@@ -1,43 +1,97 @@
 # checkit-printit
 
-Print a class set of [CheckIt](https://github.com/jslyemath/checkit) exercises:
-many versions of many skills, distributed across a seating chart so no two
-neighbours get the same paper, with answer keys.
+Prints a class set of [CheckIt](https://github.com/jslyemath/checkit) skill
+checkpoints. Give it a bank, a roster, and a seating chart. You get a PDF where
+each student has their own version of the skills they picked, ordered to match
+the room so neighbours never share a paper, with answer keys at the back.
 
-Not CheckIt's built-in assessment builder, which produces one anonymous
-assessment. This produces a stack of paper for a room full of students.
+CheckIt's built-in assessment builder makes one anonymous quiz. This makes a
+stack of paper for a room full of students.
 
 ## Install
 
+Neither package is on PyPI, so both come from GitHub:
+
+```bash
+pip install git+https://github.com/jslyemath/checkit-printit
 ```
-pip install checkit-printit
+
+```bash
 pip install "checkit-dashboard @ https://github.com/jslyemath/checkit/releases/download/v0.2.8.5/checkit_dashboard-0.2.8.5-py3-none-any.whl"
 ```
 
-> `checkit-dashboard` is **not** installed from PyPI: that name belongs to the
-> upstream project, which is different code. Use the fork's wheel.
+The name `checkit-dashboard` does exist on PyPI, but it belongs to the upstream
+project and is different code. Install the fork's wheel by URL, as above.
 
-You also need a LaTeX distribution with `pdflatex` on your PATH — TeX Live,
-MiKTeX or MacTeX. Without one, `--no-compile` still writes a folder you can
-build elsewhere.
+You also need `pdflatex` on your PATH: TeX Live, MiKTeX, or MacTeX. Without one,
+`--no-compile` still writes a folder you can build somewhere else.
 
-## Use
+## A first run
+
+Set up a folder for one quiz:
+
+```bash
+checkit-printit init ~/quizzes/2026-09-15 -b ~/Projects/mat-106-checkit
+```
 
 ```
-checkit-printit init            # writes publication.toml
-checkit-printit build           # assembles and compiles
+created ~/quizzes/2026-09-15/
+  publication.toml
+  roster.toml
+  seating.toml
+
+Next: fill in the roster and seating, then
+  cd ~/quizzes/2026-09-15 && checkit-printit build --preview
 ```
 
-`publication.toml` says what this run wants: the course, which bank, the roster
-and seating files, whether to print keys.
+The three files arrive with commented examples in them. Fill them in, then look
+before you print:
+
+```bash
+checkit-printit build --preview
+```
+
+```
+bank    /home/slye/Projects/mat-106-checkit
+theme   checkit_printit/theme/skillcheckpoints.sty
+out     /home/slye/CheckItPrintIt/MAT 106/Skill Checkpoint 2026-09-15
+
+  students 24
+  extras   6
+  skills   4: W1, W1-E, N3, D2
+  versions 8 distinct
+  key pages 30
+  seeds
+    A  W1     v414
+    A  N3     v407
+    B  W1     v417
+    B  N3     v433
+```
+
+Preview also reports the problems worth knowing about before you waste toner:
+neighbours who ended up with the same version, students missing from the seating
+chart, and template fields the generator never sets. When it reads right, drop
+the flag:
+
+```bash
+checkit-printit build
+```
+
+That writes the folder and runs `pdflatex`.
+
+## The three files
+
+### `publication.toml` — this run
+
+Where the bank is, what the header says, whether to print keys.
 
 ```toml
 [course]
-name = "MAT 106"
-semester = "Fall 2026"
+name      = "MAT 106"
+semester  = "Fall 2026"
 professor = "Slye"
-title = "Skill Checkpoint"
-date = "2026-09-15"
+title     = "Skill Checkpoint"
+date      = "2026-09-15"
 
 [bank]
 path = "../mat-106-checkit"
@@ -49,11 +103,16 @@ path = "roster.toml"
 path = "seating.toml"
 
 [print]
-keys = true
-names = true
+keys       = true   # answer keys after the student copies
+key_copies = 1
+names      = true   # false prints a ruled blank instead of each name
 ```
 
-`roster.toml` is who exists and what they chose:
+Commented-out sections handle the rest: pinning a version to a known seed for an
+exact reprint, choosing which variant of an outcome to ask for, the three skill
+selection modes, and spare copies.
+
+### `roster.toml` — who exists, and what they chose
 
 ```toml
 [[student]]
@@ -62,8 +121,26 @@ section = "800"
 skills  = ["W1", "N3"]
 ```
 
-`seating.toml` is where they sit. Versions alternate along each group, so
-immediate neighbours differ:
+A `[selection]` table in `publication.toml` adjusts these choices, and its three
+settings stack:
+
+```toml
+[selection]
+simply_print         = []   # everyone gets exactly these; choices ignored
+default_when_missing = []   # for students who chose nothing
+append_for_everyone  = []   # added on top of whatever each student chose
+```
+
+Already keeping this in a spreadsheet? Import it once:
+
+```bash
+checkit-printit import "Control Center.csv" -o roster.toml
+```
+
+The import runs one way only. Read what it produced and fix anything it got
+wrong, and after that nothing depends on a column staying where it is.
+
+### `seating.toml` — where they sit
 
 ```toml
 versions = ["A", "B"]
@@ -72,44 +149,49 @@ versions = ["A", "B"]
 seats = ["Ada Lovelace", "Alan Turing", "Grace Hopper", "Katherine Johnson"]
 ```
 
-A seat can pin its version — `{name = "Ada", version = "B"}` — and everything
-else alternates around it. A pin that collides is reported, not refused: it is a
-deliberate act and you may have a reason.
+One `[[group]]` per table. Versions alternate along each group so immediate
+neighbours differ, and the pattern restarts at each table, since two tables
+aren't adjacent. Papers print in this order, so the stack comes out matching the
+room.
 
-### Useful flags
+A seat can pin its version:
+
+```toml
+seats = [{name = "Ada Lovelace", version = "B"}, "Alan Turing"]
+```
+
+Everything else alternates around the pin. If a pin puts two neighbours on the
+same version, you get a warning rather than an error, since you probably had a
+reason.
+
+## Flags
 
 | | |
 |---|---|
 | `--preview` | report what would be printed, write nothing |
 | `--no-compile` | write the folder, skip `pdflatex` |
 | `--seed N` | reproduce an earlier run's version choices |
-| `-o DIR` | somewhere other than the default output folder |
+| `-o DIR` | write somewhere other than the default folder |
+| `-p FILE` | use a publication file other than `publication.toml` |
 
-### Coming from the spreadsheet
+## How a skill becomes a page
 
-```
-checkit-printit import "Control Center.csv" -o roster.toml
-```
+Most skills need nothing. The outcome's `template.xml` renders through CheckIt's
+`latex.xsl`, the same source the website uses, and that is the page.
 
-A one-way import. Read what it produced, fix anything it got wrong, and nothing
-downstream ever depends on a column position again.
+When a layout can't be said in SpaTeXt (true/false rows, blanks in a second
+column, a figure with the answer marked on it) put a `textemplate.tex` beside the
+generator. It's a LaTeX template using `\VAR{key}` for the generator's data, and
+it wins over the SpaTeXt route for that outcome.
 
-## Where versions come from
-
-Seeds at or above `BUNDLE_UNTIL` (400) in the bank's `seeds.json`.
-
-That range is pregenerated, so a printed sheet is reproducible from its seed,
-and **published nowhere** — `checkit viewer` copies `assets/` into `docs/` while
-ignoring `seeds.json`. Seeds 50–399 are *not* used: `derived.json` publishes
-those with their answers, so a quiz drawn from there is a quiz whose answers are
-a fetch away.
-
-Need more versions than the bank has? Raise `--amount` when generating.
+Either way you end up with a skill file written in the theme's commands, so a
+generated skill and a hand-written one are interchangeable and one document can
+hold both.
 
 ## The output folder
 
-Builds land in `~/CheckItPrintIt/<course>/<title>/`, or wherever `-o` says.
-Override the root with `CHECKIT_PRINTIT_HOME`.
+Builds land in `~/CheckItPrintIt/<course>/<title>/`, or wherever `-o` says. Set
+`CHECKIT_PRINTIT_HOME` to move the root.
 
 ```
 main.tex                 the assembled document
@@ -119,55 +201,48 @@ W1/W1 v451.tex           one file per skill per version
 assets/                  figures
 ```
 
-**That folder compiles with `pdflatex main.tex` and nothing else** — no tool, no
-bank, no `TEXINPUTS`. It is a local record you can archive, audit, or fix by
-hand the night before a quiz. It is deliberately not something to commit.
+Everything the document needs is in there. `pdflatex main.tex` builds it with no
+tool, no bank, and no `TEXINPUTS`, which means you can archive it, audit it, or
+fix a typo by hand the night before a quiz. It's a local record, not repository
+content, so don't commit it.
 
 ## The theme
 
-`skillcheckpoints.sty` decides how everything looks, and **it is a working
-by-hand system**. Skills can be written as plain `.tex` files against it with no
-CheckIt anywhere — that is how one of the two courses using it works today.
+`skillcheckpoints.sty` decides how the pages look, and it works on its own: you
+can write skills as plain `.tex` files against it with no CheckIt involved, which
+is how one of the two courses using it works today.
 
-So the tool targets the theme's commands rather than replacing them. A
-hand-written skill file and a generated one are the same kind of thing, and one
-document can mix them.
+So this tool targets the theme's commands instead of replacing them. The package
+ships a default. Drop your own `skillcheckpoints.sty` in the bank's root to
+override it, the same way `checkit` picks up a bank's `tikz_preamble.tex`.
 
-The package ships a default. A bank may drop its own `skillcheckpoints.sty` in
-its root to replace it — the same convention `checkit`'s `tikz.py` uses for
-`tikz_preamble.tex`.
+## Where versions come from
 
-## How a skill becomes a page
+Seeds at or above `BUNDLE_UNTIL` (400) in the bank's `seeds.json`.
 
-Two routes, and the first wins.
+Those seeds are pregenerated, so a printed sheet can be traced back from its
+seed, and they're published nowhere: `checkit viewer` copies `assets/` into
+`docs/` and leaves `seeds.json` behind. Seeds 50 to 399 are off limits for
+printing because `derived.json` publishes them together with their answers, so a
+quiz drawn from that range is a quiz whose answers are one fetch away.
 
-**Its SpaTeXt, through `latex.xsl`** — the default, and what you get for free.
-Write one `template.xml` and the outcome prints. Nothing extra to maintain.
-
-**A `textemplate.tex`** — the escape hatch, for layout no vocabulary would
-capture: true/false rows, blanks in a second column, figures with the answer
-marked on them. A LaTeX template using `\VAR{key}` for the generator's data.
-
-Either way the result is a skill file in the theme's own vocabulary, so a
-generated file and a hand-written one are the same kind of thing and one
-document can mix them.
+If you need more versions than the bank has, raise `--amount` when generating.
 
 ## Status
 
-Early. Working today: the whole path from bank and roster to a compiled PDF,
-with seating, keys, extras, selection modes, variants and pinned seeds.
+Early, but the whole path works: bank and roster in, compiled PDF out, with
+seating, keys, extras, selection modes, variants, and pinned seeds.
 
-Not yet: Google Forms, print tracking, the seating GUI. See
-`PRINT_TOOL_DESIGN.md` in the checkit repo.
+Still to come: Google Forms, print tracking, and a seating GUI. Design notes live
+in `PRINT_TOOL_DESIGN.md` in the checkit repo.
 
 ## Development
 
-```
-pip install -e .[test]
-pytest
+```bash
+pip install -e ".[test]" && pytest
 ```
 
-The tests build a real CheckIt bank on disk and print from it. One of them
-copies the output folder somewhere unrelated and compiles it there, which is the
-only honest way to test the self-contained promise; it skips if `pdflatex` is
-missing.
+The tests build a real CheckIt bank on disk and print from it, rather than
+mocking one. One test copies the finished output folder somewhere unrelated and
+compiles it there, which is the only honest check of the self-contained promise
+above; it skips itself if `pdflatex` is missing.
