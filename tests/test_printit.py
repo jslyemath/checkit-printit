@@ -9,13 +9,15 @@ import os
 import random
 import shutil
 import subprocess
+import sys
 
 import pytest
 
 from checkit_printit import assemble as assemble_mod
+from checkit_printit import compile as compile_mod
 from checkit_printit import publication as pub_mod
 from checkit_printit import roster as roster_mod
-from checkit_printit import seating, theme
+from checkit_printit import seating, spatext, theme
 from checkit_printit.bank import Bank, BankError, FIRST_PRINTABLE_SEED
 from checkit_printit.jinja import make_env
 
@@ -367,6 +369,156 @@ class TestAssembly:
     def test_the_theme_travels_with_the_output(self, bank_dir, tmp_path):
         out, _ = self.build(bank_dir, tmp_path)
         assert os.path.isfile(os.path.join(out, "skillcheckpoints.sty"))
+
+
+# --------------------------------------------------- SpaTeXt in a field ----
+
+class TestSpatextFields:
+    """A generator's data fields can carry inline SpaTeXt.
+
+    `template.xml` inserts them with triple braces, so the web renders them.
+    `textemplate.tex` inserts them into LaTeX, where a tag is only text -- which
+    is how `<glyphs font="egyptian">` once carried a hieroglyph into pdflatex.
+    """
+
+    def test_inline_maths_becomes_latex(self):
+        assert spatext.to_latex("<m>91</m> is composite") == r"\(91\) is composite"
+
+    def test_glyphs_use_the_latex_they_carry_not_their_unicode(self):
+        """The Unicode is for the screen. `@latex` is the print form, and the
+        stylesheet has always known to prefer it."""
+        out = spatext.to_latex(
+            '<glyphs font="egyptian" latex="\\Hone\\Hten">\U000133fa</glyphs>')
+        assert out == r"\Hone\Hten"
+        assert "\U000133fa" not in out
+
+    def test_nobreak_survives_as_mbox(self):
+        """The reason <nobreak> exists: a statement that must not break across
+        lines. Losing it in print would be silent and would look fine."""
+        assert spatext.to_latex("<nobreak><m>7 \\cdot 13</m></nobreak>") \
+            == r"\mbox{\(7 \cdot 13\)}"
+
+    def test_plain_latex_is_left_alone(self):
+        """Most fields are bare LaTeX. Parsing them as XML would fail on
+        characters that are perfectly good LaTeX, so they are not parsed."""
+        for value in (r"3 < 5", r"x \frac{1}{2} y", "55,476", r"a & b"):
+            assert spatext.to_latex(value) == value
+
+    def test_markup_that_will_not_parse_names_the_field(self):
+        with pytest.raises(spatext.SpatextError) as exc:
+            spatext.to_latex("<m>1 & 2</m>", where="N2's answer")
+        assert "N2's answer" in str(exc.value)
+
+    def test_a_print_template_gets_rendered_fields(self, bank_dir, tmp_path):
+        """End to end, with markup put into the bank's own data.
+
+        The fixture's generator emits plain numbers, so this seeds the bank with
+        what mat-106's generators actually produce and follows it to the .tex.
+        """
+        import json
+
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+        seeds_json = os.path.join(root, "assets", "AD", "generated", "seeds.json")
+        with open(seeds_json, encoding="utf-8") as f:
+            payload = json.load(f)
+        for entry in payload["seeds"]:
+            entry["data"]["answer"] = "<m>%s</m>" % entry["data"]["answer"]
+        with open(seeds_json, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+
+        out = str(tmp_path / "out")
+        source, _ = theme.load(root)
+        assemble_mod.assemble(make_publication(root), two_students(),
+                              chart_for(tmp_path, ["Ada", "Bo"]), out, source,
+                              rng=random.Random(1))
+        for name in os.listdir(os.path.join(out, "AD")):
+            body = open(os.path.join(out, "AD", name), encoding="utf-8").read()
+            assert "<m>" not in body, "markup reached the LaTeX file"
+            assert "\\(" in body, "the maths was dropped rather than rendered"
+
+
+# --------------------------------------------------------------- figures ----
+
+class TestFigures:
+    """Figures are copied by scanning the written skill files.
+
+    mat-106's R1 holds 38 hand-drawn PNGs directly in `assets/R1/`, and one quiz
+    needs two of them. Copying `assets/<slug>/generated/` -- which is where the
+    machine-made ones go -- missed every hand-drawn one, and the first real quiz
+    failed on a `pemdas-1p.png` that was sitting in the bank all along.
+    """
+
+    def bank_with_figure(self, bank_dir, tmp_path, reference, on_disk=()):
+        """A copy of the fixture bank whose AD template references `reference`."""
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+        for rel in on_disk:
+            path = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(b"\x89PNG\r\n\x1a\n")          # enough to exist
+        tex = os.path.join(root, "outcomes", "AD", "textemplate.tex")
+        with open(tex, encoding="utf-8") as f:
+            body = f.read()
+        with open(tex, "w", encoding="utf-8") as f:
+            f.write(body + "\n\\includegraphics{%s}\n" % reference)
+        return root
+
+    def build(self, root, tmp_path):
+        out = str(tmp_path / "out")
+        source, _ = theme.load(root)
+        assemble_mod.assemble(make_publication(root), two_students(),
+                              chart_for(tmp_path, ["Ada", "Bo"]), out, source,
+                              rng=random.Random(1))
+        return out
+
+    def test_a_hand_drawn_figure_beside_the_slug_is_copied(self, bank_dir, tmp_path):
+        root = self.bank_with_figure(bank_dir, tmp_path, "assets/AD/pemdas-1p.png",
+                                     on_disk=["assets/AD/pemdas-1p.png"])
+        out = self.build(root, tmp_path)
+        assert os.path.isfile(os.path.join(out, "assets", "AD", "pemdas-1p.png"))
+
+    def test_only_what_is_referenced_travels(self, bank_dir, tmp_path):
+        """38 PNGs in the bank, 2 in the quiz. The folder is meant to be
+        archived, so it carries what it uses."""
+        root = self.bank_with_figure(
+            bank_dir, tmp_path, "assets/AD/wanted.png",
+            on_disk=["assets/AD/wanted.png", "assets/AD/unused.png"])
+        out = self.build(root, tmp_path)
+        assert os.path.isfile(os.path.join(out, "assets", "AD", "wanted.png"))
+        assert not os.path.exists(os.path.join(out, "assets", "AD", "unused.png"))
+
+    def test_a_figure_the_bank_does_not_have_is_named(self, bank_dir, tmp_path):
+        """Otherwise it surfaces as `using draft setting` a thousand log lines
+        before pdflatex gives up."""
+        root = self.bank_with_figure(bank_dir, tmp_path, "assets/AD/gone.png")
+        with pytest.raises(assemble_mod.AssemblyError) as exc:
+            self.build(root, tmp_path)
+        assert "assets/AD/gone.png" in str(exc.value)
+
+    def test_a_figure_outside_the_bank_is_refused(self, bank_dir, tmp_path):
+        """Copying it would land the file outside the output folder, and the
+        folder has to stand alone."""
+        root = self.bank_with_figure(bank_dir, tmp_path, "../elsewhere.png")
+        with pytest.raises(assemble_mod.AssemblyError):
+            self.build(root, tmp_path)
+
+
+# --------------------------------------------------------------- compile ----
+
+class TestCompileLog:
+    def test_a_byte_the_locale_cannot_decode_does_not_lose_the_log(self):
+        """pdflatex echoes font and file names byte for byte. With text=True the
+        locale decides the encoding, so on a cp1252 Windows console one 0x81
+        killed the reader thread, left stdout as None, and turned a real LaTeX
+        error into a TypeError six lines later."""
+        result = subprocess.run(
+            [sys.executable, "-c",
+             r"import sys; sys.stdout.buffer.write(b'A\x81B')"],
+            capture_output=True, **compile_mod.DECODING)
+        assert result.stdout is not None
+        assert result.stdout.startswith("A") and result.stdout.endswith("B")
 
 
 # ---------------------------------------------------------- integration ----

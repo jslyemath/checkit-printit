@@ -8,8 +8,10 @@ fixed by hand the night before a quiz.
 import dataclasses
 import os
 import random
+import re
 import shutil
 
+from . import spatext
 from .bank import Bank
 from .jinja import make_env
 
@@ -134,7 +136,10 @@ def render_skill(bank, slug, seed, env):
     """
     template = bank.print_template(slug)
     if template is not None:
-        data = dict(bank.data(slug, seed))
+        # Fields carrying inline SpaTeXt go through latex.xsl first. Without
+        # this a template pastes `<m>91</m>` into the document as those nine
+        # characters, which is how a hieroglyph once reached pdflatex.
+        data = spatext.render_fields(bank.data(slug, seed), slug)
         data["seed"] = seed
         return env.from_string(template).render(data)
     return render_from_spatext(bank, slug, seed)
@@ -314,7 +319,7 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None, dry_run=False
         f.write(main_tex(publication, handouts, extras, keys,
                          load_helpers=helper is not None))
 
-    _copy_assets(bank, out_dir, slugs_used)
+    _copy_assets(bank, out_dir, written)
 
     return _report_dict(handouts, extras, keys, written, unseated, chart,
                         seeds, missing)
@@ -334,19 +339,68 @@ def _report_dict(handouts, extras, keys, written, unseated, chart, seeds, missin
     }
 
 
-def _copy_assets(bank, out_dir, slugs):
-    """Figures the skills reference.
+#: How latex.xsl emits a figure: `\includegraphics{path}` for a bitmap,
+#: `\input{path.tikz}` for a TikZ picture. Both take the path verbatim from the
+#: template's `source` attribute, which is relative to the bank root.
+_FIGURE_RE = re.compile(
+    r"\\includegraphics\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}"
+    r"|\\input\s*\{([^}]+\.tikz)\}"
+)
 
-    Copied rather than linked, because the folder has to survive the bank
-    moving or the tool being uninstalled.
+#: `\includegraphics{x}` compiles when `x.png` exists, so a template may leave
+#: the extension off. Try what LaTeX would try before calling a figure missing.
+_FIGURE_EXTENSIONS = ("", ".png", ".pdf", ".jpg", ".jpeg")
+
+
+def _copy_assets(bank, out_dir, written):
+    """Copy every figure the written skill files actually reference.
+
+    Scanning the files beats copying `assets/` wholesale twice over. The output
+    folder stays small: mat-106's R1 holds 38 hand-drawn PNGs and one quiz needs
+    two of them. And a reference the bank cannot satisfy is caught here, by
+    name, rather than as a pdflatex log that says `using draft setting` and then
+    fails a thousand lines further down.
+
+    Copied rather than linked, because the folder has to survive the bank moving
+    or the tool being uninstalled.
     """
-    src_root = bank.asset_dir()
-    for slug in slugs:
-        src = os.path.join(src_root, slug, "generated")
-        if not os.path.isdir(src):
-            continue
-        dst = os.path.join(out_dir, "assets", slug, "generated")
-        shutil.copytree(
-            src, dst, dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns("seeds.json", "derived.json"),
+    missing = {}
+    for slug, seed in sorted(written):
+        path = os.path.join(out_dir, slug, f"{slug} v{seed}.tex")
+        with open(path, encoding="utf-8") as f:
+            body = f.read()
+        for match in _FIGURE_RE.finditer(body):
+            ref = (match.group(1) or match.group(2)).strip()
+            found = _resolve_figure(bank.path, ref)
+            if found is None:
+                missing.setdefault(ref, []).append(f"{slug} v{seed}")
+                continue
+            src, rel = found
+            dst = os.path.join(out_dir, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if not os.path.exists(dst):
+                shutil.copy2(src, dst)
+
+    if missing:
+        raise AssemblyError(
+            "These figures are referenced but not in the bank:\n"
+            + "\n".join(f"  {ref}  (used by {', '.join(where)})"
+                        for ref, where in sorted(missing.items()))
+            + f"\n\nLooked under {bank.path}. Fix the source path in the "
+              "outcome's template, or generate the images, then build again."
         )
+
+
+def _resolve_figure(bank_root, ref):
+    """(file to copy, path relative to the bank root), or None if absent.
+
+    A path leading outside the bank counts as absent: copying it would land the
+    figure outside the output folder, and the folder has to stand alone.
+    """
+    if os.path.isabs(ref) or ref.startswith(".."):
+        return None
+    for ext in _FIGURE_EXTENSIONS:
+        candidate = os.path.join(bank_root, ref + ext)
+        if os.path.isfile(candidate):
+            return candidate, ref + ext
+    return None

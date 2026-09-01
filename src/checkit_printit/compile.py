@@ -20,6 +20,10 @@ PASSES = 2
 
 TIMEOUT = 600
 
+#: The log is for reading, not for parsing, so a byte that decodes to nothing
+#: sensible should cost one character and not the whole run.
+DECODING = {"encoding": "utf-8", "errors": "replace"}
+
 
 def find_pdflatex():
     found = shutil.which("pdflatex")
@@ -49,7 +53,13 @@ def compile_pdf(out_dir, log_path=None):
     for _ in range(PASSES):
         result = subprocess.run(
             [pdflatex, "-interaction=nonstopmode", "-halt-on-error", "main.tex"],
-            cwd=out_dir, capture_output=True, text=True, timeout=TIMEOUT,
+            cwd=out_dir, capture_output=True, timeout=TIMEOUT,
+            # Decode here rather than with text=True, which uses the locale
+            # encoding. pdflatex echoes font and file names byte for byte, so on
+            # a cp1252 Windows console a single 0x81 from a font the theme loads
+            # kills the reader thread, leaves stdout as None, and turns a real
+            # LaTeX error into a TypeError six lines later.
+            **DECODING,
         )
         output.append(result.stdout + result.stderr)
 
