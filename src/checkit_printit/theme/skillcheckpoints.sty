@@ -1,0 +1,611 @@
+\ProvidesPackage{skillcheckpoints}
+
+\usepackage[T1]{fontenc}
+
+% More colors and names
+\usepackage[dvipsnames]{xcolor}
+
+% Skill Checkpoint main color theme
+\definecolor{scCOLOR}{HTML}{145da0}
+\definecolor{darkergray}{HTML}{404040}
+
+% For setting keys and values
+\usepackage{pgfkeys}
+
+% Use to import thru paths
+\usepackage{import}
+
+%Header Material
+\makeatletter
+\newcommand{\acadclass}[1]{\def\@acadclass{#1}}
+\newcommand{\tbsection}[1]{\def\@tbsection{#1}}
+\newcommand{\duedate}[1]{\def\@duedate{#1}}
+\makeatother
+
+%Call Header Material
+\makeatletter
+\newcommand{\theacadclass}{\@acadclass}
+\newcommand{\thetbsection}{\@tbsection}
+\newcommand{\theduedate}{\@duedate}
+\makeatother
+
+%font
+\usepackage{ClearSans}
+\usepackage{mathpazo}
+
+\usepackage{parskip}
+
+%margins
+\usepackage[margin=0.75in, top=1.5cm, bottom=0.8cm, includeheadfoot]{geometry}
+
+%If you need doublespacing
+\usepackage{setspace}
+
+%Get Text Size for Some New Commands
+\newlength{\myts}
+\makeatletter
+\setlength{\myts}{\f@size pt}
+\makeatother
+
+% Force \include{} to throw error if file is missing
+\makeatletter
+\def\mkfilename#1{%
+  \if\relax\detokenize\expandafter{#1}\relax\else#1/\fi}
+\AddToHook{include/before}%
+  {\IfFileExists{\mkfilename\CurrentFilePath\CurrentFile}{}
+     {\GenericError{}{Error: File \mkfilename\CurrentFilePath\CurrentFile.tex not found}{\@gobble}{}}}
+\makeatother
+
+% Better tables
+\usepackage{tabularx,colortbl}
+% Even better tables
+\usepackage{tabularray}
+
+% Wrap figures
+\usepackage{wrapfig}
+
+% Answers command for keys
+\usepackage{ifthen}
+\newboolean{anstoggle}
+\setboolean{anstoggle}{false}
+\newcommand{\ans}[1]{\ifthenelse{\boolean{anstoggle}}{\textcolor{scCOLOR}{#1}}{}}
+\newenvironment{ansenv}{\ifthenelse{\boolean{anstoggle}}{\color{scCOLOR}}{\expandafter\comment}}{\ifthenelse{\boolean{anstoggle}}{}{\expandafter\endcomment}}
+
+% Custom format for T/F questions
+%\newcommand{\tfleft}[1]{\textbf{TRUE}\hspace{5pt} / \hspace{5pt}\textbf{FALSE} \hspace{7pt}  \begin{minipage}[t]{.72\textwidth} #1\end{minipage}}
+\setlength{\fboxrule}{1.2pt}
+\NewDocumentCommand{\tfleft}{o m}{% #1 is the optional answer ("True" or "False"), #2 is the statement
+    \textbf{%
+        \ifthenelse{\boolean{anstoggle} \AND \equal{\IfNoValueTF{#1}{dummy}{#1}}{True}}%
+            {\fcolorbox{scCOLOR}{white}{TRUE}}{TRUE}%
+    }
+    \hspace{5pt} / \hspace{5pt}
+    \textbf{%
+        \ifthenelse{\boolean{anstoggle} \AND \equal{\IfNoValueTF{#1}{dummy}{#1}}{False}}%
+            {\fcolorbox{scCOLOR}{white}{FALSE}}{FALSE}%
+    }
+    \hspace{7pt}
+    \begin{minipage}[t]{.72\textwidth} #2 \end{minipage}%
+}
+
+
+% Custom format for general mini-columns (usually within each enumerate item)
+\NewDocumentCommand{\minicol}{O{.475} O{.475} m m}{%
+  \begin{minipage}[t]{#1\textwidth} #3 \end{minipage}%
+  \hfill%
+  \begin{minipage}[t]{#2\textwidth} #4 \end{minipage}%
+}
+
+% Custom underlined space command
+\NewDocumentCommand{\fillinblank}{O{2.25in}m}{%
+  \makebox[#1]{\underline{\hspace{0pt}\makebox[#1][c]{\ans{#2}}}}%
+}
+
+% Math packages
+\usepackage{amssymb, amsmath, amsthm, bm, textcomp, gensymb}
+
+%Nice shortcuts for set names and other math tools
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\C}{\mathbb{C}}
+\renewcommand{\Re}{\operatorname{Re}}
+\renewcommand{\Im}{\operatorname{Im}}
+\DeclareMathOperator{\Arg}{Arg}
+\newcommand{\dlim}{\lim\limits}
+\newcommand{\dint}{\displaystyle\int}
+\DeclareMathSymbol{\shortminus}{\mathbin}{AMSa}{"39}
+\usepackage{physunits}
+\DeclareRobustCommand{\yd}{\ensuremath{%
+\expandafter\units@separator\mathrm{yd}}}
+\renewcommand{\N}{\mathbb{N}}
+
+% arcs command for geometry statements
+\makeatletter
+\DeclareFontFamily{U}{tipa}{}
+\DeclareFontShape{U}{tipa}{m}{n}{<->tipa10}{}
+\newcommand{\arc@char}{{\usefont{U}{tipa}{m}{n}\symbol{62}}}%
+
+\newcommand{\arc}[1]{\mathpalette\arc@arc{#1}}
+
+\newcommand{\arc@arc}[2]{%
+  \sbox0{$\m@th#1#2$}%
+  \vbox{
+    \hbox{\resizebox{\wd0}{\height}{\arc@char}}
+    \nointerlineskip
+    \box0
+  }%
+}
+\makeatother
+
+%Needed for some extra graphical tools
+\usepackage{graphicx}
+\usepackage{soul}
+\newcommand{\hlc}[2][yellow]{{\sethlcolor{#1}\hl{#2}}}
+\usepackage[export]{adjustbox}
+
+
+
+\usepackage{ulem}
+
+%Produces beautiful boxes. I copied some code here, so I don't know what the [most] option does
+\usepackage[most]{tcolorbox}
+
+
+%More options back-end coding of new functions
+\usepackage{xparse}
+\usepackage{xpatch}
+
+%Defining our new definition box. Still working out how to get extra padding around it and inside of it (just at the top), without needing \begin{figure} and an extra padding option every time in the main document
+\newtcolorbox{defBox}[3][]{
+arc=2mm,
+lower separated=false,
+fonttitle=\bfseries,
+colbacktitle=green!50!black!8!white,
+coltitle=black,
+enhanced,
+attach boxed title to top left={xshift=0.5cm,
+        yshift=-2mm},
+colframe=green!35!black,
+colback=green!50!black!8!white,
+overlay={
+\node[draw=green!35!black,very thick,
+inner xsep=3.5mm,
+fill= green!50!black!8!white,rounded corners=1mm,
+yshift=3pt,
+xshift=-.5cm,
+left,
+text=black,
+anchor=east,
+font=\bfseries]
+at (frame.north east) {#3};},
+title=#2,#1}
+
+
+\newtcolorbox{thmBox}[3][]{
+arc=2mm,
+lower separated=false,
+fonttitle=\bfseries,
+colbacktitle=blue!50!black!8!white,
+coltitle=black,
+enhanced,
+attach boxed title to top left={xshift=0.5cm,
+        yshift=-2mm},
+colframe=blue!35!black,
+colback=blue!50!black!8!white,
+         overlay={
+\node[draw=blue!35!black,very thick,
+inner xsep=3.5mm,
+fill= blue!50!black!8!white,rounded corners=1mm,
+yshift=3pt,
+xshift=-.5cm,
+left,
+text=black,
+anchor=east,
+font=\bfseries]
+at (frame.north east) {#3};},
+title=#2,#1}
+
+
+\newtcolorbox{noteBox}[2][]{
+arc=2mm,
+lower separated=false,
+fonttitle=\bfseries,
+coltitle=black,
+colbacktitle=black!4!white,
+enhanced,
+colback=black!4!white,
+attach boxed title to top left={xshift=0.5cm,
+        yshift=-2mm},
+title=#2,#1}
+
+% Very specific theorem-like environments from my notes, but rarely used in my quizzes
+\newenvironment{theorem}[1][]{%
+    \begin{figure}[h!]
+    \begin{thmBox}[top=3.5mm]{Theorem}{#1}%
+}{%
+    \end{thmBox}
+    \end{figure}%
+    \vspace*{-0.91\myts}
+}
+
+\newenvironment{axiom}[1][]{%
+    \begin{figure}[h!]
+    \begin{thmBox}[top=3.5mm]{Axiom}{#1}%
+}{%
+    \end{thmBox}
+    \end{figure}%
+    \vspace*{-0.91\myts}
+}
+
+\newenvironment{definition}[1][]{%
+    \begin{figure}[h!]
+    \begin{defBox}[top=3.5mm]{Definition}{#1}%
+}{%
+    \end{defBox}
+    \end{figure}%
+    \vspace*{-0.91\myts}
+}
+
+\newenvironment{statement}[1][]{%
+    \begin{figure}[h!]
+    \begin{noteBox}[top=3.5mm]{#1}%
+}{%
+    \end{noteBox}
+    \end{figure}%
+    \vspace*{-0.91\myts}
+}
+
+\newenvironment{property}[1][]{%
+    \begin{figure}[h!]
+    \begin{thmBox}[top=3.5mm]{Property}{#1}%
+}{%
+    \end{thmBox}
+    \end{figure}%
+    \vspace*{-0.91\myts}
+}
+
+%need these for some of the nifty tikz commands
+\usepackage{tikz}
+\usepackage{tkz-euclide}
+\usepackage{tikz-cd}
+\usetikzlibrary{calc,trees,positioning,arrows,fit,shapes,calc,angles,quotes,backgrounds,datavisualization,datavisualization.formats.functions,math,intersections}
+\tikzstyle{aligntotop}=[baseline={([yshift={-\ht\strutbox}]current bounding box.north)},outer sep=0pt,inner sep=0pt]
+
+\tikzmath{
+    \xa = -5; \xz = 5;
+    \ya = -5; \yz = 5;
+    \xs = 1; \ys = 1;
+    \xn = \xa + 1; \yn = \ya+1;
+    \xm1 = \xa - \xs; \xm2 = \xz + \xs;
+    \ym1 = \ya - \ys; \ym2 = \yz + \ys;
+    }
+
+\newcommand{\setmyx}[3][1]{\tikzmath{
+    \xa = #2; \xz = #3;
+    \xs = #1;
+    \xn = \xa + 1;
+    \xm1 = \xa - \xs; \xm2 = \xz + \xs;
+    }}
+
+\newcommand{\setmyy}[3][1]{\tikzmath{
+    \ya = #2; \yz = #3;
+    \ys = #1;
+    \yn = \ya + 1;
+    \ym1 = \ya - \ys; \ym2 = \yz + \ys;
+    }}
+
+\usepackage{pgfplots}
+
+\pgfplotsset{compat=newest}
+
+\tikzset{>={Stealth[length=8pt,width=7pt]}}
+\pgfplotsset{bluesoldot/.style={color=blue,only marks,mark=*}}
+\pgfplotsset{blueholdot/.style={color=blue,fill=white,only marks,mark=*}}
+\pgfplotsset{slydes axis style/.style ={
+  axis background/.style = {fill=white},
+  thick,
+  axis x line=center,
+  axis y line=center,
+  grid = both,
+  xticklabel style = {font=\tiny,yshift=0.5ex},
+  yticklabel style = {font=\tiny,xshift=0.5ex},
+  xlabel style={font=\tiny, xshift=-1.75ex},
+  ylabel style={font=\tiny, yshift=-1.75ex},
+  xtick={\xa,\xn,...,\xz},
+  ytick={\ya,\yn,...,\yz},
+  every major tick/.append style={thick, major tick length=5pt, black},
+  xlabel={$x$},
+  ylabel={$y$},
+  xlabel style={below right},
+  ylabel style={above left},
+  xmin=\xm1,
+  xmax=\xm2,
+  ymin=\ym1,
+  ymax=\ym2}}
+  \pgfplotsset{printed axis style/.style ={
+  axis background/.style = {fill=white},
+  thick,
+  axis x line=center,
+  axis y line=center,
+  grid = both,
+  xticklabel style = {font=\tiny,yshift=0.5ex},
+  yticklabel style = {font=\tiny,xshift=0.5ex},
+  xlabel style={font=\tiny, xshift=-1.75ex},
+  ylabel style={font=\tiny, yshift=-1.75ex},
+  xtick={\xa,\xn,...,\xz},
+  ytick={\ya,\yn,...,\yz},
+  every major tick/.append style={thick, major tick length=5pt, black},
+  xlabel={$x$},
+  ylabel={$y$},
+  xlabel style={below right},
+  ylabel style={above left},
+  xmin=\xm1,
+  xmax=\xm2,
+  ymin=\ym1,
+  ymax=\ym2}}
+
+\pgfplotsset{number line style/.style ={
+  axis background/.style = {fill=none},
+  thick,
+  yscale=0.1,
+  axis x line=center,
+  axis y line=none,
+  axis line style={Stealth-Stealth},
+  xticklabel style = {font=\tiny,yshift=0.5ex},
+  xlabel style={font=\tiny, xshift=-1.75ex},
+  xtick={\xa,\xn,...,\xz},
+  every major tick/.append style={thick, major tick length=50pt, black},
+  xlabel style={below right},
+  xmin=\xm1-0.5,
+  xmax=\xm2+0.5,
+  ymin=-0.5,
+  ymax=0.5}}
+
+\pgfplotsset{blank number line style/.style ={
+  axis background/.style = {fill=none},
+  thick,
+  yscale=0.1,
+  axis x line=center,
+  axis y line=none,
+  axis line style={Stealth-Stealth},
+  xticklabel style = {font=\tiny,yshift=0.5ex},
+  xtick={\xa,\xn,...,\xz},
+  every major tick/.append style={thick, major tick length=50pt, black},
+  xticklabels=\empty,
+  yticklabels=\empty,
+  xmin=\xm1-0.5,
+  xmax=\xm2+0.5,
+  ymin=-0.5,
+  ymax=0.5}}
+
+\pgfplotsset{blank axis style/.style ={
+  axis background/.style = {fill=white},
+  thick,
+  yscale=0.1,
+  axis x line=center,
+  axis y line=center,
+  grid = both,
+%   xticklabel style = {font=\tiny,yshift=0.5ex},
+%   yticklabel style = {font=\tiny,xshift=0.5ex},
+%   xlabel style={font=\tiny, xshift=-1.75ex},
+%   ylabel style={font=\tiny, yshift=-1.75ex},
+  xticklabels=\empty,
+  yticklabels=\empty,
+  xtick={\xa,\xn,...,\xz},
+  ytick={\ya,\yn,...,\yz},
+  every major tick/.append style={thick, major tick length=5pt, black},
+%   xlabel={$x$},
+%   ylabel={$y$},
+%   xlabel style={below right},
+%   ylabel style={above left},
+  xmin=\xm1,
+  xmax=\xm2,
+  ymin=\ym1,
+  ymax=\ym2}}
+
+% For the rounded checkbox at on checkpoints
+\usepackage{xspace}
+\newcommand{\roundbox}[1]{\xspace\begin{tikzpicture}[baseline=-0.7ex]
+   \node[draw, fill=white,thick,rectangle, rounded corners, minimum size=#1] {};
+\end{tikzpicture}\xspace}
+
+%Better options for lists and enumerates
+\usepackage[shortlabels]{enumitem}
+\setlist[enumerate]{label=(\alph*)}
+\usepackage{multicol}
+
+% Makes a better columns option for tables. I forget I made this half the time.
+\usepackage{array}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}m{#1}}
+\newcolumntype{Y}{>{\centering\arraybackslash}X}
+\renewcommand{\tabularxcolumn}[1]{m{#1}}
+
+% Set up title
+\setcounter{secnumdepth}{-1}
+\usepackage{titlesec}
+\titleformat{\section}
+  {\large\sffamily\bfseries}{\thesection}{em}{}
+
+\titlespacing{\section}{0pt}{0pt}{-2pt}
+
+
+% version macro
+\newcommand{\vseed}{}
+\newcommand{\setvseed}[1]{\renewcommand{\vseed}{#1}}
+
+% --- Updated Skill macros ---
+\newcommand\currentskill{}
+
+% 1. The box now accepts an optional color [#1] and the title {#2}
+\newtcolorbox{skill}[2][scCOLOR]{%
+    before skip balanced=0pt,
+    after skip balanced=12pt,
+    boxrule=0.7mm,
+    colback=#1!15!white,
+    colframe=#1,
+    title=\protect\section{#2},
+    fontupper=\sffamily\color{darkergray},
+    fonttitle=\color{white}
+}
+
+\newcommand{\gdefcurrentskill}[1]{\gdef\currentskill{#1}}
+
+% 2. This environment now looks up the stored color for the slug
+\newenvironment{skillbox}[1]{%
+    \gdefcurrentskill{#1}%
+    \begin{skill}[\getskillcolor{#1}]{\currentskill}%
+}{%
+    \end{skill}%
+}
+
+% 3. This command now handles 3 arguments: [Color], {Slug}, {Description}
+\newcommand{\setskilldesc}[3][scCOLOR]{%
+  \pgfkeyssetvalue{/skills_dict/#2/desc}{#3}%
+  \pgfkeyssetvalue{/skills_dict/#2/color}{#1}%
+}
+
+% 4. Helper macros to get the two different pieces of data
+\newcommand{\getskilldesc}[1]{\pgfkeysvalueof{/skills_dict/#1/desc}}
+\newcommand{\getskillcolor}[1]{\pgfkeysvalueof{/skills_dict/#1/color}}
+
+% 5. Load the descriptions (now that the macros above are defined)
+\input{Skill Descriptions.tex}
+
+% 6. The main header command pulls the description using the new /desc path
+\newcommand{\skillheader}[1]{\begin{skillbox}{#1} \getskilldesc{#1} \end{skillbox}}
+
+% For compatibility with older skill files
+\newenvironment{setskill}[1]{\gdefcurrentskill{#1}\begin{skill}{\currentskill}}{\end{skill}}
+
+% Adds a newpage to separate skills
+\newcommand{\skillpage}[1]{\input{#1}\newpage}
+
+%insert nicer urls if needed in online PDF checkpoints (pandemic era)
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, urlcolor=scCOLOR,linkcolor=scCOLOR}
+\usepackage{url}
+
+%Change \maketitle to activity style
+\makeatletter
+\renewcommand\maketitle{\sffamily\textit{\color{darkgray}\@title}}
+\makeatother
+
+% header/footer/page numbers
+\usepackage{fancyhdr}
+\setlength{\headheight}{22pt}
+\setlength{\headsep}{10pt}
+\renewcommand{\headrulewidth}{0pt}
+\pagestyle{fancy}
+\usepackage[bottom]{footmisc}
+\fancyhead[C]{}
+\makeatletter
+\fancyhead[R]{\sffamily\color{darkgray} \@acadclass{} \hspace{5pt} \textbullet{}\hspace{5pt}  \@date \hspace{5pt} \textbullet{}\hspace{5pt}  \@author}
+\makeatother
+\fancyhead[L]{\sffamily\color{darkgray} Name: \underline{\Large\phantom{Blank}\hspace{2.9in}}}
+\fancyfoot[RE, LO]{\maketitle}
+\fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed}}
+\fancyfoot[LE, RO]{\sffamily\textit{\color{darkgray}\currentskill\hspace{0.5em}\roundbox{20pt}}}
+
+\newcommand{\cacadclass}{
+\makeatletter
+\@acadclass{}
+\makeatother
+}
+
+\newcommand{\setname}[1]{%
+    \fancyhead[L]{\sffamily\color{darkgray} Name: %
+    \ifthenelse{\equal{#1}{Blank} \OR \equal{#1}{blank}}%
+        {\underline{\Large\phantom{Blank}\hspace{2.9in}}}%
+        {\Large #1}}%
+    \pdfbookmark[0]{\texorpdfstring{#1}{#1}}{#1}%
+}
+
+\makeatletter
+\newcommand{\setsect}[1]{%
+    \fancyhead[R]{\sffamily\color{darkgray}
+    \@acadclass{}%
+    \ifthenelse{\equal{#1}{Blank} \OR \equal{#1}{blank}}%
+    {}% Do nothing if #1 is Blank or blank
+    {-#1}% Otherwise, append -#1
+    \hspace{4pt} \textbullet{}\hspace{4pt} \@date \hspace{4pt} \textbullet{}\hspace{4pt} \@author}%
+}
+\makeatother
+
+% Roman Numerals
+\newcommand{\rnc}[1]{\MakeUppercase{\romannumeral #1}}
+\newcommand{\mathrnc}[1]{\mathrm{\MakeUppercase{\romannumeral #1}}}
+
+\usepackage{xspace}
+
+% Egyptian Hieroglphics
+\usepackage{hieroglf}
+
+% "Babylonian" Numerals
+\newcommand{\babz}{\tikz{\draw[rounded corners=0.1mm, fill=black] (0,0) -- (0.2,0) -- (0.1,0.2) -- cycle;
+\draw[rounded corners=0.15mm, fill=black] (0,0.2) -- (0.2,0.2) -- (0.1,0.4) -- cycle;}\xspace}
+\newcommand{\babo}{\tikz{\draw[rounded corners=0.15mm, fill=black] (0,0.4) -- (0.1,0) -- (0.2,0.4) -- cycle;}\xspace}
+\newcommand{\babt}{\tikz{\draw[rounded corners=0.2mm, fill=black] (0.4,0.4) -- (0.05,0.2) -- (0.4,0) -- (0.25,0.2) -- cycle;}\xspace}
+
+% Multiplication Tables
+% https://tex.stackexchange.com/questions/210670/addition-and-multiplication-tables
+\newcolumntype{O}{>{\centering\arraybackslash}p{1.5em}}
+
+\ExplSyntaxOn
+\NewDocumentCommand{\additiontable}{m}
+ {% #1 is the base
+  \induktio_make_table:nnn { #1 } { + } { $+$ }
+ }
+\NewDocumentCommand{\multiplicationtable}{m}
+ {% #1 is the base
+  \induktio_make_table:nnn { #1 } { * } { $\times$ }
+ }
+
+\tl_new:N \l__induktio_table_body_tl
+\int_new:N \l__induktio_row_number_int
+\cs_new_protected:Npn \induktio_make_table:nnn #1 #2 #3
+ {
+  \group_begin:
+  \dim_set:Nn \doublerulesep { 0pt }
+  \int_zero:N \l__induktio_row_number_int
+  % add the operation symbol
+  \tl_set:Nn \l__induktio_table_body_tl { #3 }
+  % add the first row
+  \int_step_inline:nnnn { 0 } { 1 } { #1-1 }
+   { \tl_put_right:Nx \l__induktio_table_body_tl { & \int_to_Base:nn { ##1 } { #1 } } }
+  \tl_put_right:Nn \l__induktio_table_body_tl { \\ \hline\hline }% two rules here
+  % add the subsequent rows
+  \int_step_inline:nnnn { 0 } { 1 } { #1-1 }
+   {
+    % first column
+    \tl_put_right:Nx \l__induktio_table_body_tl { \int_to_Base:nn { ##1 } { #1 } }
+    % subsequent columns
+    \int_step_inline:nnnn { 0 } { 1 } { #1-1 }
+     {
+      \tl_put_right:Nx \l__induktio_table_body_tl
+       {
+        & \int_to_Base:nn { ####1 #2 \l__induktio_row_number_int } { #1 }
+       }
+      }
+    \tl_put_right:Nn \l__induktio_table_body_tl { \\ \hline }
+    \int_incr:N \l__induktio_row_number_int
+   }
+  % print the table
+  \begin{tabular}{c||*{#1}{O|}}% two rules here
+  \tl_use:N \l__induktio_table_body_tl
+  \end{tabular}
+  \group_end:
+ }
+\ExplSyntaxOff
+
+% For creating trueemptypages when we need to force double-siding with one-siders mixed with two-siders
+\newcommand{\trueemptypage}{\clearpage\begingroup\pagestyle{empty}\cleardoublepage\endgroup}
+
+% For handling students not getting mixed up in double-sided printing
+\newcommand{\preparefornextstudent}{%
+    \clearpage
+    \begingroup
+        \pagestyle{empty}
+        \cleardoublepage
+    \endgroup
+}
