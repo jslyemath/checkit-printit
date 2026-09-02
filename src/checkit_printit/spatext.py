@@ -17,6 +17,7 @@ reimplementing it means a fix to the vocabulary reaches print for free.
 """
 
 import re
+from xml.sax.saxutils import unescape
 
 from lxml import etree
 
@@ -62,9 +63,20 @@ def has_markup(value):
 
 
 def to_latex(value, where=""):
-    """Inline SpaTeXt as LaTeX. A string with no markup comes back untouched."""
+    """Inline SpaTeXt as LaTeX.
+
+    A string with no markup still gets its XML entities resolved. A field
+    destined for a `{{{triple brace}}}` slot has to arrive already escaped or
+    `template.xml` would not parse, so N2's alignment ampersands are `&amp;` in
+    the data. The web gets them back when the XML is parsed; print never parsed
+    anything, so `\\begin{align*}` received `&amp;=` and typeset a column break
+    followed by the word `amp;`.
+
+    Unescaping is safe for a field that was never escaped: a raw `&` is left
+    alone, since it matches no entity.
+    """
     if not has_markup(value):
-        return value
+        return unescape(value) if isinstance(value, str) else value
     doc = _WRAPPER % value
     try:
         rendered = str(_stylesheet()(etree.fromstring(doc.encode("utf-8"))))

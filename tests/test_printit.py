@@ -385,11 +385,16 @@ class TestSpatextFields:
         assert spatext.to_latex("<m>91</m> is composite") == r"\(91\) is composite"
 
     def test_glyphs_use_the_latex_they_carry_not_their_unicode(self):
-        """The Unicode is for the screen. `@latex` is the print form, and the
-        stylesheet has always known to prefer it."""
+        r"""The Unicode is for the screen. `@latex` is the print form, and the
+        stylesheet has always known to prefer it.
+
+        Grouped, because a @latex value usually opens with a size switch and a
+        switch is a declaration: unbraced, \Large ran to the end of the
+        document and made every page after the first Egyptian numeral huge.
+        """
         out = spatext.to_latex(
-            '<glyphs font="egyptian" latex="\\Hone\\Hten">\U000133fa</glyphs>')
-        assert out == r"\Hone\Hten"
+            '<glyphs font="egyptian" latex="\\Large\\Hone\\Hten">\U000133fa</glyphs>')
+        assert out == r"{\Large\Hone\Hten}"
         assert "\U000133fa" not in out
 
     def test_nobreak_survives_as_mbox(self):
@@ -403,6 +408,20 @@ class TestSpatextFields:
         characters that are perfectly good LaTeX, so they are not parsed."""
         for value in (r"3 < 5", r"x \frac{1}{2} y", "55,476", r"a & b"):
             assert spatext.to_latex(value) == value
+
+    def test_entities_resolve_even_with_no_markup(self):
+        r"""A field bound for a {{{triple brace}}} slot arrives already escaped,
+        or template.xml would not parse. N2's alignment ampersands are `&amp;`
+        in the data: the web gets them back when the XML is parsed, but print
+        parses nothing, so \begin{align*} received `&amp;=` and typeset a column
+        break followed by the word `amp;`."""
+        assert spatext.to_latex(r"467 \div 2 &amp;= 233") == r"467 \div 2 &= 233"
+        assert spatext.to_latex("a &lt; b") == "a < b"
+
+    def test_a_raw_ampersand_is_not_touched(self):
+        """Unescaping has to be safe for a field that was never escaped: a bare
+        & matches no entity, so it survives."""
+        assert spatext.to_latex(r"x &= y \\ z &= w") == r"x &= y \\ z &= w"
 
     def test_markup_that_will_not_parse_names_the_field(self):
         with pytest.raises(spatext.SpatextError) as exc:
