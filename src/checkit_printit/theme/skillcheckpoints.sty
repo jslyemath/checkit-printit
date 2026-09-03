@@ -64,6 +64,19 @@
 % Wrap figures
 \usepackage{wrapfig}
 
+% Numbering for a skill whose problems run down a grid rather than an enumerate:
+% \numprob opens a table cell carrying the next number. Brought over from the
+% Fundamentals Checkpoint's own copy of this file, which had drifted from this
+% one -- FCP is the only skill that uses it, and the first compile was what
+% found it missing.
+%
+% A skill using this must reset the counter itself, with \setcounter{pi}{0} at
+% the top of its file. Every student's paper is in one document, so a counter
+% that only ever climbs would number the second student's problems 21 to 40.
+\newcounter{pi}
+\setcounter{pi}{0}
+\newcommand{\numprob}[0]{\addtocounter{pi}{1}\the\value{pi}) &}
+
 % Answers command for keys
 \usepackage{ifthen}
 \newboolean{anstoggle}
@@ -473,7 +486,21 @@ title=#2,#1}
 \input{Skill Descriptions.tex}
 
 % 6. The main header command pulls the description using the new /desc path
-\newcommand{\skillheader}[1]{\begin{skillbox}{#1} \getskilldesc{#1} \end{skillbox}}
+%
+% \skillheader{SLUG}                  box titled SLUG, footer says SLUG
+% \skillheader[Longer Name]{SLUG}     box titled "Longer Name", footer SLUG
+%
+% The two are the same thing for almost every skill, which is why they were one
+% argument. FCP is the exception: the box has to read "Fundamentals Checkpoint"
+% while the footer stays FCP, because the footer is what a student writes on
+% their paper and what the grade is recorded against. \currentskill therefore
+% keeps the slug, and only the printed title moves.
+\NewDocumentCommand{\skillheader}{o m}{%
+    \gdefcurrentskill{#2}%
+    \begin{skill}[\getskillcolor{#2}]{\IfNoValueTF{#1}{#2}{#1}}%
+        \getskilldesc{#2}%
+    \end{skill}%
+}
 
 % For compatibility with older skill files
 \newenvironment{setskill}[1]{\gdefcurrentskill{#1}\begin{skill}{\currentskill}}{\end{skill}}
@@ -498,14 +525,38 @@ title=#2,#1}
 \renewcommand{\headrulewidth}{0pt}
 \pagestyle{fancy}
 \usepackage[bottom]{footmisc}
-\fancyhead[C]{}
+
+% Named once so a second page style can reuse them rather than restate them.
+% Whatever \setsect last set, appended to the course: "-800", or nothing.
+\newcommand{\scsection}{}
 \makeatletter
-\fancyhead[R]{\sffamily\color{darkgray} \@acadclass{} \hspace{5pt} \textbullet{}\hspace{5pt}  \@date \hspace{5pt} \textbullet{}\hspace{5pt}  \@author}
+\newcommand{\scheadright}{\sffamily\color{darkgray} \@acadclass{}\scsection\hspace{5pt} \textbullet{}\hspace{5pt}  \@date \hspace{5pt} \textbullet{}\hspace{5pt}  \@author}
 \makeatother
-\fancyhead[L]{\sffamily\color{darkgray} Name: \underline{\Large\phantom{Blank}\hspace{2.9in}}}
+% Whatever \setname last set; a ruled blank until it is called.
+\newcommand{\scname}{\underline{\Large\phantom{Blank}\hspace{2.9in}}}
+\newcommand{\scheadleft}{\sffamily\color{darkgray} Name: \scname}
+
+\fancyhead[C]{}
+\fancyhead[R]{\scheadright}
+\fancyhead[L]{\scheadleft}
 \fancyfoot[RE, LO]{\maketitle}
 \fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed}}
 \fancyfoot[LE, RO]{\sffamily\textit{\color{darkgray}\currentskill\hspace{0.5em}\roundbox{20pt}}}
+
+% The second and later sheets of a skill that runs past one page. The name line
+% stays, since a loose sheet still has to be identifiable, but the footer goes:
+% repeating the version and the grading box invites a second grade for one
+% skill, and the box is what the instructor ticks.
+%
+% Use \thispagestyle{skillcontinued}, never \fancyfoot{} -- this document holds
+% every student's paper end to end, so a change to the running footer would
+% follow through into everyone after.
+\fancypagestyle{skillcontinued}{%
+    \fancyhf{}%
+    \renewcommand{\headrulewidth}{0pt}%
+    \fancyhead[R]{\scheadright}%
+    \fancyhead[L]{\scheadleft}%
+}
 
 \newcommand{\cacadclass}{
 \makeatletter
@@ -513,24 +564,25 @@ title=#2,#1}
 \makeatother
 }
 
+% Changes the name itself rather than the header that shows it, so every page
+% style renders the same one. Redefining \fancyhead[L] here would set the name
+% for the `fancy` style alone, and a continued sheet -- which uses its own style
+% -- would come out with a blank rule where the student's name should be.
 \newcommand{\setname}[1]{%
-    \fancyhead[L]{\sffamily\color{darkgray} Name: %
     \ifthenelse{\equal{#1}{Blank} \OR \equal{#1}{blank}}%
-        {\underline{\Large\phantom{Blank}\hspace{2.9in}}}%
-        {\Large #1}}%
+        {\renewcommand{\scname}{\underline{\Large\phantom{Blank}\hspace{2.9in}}}}%
+        {\renewcommand{\scname}{\Large #1}}%
     \pdfbookmark[0]{\texorpdfstring{#1}{#1}}{#1}%
 }
 
-\makeatletter
+% Sets the section, not the header that shows it -- same reason as \setname
+% above. Redefining \fancyhead[R] here would leave a continued sheet, which uses
+% its own page style, showing "MAT 106" where the first sheet says "MAT 106-800".
 \newcommand{\setsect}[1]{%
-    \fancyhead[R]{\sffamily\color{darkgray}
-    \@acadclass{}%
     \ifthenelse{\equal{#1}{Blank} \OR \equal{#1}{blank}}%
-    {}% Do nothing if #1 is Blank or blank
-    {-#1}% Otherwise, append -#1
-    \hspace{4pt} \textbullet{}\hspace{4pt} \@date \hspace{4pt} \textbullet{}\hspace{4pt} \@author}%
+        {\renewcommand{\scsection}{}}%
+        {\renewcommand{\scsection}{-#1}}%
 }
-\makeatother
 
 % Roman Numerals
 \newcommand{\rnc}[1]{\MakeUppercase{\romannumeral #1}}
