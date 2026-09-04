@@ -543,10 +543,13 @@ title=#2,#1}
 \fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed}}
 \fancyfoot[LE, RO]{\sffamily\textit{\color{darkgray}\currentskill\hspace{0.5em}\roundbox{20pt}}}
 
-% The second and later sheets of a skill that runs past one page. The name line
-% stays, since a loose sheet still has to be identifiable, but the footer goes:
-% repeating the version and the grading box invites a second grade for one
-% skill, and the box is what the instructor ticks.
+% The second and later sheets of a skill that runs past one page.
+%
+% Everything stays except the skill name and the grading box. The title and the
+% version keep a loose second sheet identifiable and let it be matched back to
+% its first page, which is what a sheet separated from its partner needs. The
+% box is what an instructor ticks, and one skill should be ticked once, so it
+% appears on the first sheet alone.
 %
 % Use \thispagestyle{skillcontinued}, never \fancyfoot{} -- this document holds
 % every student's paper end to end, so a change to the running footer would
@@ -556,6 +559,8 @@ title=#2,#1}
     \renewcommand{\headrulewidth}{0pt}%
     \fancyhead[R]{\scheadright}%
     \fancyhead[L]{\scheadleft}%
+    \fancyfoot[RE, LO]{\maketitle}%
+    \fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed}}%
 }
 
 \newcommand{\cacadclass}{
