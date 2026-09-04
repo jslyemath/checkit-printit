@@ -172,7 +172,12 @@ def descriptions_tex(bank, slugs):
     lines = ["% Generated from bank.xml. Do not edit -- edit the bank.", ""]
     for slug in slugs:
         desc = bank.description(slug).replace("\n", " ")
-        lines.append(f"\\setskilldesc{{{slug}}}{{{desc}}}")
+        # The optional argument is the box colour, from the bank's <color_map>.
+        # Omitting it left every printed skill in the theme's default blue,
+        # which is not what a bank declaring a colour map is asking for.
+        color = bank.color(slug)
+        prefix = f"\\setskilldesc[{color}]" if color else "\\setskilldesc"
+        lines.append(f"{prefix}{{{slug}}}{{{desc}}}")
     return "\n".join(lines) + "\n"
 
 
