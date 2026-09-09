@@ -53,7 +53,7 @@ checkit-printit build --preview
 
 ```
 bank    /home/slye/Projects/mat-106-checkit
-theme   checkit_printit/theme/skillcheckpoints.sty
+theme   /home/slye/Projects/mat-106-checkit/printit/printit.sty
 out     /home/slye/CheckItPrintIt/MAT 106/Skill Checkpoint 2026-09-15
 
   students 24
@@ -195,7 +195,7 @@ Builds land in `~/CheckItPrintIt/<course>/<title>/`, or wherever `-o` says. Set
 
 ```
 main.tex                 the assembled document
-skillcheckpoints.sty     the theme
+printit.sty              the theme
 Skill Descriptions.tex   generated from bank.xml
 W1/W1 v451.tex           one file per skill per version
 assets/                  figures
@@ -208,13 +208,29 @@ content, so don't commit it.
 
 ## The theme
 
-`skillcheckpoints.sty` decides how the pages look, and it works on its own: you
-can write skills as plain `.tex` files against it with no CheckIt involved, which
-is how one of the two courses using it works today.
+`printit.sty` decides how the pages look, and it works on its own: you can write
+skills as plain `.tex` files against it with no CheckIt involved, which is how
+one of the two courses using it works today. So this tool targets the theme's
+commands instead of replacing them.
 
-So this tool targets the theme's commands instead of replacing them. The package
-ships a default. Drop your own `skillcheckpoints.sty` in the bank's root to
-override it, the same way `checkit` picks up a bank's `tikz_preamble.tex`.
+It lives in your bank, at `printit/printit.sty`, and it is yours to edit. The
+first `build` puts the default there, or you can do it yourself:
+
+```bash
+checkit-printit install -b path/to/bank
+```
+
+That one file decides two things: how these handouts look, and how the CheckIt
+viewer's Assessment tab exports LaTeX. `checkit generate` publishes it with the
+bank, so the browser can load the same theme. Edit it, run `checkit generate`,
+and both change together.
+
+A bank without one still prints -- it falls back to the copy shipped inside this
+package, and the Assessment tab falls back to CheckIt's plain template.
+
+The file used to sit at the bank root as `skillcheckpoints.sty`. A bank still
+arranged that way stops with move instructions rather than quietly reverting to
+the default.
 
 ## Where versions come from
 

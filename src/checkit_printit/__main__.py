@@ -80,6 +80,42 @@ def init(directory, bank_path):
     click.echo(f"  cd {directory} && checkit-printit build --preview")
 
 
+@main.command()
+@click.option("-b", "--bank", "bank_path", default=".", type=click.Path(),
+              help="Path to the CheckIt bank. Defaults to the current folder.")
+@click.option("--force", is_flag=True,
+              help="Overwrite an existing theme with the default, discarding "
+                   "any edits made to it.")
+def install(bank_path, force):
+    """Put this tool's theme into a bank, ready to be edited.
+
+    Writes `printit/printit.sty`. That one file decides how printed handouts
+    look AND what the viewer's Assessment tab exports, because CheckIt
+    publishes it with the bank.
+
+    `build` does this on its own the first time, so running this is only
+    needed to set a bank up ahead of time, or to restore the default.
+    """
+    resolved = os.path.abspath(bank_path)
+    if not os.path.isfile(os.path.join(resolved, "bank.xml")):
+        raise click.ClickException(
+            f"{resolved} has no bank.xml, so it is not a CheckIt bank."
+        )
+    try:
+        path, action = theme.install(resolved, force=force)
+    except theme.ThemeError as exc:
+        raise click.ClickException(str(exc))
+
+    if action == "kept":
+        click.echo(f"{path} already exists; nothing written.")
+        click.echo("Pass --force to replace it with the default.")
+        return
+    click.echo(f"{action} {path}")
+    click.echo("Edit it to change how this bank looks, in print and in the "
+               "Assessment tab.")
+    click.echo("Then run `checkit generate` so the site publishes the change.")
+
+
 @main.command(name="import")
 @click.argument("csv_path", type=click.Path(exists=True))
 @click.option("-o", "--out", default="roster.toml", type=click.Path())
@@ -146,7 +182,23 @@ def build(pub_path, out, do_compile, seed, preview):
         _safe(publication.full_title or "print"),
     )
 
-    theme_source, theme_origin = theme.load(publication.bank_path)
+    # A bank with no theme of its own gets one, so the file it prints from is
+    # a file it can edit -- and so CheckIt publishes it with the bank, which is
+    # what lets the viewer's Assessment tab match these handouts. Writing into
+    # someone's bank is worth saying out loud, hence the printed line rather
+    # than a silent copy. A preview writes nothing, here as everywhere.
+    if publication.bank_path and not preview:
+        try:
+            installed_at, action = theme.install(publication.bank_path)
+        except theme.ThemeError as exc:
+            raise click.ClickException(str(exc))
+        if action == "installed":
+            click.echo(f"theme   wrote {installed_at} -- edit it to change the look")
+
+    try:
+        theme_source, theme_origin = theme.load(publication.bank_path)
+    except theme.ThemeError as exc:
+        raise click.ClickException(str(exc))
     rng = random.Random(seed)
 
     if preview:

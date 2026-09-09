@@ -368,7 +368,7 @@ class TestAssembly:
 
     def test_the_theme_travels_with_the_output(self, bank_dir, tmp_path):
         out, _ = self.build(bank_dir, tmp_path)
-        assert os.path.isfile(os.path.join(out, "skillcheckpoints.sty"))
+        assert os.path.isfile(os.path.join(out, "printit.sty"))
 
 
 # --------------------------------------------------- SpaTeXt in a field ----
@@ -627,3 +627,104 @@ def _why(directory):
         if line.startswith("! "):
             return "\n".join(text.splitlines()[i:i + 8])
     return "no PDF; the log has no '!' line"
+
+
+# ------------------------------------------------------------- the theme ----
+
+class TestThemeInstall:
+    """The theme belongs to this tool, and lives in the bank.
+
+    It decides two things at once: how printed handouts look, and what the
+    viewer's Assessment tab exports -- CheckIt publishes the installed file so
+    a browser can read it. Before it was installed anywhere, a bank on the
+    bundled default got themed handouts and a plain-looking web export, and
+    nothing said why.
+    """
+
+    def test_install_writes_the_default_into_the_bank(self, bank_dir, tmp_path):
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+
+        path, action = theme.install(root)
+
+        assert action == "installed"
+        assert path == os.path.join(root, "printit", "printit.sty")
+        with open(path, encoding="utf-8") as f:
+            assert r"\ProvidesPackage{printit}" in f.read()
+
+    def test_install_keeps_an_existing_theme(self, bank_dir, tmp_path):
+        """That file is the author's, and may be a term of layout work."""
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+        theme.install(root)
+        mine = os.path.join(root, "printit", "printit.sty")
+        with open(mine, "w", encoding="utf-8") as f:
+            f.write("% mine\n")
+
+        path, action = theme.install(root)
+
+        assert action == "kept"
+        with open(path, encoding="utf-8") as f:
+            assert f.read() == "% mine\n"
+
+    def test_force_replaces_it(self, bank_dir, tmp_path):
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+        theme.install(root)
+        mine = os.path.join(root, "printit", "printit.sty")
+        with open(mine, "w", encoding="utf-8") as f:
+            f.write("% mine\n")
+
+        path, action = theme.install(root, force=True)
+
+        assert action == "replaced"
+        with open(path, encoding="utf-8") as f:
+            assert r"\ProvidesPackage{printit}" in f.read()
+
+    def test_a_bank_on_the_old_layout_stops_with_instructions(self, bank_dir, tmp_path):
+        """Installing beside the old file would leave the bank with two themes,
+        print using the new one and hand-written .tex still loading the old."""
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+        legacy = os.path.join(root, "skillcheckpoints.sty")
+        with open(legacy, "w", encoding="utf-8") as f:
+            f.write(r"\ProvidesPackage{skillcheckpoints}" + "\n")
+
+        with pytest.raises(theme.ThemeError) as caught:
+            theme.install(root)
+
+        assert "git mv" in str(caught.value)
+        assert not os.path.exists(os.path.join(root, "printit", "printit.sty"))
+
+    def test_loading_an_old_layout_refuses_rather_than_using_the_default(
+            self, bank_dir, tmp_path):
+        """Silently falling back would print a whole class set in a theme the
+        author had already replaced."""
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+        with open(os.path.join(root, "skillcheckpoints.sty"), "w",
+                  encoding="utf-8") as f:
+            f.write("% old\n")
+
+        with pytest.raises(theme.ThemeError):
+            theme.load(root)
+
+    def test_a_bank_without_one_gets_the_bundled_default(self, bank_dir):
+        """Not a fault: printing works before anything is installed."""
+        source, origin = theme.load(bank_dir)
+
+        assert r"\ProvidesPackage{printit}" in source
+        assert origin == theme.default_path()
+
+    def test_an_installed_theme_is_the_one_used(self, bank_dir, tmp_path):
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+        theme.install(root)
+        path = os.path.join(root, "printit", "printit.sty")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("% edited by the author\n")
+
+        source, origin = theme.load(root)
+
+        assert source == "% edited by the author\n"
+        assert origin == path

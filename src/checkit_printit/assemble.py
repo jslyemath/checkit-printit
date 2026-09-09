@@ -11,11 +11,13 @@ import random
 import re
 import shutil
 
-from . import spatext
+from . import spatext, theme
 from .bank import Bank
 from .jinja import make_env
 
-THEME_FILENAME = "skillcheckpoints.sty"
+# Re-exported from theme.py, so a caller writing the file into a
+# build folder does not need a second import to learn its name.
+THEME_FILENAME = theme.THEME_FILENAME
 DESCRIPTIONS_FILENAME = "Skill Descriptions.tex"
 
 
@@ -186,7 +188,7 @@ def main_tex(publication, handouts, extras, keys, load_helpers=False):
     out = [
         r"\documentclass[12pt,twoside]{article}",
         r"\usepackage[utf8]{inputenc}",
-        r"\usepackage{skillcheckpoints}",
+        r"\usepackage{printit}",
         # The bank's own macros, after the theme so they may build on it.
         *([r"\usepackage{bank_helpers}"] if load_helpers else []),
         "",
