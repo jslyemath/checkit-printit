@@ -11,13 +11,14 @@ import random
 import re
 import shutil
 
-from . import spatext, theme
+from . import spatext
+from . import theme as theme_mod
 from .bank import Bank
 from .jinja import make_env
 
 # Re-exported from theme.py, so a caller writing the file into a
 # build folder does not need a second import to learn its name.
-THEME_FILENAME = theme.THEME_FILENAME
+THEME_FILENAME = theme_mod.THEME_FILENAME
 DESCRIPTIONS_FILENAME = "Skill Descriptions.tex"
 
 
@@ -312,6 +313,14 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None, dry_run=False
 
     with open(os.path.join(out_dir, THEME_FILENAME), "w", encoding="utf-8") as f:
         f.write(theme)
+
+    # printit.sty requires this, so the folder does not compile without it.
+    # Resolved here rather than passed in: it is a dependency of the theme, not
+    # a second choice the caller makes.
+    figures, _origin = theme_mod.figures_source(bank.path)
+    with open(os.path.join(out_dir, theme_mod.FIGURES_FILENAME), "w",
+              encoding="utf-8") as f:
+        f.write(figures)
 
     helper = bank.helper_sty()
     if helper:

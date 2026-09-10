@@ -2,12 +2,7 @@
 
 \usepackage[T1]{fontenc}
 
-% More colors and names
-\usepackage[dvipsnames]{xcolor}
-
-% Skill Checkpoint main color theme
-\definecolor{scCOLOR}{HTML}{145da0}
-\definecolor{darkergray}{HTML}{404040}
+% Colours live in printitfigures.sty; see its note.
 
 % For setting keys and values
 \usepackage{pgfkeys}
@@ -278,144 +273,10 @@ title=#2,#1}
     \vspace*{-0.91\myts}
 }
 
-%need these for some of the nifty tikz commands
-\usepackage{tikz}
-\usepackage{tkz-euclide}
-\usepackage{tikz-cd}
-\usetikzlibrary{calc,trees,positioning,arrows,fit,shapes,calc,angles,quotes,backgrounds,datavisualization,datavisualization.formats.functions,math,intersections}
-\tikzstyle{aligntotop}=[baseline={([yshift={-\ht\strutbox}]current bounding box.north)},outer sep=0pt,inner sep=0pt]
-
-\tikzmath{
-    \xa = -5; \xz = 5;
-    \ya = -5; \yz = 5;
-    \xs = 1; \ys = 1;
-    \xn = \xa + 1; \yn = \ya+1;
-    \xm1 = \xa - \xs; \xm2 = \xz + \xs;
-    \ym1 = \ya - \ys; \ym2 = \yz + \ys;
-    }
-
-\newcommand{\setmyx}[3][1]{\tikzmath{
-    \xa = #2; \xz = #3;
-    \xs = #1;
-    \xn = \xa + 1;
-    \xm1 = \xa - \xs; \xm2 = \xz + \xs;
-    }}
-
-\newcommand{\setmyy}[3][1]{\tikzmath{
-    \ya = #2; \yz = #3;
-    \ys = #1;
-    \yn = \ya + 1;
-    \ym1 = \ya - \ys; \ym2 = \yz + \ys;
-    }}
-
-\usepackage{pgfplots}
-
-\pgfplotsset{compat=newest}
-
-\tikzset{>={Stealth[length=8pt,width=7pt]}}
-\pgfplotsset{bluesoldot/.style={color=blue,only marks,mark=*}}
-\pgfplotsset{blueholdot/.style={color=blue,fill=white,only marks,mark=*}}
-\pgfplotsset{slydes axis style/.style ={
-  axis background/.style = {fill=white},
-  thick,
-  axis x line=center,
-  axis y line=center,
-  grid = both,
-  xticklabel style = {font=\tiny,yshift=0.5ex},
-  yticklabel style = {font=\tiny,xshift=0.5ex},
-  xlabel style={font=\tiny, xshift=-1.75ex},
-  ylabel style={font=\tiny, yshift=-1.75ex},
-  xtick={\xa,\xn,...,\xz},
-  ytick={\ya,\yn,...,\yz},
-  every major tick/.append style={thick, major tick length=5pt, black},
-  xlabel={$x$},
-  ylabel={$y$},
-  xlabel style={below right},
-  ylabel style={above left},
-  xmin=\xm1,
-  xmax=\xm2,
-  ymin=\ym1,
-  ymax=\ym2}}
-  \pgfplotsset{printed axis style/.style ={
-  axis background/.style = {fill=white},
-  thick,
-  axis x line=center,
-  axis y line=center,
-  grid = both,
-  xticklabel style = {font=\tiny,yshift=0.5ex},
-  yticklabel style = {font=\tiny,xshift=0.5ex},
-  xlabel style={font=\tiny, xshift=-1.75ex},
-  ylabel style={font=\tiny, yshift=-1.75ex},
-  xtick={\xa,\xn,...,\xz},
-  ytick={\ya,\yn,...,\yz},
-  every major tick/.append style={thick, major tick length=5pt, black},
-  xlabel={$x$},
-  ylabel={$y$},
-  xlabel style={below right},
-  ylabel style={above left},
-  xmin=\xm1,
-  xmax=\xm2,
-  ymin=\ym1,
-  ymax=\ym2}}
-
-\pgfplotsset{number line style/.style ={
-  axis background/.style = {fill=none},
-  thick,
-  yscale=0.1,
-  axis x line=center,
-  axis y line=none,
-  axis line style={Stealth-Stealth},
-  xticklabel style = {font=\tiny,yshift=0.5ex},
-  xlabel style={font=\tiny, xshift=-1.75ex},
-  xtick={\xa,\xn,...,\xz},
-  every major tick/.append style={thick, major tick length=50pt, black},
-  xlabel style={below right},
-  xmin=\xm1-0.5,
-  xmax=\xm2+0.5,
-  ymin=-0.5,
-  ymax=0.5}}
-
-\pgfplotsset{blank number line style/.style ={
-  axis background/.style = {fill=none},
-  thick,
-  yscale=0.1,
-  axis x line=center,
-  axis y line=none,
-  axis line style={Stealth-Stealth},
-  xticklabel style = {font=\tiny,yshift=0.5ex},
-  xtick={\xa,\xn,...,\xz},
-  every major tick/.append style={thick, major tick length=50pt, black},
-  xticklabels=\empty,
-  yticklabels=\empty,
-  xmin=\xm1-0.5,
-  xmax=\xm2+0.5,
-  ymin=-0.5,
-  ymax=0.5}}
-
-\pgfplotsset{blank axis style/.style ={
-  axis background/.style = {fill=white},
-  thick,
-  yscale=0.1,
-  axis x line=center,
-  axis y line=center,
-  grid = both,
-%   xticklabel style = {font=\tiny,yshift=0.5ex},
-%   yticklabel style = {font=\tiny,xshift=0.5ex},
-%   xlabel style={font=\tiny, xshift=-1.75ex},
-%   ylabel style={font=\tiny, yshift=-1.75ex},
-  xticklabels=\empty,
-  yticklabels=\empty,
-  xtick={\xa,\xn,...,\xz},
-  ytick={\ya,\yn,...,\yz},
-  every major tick/.append style={thick, major tick length=5pt, black},
-%   xlabel={$x$},
-%   ylabel={$y$},
-%   xlabel style={below right},
-%   ylabel style={above left},
-  xmin=\xm1,
-  xmax=\xm2,
-  ymin=\ym1,
-  ymax=\ym2}}
+% The picture vocabulary -- TikZ libraries, range helpers, axis styles --
+% lives in its own package so that figures compiled on their own can load
+% it without the page layout below. See printitfigures.sty.
+\RequirePackage{printitfigures}
 
 % For the rounded checkbox at on checkpoints
 \usepackage{xspace}

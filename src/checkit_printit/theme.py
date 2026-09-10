@@ -30,6 +30,16 @@ BANK_DIR = "printit"
 
 THEME_FILENAME = "printit.sty"
 
+#: The picture half, which printit.sty \RequirePackage's. Installed beside it
+#: because figures are compiled on their own: CheckIt rasterizes a bank's .tikz
+#: in a `standalone` document, where the full theme cannot load. Both surfaces
+#: load this one file, so a number line drawn for the web and the same line in
+#: a handout are the same picture rather than two drawings kept looking alike.
+FIGURES_FILENAME = "printitfigures.sty"
+
+#: Everything installed into the bank, in the order it is reported.
+INSTALLED_FILENAMES = (THEME_FILENAME, FIGURES_FILENAME)
+
 #: Where a bank's theme lived before it belonged to this tool. Detected so an
 #: older bank stops with instructions, rather than silently getting the default
 #: while its hand-written .tex files still load the old package.
@@ -67,23 +77,29 @@ def _migration_instructions(bank_path):
     )
 
 
-#: Path as written into bank.xml -- forward slashes, because it is read on
+#: Paths as written into bank.xml -- forward slashes, because they are read on
 #: whatever machine publishes the bank, not only the one that installed it.
+#: The figures package first: printit.sty requires it.
+DECLARED_PATHS = (
+    (f"{BANK_DIR}/{FIGURES_FILENAME}", "figures"),
+    (f"{BANK_DIR}/{THEME_FILENAME}", "theme"),
+)
+
+#: Kept for the message shown when a manifest has nowhere obvious to write to.
 DECLARED_PATH = f"{BANK_DIR}/{THEME_FILENAME}"
 
 
-def _already_declared(manifest):
-    """Does the manifest really declare this file?
+def _declared_paths(manifest):
+    """The support paths this manifest already lists.
 
-    Reads the XML, so a mention of the path in prose or a comment is not
-    mistaken for a declaration.
+    Reads the XML, so a mention of a path in prose or a comment is not mistaken
+    for a declaration.
     """
     try:
         tree = etree.parse(manifest)
     except etree.XMLSyntaxError as exc:
         raise ThemeError(f"{manifest} is not valid XML: {exc}")
-    return any(ele.get("path") == DECLARED_PATH
-               for ele in tree.iter("{*}file"))
+    return {ele.get("path") for ele in tree.iter("{*}file")}
 
 
 def declare(bank_path):
@@ -105,14 +121,29 @@ def declare(bank_path):
     # matched the path written in a *comment* elsewhere in the file, decided
     # the declaration already existed, and silently skipped it -- so the theme
     # was never published and nothing said why.
-    if _already_declared(manifest):
+    present = _declared_paths(manifest)
+    if all(path in present for path, _role in DECLARED_PATHS):
         return False
+
+    files = "\n".join(
+        f'        <file path="{path}" role="{role}"/>'
+        for path, role in DECLARED_PATHS if path not in present)
+
+    # A bank that already has the block gets the missing lines added to it.
+    # Opening a second <latex-support> would parse fine and read badly, and
+    # would happen again every time this tool grew another file.
+    opening = "    <latex-support>\n"
+    if opening in xml:
+        xml = xml.replace(opening, opening + files + "\n", 1)
+        with open(manifest, "w", encoding="utf-8", newline="") as f:
+            f.write(xml)
+        return True
 
     entry = (f'    <latex-support>\n'
              f'        <!-- Installed and owned by checkit-printit. CheckIt only\n'
-             f'             publishes it, so the viewer can build LaTeX that\n'
+             f'             publishes them, so the viewer can build LaTeX that\n'
              f'             matches the printed handouts. -->\n'
-             f'        <file path="{DECLARED_PATH}" role="theme"/>\n'
+             f'{files}\n'
              f'    </latex-support>\n')
 
     # After </url>, which every bank has exactly one of, so the declaration
@@ -150,13 +181,40 @@ def install(bank_path, force=False):
             _migration_instructions(bank_path) + "\n\nNothing was written."
         )
 
-    if os.path.isfile(target) and not force:
-        return target, "kept", declare(bank_path)
+    action = "kept" if os.path.isfile(target) and not force else (
+        "replaced" if os.path.isfile(target) else "installed")
 
-    action = "replaced" if os.path.isfile(target) else "installed"
-    os.makedirs(os.path.dirname(target), exist_ok=True)
-    shutil.copyfile(default_path(), target)
+    os.makedirs(os.path.join(bank_path, BANK_DIR), exist_ok=True)
+    for filename in INSTALLED_FILENAMES:
+        destination = os.path.join(bank_path, BANK_DIR, filename)
+        # The theme is the author's to edit and is left alone unless forced.
+        # printitfigures.sty is written whenever it is missing, because
+        # printit.sty requires it -- a bank holding one without the other does
+        # not compile, and that is a worse state than a refreshed default.
+        if os.path.isfile(destination) and not force:
+            continue
+        shutil.copyfile(
+            os.path.join(os.path.dirname(__file__), "theme", filename),
+            destination,
+        )
     return target, action, declare(bank_path)
+
+
+def figures_source(bank_path=None):
+    """The picture package printit.sty requires, and where it came from.
+
+    Resolved the same way as the theme: the bank's copy if it has one, else the
+    packaged default. A document loading printit will not compile without it,
+    so it travels into every build folder alongside the theme.
+    """
+    if bank_path:
+        override = os.path.join(bank_path, BANK_DIR, FIGURES_FILENAME)
+        if os.path.isfile(override):
+            with open(override, encoding="utf-8") as f:
+                return f.read(), override
+    path = os.path.join(os.path.dirname(__file__), "theme", FIGURES_FILENAME)
+    with open(path, encoding="utf-8") as f:
+        return f.read(), path
 
 
 def load(bank_path=None):
