@@ -221,9 +221,21 @@ checkit-printit install -b path/to/bank
 ```
 
 That one file decides two things: how these handouts look, and how the CheckIt
-viewer's Assessment tab exports LaTeX. `checkit generate` publishes it with the
-bank, so the browser can load the same theme. Edit it, run `checkit generate`,
-and both change together.
+viewer's Assessment tab exports LaTeX. Edit it, run `checkit generate`, and both
+change together.
+
+Installing also adds a line to the bank's `bank.xml`:
+
+```xml
+<latex-support>
+    <file path="printit/printit.sty" role="theme"/>
+</latex-support>
+```
+
+CheckIt publishes LaTeX files a bank declares there. It has no idea this tool
+exists -- a constant in CheckIt naming `printit.sty` would be a hook for
+something that may never be installed -- so writing the declaration is this
+tool's job.
 
 A bank without one still prints -- it falls back to the copy shipped inside this
 package, and the Assessment tab falls back to CheckIt's plain template.

@@ -20,6 +20,8 @@ here, and the Assessment tab falls back to CheckIt's plain template.
 import os
 import shutil
 
+from lxml import etree
+
 #: Folder inside the bank. Namespaced so it is obvious which tool owns it, and
 #: so anything else this tool later ships into a bank -- a default
 #: publication.toml, seating templates -- has somewhere to go without a second
@@ -65,12 +67,79 @@ def _migration_instructions(bank_path):
     )
 
 
+#: Path as written into bank.xml -- forward slashes, because it is read on
+#: whatever machine publishes the bank, not only the one that installed it.
+DECLARED_PATH = f"{BANK_DIR}/{THEME_FILENAME}"
+
+
+def _already_declared(manifest):
+    """Does the manifest really declare this file?
+
+    Reads the XML, so a mention of the path in prose or a comment is not
+    mistaken for a declaration.
+    """
+    try:
+        tree = etree.parse(manifest)
+    except etree.XMLSyntaxError as exc:
+        raise ThemeError(f"{manifest} is not valid XML: {exc}")
+    return any(ele.get("path") == DECLARED_PATH
+               for ele in tree.iter("{*}file"))
+
+
+def declare(bank_path):
+    """Tell the bank's manifest that this file exists. Returns True if added.
+
+    CheckIt publishes LaTeX support files a bank declares under
+    <latex-support>, and knows nothing about this tool -- which is the point.
+    A constant in CheckIt naming `printit.sty` would be a hook for something
+    that may never be installed. So the declaration is this tool's to write.
+
+    Inserted as text rather than by re-serialising the XML, because bank.xml is
+    hand-maintained and full of comments that a round-trip would move or drop.
+    """
+    manifest = os.path.join(bank_path, "bank.xml")
+    with open(manifest, encoding="utf-8") as f:
+        xml = f.read()
+
+    # Parsed rather than searched as text. A substring check for the path
+    # matched the path written in a *comment* elsewhere in the file, decided
+    # the declaration already existed, and silently skipped it -- so the theme
+    # was never published and nothing said why.
+    if _already_declared(manifest):
+        return False
+
+    entry = (f'    <latex-support>\n'
+             f'        <!-- Installed and owned by checkit-printit. CheckIt only\n'
+             f'             publishes it, so the viewer can build LaTeX that\n'
+             f'             matches the printed handouts. -->\n'
+             f'        <file path="{DECLARED_PATH}" role="theme"/>\n'
+             f'    </latex-support>\n')
+
+    # After </url>, which every bank has exactly one of, so the declaration
+    # lands among the other bank-level settings rather than after the outcomes.
+    marker = "</url>\n"
+    if xml.count(marker) != 1:
+        raise ThemeError(
+            f"{manifest} has {xml.count(marker)} <url> lines, so there is no "
+            "one obvious place to add the declaration. Add this by hand, "
+            f"inside <bank>:\n{entry}"
+        )
+    xml = xml.replace(marker, marker + entry, 1)
+    with open(manifest, "w", encoding="utf-8", newline="") as f:
+        f.write(xml)
+    return True
+
+
 def install(bank_path, force=False):
-    """Write the default into the bank. Returns (path, action).
+    """Write the default into the bank. Returns (path, action, declared).
 
     `action` is "installed", "kept", or "replaced". An existing theme is never
     overwritten without `force`: that file is the author's, and may be a term's
     worth of layout work.
+
+    `declared` says whether the manifest gained the declaration on this run --
+    reported separately because a run can leave the theme alone and still have
+    changed the bank, and saying "nothing written" would then be false.
     """
     target = bank_theme_path(bank_path)
     if os.path.isfile(legacy_path(bank_path)) and not os.path.isfile(target):
@@ -82,12 +151,12 @@ def install(bank_path, force=False):
         )
 
     if os.path.isfile(target) and not force:
-        return target, "kept"
+        return target, "kept", declare(bank_path)
 
     action = "replaced" if os.path.isfile(target) else "installed"
     os.makedirs(os.path.dirname(target), exist_ok=True)
     shutil.copyfile(default_path(), target)
-    return target, action
+    return target, action, declare(bank_path)
 
 
 def load(bank_path=None):

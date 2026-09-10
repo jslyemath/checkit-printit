@@ -102,15 +102,20 @@ def install(bank_path, force):
             f"{resolved} has no bank.xml, so it is not a CheckIt bank."
         )
     try:
-        path, action = theme.install(resolved, force=force)
+        path, action, declared = theme.install(resolved, force=force)
     except theme.ThemeError as exc:
         raise click.ClickException(str(exc))
 
     if action == "kept":
-        click.echo(f"{path} already exists; nothing written.")
+        click.echo(f"{path} already exists; it was left alone.")
         click.echo("Pass --force to replace it with the default.")
+    else:
+        click.echo(f"{action} {path}")
+    if declared:
+        click.echo(f"declared it in {os.path.join(resolved, 'bank.xml')}, so "
+                   "`checkit generate` publishes it with the bank.")
+    if action == "kept" and not declared:
         return
-    click.echo(f"{action} {path}")
     click.echo("Edit it to change how this bank looks, in print and in the "
                "Assessment tab.")
     click.echo("Then run `checkit generate` so the site publishes the change.")
@@ -189,11 +194,14 @@ def build(pub_path, out, do_compile, seed, preview):
     # than a silent copy. A preview writes nothing, here as everywhere.
     if publication.bank_path and not preview:
         try:
-            installed_at, action = theme.install(publication.bank_path)
+            installed_at, action, declared = theme.install(publication.bank_path)
         except theme.ThemeError as exc:
             raise click.ClickException(str(exc))
         if action == "installed":
             click.echo(f"theme   wrote {installed_at} -- edit it to change the look")
+        if declared:
+            click.echo("theme   declared it in the bank's bank.xml, so "
+                       "`checkit generate` publishes it")
 
     try:
         theme_source, theme_origin = theme.load(publication.bank_path)

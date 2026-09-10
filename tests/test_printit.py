@@ -645,7 +645,7 @@ class TestThemeInstall:
         root = str(tmp_path / "bank")
         shutil.copytree(bank_dir, root)
 
-        path, action = theme.install(root)
+        path, action, _ = theme.install(root)
 
         assert action == "installed"
         assert path == os.path.join(root, "printit", "printit.sty")
@@ -661,7 +661,7 @@ class TestThemeInstall:
         with open(mine, "w", encoding="utf-8") as f:
             f.write("% mine\n")
 
-        path, action = theme.install(root)
+        path, action, _ = theme.install(root)
 
         assert action == "kept"
         with open(path, encoding="utf-8") as f:
@@ -675,7 +675,7 @@ class TestThemeInstall:
         with open(mine, "w", encoding="utf-8") as f:
             f.write("% mine\n")
 
-        path, action = theme.install(root, force=True)
+        path, action, _ = theme.install(root, force=True)
 
         assert action == "replaced"
         with open(path, encoding="utf-8") as f:
@@ -728,3 +728,89 @@ class TestThemeInstall:
 
         assert source == "% edited by the author\n"
         assert origin == path
+
+    def test_install_declares_the_theme_in_the_manifest(self, bank_dir, tmp_path):
+        """CheckIt publishes what a bank declares, and knows nothing about this
+        tool -- so writing the declaration is this tool's job."""
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+
+        theme.install(root)
+
+        with open(os.path.join(root, "bank.xml"), encoding="utf-8") as f:
+            xml = f.read()
+        assert "<latex-support>" in xml
+        assert 'path="printit/printit.sty"' in xml
+        assert 'role="theme"' in xml
+
+    def test_declaring_twice_does_nothing(self, bank_dir, tmp_path):
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+        theme.install(root)
+        manifest = os.path.join(root, "bank.xml")
+        with open(manifest, encoding="utf-8") as f:
+            once = f.read()
+
+        assert theme.declare(root) is False
+
+        with open(manifest, encoding="utf-8") as f:
+            assert f.read() == once
+
+    def test_a_hand_copied_theme_still_gets_declared(self, bank_dir, tmp_path):
+        """`install` on a bank whose theme was copied in by hand adds the
+        declaration, rather than reporting "kept" and publishing nothing."""
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+        os.makedirs(os.path.join(root, "printit"))
+        with open(os.path.join(root, "printit", "printit.sty"), "w",
+                  encoding="utf-8") as f:
+            f.write("% copied in by hand\n")
+
+        _, action, _ = theme.install(root)
+
+        assert action == "kept"
+        with open(os.path.join(root, "bank.xml"), encoding="utf-8") as f:
+            assert 'path="printit/printit.sty"' in f.read()
+
+    def test_the_manifest_keeps_its_comments(self, bank_dir, tmp_path):
+        """bank.xml is hand-maintained. Re-serialising the XML would move or
+        drop its comments, so the declaration is inserted as text."""
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+        manifest = os.path.join(root, "bank.xml")
+        with open(manifest, encoding="utf-8") as f:
+            before = f.read()
+
+        theme.install(root)
+
+        with open(manifest, encoding="utf-8") as f:
+            after = f.read()
+        # Unchanged apart from one insertion: cutting the added block back out
+        # gives the original byte for byte. That catches a reformat, a dropped
+        # comment and a moved element all at once.
+        head, opened, tail = after.partition("    <latex-support>\n")
+        block, closed, rest = tail.partition("    </latex-support>\n")
+        assert opened and closed, "no <latex-support> block was added"
+        assert 'path="printit/printit.sty"' in block
+        assert head + rest == before
+
+    def test_a_path_named_in_a_comment_is_not_a_declaration(self, bank_dir, tmp_path):
+        """The bug this replaced: idempotence was a substring search, so the
+        path written in a comment elsewhere in bank.xml counted as a
+        declaration. The theme was then never published, and nothing said so.
+        """
+        root = str(tmp_path / "bank")
+        shutil.copytree(bank_dir, root)
+        manifest = os.path.join(root, "bank.xml")
+        with open(manifest, encoding="utf-8") as f:
+            xml = f.read()
+        with open(manifest, "w", encoding="utf-8") as f:
+            f.write(xml.replace(
+                "<outcomes>",
+                "<!-- see printit/printit.sty for the layout -->\n    <outcomes>",
+                1))
+
+        theme.install(root)
+
+        with open(manifest, encoding="utf-8") as f:
+            assert 'path="printit/printit.sty"' in f.read()
