@@ -44,24 +44,50 @@ def choose_seeds(bank, versions, publication, rng):
 
     `[seeds]` in the publication pins a letter outright, which is how a reprint
     reproduces what was handed out.
+
+    Within one skill the letters draw *without replacement*, so two versions
+    are never the same paper. Drawing each independently looked fine and was
+    not: with ten versions out of six hundred printable seeds, about one run in
+    fourteen handed two letters the same exercise -- and a report of "10
+    versions" while two neighbours hold identical sheets is the one failure
+    versioning exists to prevent.
     """
     chosen = {}
-    for version in versions:
-        pinned = publication.seeds.get(version)
-        for slug in publication_skills(publication, bank):
-            wanted = publication.variants.get(slug)
-            available = bank.seeds_with_variant(slug, wanted)
-            if pinned is not None:
-                if pinned not in available:
-                    raise AssemblyError(
-                        f"version {version} is pinned to seed {pinned}, but {slug} "
-                        f"has no printable version at that seed"
-                        + (f" with variant {wanted!r}" if wanted else "")
-                        + f". Printable seeds start at {available[0]}."
-                    )
-                chosen[(version, slug)] = pinned
-            else:
-                chosen[(version, slug)] = rng.choice(available)
+    for slug in publication_skills(publication, bank):
+        wanted = publication.variants.get(slug)
+        available = bank.seeds_with_variant(slug, wanted)
+
+        pinned = {}
+        for version in versions:
+            seed = publication.seeds.get(version)
+            if seed is None:
+                continue
+            if seed not in available:
+                raise AssemblyError(
+                    f"version {version} is pinned to seed {seed}, but {slug} "
+                    f"has no printable version at that seed"
+                    + (f" with variant {wanted!r}" if wanted else "")
+                    + f". Printable seeds start at {available[0]}."
+                )
+            pinned[version] = seed
+
+        free = [v for v in versions if v not in pinned]
+        # A pinned seed is out of the pool, so an unpinned letter cannot
+        # accidentally reproduce it.
+        pool = [s for s in available if s not in set(pinned.values())]
+        if len(pool) < len(free):
+            raise AssemblyError(
+                f"{slug} has {len(pool)} printable version(s) left to draw from"
+                + (f" with variant {wanted!r}" if wanted else "")
+                + f", but {len(free)} version letter(s) need a distinct one. "
+                "Generate more seeds, or ask for fewer versions in seating.toml."
+            )
+        drawn = rng.sample(pool, len(free))
+
+        for version in versions:
+            chosen[(version, slug)] = (
+                pinned[version] if version in pinned else drawn[free.index(version)]
+            )
     return chosen
 
 

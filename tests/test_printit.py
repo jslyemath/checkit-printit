@@ -814,3 +814,55 @@ class TestThemeInstall:
 
         with open(manifest, encoding="utf-8") as f:
             assert 'path="printit/printit.sty"' in f.read()
+
+
+# ------------------------------------------------------- distinct versions ----
+
+class TestVersionsAreDistinct:
+    """Two version letters must never be the same paper.
+
+    Seeds were drawn independently per letter, so they could collide. With ten
+    versions out of six hundred printable seeds that is about one run in
+    fourteen -- and the build still reported the full count of versions while
+    two neighbours held identical sheets.
+    """
+
+    def publication(self, bank_dir, **kwargs):
+        return pub_mod.Publication(
+            bank_path=bank_dir, roster_path=None, seating_path=None,
+            simply_print=("AD",), **kwargs)
+
+    def test_every_version_gets_a_different_seed(self, bank_dir):
+        versions = [chr(ord("A") + i) for i in range(10)]
+        bank = Bank(bank_dir)
+        # Many draws, because a collision is occasional rather than reliable.
+        for attempt in range(60):
+            chosen = assemble_mod.choose_seeds(
+                bank, versions, self.publication(bank_dir),
+                random.Random(attempt))
+            seeds = [chosen[(v, "AD")] for v in versions]
+            assert len(set(seeds)) == len(seeds), (
+                f"attempt {attempt} repeated a seed: {seeds}")
+
+    def test_a_pinned_seed_is_not_drawn_again(self, bank_dir):
+        bank = Bank(bank_dir)
+        printable = bank.printable_seeds("AD")
+        pinned = printable[0]
+        versions = ["A", "B", "C"]
+        for attempt in range(40):
+            chosen = assemble_mod.choose_seeds(
+                bank, versions, self.publication(bank_dir, seeds={"A": pinned}),
+                random.Random(attempt))
+            assert chosen[("A", "AD")] == pinned
+            others = [chosen[(v, "AD")] for v in ("B", "C")]
+            assert pinned not in others, "an unpinned letter reproduced the pin"
+            assert others[0] != others[1]
+
+    def test_asking_for_more_versions_than_exist_is_refused(self, bank_dir):
+        """Silently repeating would be worse: the report would claim versions
+        that are not different."""
+        bank = Bank(bank_dir)
+        too_many = [f"V{i}" for i in range(len(bank.printable_seeds("AD")) + 1)]
+        with pytest.raises(assemble_mod.AssemblyError, match="distinct"):
+            assemble_mod.choose_seeds(
+                bank, too_many, self.publication(bank_dir), random.Random(0))
