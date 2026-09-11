@@ -26,6 +26,17 @@
 \definecolor{scCOLOR}{HTML}{145da0}
 \definecolor{darkergray}{HTML}{404040}
 
+% Mathematics and the text font, here for the same reason. A tick label is
+% math -- a number line labelled 5/6 needs \dfrac -- and a figure has to be set
+% in the same typeface as the page it sits on, or the web image and the printed
+% one disagree about what a numeral looks like.
+%
+% Undefined \dfrac was the second silent failure: it dropped the fraction bar
+% and drew "56" on every published number line carrying a fraction.
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathpazo}
+
 %need these for some of the nifty tikz commands
 \usepackage{tikz}
 \usepackage{tkz-euclide}
