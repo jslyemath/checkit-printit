@@ -14,6 +14,7 @@ import sys
 import pytest
 
 from checkit_printit import assemble as assemble_mod
+from checkit_printit import manifest as manifest_mod
 from checkit_printit import compile as compile_mod
 from checkit_printit import publication as pub_mod
 from checkit_printit import roster as roster_mod
@@ -236,6 +237,94 @@ class TestJinja:
         env = make_env(missing=seen)
         assert env.from_string(r"a\VAR{nope}b").render() == "ab"
         assert seen == {"nope"}
+
+
+# -------------------------------------------------------------- manifest ----
+
+class TestManifest:
+    """A run seed repeats the draw; the manifest repeats the result. The
+    difference matters the moment an input changes."""
+
+    def build(self, bank_dir, tmp_path, name="out", publication=None,
+              roster=None, run_seed=99, dry_run=False):
+        publication = publication or make_publication(bank_dir)
+        roster = roster or two_students()
+        chart = chart_for(tmp_path, ["Ada", "Bo"])
+        out = str(tmp_path / name)
+        source, _ = theme.load(bank_dir)
+        report = assemble_mod.assemble(
+            publication, roster, chart, out, source, rng=random.Random(1),
+            dry_run=dry_run, run_seed=run_seed)
+        return out, report
+
+    def test_a_build_writes_one(self, bank_dir, tmp_path):
+        out, _ = self.build(bank_dir, tmp_path)
+        assert os.path.isfile(os.path.join(out, manifest_mod.FILENAME))
+
+    def test_a_preview_writes_nothing_at_all(self, bank_dir, tmp_path):
+        out, _ = self.build(bank_dir, tmp_path, dry_run=True)
+        assert not os.path.exists(os.path.join(out, manifest_mod.FILENAME))
+
+    def test_every_printed_paper_is_recorded(self, bank_dir, tmp_path):
+        out, report = self.build(bank_dir, tmp_path)
+        raw = manifest_mod.load(out)
+        recorded = {(p["skill"], p["version"]): p["seed"] for p in raw["paper"]}
+        expected = {(slug, v): s for (v, slug), s in report["seeds"].items()
+                    if slug in report["skills"]}
+        assert recorded == expected
+
+    def test_the_run_seed_is_recorded(self, bank_dir, tmp_path):
+        out, _ = self.build(bank_dir, tmp_path, run_seed=4242)
+        assert manifest_mod.load(out)["run"]["seed"] == 4242
+
+    def test_replaying_reproduces_the_papers_under_a_different_draw(
+            self, bank_dir, tmp_path):
+        """The whole point: replay pins, so the lottery is irrelevant."""
+        first, report = self.build(bank_dir, tmp_path, name="a")
+        raw = manifest_mod.load(first)
+        replayed = manifest_mod.apply(raw, make_publication(bank_dir))
+        source, _ = theme.load(bank_dir)
+        again = assemble_mod.assemble(
+            replayed, two_students(), chart_for(tmp_path, ["Ada", "Bo"]),
+            str(tmp_path / "b"), source,
+            rng=random.Random(12345),      # a different lottery entirely
+            run_seed=12345)
+        printed = {k: v for k, v in report["seeds"].items()
+                   if k[1] in report["skills"]}
+        assert {k: again["seeds"][k] for k in printed} == printed
+
+    def test_a_changed_variant_is_refused(self, bank_dir, tmp_path):
+        out, _ = self.build(bank_dir, tmp_path)
+        raw = manifest_mod.load(out)
+        raw["paper"][0]["variant"] = "a_case_this_bank_never_had"
+        refusals, _ = manifest_mod.check(
+            raw, Bank(bank_dir), make_publication(bank_dir))
+        assert refusals and "different paper" in refusals[0]
+
+    def test_an_unchanged_bank_refuses_nothing(self, bank_dir, tmp_path):
+        out, _ = self.build(bank_dir, tmp_path)
+        refusals, _ = manifest_mod.check(
+            manifest_mod.load(out), Bank(bank_dir), make_publication(bank_dir))
+        assert refusals == []
+
+    def test_a_changed_input_is_a_note_not_a_refusal(self, bank_dir, tmp_path):
+        """Fixing a misspelt name must not redraw the class."""
+        roster_file = tmp_path / "roster.toml"
+        roster_file.write_text('[[student]]\nname = "Ada"\nskills = ["AD"]\n',
+                               encoding="utf-8")
+        pub = make_publication(bank_dir, roster_path=str(roster_file))
+        out, _ = self.build(bank_dir, tmp_path, publication=pub)
+
+        roster_file.write_text('[[student]]\nname = "Ada L"\nskills = ["AD"]\n',
+                               encoding="utf-8")
+        refusals, notes = manifest_mod.check(
+            manifest_mod.load(out), Bank(bank_dir), pub)
+        assert refusals == []
+        assert any("roster has changed" in n for n in notes)
+
+    def test_a_folder_without_one_says_so(self, tmp_path):
+        with pytest.raises(manifest_mod.ManifestError, match="does not exist"):
+            manifest_mod.load(str(tmp_path))
 
 
 # ---------------------------------------------------------- publication ----

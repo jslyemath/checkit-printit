@@ -7,8 +7,9 @@ import sys
 import click
 
 from . import __version__, publication as pub_mod, roster as roster_mod, seating, theme
+from . import manifest as manifest_mod
 from .assemble import assemble, AssemblyError
-from .bank import BankError
+from .bank import Bank, BankError
 from .compile import compile_pdf, CompileError
 
 
@@ -153,12 +154,35 @@ def import_csv(csv_path, out):
               help="Seed the version chooser, to reproduce an earlier run.")
 @click.option("--preview", is_flag=True,
               help="Report what would be printed, and write nothing.")
-def build(pub_path, out, do_compile, seed, preview):
+@click.option("--replay", type=click.Path(exists=True), default=None,
+              help="Reprint a finished run exactly, from the manifest in its "
+                   "output folder. Draws nothing.")
+def build(pub_path, out, do_compile, seed, preview, replay):
     """Assemble the class set, and compile it."""
     try:
         publication = pub_mod.load(pub_path)
     except pub_mod.PublicationError as exc:
         raise click.ClickException(str(exc))
+
+    record = None
+    if replay:
+        # Checked before any work: a replay that cannot be faithful should say
+        # so instead of producing a folder that looks right.
+        try:
+            record = manifest_mod.load(replay)
+            refusals, notes = manifest_mod.check(
+                record, Bank(publication.bank_path), publication)
+        except (manifest_mod.ManifestError, BankError) as exc:
+            raise click.ClickException(str(exc))
+        for note in notes:
+            click.echo(f"replay  note: {note}")
+        if refusals:
+            raise click.ClickException(
+                "this run cannot be reproduced from its manifest:\n  "
+                + "\n  ".join(refusals))
+        publication = manifest_mod.apply(record, publication)
+        click.echo(f"replay  {len(record['paper'])} papers pinned from "
+                   f"{os.path.join(replay, manifest_mod.FILENAME)}")
 
     if not publication.roster_path:
         raise click.ClickException(f"{pub_path}: [roster] path is required.")
@@ -218,7 +242,7 @@ def build(pub_path, out, do_compile, seed, preview):
 
     try:
         report = assemble(publication, roster, chart, out, theme_source,
-                          rng=rng, dry_run=preview)
+                          rng=rng, dry_run=preview, run_seed=run_seed)
     except (AssemblyError, BankError) as exc:
         raise click.ClickException(str(exc))
 

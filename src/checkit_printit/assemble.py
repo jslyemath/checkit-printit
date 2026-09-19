@@ -11,6 +11,7 @@ import random
 import re
 import shutil
 
+from . import manifest
 from . import spatext
 from . import theme as theme_mod
 from .bank import Bank
@@ -310,7 +311,8 @@ def check_flat_pins(publication, roster):
         )
 
 
-def assemble(publication, roster, chart, out_dir, theme, rng=None, dry_run=False):
+def assemble(publication, roster, chart, out_dir, theme, rng=None,
+             dry_run=False, run_seed=None):
     """Write a complete, compilable folder. Returns a short report."""
     rng = rng or random.Random()
     bank = Bank(publication.bank_path)
@@ -388,6 +390,12 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None, dry_run=False
                          load_helpers=helper is not None))
 
     _copy_assets(bank, out_dir, written)
+
+    # Written last, so a folder only claims to be reproducible once it is
+    # complete. A run with no seed recorded cannot be replayed, so the caller
+    # has to supply one rather than have a default invented here.
+    if run_seed is not None:
+        manifest.write(out_dir, publication, run_seed, seeds, bank, slugs_used)
 
     return _report_dict(handouts, extras, keys, written, unseated, chart,
                         seeds, missing)

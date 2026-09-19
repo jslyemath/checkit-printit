@@ -43,9 +43,13 @@ never run is still text in the file, and the build fails looking for it.
   prediction**: preview and build are separate processes, each drawing from
   its own RNG, so the numbers differ. Carry the reported run seed across
   (`build --seed N`) to make a preview binding.
-- Every run reports a seed, generated when one is not given. That is the
-  handle for repeating a draw. Reproducing a whole *run* is a different job
-  and belongs to the manifest, not to a table of pins.
+- Every run reports a seed, generated when one is not given. That repeats
+  the **draw**, and only lands on the same papers if nothing else moved.
+- Every run also writes `manifest.toml`, which records the **result**.
+  `build --replay <output folder>` pins every paper from it and draws
+  nothing, so a reprint survives edits a seed would not -- fixing a misspelt
+  name must not redraw the class. A changed input is reported as a note; a
+  changed variant is refused, because then the seed is a different paper.
 - `[seeds.<skill>]` pins one letter of one skill. The flat `[seeds]` form
   names no skill, so it means every skill at once -- refused where a run
   prints more than one, because it used to hand three wrong papers out of

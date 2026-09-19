@@ -28,6 +28,8 @@ class Publication:
     title: str = ""
     date: str = ""
 
+    # where this was read from, so a manifest can record its fingerprint
+    source_path: str = ""
     bank_path: str = ""
     roster_path: str = ""
     seating_path: str = ""
@@ -107,6 +109,7 @@ def load(path):
     }
 
     pub = Publication(
+        source_path=os.path.abspath(path),
         course=course.get("name", ""),
         semester=course.get("semester", ""),
         professor=course.get("professor", ""),
