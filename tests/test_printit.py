@@ -158,9 +158,46 @@ class TestSeating:
         assert len(collisions) == 1
         assert {s.name for s in collisions[0]} == {"A1", "A2"}
 
-    def test_one_version_is_refused(self, tmp_path):
-        with pytest.raises(seating.SeatingError, match="at least two"):
-            seating.load(self.write(tmp_path, 'versions = ["A"]\n[[group]]\nseats = ["A1"]'))
+    def test_one_version_is_fine_when_nobody_shares_a_table(self, tmp_path):
+        """A single-student makeup has no neighbour, so demanding a second
+        version would mean inventing a paper nobody receives."""
+        chart = seating.load(self.write(tmp_path, """
+            versions = ["A"]
+            [[group]]
+            seats = ["A1"]
+        """))
+        assert [s.version for s in chart] == ["A"]
+        assert chart.collisions() == []
+
+    def test_one_version_is_refused_where_two_people_sit_together(self, tmp_path):
+        with pytest.raises(seating.SeatingError, match="table 1 seats 2"):
+            seating.load(self.write(tmp_path, """
+                versions = ["A"]
+                [[group]]
+                seats = ["A1", "A2"]
+            """))
+
+    def test_the_refusal_names_the_table_that_is_actually_crowded(self, tmp_path):
+        """A lone seat comes first, so naming table 1 would send the operator
+        to the wrong line of the file."""
+        with pytest.raises(seating.SeatingError, match="table 2 seats 3"):
+            seating.load(self.write(tmp_path, """
+                versions = ["A"]
+                [[group]]
+                seats = ["A1"]
+                [[group]]
+                seats = ["B1", "B2", "B3"]
+            """))
+
+    def test_an_empty_version_list_is_refused_rather_than_defaulted(self, tmp_path):
+        """Leaving the key out takes the default. Writing an empty list is a
+        mistake, and quietly supplying A and B would hide it."""
+        with pytest.raises(seating.SeatingError, match="versions is empty"):
+            seating.load(self.write(tmp_path, """
+                versions = []
+                [[group]]
+                seats = ["A1"]
+            """))
 
     def test_an_unknown_pin_is_refused(self, tmp_path):
         with pytest.raises(seating.SeatingError, match="not in"):

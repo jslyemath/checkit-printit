@@ -7,6 +7,10 @@ of paper matches the room, and adjacent seats must not share a version.
 A, B, A, B satisfies it with two versions; requiring everyone at a table to
 differ would need four, for no gain. Two versions is the intent.
 
+Where nobody shares a table there are no neighbours, so one version is enough
+-- a single student making up a checkpoint should not have to invent a second
+paper that nobody receives.
+
 This is the interim for the eventual drag-and-drop GUI. The file format is
 meant to be what that GUI reads and writes, so it becomes a front end rather
 than a replacement.
@@ -55,16 +59,37 @@ def load(path, versions=("A", "B")):
     with open(path, "rb") as f:
         raw = tomllib.load(f)
 
-    versions = tuple(raw.get("versions") or versions)
-    if len(versions) < 2:
-        raise SeatingError(
-            f"{path}: at least two versions are needed, or neighbours cannot "
-            f"differ. Got {list(versions)}."
-        )
+    declared = raw.get("versions")
+    if declared is None:
+        versions = tuple(versions)
+    else:
+        versions = tuple(declared)
+        if not versions:
+            raise SeatingError(
+                f"{path}: versions is empty. Name at least one, or leave the "
+                f"key out to take the default {list(('A', 'B'))}."
+            )
 
     groups = raw.get("group")
     if not groups:
         raise SeatingError(f"{path} has no [[group]] tables.")
+
+    # One version is refused only where it would actually put the same paper
+    # in two adjacent hands. Checking the seats rather than the class size is
+    # the point: what matters is whether anyone has a neighbour.
+    if len(versions) < 2:
+        crowded = next(
+            (g for g, grp in enumerate(groups, 1)
+             if len(grp.get("seats") or []) > 1),
+            None,
+        )
+        if crowded is not None:
+            seated = len(groups[crowded - 1].get("seats") or [])
+            raise SeatingError(
+                f"{path}: only one version ({versions[0]}), but table "
+                f"{crowded} seats {seated} people, who would all get the same "
+                f"paper. Name a second version."
+            )
 
     seats = []
     for g, group in enumerate(groups, 1):
