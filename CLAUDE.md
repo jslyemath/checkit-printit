@@ -39,4 +39,14 @@ never run is still text in the file, and the build fails looking for it.
   letters are never the same paper. Drawing independently looked fine and
   collided about one run in fourteen at ten versions.
 - `build --preview` writes nothing. Its "versions N distinct" line is the
-  check that the run is what was asked for.
+  check that the run is what was asked for. **The seeds it lists are not a
+  prediction**: preview and build are separate processes, each drawing from
+  its own RNG, so the numbers differ. Carry the reported run seed across
+  (`build --seed N`) to make a preview binding.
+- Every run reports a seed, generated when one is not given. That is the
+  handle for repeating a draw. Reproducing a whole *run* is a different job
+  and belongs to the manifest, not to a table of pins.
+- `[seeds.<skill>]` pins one letter of one skill. The flat `[seeds]` form
+  names no skill, so it means every skill at once -- refused where a run
+  prints more than one, because it used to hand three wrong papers out of
+  four with no error.

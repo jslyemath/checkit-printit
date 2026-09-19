@@ -207,7 +207,11 @@ def build(pub_path, out, do_compile, seed, preview):
         theme_source, theme_origin = theme.load(publication.bank_path)
     except theme.ThemeError as exc:
         raise click.ClickException(str(exc))
-    rng = random.Random(seed)
+    # Every run has a seed now, generated when one is not given, so the draw
+    # can be repeated afterwards. Without it a --preview can never be carried
+    # into the build it previewed, and yesterday's set is unrecoverable.
+    run_seed = seed if seed is not None else random.randrange(2**31)
+    rng = random.Random(run_seed)
 
     if preview:
         do_compile = False
@@ -218,7 +222,7 @@ def build(pub_path, out, do_compile, seed, preview):
     except (AssemblyError, BankError) as exc:
         raise click.ClickException(str(exc))
 
-    _report(report, out, theme_origin, publication)
+    _report(report, out, theme_origin, publication, run_seed)
 
     if preview:
         click.echo("\npreview only -- nothing was written.")
@@ -235,10 +239,11 @@ def build(pub_path, out, do_compile, seed, preview):
     click.echo(f"\nPDF: {pdf}")
 
 
-def _report(report, out, theme_origin, publication):
+def _report(report, out, theme_origin, publication, run_seed):
     click.echo(f"bank    {publication.bank_path}")
     click.echo(f"theme   {theme_origin}")
     click.echo(f"out     {out}")
+    click.echo(f"seed    {run_seed}   (repeat this draw with --seed {run_seed})")
     click.echo("")
     click.echo(f"  students {report['students']}")
     if report["extras"]:

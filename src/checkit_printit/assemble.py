@@ -42,8 +42,9 @@ def choose_seeds(bank, versions, publication, rng):
     so the seed is chosen per letter and reused across every student holding it.
     That is what makes two neighbours differ and two rows apart match.
 
-    `[seeds]` in the publication pins a letter outright, which is how a reprint
-    reproduces what was handed out.
+    `[seeds.<skill>]` pins a letter for one skill, which is how a single paper
+    is forced onto a chosen version. Reproducing a whole run is a different
+    job: that belongs to the run seed, not to a table of pins one per skill.
 
     Within one skill the letters draw *without replacement*, so two versions
     are never the same paper. Drawing each independently looked fine and was
@@ -56,10 +57,12 @@ def choose_seeds(bank, versions, publication, rng):
     for slug in publication_skills(publication, bank):
         wanted = publication.variants.get(slug)
         available = bank.seeds_with_variant(slug, wanted)
+        # A per-skill table wins; the flat form is the single-skill shorthand.
+        pins = publication.skill_seeds.get(slug) or publication.seeds
 
         pinned = {}
         for version in versions:
-            seed = publication.seeds.get(version)
+            seed = pins.get(version)
             if seed is None:
                 continue
             if seed not in available:
@@ -285,10 +288,33 @@ def key_versions(handouts, extras, bank):
     return sorted(used, key=lambda v: (order.get(v[0], 10**6), v[1]))
 
 
+def check_flat_pins(publication, roster):
+    """`[seeds]` names a letter but no skill, so it means every skill at once.
+
+    Across more than one that is silently wrong: pinning A = 755 to reproduce
+    one paper gives every other skill seed 755 as well, and the seeds are all
+    printable, so nothing complains. Refuse it where it cannot mean what it
+    says, and point at the per-skill form.
+    """
+    if not publication.seeds:
+        return
+    printed = {slug for student in roster for slug in student.skills}
+    printed |= {extra.skill for extra in publication.extras}
+    if len(printed) > 1:
+        letter, seed = next(iter(publication.seeds.items()))
+        names = ", ".join(sorted(printed))
+        raise AssemblyError(
+            f"[seeds] pins a letter across every skill, so {letter} = {seed} "
+            f"asks all {len(printed)} of {names} for seed {seed}. Write one "
+            f"table per skill instead: [seeds.{sorted(printed)[0]}]"
+        )
+
+
 def assemble(publication, roster, chart, out_dir, theme, rng=None, dry_run=False):
     """Write a complete, compilable folder. Returns a short report."""
     rng = rng or random.Random()
     bank = Bank(publication.bank_path)
+    check_flat_pins(publication, roster)
     missing = {}
     env_misses = set()
     env = make_env(missing=env_misses)

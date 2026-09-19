@@ -250,6 +250,33 @@ class TestPublication:
         pub = pub_mod.load(str(sub / "publication.toml"))
         assert pub.roster_path == os.path.normpath(str(sub / "roster.toml"))
 
+    def test_mixing_the_two_pin_forms_is_refused(self, tmp_path, bank_dir):
+        """One letter pinned for everything and another pinned for one skill
+        is not a shorthand for anything; guessing which wins would be worse."""
+        p = tmp_path / "publication.toml"
+        p.write_text(f"""
+[bank]
+path = {bank_dir!r}
+[seeds]
+A = 451
+[seeds.AD]
+B = 452
+""", encoding="utf-8")
+        with pytest.raises(pub_mod.PublicationError, match="Pick one form"):
+            pub_mod.load(str(p))
+
+    def test_the_two_pin_forms_are_read_apart(self, tmp_path, bank_dir):
+        p = tmp_path / "publication.toml"
+        p.write_text(f"""
+[bank]
+path = {bank_dir!r}
+[seeds.AD]
+A = 451
+""", encoding="utf-8")
+        pub = pub_mod.load(str(p))
+        assert pub.seeds == {}
+        assert pub.skill_seeds == {"AD": {"A": 451}}
+
     def test_a_missing_bank_is_refused_up_front(self, tmp_path):
         p = tmp_path / "publication.toml"
         p.write_text('[bank]\npath = "nowhere"\n', encoding="utf-8")
@@ -342,14 +369,55 @@ class TestAssembly:
 
     def test_a_pinned_seed_is_used(self, bank_dir, tmp_path):
         seed = Bank(bank_dir).printable_seeds("AD")[0]
-        pub = make_publication(bank_dir, seeds={"A": seed, "B": seed})
+        pub = make_publication(bank_dir, skill_seeds={"AD": {"A": seed, "B": seed}})
         out, report = self.build(bank_dir, tmp_path, publication=pub)
         assert report["seeds"][("A", "AD")] == seed
 
     def test_a_pinned_seed_outside_the_printable_range_is_refused(self, bank_dir, tmp_path):
-        pub = make_publication(bank_dir, seeds={"A": 3})
+        pub = make_publication(bank_dir, skill_seeds={"AD": {"A": 3}})
         with pytest.raises(assemble_mod.AssemblyError, match="pinned"):
             self.build(bank_dir, tmp_path, publication=pub)
+
+    def test_pinning_one_skill_leaves_the_others_drawn(self, bank_dir, tmp_path):
+        """The point of the per-skill form: name one paper, draw the rest."""
+        bank = Bank(bank_dir)
+        seed = bank.printable_seeds("AD")[0]
+        pub = make_publication(bank_dir, skill_seeds={"AD": {"A": seed}})
+        out, report = self.build(bank_dir, tmp_path, publication=pub)
+        assert report["seeds"][("A", "AD")] == seed
+        # SU was never pinned, so it drew from its own pool rather than
+        # inheriting AD's number the way the flat form would have handed it.
+        assert report["seeds"][("A", "SU")] in bank.printable_seeds("SU")
+
+    def test_a_flat_pin_across_several_skills_is_refused(self, bank_dir, tmp_path):
+        """A letter with no skill means every skill, which across more than one
+        is silently three wrong papers and one right one."""
+        seed = Bank(bank_dir).printable_seeds("AD")[0]
+        pub = make_publication(bank_dir, seeds={"A": seed})
+        with pytest.raises(assemble_mod.AssemblyError,
+                           match="pins a letter across every skill"):
+            self.build(bank_dir, tmp_path, publication=pub)
+
+    def test_a_flat_pin_is_allowed_when_one_skill_is_printed(self, bank_dir, tmp_path):
+        """With nothing to confuse it with, the short form still reads fine."""
+        seed = Bank(bank_dir).printable_seeds("AD")[0]
+        one = roster_mod.Roster(
+            [roster_mod.Student(name="Ada", section="1", skills=["AD"])])
+        pub = make_publication(bank_dir, seeds={"A": seed})
+        out, report = self.build(bank_dir, tmp_path, publication=pub, roster=one,
+                                 chart=chart_for(tmp_path, ["Ada"]))
+        assert report["seeds"][("A", "AD")] == seed
+
+    def test_the_same_run_seed_draws_the_same_papers(self, bank_dir, tmp_path):
+        """What makes --seed worth reporting: the draw is a function of it."""
+        source, _ = theme.load(bank_dir)
+        def draw(n):
+            return assemble_mod.assemble(
+                make_publication(bank_dir), two_students(),
+                chart_for(tmp_path, ["Ada", "Bo"]), str(tmp_path / f"out{n}"),
+                source, rng=random.Random(n))["seeds"]
+        assert draw(7) == draw(7)
+        assert draw(7) != draw(8), "two seeds produced the same draw"
 
     def test_an_unknown_skill_names_the_student(self, bank_dir, tmp_path):
         r = roster_mod.Roster([roster_mod.Student(name="Ada", skills=["NOPE"])])

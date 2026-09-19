@@ -39,8 +39,14 @@ class Publication:
     extras: tuple = ()
 
     # which versions
-    seeds: dict = dataclasses.field(default_factory=dict)   # version -> seed
-    variants: dict = dataclasses.field(default_factory=dict)  # slug -> variant
+    #
+    # `seeds` pins a letter across every skill in the run, which only means
+    # something when there is one skill. `skill_seeds` pins per skill, which is
+    # what naming one paper needs: two skills that went out as 755 and 821
+    # cannot both be "version A is 755".
+    seeds: dict = dataclasses.field(default_factory=dict)        # version -> seed
+    skill_seeds: dict = dataclasses.field(default_factory=dict)  # slug -> {version: seed}
+    variants: dict = dataclasses.field(default_factory=dict)     # slug -> variant
 
     # selection overrides
     simply_print: tuple = ()
@@ -82,6 +88,24 @@ def load(path):
                 f"extras for {extra.skill}: copies must be at least 1, got {extra.copies}."
             )
 
+    # [seeds] A = 451          -> {"A": 451}          values are ints
+    # [seeds.W1] A = 451       -> {"W1": {"A": 451}}  values are tables
+    # TOML tells the two apart for us, so both spellings read cleanly. Mixing
+    # them in one file is refused rather than guessed at.
+    raw_seeds = raw.get("seeds") or {}
+    nested = {k: v for k, v in raw_seeds.items() if isinstance(v, dict)}
+    flat = {k: v for k, v in raw_seeds.items() if not isinstance(v, dict)}
+    if nested and flat:
+        raise PublicationError(
+            f"{path}: [seeds] mixes {sorted(flat)} pinned for every skill with "
+            f"{sorted(nested)} pinned per skill. Pick one form."
+        )
+    flat_seeds = {str(k): int(v) for k, v in flat.items()}
+    skill_seeds = {
+        str(slug): {str(k): int(v) for k, v in table.items()}
+        for slug, table in nested.items()
+    }
+
     pub = Publication(
         course=course.get("name", ""),
         semester=course.get("semester", ""),
@@ -95,7 +119,8 @@ def load(path):
         key_copies=int(print_opts.get("key_copies", 1)),
         names=bool(print_opts.get("names", True)),
         extras=extras,
-        seeds={str(k): int(v) for k, v in (raw.get("seeds") or {}).items()},
+        seeds=flat_seeds,
+        skill_seeds=skill_seeds,
         variants={str(k): str(v) for k, v in (raw.get("variants") or {}).items()},
         simply_print=tuple(raw.get("selection", {}).get("simply_print", [])),
         default_when_missing=tuple(raw.get("selection", {}).get("default_when_missing", [])),
@@ -134,9 +159,10 @@ keys       = true   # answer keys after the student copies
 key_copies = 1
 names      = true   # false prints a ruled blank instead of each name
 
-# Pin a version to a seed, so a reprint is exact. Omit to choose at random
-# from the printable range.
-# [seeds]
+# Force one version of one skill onto a chosen seed; everything unpinned is
+# drawn as usual. To reproduce a whole run instead, re-run it with the seed it
+# reported -- that is what the run seed is for.
+# [seeds.W1]
 # A = 451
 # B = 802
 
