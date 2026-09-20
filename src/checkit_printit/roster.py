@@ -17,14 +17,66 @@ class RosterError(Exception):
 
 @dataclasses.dataclass
 class Student:
+    """One student.
+
+    `name` is what prints and what the seating chart matches on. `last` and
+    `first` are what the registrar says. They are separate fields because a
+    seating chart says "Matt Brienza" and a class list says "Brienza,
+    Matthew C." -- with only one of them, every re-import would rename the
+    person on the printed page.
+
+    Two id fields because the exports use two numbering systems: a Banner
+    student id (`806...`) and a Global id, which the LMS calls OrgDefinedId
+    (`20...`). A given export may carry either or both, so a merge matches on
+    whichever it has.
+    """
+
     name: str
     skills: list
     section: str = ""
     email: str = ""
     sid: str = ""
 
+    # from the registrar, kept as the record
+    last: str = ""
+    first: str = ""
+
+    # the display first name; `name` is the display full name
+    preferred: str = ""
+
+    #: the other id system, when an export carries it
+    alt_id: str = ""
+
+    #: Every address this student has been seen under, primary included.
+    #:
+    #: Not tidiness: one student in the first three real class lists appears
+    #: as `mcliffo4@oswego.edu` in Banner and `m.clifford@clasnet...` in the
+    #: LMS, downloaded the same day, and the Google Form only ever sees the
+    #: first. Overwriting on import would have silently stopped her responses
+    #: from matching.
+    emails: list = dataclasses.field(default_factory=list)
+
+    #: no longer enrolled. Excluded from printing and from the form; never
+    #: deleted, because the print record has to survive.
+    dropped: bool = False
+
     #: Set by seating, not by the roster.
     version: str = ""
+
+    def all_emails(self):
+        """The primary first, then any other address seen, de-duplicated."""
+        out = []
+        for e in [self.email] + list(self.emails):
+            e = (e or "").strip().lower()
+            if e and e not in out:
+                out.append(e)
+        return out
+
+    def ids(self):
+        """Every stable key this student can be matched on, strongest first."""
+        keys = [("sid", self.sid), ("alt_id", self.alt_id)]
+        keys += [("email", e) for e in self.all_emails()]
+        return keys
 
 
 @dataclasses.dataclass
@@ -76,6 +128,13 @@ def load(path):
             section=str(entry.get("section", "")).strip(),
             email=str(entry.get("email", "")).strip(),
             sid=str(entry.get("sid", "")).strip(),
+            last=str(entry.get("last", "")).strip(),
+            first=str(entry.get("first", "")).strip(),
+            preferred=str(entry.get("preferred", "")).strip(),
+            alt_id=str(entry.get("alt_id", "")).strip(),
+            emails=[str(e).strip().lower()
+                    for e in (entry.get("emails") or []) if str(e).strip()],
+            dropped=bool(entry.get("dropped", False)),
         ))
     return Roster(students)
 
@@ -190,14 +249,28 @@ def to_toml(roster):
              "# tool's own format, and nothing regenerates it.", ""]
     for s in roster:
         lines.append("[[student]]")
-        lines.append(f"name    = {quote(s.name)}")
-        if s.email:
-            lines.append(f"email   = {quote(s.email)}")
+        lines.append(f"name      = {quote(s.name)}")
+        if s.last:
+            lines.append(f"last      = {quote(s.last)}")
+        if s.first:
+            lines.append(f"first     = {quote(s.first)}")
+        if s.preferred and s.preferred != s.first:
+            lines.append(f"preferred = {quote(s.preferred)}")
         if s.sid:
-            lines.append(f"sid     = {quote(s.sid)}")
+            lines.append(f"sid       = {quote(s.sid)}")
+        if s.alt_id:
+            lines.append(f"alt_id    = {quote(s.alt_id)}")
+        if s.email:
+            lines.append(f"email     = {quote(s.email)}")
+        others = [e for e in s.all_emails() if e != s.email.strip().lower()]
+        if others:
+            lines.append("emails    = [" + ", ".join(quote(e) for e in others)
+                         + "]  # also seen under these")
         if s.section:
-            lines.append(f"section = {quote(s.section)}")
-        lines.append("skills  = [" + ", ".join(quote(k) for k in s.skills) + "]")
+            lines.append(f"section   = {quote(s.section)}")
+        if s.dropped:
+            lines.append("dropped   = true")
+        lines.append("skills    = [" + ", ".join(quote(k) for k in s.skills) + "]")
         lines.append("")
     return "\n".join(lines)
 

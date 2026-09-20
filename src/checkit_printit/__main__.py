@@ -7,6 +7,7 @@ import sys
 import click
 
 from . import __version__, publication as pub_mod, roster as roster_mod, seating, theme
+from . import classlist as classlist_mod
 from . import manifest as manifest_mod
 from .assemble import assemble, AssemblyError
 from .bank import Bank, BankError
@@ -120,6 +121,64 @@ def install(bank_path, force):
     click.echo("Edit it to change how this bank looks, in print and in the "
                "Assessment tab.")
     click.echo("Then run `checkit generate` so the site publishes the change.")
+
+
+@main.group()
+def roster():
+    """Work with the list of students."""
+
+
+@roster.command(name="import")
+@click.argument("class_list", type=click.Path(exists=True))
+@click.option("-o", "--out", default="roster.toml", type=click.Path(),
+              help="Where to write. An existing file is merged into, not "
+                   "replaced.")
+@click.option("--section", default="",
+              help="Section for every student in this file, for exports that "
+                   "do not carry one.")
+@click.option("--dry-run", is_flag=True,
+              help="Report what would change and write nothing.")
+def roster_import(class_list, out, section, dry_run):
+    """Read a registrar or LMS class list into the roster.
+
+    Merges rather than replaces: a student the file does not mention is marked
+    dropped and kept, because the print record refers to them, and nothing you
+    authored -- the printed name, a preferred name, chosen skills -- is ever
+    overwritten by a class list.
+    """
+    try:
+        students, mapping, notes = classlist_mod.parse(class_list, section=section)
+    except classlist_mod.ClassListError as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(mapping.describe())
+    click.echo(f"  read {len(students)} students")
+    for note in notes:
+        click.echo(f"  note: {note}")
+
+    existing = roster_mod.Roster([])
+    if os.path.isfile(out):
+        try:
+            existing = roster_mod.load(out)
+        except roster_mod.RosterError as exc:
+            raise click.ClickException(f"{out}: {exc}")
+        click.echo(f"  merging into {out} ({len(existing)} already there)")
+
+    merged, report = classlist_mod.merge(existing, students)
+    click.echo("")
+    click.echo(f"  {report.describe()}")
+    for label, names in (("added", report.added),
+                         ("updated", report.updated),
+                         ("dropped", report.dropped)):
+        for name in names:
+            click.echo(f"    {label:8} {name}")
+
+    if dry_run:
+        click.echo("\ndry run -- nothing was written.")
+        return
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(roster_mod.to_toml(merged))
+    click.echo(f"\nwrote {out}")
 
 
 @main.command(name="import")
