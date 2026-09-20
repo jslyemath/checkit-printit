@@ -8,6 +8,7 @@ import click
 
 from . import __version__, publication as pub_mod, roster as roster_mod, seating, theme
 from . import classlist as classlist_mod
+from . import workspace as workspace_mod
 from . import manifest as manifest_mod
 from .assemble import assemble, AssemblyError
 from .bank import Bank, BankError
@@ -124,6 +125,47 @@ def install(bank_path, force):
 
 
 @main.group()
+def workspace():
+    """The course state that outlives a single print job."""
+
+
+@workspace.command(name="init")
+@click.argument("name")
+@click.option("-b", "--bank", "bank_path", default="", type=click.Path(),
+              help="The bank this course prints from.")
+@click.option("--adopt", default=None, type=click.Path(exists=True),
+              help="A job folder whose roster and seating to start from. "
+                   "Defaults to the newest one; --adopt= for none.")
+def workspace_init(name, bank_path, adopt):
+    """Create a workspace.
+
+    A job then names it instead of carrying its own copy of the roster and the
+    seating chart, so a student who drops is fixed in one place rather than
+    remembered at the next copy.
+    """
+    if adopt is None:
+        adopt = workspace_mod.newest_job()
+        if adopt:
+            click.echo(f"adopting from the newest job: {adopt}")
+            click.echo("  (pass --adopt= to start empty)")
+    try:
+        path, notes = workspace_mod.init(
+            name, bank=os.path.abspath(bank_path) if bank_path else "",
+            adopt=adopt)
+    except workspace_mod.WorkspaceError as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(f"created {path}")
+    for note in notes:
+        click.echo(f"  {note}")
+    click.echo("")
+    click.echo("point a job at it by putting this in its publication.toml:")
+    click.echo("")
+    click.echo("    [workspace]")
+    click.echo(f'    name = "{name}"')
+
+
+@main.group()
 def roster():
     """Work with the list of students."""
 
@@ -136,9 +178,13 @@ def roster():
 @click.option("--section", default="",
               help="Section for every student in this file, for exports that "
                    "do not carry one.")
+@click.option("--covers", multiple=True,
+              help="Sections this file is authoritative for. Defaults to the "
+                   "sections in the file; state it when a section has emptied, "
+                   "since an empty section cannot appear in its own class list.")
 @click.option("--dry-run", is_flag=True,
               help="Report what would change and write nothing.")
-def roster_import(class_list, out, section, dry_run):
+def roster_import(class_list, out, section, covers, dry_run):
     """Read a registrar or LMS class list into the roster.
 
     Merges rather than replaces: a student the file does not mention is marked
@@ -164,8 +210,13 @@ def roster_import(class_list, out, section, dry_run):
             raise click.ClickException(f"{out}: {exc}")
         click.echo(f"  merging into {out} ({len(existing)} already there)")
 
-    merged, report = classlist_mod.merge(existing, students)
+    scope = set(covers) or {s.section for s in students if s.section}
+    merged, report = classlist_mod.merge(existing, students, scope=scope or None)
     click.echo("")
+    if scope:
+        click.echo(f"  treating this file as covering section(s) "
+                   f"{', '.join(sorted(scope))}; students elsewhere are "
+                   f"untouched")
     click.echo(f"  {report.describe()}")
     for label, names in (("added", report.added),
                          ("updated", report.updated),

@@ -160,6 +160,20 @@ class TestMerging:
         assert report.added == []
         assert len(roster) == 3
 
+    def test_a_preferred_name_matches_the_legal_one(self, tmp_path):
+        """An adopted roster says "Ada Lovelace"; the registrar says "Augusta
+        Ada Lovelace". The display names differ and the adopted row has no id,
+        so surname-plus-initial is the only thing that can join them -- and
+        without it every student who goes by a short form imports as a second
+        copy of themselves. Measured on a real roster: two of twenty-five."""
+        roster = Roster([Student(name="Ada Lovelace", skills=["W1"])])
+        roster, report = classlist.merge(roster, self.banner(tmp_path))
+        assert "Augusta Lovelace" not in report.added, "imported as a duplicate"
+        ada = next(s for s in roster if s.name == "Ada Lovelace")
+        assert ada.sid == "806000001", "the ids should have been filled in"
+        assert ada.first == "Augusta", "the legal name is recorded"
+        assert ada.skills == ["W1"], "and what was authored survives"
+
     def test_a_second_address_is_added_not_substituted(self, tmp_path):
         """One real student had two addresses across two same-day exports, and
         the Google Form only ever saw the first. Replacing it would have
@@ -184,18 +198,41 @@ class TestMerging:
 
     def test_absence_marks_dropped_rather_than_deleting(self, tmp_path):
         roster, _ = classlist.merge(Roster([]), self.banner(tmp_path))
-        fewer = [s for s in self.banner(tmp_path) if s.last != "Hopper"]
+        # a 820 student leaves; 820 is still represented by the other one
+        fewer = [s for s in self.banner(tmp_path) if s.last != "Lovelace"]
         roster, report = classlist.merge(roster, fewer)
-        assert report.dropped == ["Grace Hopper"]
+        assert report.dropped == ["Augusta Lovelace"]
         assert len(roster) == 3, "the print record still refers to them"
-        assert next(s for s in roster if s.last == "Hopper").dropped
+        assert next(s for s in roster if s.last == "Lovelace").dropped
+
+    def test_importing_one_section_leaves_the_other_alone(self, tmp_path):
+        """A class list is usually one section and a workspace may hold
+        several. Without scoping, importing 820 would drop all of 830."""
+        roster, _ = classlist.merge(Roster([]), self.banner(tmp_path))
+        only820 = [s for s in self.banner(tmp_path) if s.section == "820"]
+        roster, report = classlist.merge(roster, only820)
+        assert report.dropped == []
+        assert not next(s for s in roster if s.section == "830").dropped
+
+    def test_emptying_a_section_needs_the_coverage_stated(self, tmp_path):
+        """The hole in inferring coverage from the file: when the last student
+        in a section leaves, the section vanishes from the file too, so
+        absence cannot be told from silence. Saying so explicitly resolves it."""
+        roster, _ = classlist.merge(Roster([]), self.banner(tmp_path))
+        only820 = [s for s in self.banner(tmp_path) if s.section == "820"]
+
+        quiet, report = classlist.merge(roster, only820)
+        assert report.dropped == [], "inferred coverage cannot see 830 at all"
+
+        stated, report = classlist.merge(roster, only820, scope={"820", "830"})
+        assert report.dropped == ["Grace Hopper"]
 
     def test_returning_after_a_drop_un_drops(self, tmp_path):
         roster, _ = classlist.merge(Roster([]), self.banner(tmp_path))
         roster, _ = classlist.merge(
-            roster, [s for s in self.banner(tmp_path) if s.last != "Hopper"])
+            roster, [s for s in self.banner(tmp_path) if s.last != "Lovelace"])
         roster, report = classlist.merge(roster, self.banner(tmp_path))
-        assert not next(s for s in roster if s.last == "Hopper").dropped
+        assert not next(s for s in roster if s.last == "Lovelace").dropped
         assert any("re-enrolled" in u for u in report.updated)
 
     def test_a_re_import_does_not_rename_the_printed_page(self, tmp_path):

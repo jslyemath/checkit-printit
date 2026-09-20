@@ -274,19 +274,71 @@ class MergeReport:
         return out
 
 
+def _norm(value):
+    return " ".join((value or "").split()).lower()
+
+
+def _as_first_last(student):
+    """(first, last), falling back to splitting the display name.
+
+    A roster adopted from an old print job has only `name`, so without this
+    the surname-plus-initial rule has nothing on its side of the comparison
+    and every preferred name -- Matt for Matthew, Aly for Alyson -- imports as
+    a second copy of a student already there.
+    """
+    if student.first and student.last:
+        return student.first, student.last
+    parts = (student.name or "").split(None, 1)
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return student.first, student.last
+
+
 def _index(students):
-    """Every stable key to the student holding it."""
+    """Every key to the student holding it, plus the ambiguous ones removed.
+
+    Names are weak keys and are only reached when no id matched. Two are kept:
+    the display name, because a roster adopted from an old print job has
+    nothing else, and surname-plus-initial, because a chart says "Matt
+    Brienza" where a class list says "Brienza, Matthew C.".
+
+    Surname-plus-initial can collide -- two Smiths, both J. A colliding key is
+    dropped rather than resolved, so a merge never guesses which one it meant.
+    """
     out = {}
+    seen_initials = {}
     for s in students:
         for kind, value in s.ids():
             if value:
                 out[(kind, value)] = s
-        if s.last and s.first:
-            out[("name", f"{s.last.lower()}|{s.first.lower()}")] = s
+        for spelling in (s.name, f"{s.first} {s.last}", f"{s.preferred} {s.last}"):
+            key = _norm(spelling)
+            if key:
+                out.setdefault(("name", key), s)
+        first, last = _as_first_last(s)
+        if first and last:
+            initial = ("initial", _norm(last), first[:1].lower())
+            seen_initials.setdefault(initial, []).append(s)
+    for key, holders in seen_initials.items():
+        if len(holders) == 1:
+            out[key] = holders[0]
     return out
 
 
-def merge(existing, incoming):
+def _spellings(student):
+    """The name keys to try for an incoming student, strongest first."""
+    keys = []
+    for spelling in (f"{student.first} {student.last}", student.name):
+        key = _norm(spelling)
+        if key:
+            keys.append(("name", key))
+    first, last = _as_first_last(student)
+    if first and last:
+        keys.append(("initial", _norm(last), first[:1].lower()))
+    return keys
+
+
+def merge(existing, incoming, scope=None):
     """Fold a freshly read class list into the roster we already have.
 
     Absence is not deletion: a student the import does not mention is marked
@@ -294,6 +346,12 @@ def merge(existing, incoming):
     instructor authored is overwritten -- `preferred`, `name` and `skills`
     survive every re-import, which is what stops a class list renaming the
     person on the printed page.
+
+    **Absence only counts inside the sections the file covers.** A class list
+    is usually one section, and a workspace may hold several; without this,
+    importing 820 would mark all of 830 as dropped. `scope` overrides the
+    sections inferred from the file, and an import carrying no section at all
+    is taken to cover everyone, because nothing says otherwise.
     """
     students = [dataclasses.replace(s) for s in existing]
     index = _index(students)
@@ -306,8 +364,11 @@ def merge(existing, incoming):
             if value and (kind, value) in index:
                 match = index[(kind, value)]
                 break
-        if match is None and fresh.last and fresh.first:
-            match = index.get(("name", f"{fresh.last.lower()}|{fresh.first.lower()}"))
+        if match is None:
+            for key in _spellings(fresh):
+                if key in index:
+                    match = index[key]
+                    break
 
         if match is None:
             students.append(fresh)
@@ -347,10 +408,15 @@ def merge(existing, incoming):
         else:
             report.unchanged.append(match.name)
 
+    if scope is None:
+        scope = {s.section for s in incoming if s.section}
     for s in students:
-        if id(s) not in seen and not s.dropped:
-            s.dropped = True
-            s.dropped_by = "import"
-            report.dropped.append(s.name)
+        if id(s) in seen or s.dropped:
+            continue
+        if scope and s.section and s.section not in scope:
+            continue                      # a section this file says nothing about
+        s.dropped = True
+        s.dropped_by = "import"
+        report.dropped.append(s.name)
 
     return Roster(students), report
