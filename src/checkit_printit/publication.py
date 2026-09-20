@@ -8,6 +8,8 @@ import dataclasses
 import os
 import tomllib
 
+from . import workspace as workspace_mod
+
 
 class PublicationError(Exception):
     pass
@@ -30,6 +32,9 @@ class Publication:
 
     # where this was read from, so a manifest can record its fingerprint
     source_path: str = ""
+
+    #: the workspace this job belongs to, when it names one
+    workspace: str = ""
     bank_path: str = ""
     roster_path: str = ""
     seating_path: str = ""
@@ -60,6 +65,22 @@ class Publication:
         return " ".join(p for p in (self.title, self.date) if p).strip()
 
 
+def _workspace_bank(name):
+    """The bank a workspace prints from, when the job does not say."""
+    if not name:
+        return ""
+    config = os.path.join(workspace_mod.path_for(name), workspace_mod.CONFIG)
+    if not os.path.isfile(config):
+        return ""
+    with open(config, "rb") as f:
+        raw = tomllib.load(f)
+    declared = str(raw.get("bank", {}).get("path", "")).strip()
+    if not declared:
+        return ""
+    return os.path.normpath(
+        os.path.join(workspace_mod.path_for(name), declared))
+
+
 def load(path):
     with open(path, "rb") as f:
         raw = tomllib.load(f)
@@ -79,6 +100,26 @@ def load(path):
     course = raw.get("course", {})
     bank = raw.get("bank", {})
     print_opts = raw.get("print", {})
+
+    # A job may name a workspace instead of carrying copies of the roster and
+    # the seating chart. An explicit path still wins, so every job folder
+    # written before workspaces existed keeps working untouched.
+    space = str(raw.get("workspace", {}).get("name", "")).strip()
+    if space and not workspace_mod.exists(space):
+        raise PublicationError(
+            f"{path}: [workspace] names {space!r}, which does not exist at "
+            f"{workspace_mod.path_for(space)}. Create it with "
+            f"`checkit-printit workspace init {space!r}`."
+        )
+
+    def from_workspace(which):
+        return workspace_mod.file_in(space, which) if space else ""
+
+    def either(declared, which):
+        """An explicit path, else the workspace's, else nothing."""
+        if declared:
+            return resolve(declared)
+        return from_workspace(which)
 
     extras = tuple(
         Extra(skill=e["skill"], copies=int(e.get("copies", 1)))
@@ -115,9 +156,10 @@ def load(path):
         professor=course.get("professor", ""),
         title=course.get("title", ""),
         date=str(course.get("date", "")),
-        bank_path=resolve(bank.get("path", "")),
-        roster_path=resolve(raw.get("roster", {}).get("path", "")),
-        seating_path=resolve(raw.get("seating", {}).get("path", "")),
+        bank_path=resolve(bank.get("path", "")) or _workspace_bank(space),
+        workspace=space,
+        roster_path=either(raw.get("roster", {}).get("path", ""), "roster"),
+        seating_path=either(raw.get("seating", {}).get("path", ""), "seating"),
         keys=bool(print_opts.get("keys", True)),
         key_copies=int(print_opts.get("key_copies", 1)),
         names=bool(print_opts.get("names", True)),
