@@ -117,6 +117,33 @@ def load(path, versions=("A", "B")):
     return Chart(seats, versions)
 
 
+def blank_seat(text, name):
+    """Empty one seat in a seating file, returning (new text, how many).
+
+    A text edit rather than a parse-and-rewrite, because these files carry
+    hand-written comments -- which table is which, where a section starts --
+    and Python has no TOML writer that would keep them. Only the quoted name
+    changes; every other byte survives.
+
+    The seat is emptied, not removed. `alternate()` assigns version letters by
+    position, so deleting the entry would re-letter everyone after it at that
+    table; leaving a hole keeps their papers the same.
+    """
+    needle = name.strip()
+    if not needle:
+        return text, 0
+    out, count = [], 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if not stripped.startswith("#"):
+            for quoted in (f'"{needle}"', f"'{needle}'"):
+                if quoted in line:
+                    line = line.replace(quoted, '""')
+                    count += 1
+        out.append(line)
+    return "".join(out), count
+
+
 @dataclasses.dataclass
 class Chart:
     seats: list

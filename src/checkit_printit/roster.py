@@ -56,9 +56,16 @@ class Student:
     #: from matching.
     emails: list = dataclasses.field(default_factory=list)
 
-    #: no longer enrolled. Excluded from printing and from the form; never
-    #: deleted, because the print record has to survive.
+    #: no longer enrolled. Never deleted, because the print record refers to
+    #: them. Dropping also empties their seat, which is what actually stops
+    #: the printing -- the seating chart is the print list.
     dropped: bool = False
+
+    #: "instructor" or "import". An instructor's drop is sticky: a later class
+    #: list that still lists the student does not undo it, because the
+    #: registrar is often behind the room. A drop inferred from an import is
+    #: undone by an import that disagrees.
+    dropped_by: str = ""
 
     #: Set by seating, not by the roster.
     version: str = ""
@@ -135,8 +142,55 @@ def load(path):
             emails=[str(e).strip().lower()
                     for e in (entry.get("emails") or []) if str(e).strip()],
             dropped=bool(entry.get("dropped", False)),
+            dropped_by=str(entry.get("dropped_by", "")).strip(),
         ))
     return Roster(students)
+
+
+class NotFound(RosterError):
+    pass
+
+
+class Ambiguous(RosterError):
+    pass
+
+
+def find(roster, who):
+    """One student, by id, address or name. Refuses to guess.
+
+    Identifiers are tried strongest first, so a name that happens to look like
+    somebody else's cannot beat an exact id.
+    """
+    needle = who.strip().lower()
+    if not needle:
+        raise NotFound("name somebody to look for.")
+
+    for attr in ("sid", "alt_id"):
+        hits = [s for s in roster if getattr(s, attr).lower() == needle]
+        if len(hits) == 1:
+            return hits[0]
+
+    hits = [s for s in roster if needle in s.all_emails()]
+    if len(hits) == 1:
+        return hits[0]
+
+    hits = [s for s in roster if s.name.strip().lower() == needle]
+    if len(hits) == 1:
+        return hits[0]
+    if len(hits) > 1:
+        raise Ambiguous(f"{who!r} matches {len(hits)} students. Use a student "
+                        f"id or an email address instead.")
+
+    hits = [s for s in roster if needle in s.name.strip().lower()]
+    if len(hits) == 1:
+        return hits[0]
+    if len(hits) > 1:
+        raise Ambiguous(
+            f"{who!r} matches {len(hits)} students: "
+            + ", ".join(sorted(s.name for s in hits))
+            + ". Be more specific, or use an id."
+        )
+    raise NotFound(f"no student matching {who!r}.")
 
 
 def apply_selection_modes(roster, simply_print=(), default_when_missing=(),
@@ -270,6 +324,8 @@ def to_toml(roster):
             lines.append(f"section   = {quote(s.section)}")
         if s.dropped:
             lines.append("dropped   = true")
+            if s.dropped_by:
+                lines.append(f"dropped_by = {quote(s.dropped_by)}")
         lines.append("skills    = [" + ", ".join(quote(k) for k in s.skills) + "]")
         lines.append("")
     return "\n".join(lines)

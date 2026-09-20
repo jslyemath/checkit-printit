@@ -311,12 +311,36 @@ def check_flat_pins(publication, roster):
         )
 
 
+def check_dropped_are_unseated(roster, chart):
+    """A dropped student must not still hold a seat.
+
+    Printing works off the seating chart, so there is deliberately no filter
+    at print time -- dropping a student empties their seat, and what you see
+    in the chart is what comes out of the printer. That only holds if the two
+    files agree, and hand-editing `dropped = true` without touching the chart
+    would quietly put a paper in a departed student's hands. So it is checked
+    rather than filtered: a filter would hide the divergence, a check names it.
+    """
+    if chart is None:
+        return
+    seated = {seat.name for seat in chart}
+    still = sorted(s.name for s in roster if s.dropped and s.name in seated)
+    if still:
+        raise AssemblyError(
+            f"{len(still)} student(s) marked dropped are still in the seating "
+            f"chart: {', '.join(still)}. Dropping is meant to empty the seat "
+            f"as well -- run `checkit-printit roster drop <name>`, or restore "
+            f"them."
+        )
+
+
 def assemble(publication, roster, chart, out_dir, theme, rng=None,
              dry_run=False, run_seed=None):
     """Write a complete, compilable folder. Returns a short report."""
     rng = rng or random.Random()
     bank = Bank(publication.bank_path)
     check_flat_pins(publication, roster)
+    check_dropped_are_unseated(roster, chart)
     missing = {}
     env_misses = set()
     env = make_env(missing=env_misses)

@@ -262,11 +262,16 @@ class MergeReport:
     updated: list
     dropped: list
     unchanged: list
+    kept_dropped: list = dataclasses.field(default_factory=list)
 
     def describe(self):
-        return (f"{len(self.added)} added, {len(self.updated)} updated, "
-                f"{len(self.dropped)} marked dropped, "
-                f"{len(self.unchanged)} unchanged")
+        out = (f"{len(self.added)} added, {len(self.updated)} updated, "
+               f"{len(self.dropped)} marked dropped, "
+               f"{len(self.unchanged)} unchanged")
+        if self.kept_dropped:
+            out += (f", {len(self.kept_dropped)} still dropped by hand "
+                    f"despite being listed")
+        return out
 
 
 def _index(students):
@@ -292,7 +297,7 @@ def merge(existing, incoming):
     """
     students = [dataclasses.replace(s) for s in existing]
     index = _index(students)
-    report = MergeReport([], [], [], [])
+    report = MergeReport([], [], [], [], [])
     seen = set()
 
     for fresh in incoming:
@@ -329,9 +334,12 @@ def merge(existing, incoming):
                 else:
                     match.emails = list(match.emails) + [address]
                     changed.append(f"second address {address}")
-        if match.dropped:
+        if match.dropped and match.dropped_by != "instructor":
             match.dropped = False
+            match.dropped_by = ""
             changed.append("re-enrolled")
+        elif match.dropped:
+            report.kept_dropped.append(match.name)
         if not match.preferred:
             match.preferred = match.first
         if changed:
@@ -342,6 +350,7 @@ def merge(existing, incoming):
     for s in students:
         if id(s) not in seen and not s.dropped:
             s.dropped = True
+            s.dropped_by = "import"
             report.dropped.append(s.name)
 
     return Roster(students), report

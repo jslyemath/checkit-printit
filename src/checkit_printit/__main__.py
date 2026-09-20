@@ -181,6 +181,65 @@ def roster_import(class_list, out, section, dry_run):
     click.echo(f"\nwrote {out}")
 
 
+@roster.command(name="drop")
+@click.argument("who")
+@click.option("-r", "--roster", "roster_path", default="roster.toml",
+              type=click.Path(exists=True))
+@click.option("-s", "--seating", "seating_path", default="seating.toml",
+              type=click.Path())
+def roster_drop(who, roster_path, seating_path):
+    """Drop a student: flag the roster, empty their seat.
+
+    The roster keeps them, because the print record refers to them. The
+    seating chart loses them, because that is what stops the printing -- the
+    chart is the print list. Their seat is left empty rather than removed, so
+    their tablemates keep the version letters they already had.
+    """
+    _set_dropped(who, roster_path, seating_path, dropped=True)
+
+
+@roster.command(name="restore")
+@click.argument("who")
+@click.option("-r", "--roster", "roster_path", default="roster.toml",
+              type=click.Path(exists=True))
+def roster_restore(who, roster_path):
+    """Undo a drop. Does not put the student back in the seating chart --
+    they need a seat choosing, which is the chart's business, not this one."""
+    _set_dropped(who, roster_path, None, dropped=False)
+
+
+def _set_dropped(who, roster_path, seating_path, dropped):
+    try:
+        people = roster_mod.load(roster_path)
+        student = roster_mod.find(people, who)
+    except roster_mod.RosterError as exc:
+        raise click.ClickException(str(exc))
+
+    if student.dropped == dropped:
+        state = "already dropped" if dropped else "not dropped"
+        click.echo(f"{student.name} is {state}; nothing to do.")
+        return
+
+    student.dropped = dropped
+    student.dropped_by = "instructor" if dropped else ""
+    with open(roster_path, "w", encoding="utf-8") as f:
+        f.write(roster_mod.to_toml(people))
+    click.echo(f"{'dropped' if dropped else 'restored'} {student.name}"
+               f"  ({roster_path})")
+
+    if dropped and seating_path and os.path.isfile(seating_path):
+        text = open(seating_path, encoding="utf-8").read()
+        new, count = seating.blank_seat(text, student.name)
+        if count:
+            with open(seating_path, "w", encoding="utf-8") as f:
+                f.write(new)
+            click.echo(f"emptied {count} seat(s) in {seating_path}")
+        else:
+            click.echo(f"no seat found in {seating_path}; nothing to empty")
+    elif not dropped:
+        click.echo("give them a seat in the chart when you are ready.")
+
+
 @main.command(name="import")
 @click.argument("csv_path", type=click.Path(exists=True))
 @click.option("-o", "--out", default="roster.toml", type=click.Path())
