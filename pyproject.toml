@@ -12,6 +12,10 @@ license = {file = "LICENSE"}
 dependencies = [
     "click>=8.1",
     "jinja2>=3.1",
+    # Class lists arrive as .xlsx as often as .csv -- a Banner summary export
+    # is a workbook with a preamble above the table. Requiring a save-as-CSV
+    # first would defeat an importer whose purpose is removing manual steps.
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]
