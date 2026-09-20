@@ -86,12 +86,17 @@ def write(out_dir, publication, run_seed, seeds, bank, slugs):
         labels = sorted({bank.variant(slug, s) or ""
                          for s in bank.printable_seeds(slug)})
         labels = [x for x in labels if x]
+        try:
+            generator = file_digest(bank.outcome(slug).generator_path())
+        except Exception:
+            generator = ""
         lines += [
             "",
             "[[skill]]",
             f"slug      = {_quote(slug)}",
             "variants  = [" + ", ".join(_quote(x) for x in labels) + "]",
             f"printable = {len(bank.printable_seeds(slug))}",
+            f"generator = {_quote(generator)}",
         ]
 
     path = os.path.join(out_dir, FILENAME)
@@ -160,6 +165,25 @@ def check(raw, bank, publication):
         if len(bank.printable_seeds(slug)) != entry.get("printable"):
             notes.append(f"{slug} had {entry.get('printable')} printable seeds "
                          f"and now has {len(bank.printable_seeds(slug))}")
+
+        # A seed is only a paper for as long as the generator is the one that
+        # produced it. Absent on manifests written before this was recorded,
+        # which replay cannot check and does not pretend to.
+        was = entry.get("generator", "")
+        if was:
+            try:
+                now = file_digest(bank.outcome(slug).generator_path())
+            except Exception as exc:
+                refusals.append(f"{slug}: {exc}")
+                continue
+            if now and now != was:
+                refusals.append(
+                    f"{slug}'s generator has changed since this run was "
+                    f"built, so its seeds may no longer produce the same "
+                    f"exercises. An edit that changed nothing about the "
+                    f"output trips this too; build fresh if that is all "
+                    f"it was."
+                )
 
     inputs = raw.get("inputs", {})
     for label, path in [("roster", publication.roster_path),
