@@ -38,6 +38,16 @@ def command():
     return [npx, "--yes", PACKAGE]
 
 
+#: clasp says these and still exits 0, so the exit code cannot be the
+#: only check. `create-script --type bogus` prints the first and returns
+#: success, and the real failure then surfaces as a missing .clasp.json.
+REFUSALS = (
+    "invalid script type",
+    "unknown command",
+    "unknown option",
+)
+
+
 def run(args, cwd=None, timeout=300, check=True):
     """One clasp invocation. Returns (exit code, combined output)."""
     try:
@@ -53,8 +63,17 @@ def run(args, cwd=None, timeout=300, check=True):
             f"first and try again."
         ) from None
     output = (done.stdout or "") + (done.stderr or "")
-    if check and done.returncode != 0:
-        raise ClaspError(f"clasp {' '.join(args)} failed:\n{output.strip()}")
+    if check:
+        lowered = output.lower()
+        refused = next((r for r in REFUSALS if r in lowered), None)
+        if refused:
+            raise ClaspError(
+                f"clasp {' '.join(args)} was refused ({refused}), though "
+                f"it reported exit {done.returncode}:\n{output.strip()}"
+            )
+        if done.returncode != 0:
+            raise ClaspError(
+                f"clasp {' '.join(args)} failed:\n{output.strip()}")
     return done.returncode, output
 
 
@@ -90,7 +109,10 @@ def create_form(title, directory, parent_id=""):
     wants rather than loose at the top of My Drive.
     """
     os.makedirs(directory, exist_ok=True)
-    args = ["create-script", "--type", "form", "--title", title,
+    # "forms", plural. clasp takes standalone, webapp, api, docs, forms,
+    # sheets, slides -- and answers the singular with "Invalid script
+    # type" *and exit 0*, which is why run() checks the output too.
+    args = ["create-script", "--type", "forms", "--title", title,
             "--rootDir", directory]
     if parent_id:
         args += ["--parentId", parent_id]
@@ -118,7 +140,9 @@ def script_id(directory):
 
 
 def push(directory):
-    run(["push-files", "--force"], cwd=directory)
+    # `push`, not `push-files`: clasp answers an unknown command by
+    # printing its global help, which reads a lot like success.
+    run(["push", "--force"], cwd=directory)
 
 
 def deploy(directory, description="checkit-printit"):

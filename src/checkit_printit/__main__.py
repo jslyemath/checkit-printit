@@ -241,9 +241,9 @@ def form_create(space, title, folder):
 
     click.echo("")
     click.echo("done. Set the assessment and open some skills, then push:")
-    click.echo(f"  checkit-printit skills set  -w {space!r} --name ... --date ...")
-    click.echo(f"  checkit-printit skills open -w {space!r} W1 W1-E")
-    click.echo(f"  checkit-printit form push   -w {space!r}")
+    click.echo(f"  checkit-printit skills set  -c {space!r} --name ... --date ...")
+    click.echo(f"  checkit-printit skills open -c {space!r} W1 W1-E")
+    click.echo(f"  checkit-printit form push   -c {space!r}")
 
 
 @form.command(name="attach")
@@ -284,7 +284,7 @@ def form_attach(space, script_id):
     click.echo(f"  connected to {answer.get('form', '')!r}")
     click.echo("")
     click.echo("nothing on the form was changed. Next:")
-    click.echo(f"  checkit-printit form map -w {space!r}")
+    click.echo(f"  checkit-printit form map -c {space!r}")
 
 
 @form.command(name="add-items")
@@ -339,7 +339,7 @@ def form_setup(space):
     click.echo("   actually guards it, so treat the URL as a password too.")
     click.echo("")
     click.echo("5. Copy the web app URL, then run:")
-    click.echo(f"      checkit-printit form connect -w {space!r} --url <URL>")
+    click.echo(f"      checkit-printit form connect -c {space!r} --url <URL>")
     click.echo("")
     click.echo(f"the secret is stored in {secret_file}")
 
@@ -691,7 +691,9 @@ def course():
 @click.argument("name")
 @click.option("-b", "--bank", "bank_path", default="", type=click.Path(),
               help="The bank this course prints from.")
-@click.option("--adopt", default=None, type=click.Path(exists=True),
+# Not Path(exists=True): `--adopt=` means "start empty", and Click would
+# reject the empty string before this function ever ran.
+@click.option("--adopt", default=None, type=click.Path(),
               help="A job folder whose roster and seating to start from. "
                    "Defaults to the newest one; --adopt= for none.")
 def course_init(name, bank_path, adopt):
@@ -706,6 +708,9 @@ def course_init(name, bank_path, adopt):
         if adopt:
             click.echo(f"adopting from the newest job: {adopt}")
             click.echo("  (pass --adopt= to start empty)")
+    elif adopt and not os.path.isdir(adopt):
+        raise click.ClickException(
+            f"--adopt {adopt!r}: no such job folder.")
     try:
         path, notes = course_mod.init(
             name, bank=os.path.abspath(bank_path) if bank_path else "",
@@ -720,7 +725,10 @@ def course_init(name, bank_path, adopt):
     click.echo("point a job at it by putting this in its publication.toml:")
     click.echo("")
     click.echo("    [course]")
-    click.echo(f'    name = "{name}"')
+    click.echo('    name   = "MAT 106"      # what prints in the header')
+    click.echo(f'    folder = "{name}"      # this course')
+    click.echo("")
+    click.echo("`folder` is what resolves; `name` only prints.")
 
 
 @main.group()
