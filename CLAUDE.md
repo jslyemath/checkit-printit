@@ -70,6 +70,17 @@ same `--seed`. Checking the preview's seeds proves nothing about the build's.
 pushed the design somewhere worse. The browser loopback flow works; what was
 missing was an OAuth *client*, a different problem with a different answer.
 
+### A change with reasoning gets a dated section in the notes
+
+`../checkit/CODEBASE_NOTES.md`, a `##` heading with today's date. The commit
+message is not the record -- write what was actually wrong, how it was found,
+what was ruled out, and what was verified rather than assumed.
+
+Writing to this file does not count. Twenty-six commits went unrecorded
+because the notes felt superseded by these guides; they are not, and the
+design doc is a third thing again. `CLAUDE.md` is the map, the design doc is
+the plan, the notes are the history.
+
 ### Student names never reach chat or a commit
 
 They live in `~/CheckItPrintIt`, `mat-106-checkit/TeX Outputs/` and
