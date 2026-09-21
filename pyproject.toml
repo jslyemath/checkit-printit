@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "checkit-printit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Print a class set of CheckIt exercises: many versions, distributed by seating, with answer keys."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,11 +16,19 @@ dependencies = [
     # is a workbook with a preamble above the table. Requiring a save-as-CSV
     # first would defeat an importer whose purpose is removing manual steps.
     "openpyxl>=3.1",
+    # This tool imports checkit -- `from checkit.bank import Bank` -- so it is
+    # a real dependency, and leaving it undeclared meant `pip install` could
+    # succeed and then fail at the first command with an import error.
+    #
+    # It is given as a URL because the name `checkit-dashboard` on PyPI is the
+    # upstream project, which is different code: declaring the bare name would
+    # install the wrong thing, which is worse than declaring nothing. A direct
+    # URL cannot be uploaded to PyPI, which is fine -- this is installed from
+    # GitHub, and the day it goes to PyPI both packages need new names anyway.
+    "checkit-dashboard @ https://github.com/jslyemath/checkit/releases/download/v0.2.9.1/checkit_dashboard-0.2.9.1-py3-none-any.whl",
 ]
 
 [project.optional-dependencies]
-# checkit-dashboard is not on PyPI under this name -- that name is the upstream
-# project. Install the fork's wheel by URL; see the README.
 test = ["pytest>=8"]
 
 [project.scripts]
