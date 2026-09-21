@@ -18,6 +18,10 @@ import subprocess
 
 PACKAGE = "@google/clasp@latest"
 
+#: The file clasp overwrites on create-script. Ours declares the
+#: webapp block; clasp's default does not.
+MANIFEST = "appsscript.json"
+
 
 class ClaspError(Exception):
     pass
@@ -109,6 +113,18 @@ def create_form(title, directory, parent_id=""):
     wants rather than loose at the top of My Drive.
     """
     os.makedirs(directory, exist_ok=True)
+
+    # clasp writes its OWN appsscript.json into --rootDir, overwriting the one
+    # staged there. Its default has no "webapp" block, so the deployment gets
+    # no entry point and every request to /exec answers 404 -- with a
+    # perfectly well-formed URL and a deployment id that parses. Keep ours and
+    # put it back.
+    manifest = os.path.join(directory, MANIFEST)
+    staged = None
+    if os.path.isfile(manifest):
+        with open(manifest, encoding="utf-8") as f:
+            staged = f.read()
+
     # "forms", plural. clasp takes standalone, webapp, api, docs, forms,
     # sheets, slides -- and answers the singular with "Invalid script
     # type" *and exit 0*, which is why run() checks the output too.
@@ -117,6 +133,11 @@ def create_form(title, directory, parent_id=""):
     if parent_id:
         args += ["--parentId", parent_id]
     run(args, cwd=directory)
+
+    if staged is not None:
+        with open(manifest, "w", encoding="utf-8") as f:
+            f.write(staged)
+
     return script_id(directory)
 
 
