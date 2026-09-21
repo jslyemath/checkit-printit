@@ -10,21 +10,30 @@ stack of paper for a room full of students.
 
 ## Install
 
-Neither package is on PyPI, so both come from GitHub:
+Neither package is on PyPI, so both come from GitHub. One command gets both:
 
 ```bash
-pip install git+https://github.com/jslyemath/checkit-printit
+pipx install git+https://github.com/jslyemath/checkit-printit
 ```
 
-```bash
-pip install "checkit-dashboard @ https://github.com/jslyemath/checkit/releases/download/v0.2.8.5/checkit_dashboard-0.2.8.5-py3-none-any.whl"
-```
+`pipx` puts the tool in its own environment and makes `checkit-printit` a
+command you can type anywhere. It asks you to run `pipx ensurepath` once, the
+first time you use it, and then never again. Plain `pip install` works too, but
+you have to be inside the environment you installed into every time you run it.
 
 The name `checkit-dashboard` does exist on PyPI, but it belongs to the upstream
-project and is different code. Install the fork's wheel by URL, as above.
+project and is different code, so this package names the fork's wheel by URL
+rather than by name. That is why it installs from GitHub and not from PyPI.
 
-You also need `pdflatex` on your PATH: TeX Live, MiKTeX, or MacTeX. Without one,
-`--no-compile` still writes a folder you can build somewhere else.
+### LaTeX
+
+You also need `pdflatex`: TeX Live, MiKTeX, or MacTeX. That is a much larger
+install than this tool, and it is the only hard requirement here.
+
+**You can skip it.** `checkit-printit build --no-compile` writes a folder that
+compiles anywhere -- upload it to Overleaf and press the button. Nothing about
+the output depends on having TeX locally; only the convenience of getting a PDF
+without leaving the terminal.
 
 ## A first run
 
