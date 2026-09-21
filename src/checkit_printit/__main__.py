@@ -8,6 +8,7 @@ import click
 
 from . import __version__, publication as pub_mod, roster as roster_mod, seating, theme
 from . import availability as availability_mod
+from . import clasp as clasp_mod
 from . import classlist as classlist_mod
 from . import form as form_mod
 from . import record as record_mod
@@ -138,6 +139,175 @@ def _space_path(space):
     return workspace_mod.path_for(space)
 
 
+def _clasp_dir(space):
+    """Where the local copy of the Apps Script project lives.
+
+    Under secrets/, because printit writes the shared secret into the script
+    source before pushing it -- clasp cannot set a Script Property, and the
+    point of this path is that nothing is done by hand.
+    """
+    return os.path.join(workspace_mod.path_for(space), "secrets", "script")
+
+
+def _script_sources():
+    here = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    return os.path.join(here, "appsscript")
+
+
+def _stage_script(space, secret):
+    """Copy the script into the workspace and write the secret beside it."""
+    import shutil
+    target = _clasp_dir(space)
+    os.makedirs(target, exist_ok=True)
+    for name in ("Code.gs", "appsscript.json"):
+        shutil.copy(os.path.join(_script_sources(), name),
+                    os.path.join(target, name))
+    with open(os.path.join(target, "Secret.gs"), "w", encoding="utf-8") as f:
+        f.write(form_mod.secret_source(secret))
+    return target
+
+
+def _ensure_login():
+    try:
+        if clasp_mod.logged_in():
+            return
+    except clasp_mod.ClaspError as exc:
+        raise click.ClickException(str(exc))
+    click.echo("signing in to Google -- a browser window will open.")
+    click.echo("  (this uses clasp's own sign-in; printit never sees your "
+               "password)")
+    try:
+        clasp_mod.login()
+    except clasp_mod.ClaspError as exc:
+        raise click.ClickException(str(exc))
+
+
+def _deploy_and_record(space, directory, conn):
+    click.echo("pushing the script...")
+    clasp_mod.push(directory)
+    click.echo("deploying it as a web app...")
+    deployment = clasp_mod.deploy(directory)
+    conn.url = clasp_mod.web_app_url(deployment)
+    click.echo(f"  {conn.url}")
+
+    click.echo("checking it answers...")
+    answer = form_mod.call(conn, "ping")
+    click.echo(f"  connected to {answer.get('form', '')!r}")
+
+    click.echo("creating the items printit writes to...")
+    made = form_mod.call(conn, "addItems",
+                         {"items": dict(conn.items)})["items"]
+    conn.items = made
+    form_mod.save(workspace_mod.path_for(space), conn)
+    for slot, item_id in made.items():
+        click.echo(f"  {slot:14} {item_id}")
+
+
+@form.command(name="create")
+@click.option("-w", "--workspace", "space", required=True)
+@click.option("--title", default="Skill Selection Form",
+              help="What the new form is called.")
+@click.option("--folder", default="",
+              help="A Drive folder id to put it in. Omit for the top of My "
+                   "Drive.")
+def form_create(space, title, folder):
+    """Make a new Google Form, wire it up, and record everything.
+
+    One command and one browser sign-in. Creates the form and its bound
+    script, deploys the web app, adds the four items printit writes to, and
+    records their ids -- so there is nothing to paste and nothing to map.
+    """
+    path = _space_path(space)
+    conn = form_mod.load(path)
+    if conn.url:
+        raise click.ClickException(
+            "this workspace is already connected to a form. Use "
+            "`checkit-printit form push`, or clear secrets/form-secret.toml "
+            "to start over.")
+    _ensure_login()
+
+    if not conn.secret:
+        conn.secret = form_mod.new_secret()
+    directory = _stage_script(space, conn.secret)
+
+    click.echo(f"creating the form {title!r}...")
+    try:
+        conn.form_id = clasp_mod.create_form(title, directory, folder)
+        click.echo(f"  script {conn.form_id}")
+        _deploy_and_record(space, directory, conn)
+    except (clasp_mod.ClaspError, form_mod.FormError) as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo("")
+    click.echo("done. Set the assessment and open some skills, then push:")
+    click.echo(f"  checkit-printit skills set  -w {space!r} --name ... --date ...")
+    click.echo(f"  checkit-printit skills open -w {space!r} W1 W1-E")
+    click.echo(f"  checkit-printit form push   -w {space!r}")
+
+
+@form.command(name="attach")
+@click.option("-w", "--workspace", "space", required=True)
+@click.option("--script-id", required=True,
+              help="The bound script's id: on the form, three-dot menu > Apps "
+                   "Script, then Project Settings.")
+def form_attach(space, script_id):
+    """Wire up a form you already have, without touching its content.
+
+    For a form with a banner, grade cutoffs and syllabus links worth keeping.
+    The script is pushed and deployed, but no items are created or changed --
+    run `form map` afterwards to say which existing item is which.
+    """
+    path = _space_path(space)
+    conn = form_mod.load(path)
+    _ensure_login()
+
+    if not conn.secret:
+        conn.secret = form_mod.new_secret()
+    directory = _stage_script(space, conn.secret)
+
+    click.echo("fetching the existing script...")
+    try:
+        clasp_mod.clone(script_id, directory)
+        _stage_script(space, conn.secret)      # our files, over the fetched ones
+        conn.form_id = script_id
+        click.echo("pushing the script...")
+        clasp_mod.push(directory)
+        click.echo("deploying it as a web app...")
+        deployment = clasp_mod.deploy(directory)
+        conn.url = clasp_mod.web_app_url(deployment)
+        answer = form_mod.call(conn, "ping")
+    except (clasp_mod.ClaspError, form_mod.FormError) as exc:
+        raise click.ClickException(str(exc))
+
+    form_mod.save(path, conn)
+    click.echo(f"  connected to {answer.get('form', '')!r}")
+    click.echo("")
+    click.echo("nothing on the form was changed. Next:")
+    click.echo(f"  checkit-printit form map -w {space!r}")
+
+
+@form.command(name="add-items")
+@click.option("-w", "--workspace", "space", required=True)
+def form_add_items(space):
+    """Create any of the four items the form is missing.
+
+    Only what is absent: an item printit already knows about is left alone,
+    because recreating a question orphans every answer already given to it.
+    """
+    path = _space_path(space)
+    conn = form_mod.load(path)
+    try:
+        made = form_mod.call(conn, "addItems",
+                             {"items": dict(conn.items)})["items"]
+    except form_mod.FormError as exc:
+        raise click.ClickException(str(exc))
+    added = [k for k, v in made.items() if conn.items.get(k) != v]
+    conn.items = made
+    form_mod.save(path, conn)
+    click.echo(f"added {len(added)}: {', '.join(added) or 'nothing was missing'}")
+
+
 @form.command(name="setup")
 @click.option("-w", "--workspace", "space", required=True)
 def form_setup(space):
@@ -191,12 +361,12 @@ def form_connect(space, url):
         raise click.ClickException(str(exc))
     form_mod.save(path, conn)
     click.echo(f"connected to the form {answer.get('form', '')!r}")
-    click.echo("next: `checkit-printit form adopt` to say which item is which")
+    click.echo("next: `checkit-printit form map` to say which item is which")
 
 
-@form.command(name="adopt")
+@form.command(name="map")
 @click.option("-w", "--workspace", "space", required=True)
-def form_adopt(space):
+def form_map(space):
     """Record which item on the form holds each thing printit writes.
 
     Asked rather than guessed: only you know which section header is the due
@@ -287,7 +457,7 @@ def form_push(space, dry_run):
 
     if not conn.items:
         raise click.ClickException(
-            "no items are mapped yet -- run `checkit-printit form adopt`.")
+            "no items are mapped yet -- run `checkit-printit form map`.")
     if dry_run:
         click.echo("\ndry run -- nothing was sent.")
         return
