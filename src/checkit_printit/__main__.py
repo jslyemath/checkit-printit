@@ -7,6 +7,7 @@ import sys
 import click
 
 from . import __version__, publication as pub_mod, roster as roster_mod, seating, theme
+from . import availability as availability_mod
 from . import classlist as classlist_mod
 from . import workspace as workspace_mod
 from . import manifest as manifest_mod
@@ -122,6 +123,139 @@ def install(bank_path, force):
     click.echo("Edit it to change how this bank looks, in print and in the "
                "Assessment tab.")
     click.echo("Then run `checkit generate` so the site publishes the change.")
+
+
+@main.group()
+def skills():
+    """Which skills are open for retake, and what the next assessment is."""
+
+
+def _availability_path(space):
+    if not workspace_mod.exists(space):
+        raise click.ClickException(
+            f"no workspace named {space!r}. Create one with "
+            f"`checkit-printit workspace init {space!r}`.")
+    return workspace_mod.file_in(space, "availability")
+
+
+@skills.command(name="show")
+@click.option("-w", "--workspace", "space", required=True)
+def skills_show(space):
+    """What the form will say, before it says it."""
+    path = _availability_path(space)
+    try:
+        av = availability_mod.load(path)
+    except availability_mod.AvailabilityError as exc:
+        raise click.ClickException(str(exc))
+
+    descriptions = {}
+    try:
+        pub_bank = _bank_for(space)
+        if pub_bank:
+            descriptions = {s: pub_bank.description(s) for s in av.skills}
+    except Exception as exc:                       # a bank problem is a note
+        click.echo(f"(descriptions unavailable: {exc})")
+
+    click.echo(availability_mod.describe(av, descriptions))
+    click.echo("")
+    click.echo("the form will read:")
+    for line in (av.selecting_for(), av.confirmation(),
+                 av.question_title(), av.due_notice()):
+        click.echo(f"  {line}")
+
+
+@skills.command(name="open")
+@click.argument("slugs", nargs=-1, required=True)
+@click.option("-w", "--workspace", "space", required=True)
+@click.option("--add", is_flag=True, help="Add to the open list rather than "
+                                          "replacing it.")
+def skills_open(slugs, space, add):
+    """Set which skills are open for retake.
+
+    Slugs are checked against the bank, because a typo here reaches students
+    as a missing option on the form and a missing paper in the pile.
+    """
+    path = _availability_path(space)
+    try:
+        av = availability_mod.load(path)
+    except availability_mod.AvailabilityError as exc:
+        raise click.ClickException(str(exc))
+
+    bank = _bank_for(space)
+    if bank is not None:
+        known = set(bank.slugs())
+        unknown = [s for s in slugs if s not in known]
+        if unknown:
+            raise click.ClickException(
+                f"not in the bank: {', '.join(unknown)}. It has "
+                f"{', '.join(sorted(known))}.")
+
+    wanted = list(av.skills) if add else []
+    for slug in slugs:
+        if slug not in wanted:
+            wanted.append(slug)
+
+    text = open(path, encoding="utf-8").read()
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(availability_mod.set_values(text, {"skills": wanted}))
+    click.echo(f"open for retake ({len(wanted)}): {', '.join(wanted)}")
+
+
+@skills.command(name="set")
+@click.option("-w", "--workspace", "space", required=True)
+@click.option("--name", default=None, help='e.g. "Skill Checkpoint Redo"')
+@click.option("--date", default=None, help="The assessment date, 2026-09-18.")
+@click.option("--due", default=None, help="When the form closes, "
+                                          "2026-09-17T23:59.")
+@click.option("--choose", type=int, default=None,
+              help="How many skills a student may pick. 0 means any number.")
+@click.option("--limit", type=click.Choice(availability_mod.LIMITS),
+              default=None)
+def skills_set(space, name, date, due, choose, limit):
+    """Set the next assessment's name, dates and selection limit."""
+    path = _availability_path(space)
+    values = {}
+    try:
+        if name is not None:
+            values["name"] = name
+        if date is not None:
+            values["date"] = availability_mod.as_date(date)
+        if due is not None:
+            values["due"] = availability_mod.as_datetime(due)
+        if choose is not None:
+            values["choose"] = choose
+        if limit is not None:
+            values["limit"] = limit
+    except availability_mod.AvailabilityError as exc:
+        raise click.ClickException(str(exc))
+    if not values:
+        raise click.ClickException("nothing to set.")
+
+    text = open(path, encoding="utf-8").read()
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(availability_mod.set_values(text, values))
+    except availability_mod.AvailabilityError as exc:
+        raise click.ClickException(str(exc))
+    av = availability_mod.load(path)
+    click.echo(availability_mod.describe(av))
+
+
+def _bank_for(space):
+    """The workspace's bank, or None when it names none or cannot be read."""
+    import tomllib
+    config = os.path.join(workspace_mod.path_for(space), workspace_mod.CONFIG)
+    if not os.path.isfile(config):
+        return None
+    with open(config, "rb") as f:
+        declared = str(tomllib.load(f).get("bank", {}).get("path", "")).strip()
+    if not declared:
+        return None
+    try:
+        return Bank(os.path.normpath(
+            os.path.join(workspace_mod.path_for(space), declared)))
+    except BankError:
+        return None
 
 
 @main.group()
