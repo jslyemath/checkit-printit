@@ -17,6 +17,8 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+import urllib.error
+
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -227,3 +229,80 @@ class TestConfigOnDisk:
     def test_a_fresh_secret_is_long_and_different_every_time(self):
         a, b = form.new_secret(), form.new_secret()
         assert a != b and len(a) > 30
+
+class TestRetrying:
+    """Apps Script 404s a live deployment now and then.
+
+    Measured: three identical calls to one deployment gave success, 404,
+    success, while clasp listed it the whole time.
+    """
+
+    class Opener:
+        """Fails the first `fail` calls the given way, then answers."""
+
+        def __init__(self, fail, how, body='{"ok": true}'):
+            self.left, self.how, self.body, self.calls = fail, how, body, 0
+
+        def __call__(self, request, timeout=None):
+            self.calls += 1
+            if self.left > 0:
+                self.left -= 1
+                raise self.how()
+            outer = self
+
+            class R:
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+                def read(self): return outer.body.encode()
+            return R()
+
+    def _404(self):
+        return urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+
+    def _403(self):
+        return urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
+
+    def _slow(self):
+        return TimeoutError("timed out")
+
+    def setup_method(self):
+        form.RETRY_WAIT = 0          # no real sleeping in tests
+
+    def test_a_single_404_is_retried_and_succeeds(self):
+        op = self.Opener(1, self._404)
+        answer = form.call(form.Connection(url="http://x/", secret="s"),
+                           "ping", opener=op)
+        assert answer["ok"] is True
+        assert op.calls == 2
+
+    def test_a_persistent_404_gives_up_and_says_how_often_it_tried(self):
+        op = self.Opener(99, self._404)
+        with pytest.raises(form.FormError, match="3 time"):
+            form.call(form.Connection(url="http://x/", secret="s"),
+                      "ping", opener=op, retries=2)
+        assert op.calls == 3
+
+    def test_a_403_is_never_retried(self):
+        """A 403 is a real configuration problem. Retrying it only buries the
+        sentence that explains it."""
+        op = self.Opener(99, self._403)
+        with pytest.raises(form.FormError, match="403"):
+            form.call(form.Connection(url="http://x/", secret="s"),
+                      "ping", opener=op)
+        assert op.calls == 1
+
+    def test_a_timeout_is_retried_too(self):
+        """The first call after a deployment is the slow one."""
+        op = self.Opener(1, self._slow)
+        answer = form.call(form.Connection(url="http://x/", secret="s"),
+                           "ping", opener=op)
+        assert answer["ok"] is True
+        assert op.calls == 2
+
+    def test_a_persistent_timeout_is_a_sentence_not_a_traceback(self):
+        """TimeoutError is an OSError but not a urllib.error.URLError, so it
+        used to escape call() entirely."""
+        op = self.Opener(99, self._slow)
+        with pytest.raises(form.FormError, match="did not answer"):
+            form.call(form.Connection(url="http://x/", secret="s"),
+                      "ping", opener=op)
