@@ -20,6 +20,7 @@ the item ids to put it in.
 import dataclasses
 import json
 import os
+import time
 import secrets
 import tomllib
 import urllib.error
@@ -28,6 +29,9 @@ import urllib.request
 #: The four things printit owns on the form. Everything else -- the banner,
 #: the title, the grade cutoffs, the syllabus links -- belongs to whoever made
 #: the form, and a push must not touch it.
+#: Seconds between retries, multiplied by the attempt number.
+RETRY_WAIT = 2
+
 SLOTS = {
     "selecting_for": "the 'What am I selecting skills for?' text",
     "confirm_date": "the date confirmation checkbox",
@@ -118,7 +122,7 @@ def save(course_path, conn):
         "#",
         "# Ids, not positions: responses are stored against a question's id,",
         "# so the skill question has to keep its own while its options change",
-        "# every week. Re-run `checkit-printit form adopt` if the form is",
+        "# every week. Re-run `checkit-printit form map` if the form is",
         "# rebuilt.",
         "#",
         "# The web app URL and its secret are NOT here -- they are credentials",
@@ -153,7 +157,7 @@ def save(course_path, conn):
 
 # ----------------------------------------------------------------- talking --
 
-def call(conn, op, payload=None, timeout=30, opener=None):
+def call(conn, op, payload=None, timeout=60, opener=None, retries=2):
     """One request to the web app. Raises FormError with what went wrong.
 
     Apps Script answers a web app request with a 302 to a googleusercontent
@@ -169,17 +173,44 @@ def call(conn, op, payload=None, timeout=30, opener=None):
     request = urllib.request.Request(
         conn.url, data=body,
         headers={"Content-Type": "application/json"})
-    try:
-        open_it = opener or urllib.request.urlopen
-        with open_it(request, timeout=timeout) as response:
-            text = response.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        raise FormError(
-            f"the web app answered {exc.code}. A 401 or 403 usually means the "
-            f"deployment is not set to 'Anyone'; a 404 means the URL is wrong "
-            f"or the deployment was replaced.") from None
-    except urllib.error.URLError as exc:
-        raise FormError(f"could not reach the web app: {exc.reason}") from None
+    open_it = opener or urllib.request.urlopen
+    text = None
+    for attempt in range(retries + 1):
+        last = attempt == retries
+        try:
+            with open_it(request, timeout=timeout) as response:
+                text = response.read().decode("utf-8", "replace")
+            break
+        except urllib.error.HTTPError as exc:
+            # A 404 from a deployment clasp still lists is Apps Script being
+            # flaky: three identical calls to one live deployment gave
+            # success, 404, success. A 401 or 403 is a real configuration
+            # problem, so it is never retried -- that would only hide the
+            # message explaining it.
+            if exc.code == 404 and not last:
+                time.sleep(RETRY_WAIT * (attempt + 1))
+                continue
+            raise FormError(
+                f"the web app answered {exc.code}. A 401 or 403 usually means "
+                f"the deployment is not set to 'Anyone'; a 404 means the URL "
+                f"is wrong, the deployment was replaced, or Apps Script is "
+                f"being flaky -- this was tried {attempt + 1} time(s)."
+            ) from None
+        except TimeoutError:
+            # Not a urllib.error.URLError, so the handler below never sees
+            # it: a socket read timeout arrives as a bare OSError subclass
+            # and used to escape call() as a traceback.
+            if not last:
+                time.sleep(RETRY_WAIT * (attempt + 1))
+                continue
+            raise FormError(
+                f"the web app did not answer within {timeout}s, "
+                f"{attempt + 1} time(s). The first call after a deployment is "
+                f"the slow one."
+            ) from None
+        except urllib.error.URLError as exc:
+            raise FormError(
+                f"could not reach the web app: {exc.reason}") from None
 
     try:
         answer = json.loads(text)

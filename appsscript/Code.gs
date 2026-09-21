@@ -57,6 +57,12 @@ function doPost(e) {
     switch (body.op) {
       case 'ping':
         return json_({ok: true, form: FormApp.getActiveForm().getTitle()});
+      case 'rename':
+        // Used once, by `form create`, because clasp's --title names the
+        // script project and leaves the form itself untitled. Never called
+        // by push: the form's title belongs to the instructor.
+        FormApp.getActiveForm().setTitle(String(body.payload.title || ''));
+        return json_({ok: true, form: FormApp.getActiveForm().getTitle()});
       case 'describe':
         return json_({ok: true, items: describe_()});
       case 'push':
@@ -121,7 +127,7 @@ function byId_(form, id) {
   var item = form.getItemById(Number(id));
   if (!item) {
     throw new Error('no item with id ' + id + '. If it was deleted, run ' +
-                    '`checkit-printit form adopt` again.');
+                    '`checkit-printit form map` again.');
   }
   return item;
 }

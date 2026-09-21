@@ -225,11 +225,30 @@ student sees.
 
 ## Where things stand
 
-Stages 1-6c and 7a are built. **7a has never run against a real Google
-account.** `Code.gs` and `clasp.py` are written from the reference
-implementation and the API docs, not from a round trip; first deploy is the
-real test. `clasp._deployment_id` in particular parses output whose wording
-has changed between clasp versions, which is why it matches on shape.
+Stages 1-6c are built. **7a ran against a real Google account on
+2026-09-21 and works**: attach, add-items, dry-run and push all write the
+four slots. Seven bugs were found doing it, none of them the predicted ones.
+Read "Stage 7a, against a real Google account" in `../checkit/CODEBASE_NOTES.md`
+before touching `clasp.py` or `Code.gs`.
 
-Next: 7b (pull responses), 8 (the seating GUI), 9 (the gradebook). The full
-plan is `../checkit/PRINT_TOOL_DESIGN.md` section 12.
+Four of those are worth carrying in your head:
+
+- **clasp exits 0 when it refuses.** `run()` therefore checks the *output*
+  for refusal phrases, not just the exit code. Do not undo that.
+- **`clasp create-script` overwrites `appsscript.json`** in `--rootDir`,
+  dropping the `webapp` block and leaving the deployment with no entry point.
+  `create_form` restores the staged one; `attach` re-stages over the clone.
+- **Apps Script 404s a live deployment at random**, about one call in three.
+  `call()` retries 404 and timeout. It must never retry 401 or 403 -- those
+  are real configuration errors and a retry only buries the message.
+- **Subcommand names are pinned by tests** against `clasp --help` on 3.4.1
+  (`create-script --type forms`, `push`, `create-deployment`). The old tests
+  could not catch a wrong name because they assert on what the deployment
+  replies, never on the argv.
+
+**`form create` is still unfinished**: a new form needs one browser visit to
+authorize the script before any call works. The editor's deploy flow does
+this automatically and clasp's does not.
+
+Next: finish that, then 7b (pull responses), 8 (the seating GUI), 9 (the
+gradebook). The full plan is `../checkit/PRINT_TOOL_DESIGN.md` section 12.

@@ -183,7 +183,7 @@ def _ensure_login():
         raise click.ClickException(str(exc))
 
 
-def _deploy_and_record(space, directory, conn):
+def _deploy_and_record(space, directory, conn, rename_to=""):
     click.echo("pushing the script...")
     clasp_mod.push(directory)
     click.echo("deploying it as a web app...")
@@ -193,6 +193,11 @@ def _deploy_and_record(space, directory, conn):
 
     click.echo("checking it answers...")
     answer = form_mod.call(conn, "ping")
+
+    if rename_to:
+        # clasp's --title named the script project; the form itself is still
+        # untitled. Only at creation -- a push must never touch the title.
+        answer = form_mod.call(conn, "rename", {"title": rename_to})
     click.echo(f"  connected to {answer.get('form', '')!r}")
 
     click.echo("creating the items printit writes to...")
@@ -235,7 +240,8 @@ def form_create(space, title, folder):
     try:
         conn.form_id = clasp_mod.create_form(title, directory, folder)
         click.echo(f"  script {conn.form_id}")
-        _deploy_and_record(space, directory, conn)
+        _deploy_and_record(space, directory, conn,
+                           rename_to=title)
     except (clasp_mod.ClaspError, form_mod.FormError) as exc:
         raise click.ClickException(str(exc))
 
