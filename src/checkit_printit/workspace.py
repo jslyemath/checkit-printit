@@ -104,13 +104,22 @@ AVAILABILITY_TEMPLATE = '''# Which skills are open for retake, and what the next
 # Descriptions are not here -- they come from the bank's bank.xml, which is
 # already the single source for the printed skill headers. A second copy is
 # how they drift.
+#
+#   name    what it is called, e.g. "Skill Checkpoint Redo"
+#   date    when it happens, 2026-09-18
+#   due     when the form closes, 2026-09-17T23:59:00
+#   choose  how many skills a student may pick; 0 means any number
+#   limit   at most | at least | exactly
+#   skills  the slugs open for retake
+#
+# Set them with `checkit-printit skills set` and `skills open`, or by hand.
 
 [assessment]
-name   = ""          # "Skill Checkpoint Redo"
-date   = ""          # 2026-09-18
-due    = ""          # 2026-09-17T23:59:00
-choose = 0           # 0 means any number
-limit  = "at most"   # at most | at least | exactly
+name   = ""
+date   = ""
+due    = ""
+choose = 0
+limit  = "at most"
 
 skills = []
 '''
