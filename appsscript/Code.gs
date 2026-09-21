@@ -61,6 +61,8 @@ function doPost(e) {
         return json_({ok: true, items: describe_()});
       case 'push':
         return json_({ok: true, changed: push_(body.payload)});
+      case 'addItems':
+        return json_({ok: true, items: addItems_(body.payload || {})});
       default:
         return json_({ok: false, error: 'unknown op: ' + body.op});
     }
@@ -70,8 +72,18 @@ function doPost(e) {
 }
 
 function secretOk_(given) {
-  var want = PropertiesService.getScriptProperties()
-      .getProperty(SECRET_PROPERTY);
+  // Secret.gs when printit deployed this; a Script Property when it was set
+  // up by hand. Either is fine, and neither being present means closed.
+  var want = null;
+  try {
+    want = PRINTIT_SECRET_VALUE;
+  } catch (e) {
+    want = null;
+  }
+  if (!want) {
+    want = PropertiesService.getScriptProperties()
+        .getProperty(SECRET_PROPERTY);
+  }
   if (!want) {
     return false;   // unconfigured is closed, not open
   }
@@ -177,6 +189,62 @@ function validation_(spec) {
     return builder.setHelpText(spec.help).requireSelectExactly(count).build();
   }
   return builder.setHelpText(spec.help).requireSelectAtMost(count).build();
+}
+
+/**
+ * Create the four items printit writes to, and hand back their ids.
+ *
+ * For a form printit made itself, and for repairing one where an item was
+ * deleted. Only what is missing is created -- an id printit already holds is
+ * left alone, because recreating a question orphans every answer given to it.
+ *
+ * The wording set here is only a placeholder; the first push replaces it.
+ */
+function addItems_(payload) {
+  var form = FormApp.getActiveForm();
+  var have = payload.items || {};
+  var made = {};
+
+  function exists(id) {
+    if (!id) { return false; }
+    try { return Boolean(form.getItemById(Number(id))); } catch (e) { return false; }
+  }
+
+  if (exists(have.selecting_for)) {
+    made.selecting_for = String(have.selecting_for);
+  } else {
+    made.selecting_for = String(form.addSectionHeaderItem()
+        .setTitle('What am I selecting skills for?')
+        .setHelpText('(printit fills this in)').getId());
+  }
+
+  if (exists(have.confirm_date)) {
+    made.confirm_date = String(have.confirm_date);
+  } else {
+    made.confirm_date = String(form.addCheckboxItem()
+        .setTitle('Confirm Skill Checkpoint Date')
+        .setRequired(true)
+        .setChoiceValues(['(printit fills this in)']).getId());
+  }
+
+  if (exists(have.due_notice)) {
+    made.due_notice = String(have.due_notice);
+  } else {
+    made.due_notice = String(form.addSectionHeaderItem()
+        .setTitle('When is this form due?')
+        .setHelpText('(printit fills this in)').getId());
+  }
+
+  if (exists(have.choose_skills)) {
+    made.choose_skills = String(have.choose_skills);
+  } else {
+    made.choose_skills = String(form.addCheckboxItem()
+        .setTitle('Choose Skills')
+        .setRequired(true)
+        .setChoiceValues(['(printit fills this in)']).getId());
+  }
+
+  return made;
 }
 
 function json_(value) {
