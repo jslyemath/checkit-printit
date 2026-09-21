@@ -9,6 +9,7 @@ import click
 from . import __version__, publication as pub_mod, roster as roster_mod, seating, theme
 from . import availability as availability_mod
 from . import classlist as classlist_mod
+from . import record as record_mod
 from . import workspace as workspace_mod
 from . import manifest as manifest_mod
 from .assemble import assemble, AssemblyError
@@ -126,6 +127,83 @@ def install(bank_path, force):
 
 
 @main.group()
+def record():
+    """What has been printed, for whom, at which seed."""
+
+
+def _record_path(space):
+    if not workspace_mod.exists(space):
+        raise click.ClickException(f"no workspace named {space!r}.")
+    return workspace_mod.file_in(space, "record")
+
+
+@record.command(name="runs")
+@click.option("-w", "--workspace", "space", required=True)
+def record_runs(space):
+    """Every print run, oldest first."""
+    rows = record_mod.runs(_record_path(space))
+    if not rows:
+        click.echo("nothing recorded yet.")
+        return
+    for r in rows:
+        line = (f"{r['date']:12} {r['title']:28} "
+                f"{r['students']:3} students, {r['papers']:4} papers")
+        if r["extras"]:
+            line += f", {r['extras']} extras"
+        click.echo(line)
+        click.echo(f"{'':12} seed {r['seed']}   {r['run_id']}")
+        if r["unnamed"]:
+            click.echo(f"{'':12} {r['unnamed']} handout(s) unattributed "
+                       f"(printed without names)")
+
+
+@record.command(name="student")
+@click.argument("who")
+@click.option("-w", "--workspace", "space", required=True)
+def record_student(who, space):
+    """Every paper one student has been handed.
+
+    Printed, not attempted -- a build cannot know who was in the room.
+    """
+    try:
+        people = roster_mod.load(workspace_mod.file_in(space, "roster"))
+        student = roster_mod.find(people, who)
+    except roster_mod.RosterError as exc:
+        raise click.ClickException(str(exc))
+    if not student.sid:
+        raise click.ClickException(
+            f"{student.name} has no student id, so nothing can be attributed "
+            f"to them. Import a class list to fill the ids in.")
+
+    path = _record_path(space)
+    rows = record_mod.for_student(path, student.sid)
+    click.echo(f"{student.name}  ({student.sid})")
+    if not rows:
+        click.echo("  nothing printed yet.")
+        return
+    for r in rows:
+        click.echo(f"  {r['date']:12} {r['slug']:6} v{r['seed']:<5} "
+                   f"version {r['version'] or '-':2}  {r['title']}")
+    click.echo("")
+    counts = record_mod.times_printed(path, student.sid)
+    click.echo("  times printed: "
+               + ", ".join(f"{k} x{v}" for k, v in sorted(counts.items())))
+
+
+@record.command(name="skills")
+@click.option("-w", "--workspace", "space", required=True)
+def record_skills(space):
+    """Per skill: how many papers, to how many students."""
+    rows = record_mod.skill_totals(_record_path(space))
+    if not rows:
+        click.echo("nothing recorded yet.")
+        return
+    for r in rows:
+        click.echo(f"  {r['slug']:8} {r['papers']:4} papers to "
+                   f"{r['students']:3} students")
+
+
+@main.group()
 def skills():
     """Which skills are open for retake, and what the next assessment is."""
 
@@ -138,10 +216,14 @@ def _availability_path(space):
     return workspace_mod.file_in(space, "availability")
 
 
-@skills.command(name="show")
+@skills.command(name="preview")
 @click.option("-w", "--workspace", "space", required=True)
-def skills_show(space):
-    """What the form will say, before it says it."""
+def skills_preview(space):
+    """Read the form's wording back before students see it.
+
+    Changes nothing. `skills open` is the verb that changes what is available;
+    this is the one that shows you the result.
+    """
     path = _availability_path(space)
     try:
         av = availability_mod.load(path)
@@ -316,9 +398,13 @@ def roster():
               help="Sections this file is authoritative for. Defaults to the "
                    "sections in the file; state it when a section has emptied, "
                    "since an empty section cannot appear in its own class list.")
+@click.option("-s", "--seating", "seating_path", default=None,
+              type=click.Path(),
+              help="The seating chart to keep in step. Defaults to one beside "
+                   "the roster.")
 @click.option("--dry-run", is_flag=True,
               help="Report what would change and write nothing.")
-def roster_import(class_list, out, section, covers, dry_run):
+def roster_import(class_list, out, section, covers, seating_path, dry_run):
     """Read a registrar or LMS class list into the roster.
 
     Merges rather than replaces: a student the file does not mention is marked
@@ -364,6 +450,25 @@ def roster_import(class_list, out, section, covers, dry_run):
     with open(out, "w", encoding="utf-8") as f:
         f.write(roster_mod.to_toml(merged))
     click.echo(f"\nwrote {out}")
+
+    # Dropping empties the seat, whoever initiated it. Leaving that to the
+    # operator would mean every import ending in a refused build, because the
+    # chart is the print list and the two are checked against each other.
+    if seating_path is None:
+        seating_path = os.path.join(os.path.dirname(os.path.abspath(out)),
+                                    "seating.toml")
+    if report.dropped and os.path.isfile(seating_path):
+        text = open(seating_path, encoding="utf-8").read()
+        emptied = 0
+        for name in report.dropped:
+            text, count = seating.blank_seat(text, name)
+            emptied += count
+        if emptied:
+            with open(seating_path, "w", encoding="utf-8") as f:
+                f.write(text)
+            click.echo(f"emptied {emptied} seat(s) in {seating_path}")
+        else:
+            click.echo("none of the dropped students held a seat")
 
 
 @roster.command(name="drop")
@@ -555,6 +660,11 @@ def build(pub_path, out, do_compile, seed, preview, replay):
         click.echo("\npreview only -- nothing was written.")
         return
 
+    # Recorded when the folder is written, not when it compiles: the papers
+    # exist either way, and --no-compile is a normal way to finish. A preview
+    # writes nothing and records nothing, which is the honest line.
+    _record_run(publication, report, out, run_seed)
+
     if not do_compile:
         click.echo(f"\nnot compiled. To build it yourself:\n  cd {out} && pdflatex main.tex")
         return
@@ -564,6 +674,38 @@ def build(pub_path, out, do_compile, seed, preview, replay):
     except CompileError as exc:
         raise click.ClickException(str(exc))
     click.echo(f"\nPDF: {pdf}")
+
+
+def _record_run(publication, report, out, run_seed):
+    """Note what was printed, when the job belongs to a workspace.
+
+    A side effect of building, never an input to it: nothing here is read back
+    when choosing what to print. A job with no workspace records nothing and
+    says nothing, because there is nowhere to put it.
+    """
+    if not publication.workspace:
+        return
+    import datetime
+    path = workspace_mod.file_in(publication.workspace, "record")
+    try:
+        rows, unnamed = record_mod.write_run(
+            path,
+            run_id=os.path.basename(os.path.normpath(out)),
+            title=publication.title,
+            date=str(publication.date),
+            built=datetime.datetime.now().isoformat(timespec="seconds"),
+            seed=run_seed,
+            output=os.path.abspath(out),
+            handouts=report.get("handouts", []),
+            extras=report.get("extras", 0),
+        )
+    except Exception as exc:                     # never lose a built PDF to it
+        click.echo(f"\ncould not write the print record: {exc}")
+        return
+    click.echo(f"\nrecorded {rows} paper(s) in {path}")
+    if unnamed:
+        click.echo(f"  {unnamed} handout(s) had no student id and were counted "
+                   f"but not attributed")
 
 
 def _report(report, out, theme_origin, publication, run_seed):

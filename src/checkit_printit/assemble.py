@@ -35,6 +35,13 @@ class Handout:
     versions: list          # (slug, seed) in the order they print
     blank_name: bool = False
 
+    #: Carried so the print record can attribute the paper without joining
+    #: back on a name. Names change and repeat; ids do not.
+    sid: str = ""
+
+    #: The letter this packet was dealt, kept for the record.
+    version: str = ""
+
 
 def choose_seeds(bank, versions, publication, rng):
     """One seed per (version, skill).
@@ -115,6 +122,8 @@ def build_handouts(roster, chart, publication, seeds):
                 )
             versions.append((slug, seed))
         handouts.append(Handout(
+            sid=student.sid,
+            version=version,
             name=student.name,
             section=student.section,
             versions=versions,
@@ -436,6 +445,14 @@ def _report_dict(handouts, extras, keys, written, unseated, chart, seeds, missin
         "collisions": chart.collisions() if chart else [],
         "seeds": seeds,
         "missing_fields": {k: sorted(v) for k, v in sorted(missing.items())},
+        # Enough for the print record, which is written by the caller rather
+        # than here: assemble does not know which workspace it is serving, and
+        # a build that also wrote to a database would be two jobs in one.
+        "handouts": [
+            {"sid": h.sid, "name": h.name, "section": h.section,
+             "version": h.version, "papers": list(h.versions)}
+            for h in handouts
+        ],
     }
 
 
