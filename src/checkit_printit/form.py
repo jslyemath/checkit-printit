@@ -8,7 +8,7 @@ identity to prove and no token to refresh.
 What that costs is a shared secret. A web app a command line can reach has to
 be deployed for "anyone", because a terminal cannot complete a Google sign-in,
 so the URL is a capability and every request carries a secret the script
-checks. Both live in the workspace's `secrets/` directory, never in `form.toml`
+checks. Both live in the course's `secrets/` directory, never in `form.toml`
 and never in a repository.
 
 **printit renders every string.** The script formats nothing: the number
@@ -83,10 +83,10 @@ def secret_source(secret):
     return SECRET_SOURCE % json.dumps(secret)
 
 
-def load(workspace_path):
+def load(course_path):
     """Read the form config and its secret, which live apart on purpose."""
     conn = Connection()
-    config = os.path.join(workspace_path, FILENAME)
+    config = os.path.join(course_path, FILENAME)
     if os.path.isfile(config):
         with open(config, "rb") as f:
             raw = tomllib.load(f)
@@ -98,7 +98,7 @@ def load(workspace_path):
 
     # The URL is as sensitive as the secret: anyone holding it can rewrite the
     # form. Both sit in secrets/, which is why neither is in form.toml.
-    secret_file = os.path.join(workspace_path, "secrets", SECRET_FILENAME)
+    secret_file = os.path.join(course_path, "secrets", SECRET_FILENAME)
     if os.path.isfile(secret_file):
         with open(secret_file, "rb") as f:
             raw = tomllib.load(f)
@@ -111,8 +111,8 @@ def _quote(value):
     return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def save(workspace_path, conn):
-    config = os.path.join(workspace_path, FILENAME)
+def save(course_path, conn):
+    config = os.path.join(course_path, FILENAME)
     lines = [
         "# Which form, and which item in it holds each thing printit writes.",
         "#",
@@ -136,7 +136,7 @@ def save(workspace_path, conn):
     with open(config, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
-    secrets_dir = os.path.join(workspace_path, "secrets")
+    secrets_dir = os.path.join(course_path, "secrets")
     os.makedirs(secrets_dir, exist_ok=True)
     path = os.path.join(secrets_dir, SECRET_FILENAME)
     with open(path, "w", encoding="utf-8") as f:

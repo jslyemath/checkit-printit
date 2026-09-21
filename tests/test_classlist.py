@@ -206,7 +206,7 @@ class TestMerging:
         assert next(s for s in roster if s.last == "Lovelace").dropped
 
     def test_importing_one_section_leaves_the_other_alone(self, tmp_path):
-        """A class list is usually one section and a workspace may hold
+        """A class list is usually one section and a course may hold
         several. Without scoping, importing 820 would drop all of 830."""
         roster, _ = classlist.merge(Roster([]), self.banner(tmp_path))
         only820 = [s for s in self.banner(tmp_path) if s.section == "820"]

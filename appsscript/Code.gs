@@ -43,7 +43,7 @@
  * "Anyone" is required because a command line cannot sign in to Google. The
  * URL is unguessable and every request must carry the secret, which is what
  * actually protects it -- so treat the URL as a credential and keep it in the
- * workspace's secrets/ directory.
+ * course's secrets/ directory.
  */
 
 var SECRET_PROPERTY = 'PRINTIT_SECRET';

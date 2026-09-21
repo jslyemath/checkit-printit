@@ -103,7 +103,7 @@ that outlives one print job.
 | `install -b BANK [--force]` | put the theme into a bank |
 | `build` | `-p`, `-o`, `--compile/--no-compile`, `--seed N`, `--preview`, `--replay DIR` |
 | `import FILE -o OUT` | the retired Control Center CSV. Superseded by `roster import`; dead weight |
-| `workspace init NAME` | `-b BANK`, `--adopt JOBDIR` |
+| `course init NAME` | `-b BANK`, `--adopt JOBDIR` |
 | `roster import FILE` | `-o`, `--section`, `--covers`, `-s/--seating`, `--dry-run` |
 | `roster drop WHO` / `roster restore WHO` | `-r`, `-s` |
 | `skills open SLUGS…` | `-w`, `--add` |
@@ -121,23 +121,29 @@ that outlives one print job.
 against the job that asked for it. **A check that examined nothing fails** --
 that rule is the point of the file.
 
-## The workspace
+## The course
 
-Course state that outlives a job, at `~/CheckItPrintIt/workspaces/<name>/`
+Course state that outlives a job, at `~/CheckItPrintIt/courses/<name>/`
 (relocate all of it with `CHECKIT_PRINTIT_HOME`):
 
 ```
-workspace.toml  roster.toml  seating.toml  availability.toml
+course.toml  roster.toml  seating.toml  availability.toml
 form.toml       record.db    secrets/
 ```
 
-**A workspace is not a course.** One instructor runs both sections together
-with one form; another wants them apart. The directory is named by whoever
-makes it.
+**One course folder need not be one course.** An instructor may run both
+sections from a single folder with one form, or make "MAT 106 820" and
+"MAT 106 830" and keep them wholly apart -- separate form, seating,
+availability and record. Both are supported and neither is the default.
+The directory is named by whoever makes it; nothing derives it from the
+course code.
 
-A job's `publication.toml` says `[workspace] name = "..."` instead of carrying
-copies. An explicit `[roster] path` still wins, so every job folder written
-before workspaces existed keeps working.
+A job's `publication.toml` says `[course] folder = "..."` instead of
+carrying copies. **`folder`, not `name`** -- `name` in that same table is
+the printed header string and always was, and it is a key rather than a
+`[course]` table of its own because the file already has one and TOML
+refuses a duplicate. An explicit `[roster] path` still wins, so every job
+folder written before courses existed keeps working.
 
 **Why it exists:** three job folders each held their own copy of the same 48
 students, because a job resolves its roster relative to itself. A student who

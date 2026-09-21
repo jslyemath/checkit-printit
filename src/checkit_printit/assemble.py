@@ -446,7 +446,7 @@ def _report_dict(handouts, extras, keys, written, unseated, chart, seeds, missin
         "seeds": seeds,
         "missing_fields": {k: sorted(v) for k, v in sorted(missing.items())},
         # Enough for the print record, which is written by the caller rather
-        # than here: assemble does not know which workspace it is serving, and
+        # than here: assemble does not know which course it is serving, and
         # a build that also wrote to a database would be two jobs in one.
         "handouts": [
             {"sid": h.sid, "name": h.name, "section": h.section,

@@ -10,8 +10,8 @@ So the things that outlive a job -- who exists, where they sit, what is open
 for retake, which form to talk to, what has been printed -- live in one place
 and a job names it.
 
-    ~/CheckItPrintIt/workspaces/MAT 106/
-    |-- workspace.toml      course identity and the bank it prints from
+    ~/CheckItPrintIt/courses/MAT 106/
+    |-- course.toml         identity, and the bank it prints from
     |-- roster.toml         every student, dropped ones included
     |-- seating.toml        groups and desks; the print list
     |-- availability.toml   skills open for retake, and the next assessment
@@ -19,9 +19,13 @@ and a job names it.
     |-- record.db           what was printed, to whom, at which seed
     `-- secrets/            credentials, kept apart from configuration
 
-**A workspace is not a course.** One instructor runs both sections of MAT 106
-from a single workspace with one form and `section` as a roster field; another
-wants each section separate. The directory is named by whoever makes it.
+**One course folder need not be one course.** An instructor may run both
+sections of MAT 106 from a single folder, with one form and `section` as a
+roster field. Another may make "MAT 106 820" and "MAT 106 830" and keep
+them wholly apart -- a separate form, seating chart, availability list and
+print record for each. Both are supported, neither is the default, and
+nothing derives the directory name from the course code: it is named by
+whoever makes it.
 
 Outside every repository, always: these files carry names, student ids and
 email addresses.
@@ -30,8 +34,8 @@ email addresses.
 import os
 import shutil
 
-WORKSPACES = "workspaces"
-CONFIG = "workspace.toml"
+COURSES = "courses"
+CONFIG = "course.toml"
 SECRETS = "secrets"
 
 #: Written by `init`, read by everything else.
@@ -44,12 +48,12 @@ FILENAMES = {
 }
 
 
-class WorkspaceError(Exception):
+class CourseError(Exception):
     pass
 
 
 def default_root():
-    """Where workspaces live.
+    """Where courses live.
 
     Beside the job folders and the printed output, under one root that is
     deliberately not a repository. `CHECKIT_PRINTIT_HOME` moves all three
@@ -57,15 +61,15 @@ def default_root():
     """
     home = os.environ.get("CHECKIT_PRINTIT_HOME")
     if home:
-        return os.path.join(home, WORKSPACES)
-    return os.path.join(os.path.expanduser("~"), "CheckItPrintIt", WORKSPACES)
+        return os.path.join(home, COURSES)
+    return os.path.join(os.path.expanduser("~"), "CheckItPrintIt", COURSES)
 
 
 def path_for(name, root=None):
     safe = str(name).strip().rstrip(". ")
     if not safe or safe in (".", "..") or os.path.sep in safe or "/" in safe:
-        raise WorkspaceError(
-            f"{name!r} is not usable as a workspace name -- it becomes a "
+        raise CourseError(
+            f"{name!r} is not usable as a course name -- it becomes a "
             f"directory, so no slashes and no dots on their own."
         )
     return os.path.join(root or default_root(), safe)
@@ -79,19 +83,28 @@ def file_in(name, which, root=None):
     try:
         filename = FILENAMES[which]
     except KeyError:
-        raise WorkspaceError(f"a workspace has no {which!r}.") from None
+        raise CourseError(f"a course has no {which!r}.") from None
     return os.path.join(path_for(name, root), filename)
 
 
-CONFIG_TEMPLATE = '''# This workspace. Everything here outlives a single print job.
+CONFIG_TEMPLATE = '''# This course. Everything here outlives a single print job.
 #
-# A job's publication.toml names this workspace instead of carrying copies:
+# A job's publication.toml points here from inside its own [course] table,
+# rather than carrying its own copies of the roster and seating chart:
 #
-#     [workspace]
-#     name = "{name}"
+#     [course]
+#     name   = "MAT 106"     # what prints in the header
+#     folder = "{name}"      # this directory
+#
+# `folder` is a key in that table, not a table of its own, because a
+# publication file already has a [course] table and TOML refuses a
+# duplicate.
+#
+# Nothing forces one folder per course. Make one per section instead if
+# you would rather keep two rosters, two forms and two records apart.
 
 name      = "{name}"
-course    = "{course}"
+code      = "{code}"
 semester  = ""
 professor = ""
 
@@ -126,7 +139,7 @@ skills = []
 
 
 def init(name, bank="", root=None, adopt=None):
-    """Create a workspace. Returns (path, notes).
+    """Create a course. Returns (path, notes).
 
     `adopt` names a job folder whose roster and seating are copied in, because
     a working course already has both and nobody should retype forty-eight
@@ -136,13 +149,13 @@ def init(name, bank="", root=None, adopt=None):
     """
     path = path_for(name, root)
     if os.path.isfile(os.path.join(path, CONFIG)):
-        raise WorkspaceError(f"{path} already exists.")
+        raise CourseError(f"{path} already exists.")
     os.makedirs(os.path.join(path, SECRETS), exist_ok=True)
     notes = []
 
     with open(os.path.join(path, CONFIG), "w", encoding="utf-8") as f:
         f.write(CONFIG_TEMPLATE.format(
-            name=name, course=name, bank=bank.replace("\\", "/")))
+            name=name, code=name, bank=bank.replace("\\", "/")))
 
     for which, source_name in (("roster", "roster.toml"),
                                ("seating", "seating.toml")):
