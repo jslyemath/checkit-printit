@@ -12,7 +12,7 @@ from . import clasp as clasp_mod
 from . import classlist as classlist_mod
 from . import form as form_mod
 from . import record as record_mod
-from . import workspace as workspace_mod
+from . import course as course_mod
 from . import manifest as manifest_mod
 from .assemble import assemble, AssemblyError
 from .bank import Bank, BankError
@@ -134,9 +134,9 @@ def form():
 
 
 def _space_path(space):
-    if not workspace_mod.exists(space):
-        raise click.ClickException(f"no workspace named {space!r}.")
-    return workspace_mod.path_for(space)
+    if not course_mod.exists(space):
+        raise click.ClickException(f"no course named {space!r}.")
+    return course_mod.path_for(space)
 
 
 def _clasp_dir(space):
@@ -146,7 +146,7 @@ def _clasp_dir(space):
     source before pushing it -- clasp cannot set a Script Property, and the
     point of this path is that nothing is done by hand.
     """
-    return os.path.join(workspace_mod.path_for(space), "secrets", "script")
+    return os.path.join(course_mod.path_for(space), "secrets", "script")
 
 
 def _script_sources():
@@ -156,7 +156,7 @@ def _script_sources():
 
 
 def _stage_script(space, secret):
-    """Copy the script into the workspace and write the secret beside it."""
+    """Copy the script into the course and write the secret beside it."""
     import shutil
     target = _clasp_dir(space)
     os.makedirs(target, exist_ok=True)
@@ -199,13 +199,13 @@ def _deploy_and_record(space, directory, conn):
     made = form_mod.call(conn, "addItems",
                          {"items": dict(conn.items)})["items"]
     conn.items = made
-    form_mod.save(workspace_mod.path_for(space), conn)
+    form_mod.save(course_mod.path_for(space), conn)
     for slot, item_id in made.items():
         click.echo(f"  {slot:14} {item_id}")
 
 
 @form.command(name="create")
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 @click.option("--title", default="Skill Selection Form",
               help="What the new form is called.")
 @click.option("--folder", default="",
@@ -222,7 +222,7 @@ def form_create(space, title, folder):
     conn = form_mod.load(path)
     if conn.url:
         raise click.ClickException(
-            "this workspace is already connected to a form. Use "
+            "this course is already connected to a form. Use "
             "`checkit-printit form push`, or clear secrets/form-secret.toml "
             "to start over.")
     _ensure_login()
@@ -247,7 +247,7 @@ def form_create(space, title, folder):
 
 
 @form.command(name="attach")
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 @click.option("--script-id", required=True,
               help="The bound script's id: on the form, three-dot menu > Apps "
                    "Script, then Project Settings.")
@@ -288,7 +288,7 @@ def form_attach(space, script_id):
 
 
 @form.command(name="add-items")
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 def form_add_items(space):
     """Create any of the four items the form is missing.
 
@@ -309,7 +309,7 @@ def form_add_items(space):
 
 
 @form.command(name="setup")
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 def form_setup(space):
     """Generate a secret and print what to do in the Apps Script editor."""
     path = _space_path(space)
@@ -345,10 +345,10 @@ def form_setup(space):
 
 
 @form.command(name="connect")
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 @click.option("--url", required=True, help="The web app deployment URL.")
 def form_connect(space, url):
-    """Point the workspace at a deployed web app, and check it answers."""
+    """Point the course at a deployed web app, and check it answers."""
     path = _space_path(space)
     conn = form_mod.load(path)
     if not conn.secret:
@@ -365,7 +365,7 @@ def form_connect(space, url):
 
 
 @form.command(name="map")
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 def form_map(space):
     """Record which item on the form holds each thing printit writes.
 
@@ -419,7 +419,7 @@ def form_map(space):
 
 
 @form.command(name="push")
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 @click.option("--dry-run", is_flag=True,
               help="Show exactly what would be sent, and send nothing.")
 def form_push(space, dry_run):
@@ -427,7 +427,7 @@ def form_push(space, dry_run):
     path = _space_path(space)
     conn = form_mod.load(path)
     try:
-        av = availability_mod.load(workspace_mod.file_in(space, "availability"))
+        av = availability_mod.load(course_mod.file_in(space, "availability"))
     except availability_mod.AvailabilityError as exc:
         raise click.ClickException(str(exc))
 
@@ -474,13 +474,13 @@ def record():
 
 
 def _record_path(space):
-    if not workspace_mod.exists(space):
-        raise click.ClickException(f"no workspace named {space!r}.")
-    return workspace_mod.file_in(space, "record")
+    if not course_mod.exists(space):
+        raise click.ClickException(f"no course named {space!r}.")
+    return course_mod.file_in(space, "record")
 
 
 @record.command(name="runs")
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 def record_runs(space):
     """Every print run, oldest first."""
     rows = record_mod.runs(_record_path(space))
@@ -501,14 +501,14 @@ def record_runs(space):
 
 @record.command(name="student")
 @click.argument("who")
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 def record_student(who, space):
     """Every paper one student has been handed.
 
     Printed, not attempted -- a build cannot know who was in the room.
     """
     try:
-        people = roster_mod.load(workspace_mod.file_in(space, "roster"))
+        people = roster_mod.load(course_mod.file_in(space, "roster"))
         student = roster_mod.find(people, who)
     except roster_mod.RosterError as exc:
         raise click.ClickException(str(exc))
@@ -533,7 +533,7 @@ def record_student(who, space):
 
 
 @record.command(name="skills")
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 def record_skills(space):
     """Per skill: how many papers, to how many students."""
     rows = record_mod.skill_totals(_record_path(space))
@@ -551,15 +551,15 @@ def skills():
 
 
 def _availability_path(space):
-    if not workspace_mod.exists(space):
+    if not course_mod.exists(space):
         raise click.ClickException(
-            f"no workspace named {space!r}. Create one with "
-            f"`checkit-printit workspace init {space!r}`.")
-    return workspace_mod.file_in(space, "availability")
+            f"no course named {space!r}. Create one with "
+            f"`checkit-printit course init {space!r}`.")
+    return course_mod.file_in(space, "availability")
 
 
 @skills.command(name="preview")
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 def skills_preview(space):
     """Read the form's wording back before students see it.
 
@@ -590,7 +590,7 @@ def skills_preview(space):
 
 @skills.command(name="open")
 @click.argument("slugs", nargs=-1, required=True)
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 @click.option("--add", is_flag=True, help="Add to the open list rather than "
                                           "replacing it.")
 def skills_open(slugs, space, add):
@@ -626,7 +626,7 @@ def skills_open(slugs, space, add):
 
 
 @skills.command(name="set")
-@click.option("-w", "--workspace", "space", required=True)
+@click.option("-c", "--course", "space", required=True)
 @click.option("--name", default=None, help='e.g. "Skill Checkpoint Redo"')
 @click.option("--date", default=None, help="The assessment date, 2026-09-18.")
 @click.option("--due", default=None, help="When the form closes, "
@@ -666,9 +666,9 @@ def skills_set(space, name, date, due, choose, limit):
 
 
 def _bank_for(space):
-    """The workspace's bank, or None when it names none or cannot be read."""
+    """The course's bank, or None when it names none or cannot be read."""
     import tomllib
-    config = os.path.join(workspace_mod.path_for(space), workspace_mod.CONFIG)
+    config = os.path.join(course_mod.path_for(space), course_mod.CONFIG)
     if not os.path.isfile(config):
         return None
     with open(config, "rb") as f:
@@ -677,40 +677,40 @@ def _bank_for(space):
         return None
     try:
         return Bank(os.path.normpath(
-            os.path.join(workspace_mod.path_for(space), declared)))
+            os.path.join(course_mod.path_for(space), declared)))
     except BankError:
         return None
 
 
 @main.group()
-def workspace():
+def course():
     """The course state that outlives a single print job."""
 
 
-@workspace.command(name="init")
+@course.command(name="init")
 @click.argument("name")
 @click.option("-b", "--bank", "bank_path", default="", type=click.Path(),
               help="The bank this course prints from.")
 @click.option("--adopt", default=None, type=click.Path(exists=True),
               help="A job folder whose roster and seating to start from. "
                    "Defaults to the newest one; --adopt= for none.")
-def workspace_init(name, bank_path, adopt):
-    """Create a workspace.
+def course_init(name, bank_path, adopt):
+    """Create a course.
 
     A job then names it instead of carrying its own copy of the roster and the
     seating chart, so a student who drops is fixed in one place rather than
     remembered at the next copy.
     """
     if adopt is None:
-        adopt = workspace_mod.newest_job()
+        adopt = course_mod.newest_job()
         if adopt:
             click.echo(f"adopting from the newest job: {adopt}")
             click.echo("  (pass --adopt= to start empty)")
     try:
-        path, notes = workspace_mod.init(
+        path, notes = course_mod.init(
             name, bank=os.path.abspath(bank_path) if bank_path else "",
             adopt=adopt)
-    except workspace_mod.WorkspaceError as exc:
+    except course_mod.CourseError as exc:
         raise click.ClickException(str(exc))
 
     click.echo(f"created {path}")
@@ -719,7 +719,7 @@ def workspace_init(name, bank_path, adopt):
     click.echo("")
     click.echo("point a job at it by putting this in its publication.toml:")
     click.echo("")
-    click.echo("    [workspace]")
+    click.echo("    [course]")
     click.echo(f'    name = "{name}"')
 
 
@@ -1019,16 +1019,16 @@ def build(pub_path, out, do_compile, seed, preview, replay):
 
 
 def _record_run(publication, report, out, run_seed):
-    """Note what was printed, when the job belongs to a workspace.
+    """Note what was printed, when the job belongs to a course.
 
     A side effect of building, never an input to it: nothing here is read back
-    when choosing what to print. A job with no workspace records nothing and
+    when choosing what to print. A job with no course records nothing and
     says nothing, because there is nowhere to put it.
     """
-    if not publication.workspace:
+    if not publication.course_folder:
         return
     import datetime
-    path = workspace_mod.file_in(publication.workspace, "record")
+    path = course_mod.file_in(publication.course_folder, "record")
     try:
         rows, unnamed = record_mod.write_run(
             path,

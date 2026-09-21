@@ -1,4 +1,4 @@
-"""A workspace, and a job that names one instead of copying it.
+"""A course, and a job that names one instead of copying it.
 
 The problem this fixes was measured, not imagined: three job folders on one
 machine each held their own copy of the same forty-eight students, because a
@@ -14,7 +14,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from checkit_printit import publication as pub_mod
-from checkit_printit import workspace as ws
+from checkit_printit import course as ws
 
 
 @pytest.fixture
@@ -38,13 +38,13 @@ def job(home):
 
 
 class TestNaming:
-    def test_a_workspace_is_a_directory_under_the_root(self, home):
+    def test_a_course_is_a_directory_under_the_root(self, home):
         assert ws.path_for("MAT 106").startswith(str(home))
         assert ws.path_for("MAT 106").endswith("MAT 106")
 
     @pytest.mark.parametrize("bad", ["", "  ", ".", "..", "a/b", "a\\b"])
     def test_a_name_that_would_escape_its_directory_is_refused(self, home, bad):
-        with pytest.raises(ws.WorkspaceError):
+        with pytest.raises(ws.CourseError):
             ws.path_for(bad)
 
     def test_the_home_variable_moves_the_root(self, tmp_path, monkeypatch):
@@ -53,7 +53,7 @@ class TestNaming:
 
 
 class TestInit:
-    def test_it_creates_what_a_workspace_needs(self, home):
+    def test_it_creates_what_a_course_needs(self, home):
         path, _ = ws.init("MAT 106", bank="/banks/mat106")
         assert os.path.isfile(os.path.join(path, ws.CONFIG))
         assert os.path.isfile(os.path.join(path, "availability.toml"))
@@ -62,7 +62,7 @@ class TestInit:
 
     def test_it_will_not_overwrite_one(self, home):
         ws.init("MAT 106")
-        with pytest.raises(ws.WorkspaceError, match="already exists"):
+        with pytest.raises(ws.CourseError, match="already exists"):
             ws.init("MAT 106")
 
     def test_adopting_copies_the_roster_and_the_seating(self, home, job):
@@ -90,7 +90,7 @@ class TestInit:
         assert ws.newest_job() is None
 
 
-class TestAJobThatNamesAWorkspace:
+class TestAJobThatNamesACourse:
     def publication(self, tmp_path, body):
         d = tmp_path / "job"
         d.mkdir(exist_ok=True)
@@ -98,27 +98,27 @@ class TestAJobThatNamesAWorkspace:
         p.write_text(body, encoding="utf-8")
         return str(p)
 
-    def test_the_roster_comes_from_the_workspace(self, home, job, bank_dir):
+    def test_the_roster_comes_from_the_course(self, home, job, bank_dir):
         ws.init("MAT 106", adopt=str(job))
         pub = pub_mod.load(self.publication(home, f'''
-[workspace]
-name = "MAT 106"
+[course]
+folder = "MAT 106"
 [bank]
 path = {bank_dir!r}
 '''))
-        assert pub.workspace == "MAT 106"
+        assert pub.course_folder == "MAT 106"
         assert pub.roster_path == ws.file_in("MAT 106", "roster")
         assert pub.seating_path == ws.file_in("MAT 106", "seating")
 
     def test_an_explicit_path_still_wins(self, home, job, bank_dir):
-        """Every job folder written before workspaces existed keeps working."""
+        """Every job folder written before courses existed keeps working."""
         ws.init("MAT 106", adopt=str(job))
         (home / "job").mkdir(exist_ok=True)
         (home / "job" / "own.toml").write_text(
             '[[student]]\nname = "B"\nskills = []\n', encoding="utf-8")
         pub = pub_mod.load(self.publication(home, f'''
-[workspace]
-name = "MAT 106"
+[course]
+folder = "MAT 106"
 [bank]
 path = {bank_dir!r}
 [roster]
@@ -126,19 +126,40 @@ path = "own.toml"
 '''))
         assert pub.roster_path.endswith("own.toml")
 
-    def test_the_bank_can_come_from_the_workspace(self, home, job, bank_dir):
+    def test_the_bank_can_come_from_the_course(self, home, job, bank_dir):
         ws.init("MAT 106", bank=str(bank_dir), adopt=str(job))
         pub = pub_mod.load(self.publication(home, '''
-[workspace]
-name = "MAT 106"
+[course]
+folder = "MAT 106"
 '''))
         assert os.path.normpath(pub.bank_path) == os.path.normpath(str(bank_dir))
 
-    def test_naming_a_workspace_that_does_not_exist_says_where(self, home, bank_dir):
+    def test_naming_a_course_that_does_not_exist_says_where(self, home, bank_dir):
         with pytest.raises(pub_mod.PublicationError, match="does not exist"):
             pub_mod.load(self.publication(home, f'''
-[workspace]
-name = "Nope"
+[course]
+folder = "Nope"
 [bank]
 path = {bank_dir!r}
 '''))
+
+    def test_the_header_name_is_not_a_folder(self, home, job, bank_dir):
+        """`name` prints; `folder` resolves. They are never the same field.
+
+        Every job folder written before courses existed says
+        `[course] name = "MAT 106"` and means the printed header. Reading that
+        as a directory would silently pull in a roster nobody asked for -- and
+        a course called "MAT 106" is exactly what an instructor would make.
+        """
+        ws.init("MAT 106", adopt=str(job))
+        pub = pub_mod.load(self.publication(home, f'''
+[course]
+name = "MAT 106"
+[bank]
+path = {bank_dir!r}
+[roster]
+path = "own.toml"
+'''))
+        assert pub.course == "MAT 106"
+        assert pub.course_folder == ""
+        assert pub.roster_path != ws.file_in("MAT 106", "roster")

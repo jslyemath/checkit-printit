@@ -8,7 +8,7 @@ import dataclasses
 import os
 import tomllib
 
-from . import workspace as workspace_mod
+from . import course as course_mod
 
 
 class PublicationError(Exception):
@@ -33,8 +33,9 @@ class Publication:
     # where this was read from, so a manifest can record its fingerprint
     source_path: str = ""
 
-    #: the workspace this job belongs to, when it names one
-    workspace: str = ""
+    #: the course folder this job belongs to, when it names one.
+    #: `course` above is the printed header string, a different thing.
+    course_folder: str = ""
     bank_path: str = ""
     roster_path: str = ""
     seating_path: str = ""
@@ -65,11 +66,11 @@ class Publication:
         return " ".join(p for p in (self.title, self.date) if p).strip()
 
 
-def _workspace_bank(name):
-    """The bank a workspace prints from, when the job does not say."""
+def _course_bank(name):
+    """The bank a course prints from, when the job does not say."""
     if not name:
         return ""
-    config = os.path.join(workspace_mod.path_for(name), workspace_mod.CONFIG)
+    config = os.path.join(course_mod.path_for(name), course_mod.CONFIG)
     if not os.path.isfile(config):
         return ""
     with open(config, "rb") as f:
@@ -78,7 +79,7 @@ def _workspace_bank(name):
     if not declared:
         return ""
     return os.path.normpath(
-        os.path.join(workspace_mod.path_for(name), declared))
+        os.path.join(course_mod.path_for(name), declared))
 
 
 def load(path):
@@ -101,25 +102,28 @@ def load(path):
     bank = raw.get("bank", {})
     print_opts = raw.get("print", {})
 
-    # A job may name a workspace instead of carrying copies of the roster and
+    # A job may name a course instead of carrying copies of the roster and
     # the seating chart. An explicit path still wins, so every job folder
-    # written before workspaces existed keeps working untouched.
-    space = str(raw.get("workspace", {}).get("name", "")).strip()
-    if space and not workspace_mod.exists(space):
+    # written before courses existed keeps working untouched.
+    #
+    # It is a `folder` key inside [course], not a [course] table of its
+    # own: this file already has one, and TOML refuses a duplicate.
+    space = str(course.get("folder", "")).strip()
+    if space and not course_mod.exists(space):
         raise PublicationError(
-            f"{path}: [workspace] names {space!r}, which does not exist at "
-            f"{workspace_mod.path_for(space)}. Create it with "
-            f"`checkit-printit workspace init {space!r}`."
+            f"{path}: [course] folder = {space!r} does not exist at "
+            f"{course_mod.path_for(space)}. Create it with "
+            f"`checkit-printit course init {space!r}`."
         )
 
-    def from_workspace(which):
-        return workspace_mod.file_in(space, which) if space else ""
+    def from_course(which):
+        return course_mod.file_in(space, which) if space else ""
 
     def either(declared, which):
-        """An explicit path, else the workspace's, else nothing."""
+        """An explicit path, else the course's, else nothing."""
         if declared:
             return resolve(declared)
-        return from_workspace(which)
+        return from_course(which)
 
     extras = tuple(
         Extra(skill=e["skill"], copies=int(e.get("copies", 1)))
@@ -156,8 +160,8 @@ def load(path):
         professor=course.get("professor", ""),
         title=course.get("title", ""),
         date=str(course.get("date", "")),
-        bank_path=resolve(bank.get("path", "")) or _workspace_bank(space),
-        workspace=space,
+        bank_path=resolve(bank.get("path", "")) or _course_bank(space),
+        course_folder=space,
         roster_path=either(raw.get("roster", {}).get("path", ""), "roster"),
         seating_path=either(raw.get("seating", {}).get("path", ""), "seating"),
         keys=bool(print_opts.get("keys", True)),

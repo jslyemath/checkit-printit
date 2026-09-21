@@ -200,7 +200,7 @@ class TestWhatGetsSent:
 
 class TestConfigOnDisk:
     def test_the_secret_is_not_in_the_config(self, tmp_path):
-        """form.toml goes in the workspace beside the roster. The URL and the
+        """form.toml goes in the course beside the roster. The URL and the
         secret are credentials -- anyone holding them can rewrite the form --
         so they live in secrets/ instead."""
         conn = form.Connection(url="https://script.google.com/x", secret="abc",
@@ -220,7 +220,7 @@ class TestConfigOnDisk:
         assert back.url == conn.url and back.secret == conn.secret
         assert back.items == conn.items and back.form_id == conn.form_id
 
-    def test_an_empty_workspace_loads_as_unconfigured(self, tmp_path):
+    def test_an_empty_course_loads_as_unconfigured(self, tmp_path):
         conn = form.load(str(tmp_path))
         assert not conn.ready and conn.missing_slots() == list(form.SLOTS)
 

@@ -348,7 +348,7 @@ def merge(existing, incoming, scope=None):
     person on the printed page.
 
     **Absence only counts inside the sections the file covers.** A class list
-    is usually one section, and a workspace may hold several; without this,
+    is usually one section, and a course may hold several; without this,
     importing 820 would mark all of 830 as dropped. `scope` overrides the
     sections inferred from the file, and an import carrying no section at all
     is taken to cover everyone, because nothing says otherwise.
