@@ -9,6 +9,7 @@ import click
 from . import __version__, publication as pub_mod, roster as roster_mod, seating, theme
 from . import availability as availability_mod
 from . import classlist as classlist_mod
+from . import form as form_mod
 from . import record as record_mod
 from . import workspace as workspace_mod
 from . import manifest as manifest_mod
@@ -124,6 +125,177 @@ def install(bank_path, force):
     click.echo("Edit it to change how this bank looks, in print and in the "
                "Assessment tab.")
     click.echo("Then run `checkit generate` so the site publishes the change.")
+
+
+@main.group()
+def form():
+    """The Google Form students choose their skills on."""
+
+
+def _space_path(space):
+    if not workspace_mod.exists(space):
+        raise click.ClickException(f"no workspace named {space!r}.")
+    return workspace_mod.path_for(space)
+
+
+@form.command(name="setup")
+@click.option("-w", "--workspace", "space", required=True)
+def form_setup(space):
+    """Generate a secret and print what to do in the Apps Script editor."""
+    path = _space_path(space)
+    conn = form_mod.load(path)
+    if conn.secret:
+        click.echo("a secret already exists; keeping it.")
+    else:
+        conn.secret = form_mod.new_secret()
+    _, secret_file = form_mod.save(path, conn)
+
+    script = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))), "appsscript")
+    click.echo("")
+    click.echo("1. Open the form, then the three-dot menu > Apps Script.")
+    click.echo(f"2. Paste in the script from {script}")
+    click.echo("   (or `clasp clone <scriptId>` there and `clasp push`).")
+    click.echo("3. Project Settings > Script Properties > add:")
+    click.echo("")
+    click.echo(f"      PRINTIT_SECRET = {conn.secret}")
+    click.echo("")
+    click.echo("4. Deploy > New deployment > Web app")
+    click.echo("      Execute as:     Me")
+    click.echo("      Who has access: Anyone")
+    click.echo("")
+    click.echo("   'Anyone' is needed because a command line cannot sign in to")
+    click.echo("   Google. The URL is unguessable and the secret is what")
+    click.echo("   actually guards it, so treat the URL as a password too.")
+    click.echo("")
+    click.echo("5. Copy the web app URL, then run:")
+    click.echo(f"      checkit-printit form connect -w {space!r} --url <URL>")
+    click.echo("")
+    click.echo(f"the secret is stored in {secret_file}")
+
+
+@form.command(name="connect")
+@click.option("-w", "--workspace", "space", required=True)
+@click.option("--url", required=True, help="The web app deployment URL.")
+def form_connect(space, url):
+    """Point the workspace at a deployed web app, and check it answers."""
+    path = _space_path(space)
+    conn = form_mod.load(path)
+    if not conn.secret:
+        raise click.ClickException(
+            "no secret yet -- run `checkit-printit form setup` first.")
+    conn.url = url.strip()
+    try:
+        answer = form_mod.call(conn, "ping")
+    except form_mod.FormError as exc:
+        raise click.ClickException(str(exc))
+    form_mod.save(path, conn)
+    click.echo(f"connected to the form {answer.get('form', '')!r}")
+    click.echo("next: `checkit-printit form adopt` to say which item is which")
+
+
+@form.command(name="adopt")
+@click.option("-w", "--workspace", "space", required=True)
+def form_adopt(space):
+    """Record which item on the form holds each thing printit writes.
+
+    Asked rather than guessed: only you know which section header is the due
+    notice and which is the grade advice, and writing to the wrong one would
+    overwrite something the tool has no way to restore.
+    """
+    path = _space_path(space)
+    conn = form_mod.load(path)
+    try:
+        items = form_mod.call(conn, "describe")["items"]
+    except form_mod.FormError as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo("the form contains:")
+    for i, item in enumerate(items, 1):
+        title = item.get("title") or "(untitled)"
+        help_text = (item.get("help") or "").replace("\n", " ")
+        click.echo(f"  {i:2}. [{item.get('type', '?'):16}] {title[:48]}")
+        if help_text:
+            click.echo(f"      {help_text[:70]}")
+    click.echo("")
+
+    chosen = {}
+    for slot, what in form_mod.SLOTS.items():
+        current = conn.items.get(slot)
+        hint = ""
+        if current:
+            match = next((str(n) for n, it in enumerate(items, 1)
+                          if it["id"] == current), None)
+            hint = f" [{match}]" if match else ""
+        answer = click.prompt(f"which item is {what}?{hint}",
+                              default=hint.strip(" []") or "", show_default=bool(hint))
+        answer = str(answer).strip()
+        if not answer:
+            click.echo(f"  skipped -- {slot} will not be written")
+            continue
+        try:
+            chosen[slot] = items[int(answer) - 1]["id"]
+        except (ValueError, IndexError):
+            raise click.ClickException(f"{answer!r} is not one of 1-{len(items)}.")
+
+    conn.items = chosen
+    config, _ = form_mod.save(path, conn)
+    click.echo("")
+    click.echo(f"wrote {config}")
+    missing = conn.missing_slots()
+    if missing:
+        click.echo(f"not set: {', '.join(missing)} -- a push will leave those "
+                   f"parts of the form alone")
+
+
+@form.command(name="push")
+@click.option("-w", "--workspace", "space", required=True)
+@click.option("--dry-run", is_flag=True,
+              help="Show exactly what would be sent, and send nothing.")
+def form_push(space, dry_run):
+    """Write this week's wording and skill list onto the form."""
+    path = _space_path(space)
+    conn = form_mod.load(path)
+    try:
+        av = availability_mod.load(workspace_mod.file_in(space, "availability"))
+    except availability_mod.AvailabilityError as exc:
+        raise click.ClickException(str(exc))
+
+    bank = _bank_for(space)
+    descriptions = {}
+    if bank is not None:
+        for slug in av.skills:
+            try:
+                descriptions[slug] = bank.description(slug)
+            except BankError as exc:
+                raise click.ClickException(str(exc))
+    elif av.skills:
+        click.echo("(no bank configured, so options will carry slugs only)")
+
+    payload = form_mod.payload_for(av, conn, descriptions)
+
+    click.echo("what the form will say:")
+    for key in ("selecting_for", "confirm_date", "due_notice",
+                "question_title", "question_help"):
+        if payload[key]:
+            click.echo(f"  {payload[key]}")
+    click.echo(f"  options ({len(payload['choices'])}):")
+    for choice in payload["choices"]:
+        click.echo(f"    {choice[:88]}")
+    click.echo(f"  validation: {payload['validation']['mode']} "
+               f"{payload['validation']['count'] or ''}".rstrip())
+
+    if not conn.items:
+        raise click.ClickException(
+            "no items are mapped yet -- run `checkit-printit form adopt`.")
+    if dry_run:
+        click.echo("\ndry run -- nothing was sent.")
+        return
+    try:
+        answer = form_mod.call(conn, "push", payload)
+    except form_mod.FormError as exc:
+        raise click.ClickException(str(exc))
+    click.echo(f"\nupdated: {', '.join(answer.get('changed', [])) or 'nothing'}")
 
 
 @main.group()
