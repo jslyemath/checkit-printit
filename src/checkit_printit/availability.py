@@ -128,6 +128,16 @@ class Availability:
                 f"that time, then I cannot guarantee that I will have skills "
                 f"printed for you to attempt.")
 
+    def weekday(self):
+        """Just "Friday".
+
+        The skill question's help text names the day and not the date -- the
+        script this replaces called dayOfDate() there and spoken_date()
+        everywhere else, and the difference is visible to students.
+        """
+        day = as_date(self.date)
+        return DAYS[day.weekday()] if day else ""
+
     def confirmation(self):
         return (f"I understand that I am selecting skills for "
                 f"{spoken_date(self.date)}.")
