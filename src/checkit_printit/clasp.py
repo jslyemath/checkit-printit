@@ -37,7 +37,7 @@ def command():
         raise ClaspError(
             "this needs Node, which does not appear to be installed. "
             "Install it from nodejs.org, or set the form up by hand -- "
-            "`checkit-printit form manual` prints the steps."
+            "`checkit-printit form setup` prints the steps."
         )
     return [npx, "--yes", PACKAGE]
 
