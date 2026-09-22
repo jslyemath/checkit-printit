@@ -67,6 +67,8 @@ function doPost(e) {
         return json_(configure_(body.payload || {}));
       case 'describe':
         return json_({ok: true, items: describe_()});
+      case 'responses':
+        return json_({ok: true, responses: responses_()});
       case 'push':
         return json_({ok: true, changed: push_(body.payload)});
       case 'addItems':
@@ -203,6 +205,32 @@ function configure_(payload) {
   out.did = did;
   out.skipped = skipped;
   return out;
+}
+
+
+/**
+ * Every response the form holds, as plainly as possible.
+ *
+ * No scoping and no deduplication: a form accumulates responses all term,
+ * and which of them belong to a given assessment is decided in printit,
+ * from the confirmation answer. Doing it here would put a rule in the one
+ * place with no tests.
+ *
+ * Answers are keyed by ITEM ID, never by position. A checkbox answers with
+ * an array, a text item with a string; both are passed through as they come.
+ */
+function responses_() {
+  return FormApp.getActiveForm().getResponses().map(function (r) {
+    var answers = {};
+    r.getItemResponses().forEach(function (ir) {
+      answers[String(ir.getItem().getId())] = ir.getResponse();
+    });
+    return {
+      timestamp: r.getTimestamp().toISOString(),
+      email: r.getRespondentEmail(),
+      answers: answers
+    };
+  });
 }
 
 
