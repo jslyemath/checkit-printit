@@ -17,9 +17,26 @@ const VIEWS = [
   { id: "callout", label: "Cold call", soon: "Pick a random student, pick several, refresh the call list. No CLI equivalent yet." },
 ];
 
+// One definition per column, used to build the header AND the cells. They
+// used to be two lists that could drift, and did: a rule hid the SID cell on
+// a narrow window but not its heading, so every column after it read one
+// place to the left.
+const COLUMNS = [
+  { key: "name",      label: "Name",     edit: true },
+  { key: "preferred", label: "Nickname", edit: true },
+  { key: "section",   label: "Section",  edit: true },
+  { key: "email",     label: "Email",    edit: true },
+  { key: "sid",       label: "SID",      cls: "ro",
+    text: s => s.sid || s.alt_id || "—",
+    value: s => s.sid || s.alt_id || "" },
+  { key: "_actions",  label: "",         sortable: false },
+];
+
 let students = [];
 let edits = new Map();          // "index:field" -> value
 let showDropped = false;
+let sortKey = null;
+let sortDesc = false;
 
 // ------------------------------------------------------------------ api --
 
@@ -128,40 +145,78 @@ function cellInput(student, field) {
   return input;
 }
 
+function sortValue(column, student) {
+  const raw = column.value ? column.value(student) : (student[column.key] || "");
+  return String(raw).toLowerCase();
+}
+
+function sortBy(key) {
+  if (sortKey === key) sortDesc = !sortDesc;
+  else { sortKey = key; sortDesc = false; }
+  renderRoster();
+}
+
+function renderHeader() {
+  const row = document.querySelector("#roster thead tr");
+  row.textContent = "";
+  for (const column of COLUMNS) {
+    const th = document.createElement("th");
+    if (column.sortable === false) {
+      th.textContent = column.label;
+    } else {
+      const b = document.createElement("button");
+      b.className = "sort";
+      b.textContent = column.label;
+      if (sortKey === column.key) {
+        b.classList.add("sorted");
+        b.textContent += sortDesc ? " ↓" : " ↑";
+      }
+      b.onclick = () => sortBy(column.key);
+      th.appendChild(b);
+    }
+    row.appendChild(th);
+  }
+}
+
 function renderRoster() {
+  renderHeader();
   const body = document.querySelector("#roster tbody");
   body.textContent = "";
-  const shown = students.filter(s => showDropped || !s.dropped);
+
+  let shown = students.filter(s => showDropped || !s.dropped);
+  if (sortKey) {
+    const column = COLUMNS.find(c => c.key === sortKey);
+    // Sorting only reorders what is displayed. Edits are keyed to each
+    // student's own index, not to a row position, so they survive it.
+    shown = [...shown].sort((a, b) => {
+      const cmp = sortValue(column, a).localeCompare(
+        sortValue(column, b), undefined, { numeric: true });
+      return sortDesc ? -cmp : cmp;
+    });
+  }
 
   for (const student of shown) {
     const tr = document.createElement("tr");
     if (student.dropped) tr.className = "dropped";
 
-    for (const field of ["name", "preferred", "section", "email"]) {
+    for (const column of COLUMNS) {
       const td = document.createElement("td");
-      td.className = "cell-" + field;
-      td.appendChild(cellInput(student, field));
+      if (column.cls) td.className = column.cls;
+      if (column.key === "_actions") {
+        const b = document.createElement("button");
+        b.className = "link";
+        b.textContent = student.dropped ? "restore" : "drop";
+        b.onclick = () => drop(student, !student.dropped);
+        td.appendChild(b);
+      } else if (column.edit) {
+        td.classList.add("cell-" + column.key);
+        td.appendChild(cellInput(student, column.key));
+      } else {
+        td.textContent = column.text ? column.text(student)
+                                     : (student[column.key] || "—");
+      }
       tr.appendChild(td);
     }
-
-    const sid = document.createElement("td");
-    sid.className = "ro";
-    sid.textContent = student.sid || student.alt_id || "—";
-    tr.appendChild(sid);
-
-    const chose = document.createElement("td");
-    chose.className = "chose";
-    chose.textContent = student.skills.join(", ") || "—";
-    tr.appendChild(chose);
-
-    const actions = document.createElement("td");
-    const b = document.createElement("button");
-    b.className = "link";
-    b.textContent = student.dropped ? "restore" : "drop";
-    b.onclick = () => drop(student, !student.dropped);
-    actions.appendChild(b);
-    tr.appendChild(actions);
-
     body.appendChild(tr);
   }
 

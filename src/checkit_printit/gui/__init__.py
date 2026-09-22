@@ -61,6 +61,9 @@ def _student_json(student, index):
         "alt_id": student.alt_id,
         "dropped": bool(student.dropped),
         "dropped_by": student.dropped_by,
+        # Not shown in the roster table: what a student chose belongs to
+        # one assessment, and the roster is the course. The assessment
+        # staging view reads it. See 12.6.
         "skills": list(student.skills),
     }
 
@@ -174,9 +177,14 @@ def api_roster_save(course, body):
                 "on and what prints on the paper.")
         staged.append((student, field, value))
 
-    for student, field, value in staged:
-        setattr(student, field, value)
-    course.save_roster(people)
+    if staged:
+        for student, field, value in staged:
+            setattr(student, field, value)
+        course.save_roster(people)
+    # An empty batch writes nothing at all. It used to rewrite the whole file
+    # anyway, which changed its timestamp and reformatted it for no reason --
+    # and made "which action last wrote this roster?" unanswerable, which is
+    # the question you ask when a value is not what you expected.
     return {"saved": len(staged), "students":
             [_student_json(s, i) for i, s in enumerate(people)]}
 
@@ -238,6 +246,13 @@ def make_handler(course, token):
             # Nothing here should ever be embedded in another page.
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
+            # Never cached. Everything is read from disk per request, so an
+            # upgraded printit takes effect on reload. Without this the
+            # browser keeps running yesterday's script against today's
+            # server, and the mismatch is invisible -- it cost a confused
+            # minute the first time the roster table changed shape. There is
+            # no network here to save.
+            self.send_header("Cache-Control", "no-store, must-revalidate")
             self.end_headers()
             self.wfile.write(body)
 

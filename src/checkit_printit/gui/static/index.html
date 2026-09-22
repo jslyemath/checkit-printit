@@ -37,13 +37,16 @@
       are not: those are set by an import, a drop or a pull, each of which has
       rules a text box would bypass.
     </p>
-    <table id="roster">
-      <thead><tr>
-        <th>Name</th><th>Nickname</th><th>Section</th><th>Email</th>
-        <th>SID</th><th>Chose</th><th></th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
+    <!-- Header and body are both built from COLUMNS in app.js. They used to
+         be two lists -- this one in markup, the cells in script -- and they
+         drifted: a rule hid the SID cell on a narrow window without hiding
+         its heading, so every column after it read one place to the left. -->
+    <div class="scroller">
+      <table id="roster">
+        <thead><tr></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
     <p id="roster-empty" class="muted" hidden></p>
   </section>
 
