@@ -106,6 +106,28 @@ class TestTheRosterTable:
             gui_mod.api_roster_save(course, {"edits": [
                 {"index": 99, "field": "name", "value": "x"}]})
 
+    def test_only_the_named_fields_move(self, course):
+        """A save changes what it was asked to change and nothing else.
+
+        Written after a scratch roster came back with a section edit that had
+        been discarded in the browser. The discard turned out to be correct
+        and the write came from an ad-hoc probe, but "a roster file changed
+        and I cannot say which action did it" is worth making impossible to
+        wonder about again.
+        """
+        before = {s.name: (s.section, s.email, s.sid, list(s.skills))
+                  for s in course.roster()}
+        gui_mod.api_roster_save(course, {"edits": [
+            {"index": 0, "field": "preferred", "value": "Ada L"}]})
+        after = {s.name: (s.section, s.email, s.sid, list(s.skills))
+                 for s in gui_mod.Course("Test").roster()}
+        assert before == after
+
+    def test_an_empty_batch_changes_nothing(self, course):
+        before = open(course.file("roster"), encoding="utf-8").read()
+        gui_mod.api_roster_save(course, {"edits": []})
+        assert open(course.file("roster"), encoding="utf-8").read() == before
+
     def test_a_refused_batch_writes_nothing(self, course):
         """All or nothing: a half-applied batch leaves the file disagreeing
         with the table still on screen."""

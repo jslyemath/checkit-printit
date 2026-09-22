@@ -166,7 +166,6 @@ td input:focus { border-color: var(--accent); outline: none; background: var(--b
 td input.changed { border-color: var(--dirty); background: var(--bg); }
 
 td.ro { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
-td.chose { font-size: 13px; }
 
 .toast {
   position: fixed;
@@ -183,7 +182,26 @@ td.chose { font-size: 13px; }
 }
 .toast.bad { background: var(--warn); color: #fff; }
 
+/* Sortable headings. */
+th button.sort {
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+th button.sort:hover { color: var(--ink); }
+th button.sort.sorted { color: var(--accent); }
+
+/* A narrow window scrolls the table sideways. It used to hide the SID
+   column instead, which shifted every heading after it one place left --
+   silently dropping a column is worse than a scrollbar. */
+.scroller { overflow-x: auto; }
+.scroller table { min-width: 720px; }
+
 @media (max-width: 720px) {
   main { padding: 16px; }
-  td.ro, th.ro { display: none; }
 }
