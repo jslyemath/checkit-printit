@@ -183,6 +183,49 @@ def _ensure_login():
         raise click.ClickException(str(exc))
 
 
+def _authorize_prompt(conn):
+    """What to say when Google has not authorized the script yet."""
+    return (
+        "Google has not authorized this script yet, so it refuses every "
+        "call.\n\n"
+        "Open this once, signed in as the form's owner, and grant the "
+        "permissions:\n\n"
+        f"    {conn.url}\n\n"
+        "It will say 'Unverified'. That only means Google has not reviewed "
+        "it;\n"
+        "it is your script, in your own Drive. When it works you will see\n"
+        "'Script function not found: doGet' -- this script answers POST and "
+        "a\nbrowser sends GET, so that page is the success."
+    )
+
+
+def _ping_authorized(conn):
+    """Ping, walking the user through authorization if Google refuses.
+
+    The editor's deploy flow prompts for this; clasp's does not. Without it
+    the first call after `form create` answers 403 and looks exactly like a
+    domain policy blocking anonymous web apps -- which cost an hour on
+    2026-09-21.
+    """
+    try:
+        return form_mod.call(conn, "ping")
+    except form_mod.FormError as first:
+        if not sys.stdin.isatty():
+            raise click.ClickException(
+                f"{first}\n\n{_authorize_prompt(conn)}\n\n"
+                "Then run this command again."
+            ) from None
+        click.echo("")
+        click.echo(_authorize_prompt(conn))
+        click.echo("")
+        click.confirm("authorized?", default=True, abort=True)
+        try:
+            return form_mod.call(conn, "ping")
+        except form_mod.FormError as second:
+            raise click.ClickException(
+                f"still refused after authorizing: {second}") from None
+
+
 def _report_identity(conn, answer):
     """Record which form we reached, and say where it is.
 
@@ -205,7 +248,7 @@ def _deploy_and_record(space, directory, conn, rename_to=""):
     click.echo(f"  {conn.url}")
 
     click.echo("checking it answers...")
-    answer = form_mod.call(conn, "ping")
+    answer = _ping_authorized(conn)
 
     if rename_to:
         # clasp's --title named the script project; the form itself is still
@@ -217,6 +260,20 @@ def _deploy_and_record(space, directory, conn, rename_to=""):
     made = form_mod.call(conn, "addItems",
                          {"items": dict(conn.items)})["items"]
     conn.items = made
+
+    if rename_to:
+        # A form printit just made. Never for attach: an existing form's
+        # settings belong to the instructor, like its banner and its title.
+        click.echo("setting the form up...")
+        done = form_mod.call(conn, "configure", {
+            "requireLogin": True,
+            "removeDefaultQuestion": True,
+            "keep": dict(made),
+        })
+        for line in done.get("did", []):
+            click.echo(f"  {line}")
+        for line in done.get("skipped", []):
+            click.echo(f"  ! {line}")
     form_mod.save(course_mod.path_for(space), conn)
     for slot, item_id in made.items():
         click.echo(f"  {slot:14} {item_id}")
@@ -295,9 +352,9 @@ def form_attach(space, script_id):
         click.echo("deploying it as a web app...")
         deployment = clasp_mod.deploy(directory)
         conn.url = clasp_mod.web_app_url(deployment)
-        answer = form_mod.call(conn, "ping")
     except (clasp_mod.ClaspError, form_mod.FormError) as exc:
         raise click.ClickException(str(exc))
+    answer = _ping_authorized(conn)
 
     _report_identity(conn, answer)
     form_mod.save(path, conn)
