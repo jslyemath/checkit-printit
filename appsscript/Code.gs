@@ -56,13 +56,13 @@ function doPost(e) {
     }
     switch (body.op) {
       case 'ping':
-        return json_({ok: true, form: FormApp.getActiveForm().getTitle()});
+        return json_(identity_());
       case 'rename':
         // Used once, by `form create`, because clasp's --title names the
         // script project and leaves the form itself untitled. Never called
         // by push: the form's title belongs to the instructor.
         FormApp.getActiveForm().setTitle(String(body.payload.title || ''));
-        return json_({ok: true, form: FormApp.getActiveForm().getTitle()});
+        return json_(identity_());
       case 'describe':
         return json_({ok: true, items: describe_()});
       case 'push':
@@ -112,6 +112,23 @@ function secretOk_(given) {
  * header is the due notice and which is the grade advice, and a wrong guess
  * would overwrite the wrong one.
  */
+/**
+ * Who we are. The bound script is a different Drive file from the form it
+ * drives, so the script id cannot be turned into a form URL -- a URL built
+ * that way 404s. Report the form's own id and edit URL.
+ */
+function identity_() {
+  var form = FormApp.getActiveForm();
+  return {
+    ok: true,
+    form: form.getTitle(),
+    formId: form.getId(),
+    editUrl: form.getEditUrl(),
+    liveUrl: form.getPublishedUrl()
+  };
+}
+
+
 function describe_() {
   return FormApp.getActiveForm().getItems().map(function (item) {
     return {

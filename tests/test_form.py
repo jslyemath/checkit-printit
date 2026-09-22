@@ -206,7 +206,7 @@ class TestConfigOnDisk:
         secret are credentials -- anyone holding them can rewrite the form --
         so they live in secrets/ instead."""
         conn = form.Connection(url="https://script.google.com/x", secret="abc",
-                               form_id="1FAIpQL", items={"choose_skills": "33"})
+                               script_id="1AbCdEf", form_id="1FAIpQL", items={"choose_skills": "33"})
         config, secret_file = form.save(str(tmp_path), conn)
         text = open(config, encoding="utf-8").read()
         assert "abc" not in text and "script.google.com" not in text
@@ -214,13 +214,15 @@ class TestConfigOnDisk:
 
     def test_it_round_trips(self, tmp_path):
         conn = form.Connection(url="https://x/exec", secret="abc",
-                               form_id="1FAIpQL",
+                               script_id="1AbCdEf", form_id="1FAIpQL",
                                items={"choose_skills": "33",
                                       "confirm_date": "22"})
         form.save(str(tmp_path), conn)
         back = form.load(str(tmp_path))
         assert back.url == conn.url and back.secret == conn.secret
-        assert back.items == conn.items and back.form_id == conn.form_id
+        assert back.items == conn.items
+        assert back.form_id == conn.form_id
+        assert back.script_id == conn.script_id
 
     def test_an_empty_course_loads_as_unconfigured(self, tmp_path):
         conn = form.load(str(tmp_path))
@@ -306,3 +308,37 @@ class TestRetrying:
         with pytest.raises(form.FormError, match="did not answer"):
             form.call(form.Connection(url="http://x/", secret="s"),
                       "ping", opener=op)
+
+class TestTheTwoIds:
+    """A bound script is a separate Drive file from the form it drives.
+
+    `Connection.form_id` used to be assigned the script's id by both call
+    sites, and form.toml wrote it as `[form] id` under a comment reading
+    "Which form". A URL built from it 404s, which is how this was found --
+    by handing one to the instructor.
+    """
+
+    def test_they_round_trip_separately(self, tmp_path):
+        conn = form.Connection(url="http://x/", secret="s",
+                               script_id="1SCRIPT", form_id="1FORM")
+        form.save(str(tmp_path), conn)
+        back = form.load(str(tmp_path))
+        assert back.script_id == "1SCRIPT"
+        assert back.form_id == "1FORM"
+
+    def test_a_form_toml_written_before_the_split_still_loads(self, tmp_path):
+        """`[form] id` meant the script, so it has to read back as one --
+        not as a form id, which would rebuild the broken URL."""
+        (tmp_path / "form.toml").write_text(
+            '[form]\nid = "1SCRIPT"\n\n[items]\n', encoding="utf-8")
+        back = form.load(str(tmp_path))
+        assert back.script_id == "1SCRIPT"
+        assert back.form_id == ""
+
+    def test_ping_is_what_teaches_it_the_form_id(self, script):
+        """Nothing else knows it: clasp reports the script, and the script id
+        cannot be turned into a form id."""
+        conn = connection(script)
+        assert conn.form_id == ""
+        answer = form.call(conn, "ping")
+        assert "form" in answer
