@@ -38,4 +38,7 @@ checkit-printit = "checkit_printit.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-checkit_printit = ["theme/*.sty"]
+# gui/static ships with the package. Left out, `pip install` succeeds and
+# `checkit-printit gui` then serves 404s for its own page -- the same shape as
+# the 0.2.8.5 release whose install had never worked for anyone.
+checkit_printit = ["theme/*.sty", "gui/static/*"]

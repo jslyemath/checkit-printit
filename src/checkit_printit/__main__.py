@@ -923,6 +923,45 @@ def course_init(name, bank_path, adopt):
     click.echo("`folder` is what resolves; `name` only prints.")
 
 
+@main.command(name="gui")
+@click.option("-c", "--course", "space", required=True)
+@click.option("--port", default=8765, show_default=True,
+              help="Which port to listen on.")
+@click.option("--open/--no-open", "open_browser", default=True,
+              help="Open a browser window.")
+def gui(space, port, open_browser):
+    """Open the local web app for a course.
+
+    Bound to 127.0.0.1, never 0.0.0.0: it serves names, student ids and email
+    addresses off a laptop that sits on university wifi. Each run mints a
+    token the page must send back, because loopback stops another machine but
+    not another *page* -- any site open in the same browser can quietly POST
+    to localhost.
+
+    Stop it with Ctrl-C.
+    """
+    from . import gui as gui_mod
+    try:
+        httpd, url, _ = gui_mod.serve(space, port=port,
+                                      open_browser=open_browser,
+                                      forever=False)
+    except gui_mod.GuiError as exc:
+        raise click.ClickException(str(exc))
+    except OSError as exc:
+        raise click.ClickException(
+            f"could not listen on port {port}: {exc}. Another copy may "
+            f"already be running -- try --port {port + 1}.")
+
+    click.echo(f"serving {space!r} at {url}")
+    click.echo("  Ctrl-C to stop")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("")
+    finally:
+        httpd.server_close()
+
+
 @main.group()
 def roster():
     """Work with the list of students."""
@@ -1041,31 +1080,23 @@ def roster_restore(who, roster_path):
 
 
 def _set_dropped(who, roster_path, seating_path, dropped):
+    """Render what `roster.set_dropped` did. The rule lives there, so the GUI
+    can call it without going through click."""
     try:
-        people = roster_mod.load(roster_path)
-        student = roster_mod.find(people, who)
+        done = roster_mod.set_dropped(roster_path, who, dropped, seating_path)
     except roster_mod.RosterError as exc:
         raise click.ClickException(str(exc))
 
-    if student.dropped == dropped:
+    if not done.changed:
         state = "already dropped" if dropped else "not dropped"
-        click.echo(f"{student.name} is {state}; nothing to do.")
+        click.echo(f"{done.student.name} is {state}; nothing to do.")
         return
 
-    student.dropped = dropped
-    student.dropped_by = "instructor" if dropped else ""
-    with open(roster_path, "w", encoding="utf-8") as f:
-        f.write(roster_mod.to_toml(people, "checkit-printit roster drop"))
-    click.echo(f"{'dropped' if dropped else 'restored'} {student.name}"
+    click.echo(f"{'dropped' if dropped else 'restored'} {done.student.name}"
                f"  ({roster_path})")
-
-    if dropped and seating_path and os.path.isfile(seating_path):
-        text = open(seating_path, encoding="utf-8").read()
-        new, count = seating.blank_seat(text, student.name)
-        if count:
-            with open(seating_path, "w", encoding="utf-8") as f:
-                f.write(new)
-            click.echo(f"emptied {count} seat(s) in {seating_path}")
+    if done.seating_checked:
+        if done.seats_emptied:
+            click.echo(f"emptied {done.seats_emptied} seat(s) in {seating_path}")
         else:
             click.echo(f"no seat found in {seating_path}; nothing to empty")
     elif not dropped:

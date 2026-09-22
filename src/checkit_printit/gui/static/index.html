@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>checkit-printit</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>checkit&#8209;printit</h1>
+  <div id="course-name" class="course">loading&hellip;</div>
+  <nav id="views"></nav>
+</header>
+
+<main>
+  <section id="view-overview" class="view">
+    <h2>This course</h2>
+    <div id="overview" class="cards"></div>
+    <p class="muted">
+      Everything here lives outside every repository, because it holds names,
+      student ids and email addresses.
+    </p>
+  </section>
+
+  <section id="view-roster" class="view" hidden>
+    <h2>Roster</h2>
+    <div class="toolbar">
+      <label><input type="checkbox" id="show-dropped"> show dropped students</label>
+      <span class="spacer"></span>
+      <span id="dirty" class="dirty" hidden></span>
+      <button id="save" class="primary" disabled>Save</button>
+      <button id="revert" disabled>Discard</button>
+    </div>
+    <p class="muted">
+      Name, nickname, section and email are editable. Ids and the dropped flag
+      are not: those are set by an import, a drop or a pull, each of which has
+      rules a text box would bypass.
+    </p>
+    <table id="roster">
+      <thead><tr>
+        <th>Name</th><th>Nickname</th><th>Section</th><th>Email</th>
+        <th>SID</th><th>Chose</th><th></th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <p id="roster-empty" class="muted" hidden></p>
+  </section>
+
+  <section id="view-soon" class="view" hidden>
+    <h2 id="soon-title">Not built yet</h2>
+    <p class="muted" id="soon-body"></p>
+  </section>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+
+<script>window.PRINTIT_TOKEN = "__TOKEN__";</script>
+<script src="/app.js"></script>
+</body>
+</html>

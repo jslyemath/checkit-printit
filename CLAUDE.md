@@ -130,6 +130,7 @@ that outlives one print job.
 | `form push` | `-c`, `--dry-run` |
 | `form pull` | `-c`, `--dry-run`, `--force`. Responses into the roster |
 | `form setup` / `form connect --url` | the manual path, for when clasp is not an option |
+| `gui` | `-c`, `--port`, `--open/--no-open`. The local web app (8a, 8b) |
 
 `tools/verify_run.py <job> <out> [--against DIR]` checks a finished run
 against the job that asked for it. **A check that examined nothing fails** --
@@ -141,6 +142,28 @@ are not real, duplicated call sites, dead parameters, and whether all 21
 commands parse. It derives the real CLI by running `--help`, so it cannot go
 stale the way a hand-written table does. **Run it after any rename or any new
 command.**
+
+## The local web app
+
+`checkit-printit gui -c COURSE` serves one course at `127.0.0.1:8765`, never
+`0.0.0.0`: it hands out names, student ids and email addresses from a laptop
+on university wifi.
+
+**It is also token-guarded**, which is not belt-and-braces. Loopback stops
+another *machine*; it does not stop another *page*. Any site open in the same
+browser can POST to `http://127.0.0.1:8765` in the background. Each run mints
+a token, injects it into the page, and requires it as a header a cross-origin
+form cannot set.
+
+**Every handler calls the function the CLI calls.** Dropping goes through
+`roster.set_dropped`, the same call `roster drop` makes -- which is why the
+roster file it writes is headed "Written by checkit-printit roster drop". If a
+rule needs to be reachable from the GUI, move it out of the `@click.command`
+body rather than copying it. See the footgun above about one of two copies.
+
+Built: **8a** the shell, **8b** the roster table. The other six views are
+listed in the nav and say what they will do and which CLI command does it
+today. Order and rationale: `../checkit/PRINT_TOOL_DESIGN.md` 12.6.
 
 ## The course
 

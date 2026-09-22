@@ -61,16 +61,28 @@ GOOGLE_OK = ("Internal apps in a Workspace", "A Workspace admin")
 # blessed lines, which would go stale exactly like the CLI table did.
 RETROSPECTIVE = ("goes wrong", "failed silently", "not applied to the others")
 
+#: An explicit opt-out, for prose that must quote a token this script hunts
+#: for. Invisible in rendered markdown, and it does not rot the way another
+#: heading keyword would. Applies until the next heading.
+MARKER = "<!-- audit-ignore -->"
+
 def retrospective_lines(path):
-    """Line numbers inside a section whose heading admits to past mistakes."""
+    """Line numbers this script must not read as instructions.
+
+    Two kinds: a section whose heading admits to a past mistake, and a
+    section explicitly marked. Both exist because a document recording a
+    mistake has to quote it, which is the same trap as a template that
+    documents its own syntax -- hit twice here in the Mustache and Jinja
+    templates.
+    """
     if path.suffix != ".md":
         return set()
     out, skipping = set(), False
     for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if line.startswith("#"):
             skipping = any(k in line.lower() for k in RETROSPECTIVE)
-        elif line.startswith("###") is False and line.startswith("##"):
-            skipping = any(k in line.lower() for k in RETROSPECTIVE)
+        elif MARKER in line:
+            skipping = True
         if skipping:
             out.add(n)
     return out
