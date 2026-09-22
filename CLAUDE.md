@@ -271,11 +271,9 @@ Four of those are worth carrying in your head:
 authorize the script before any call works. The editor's deploy flow does
 this automatically and clasp's does not.
 
-**7b (`form pull`) has never read a real response.** The scratch form holds
-none, so the op has only been exercised returning an empty list. Unknown: the
-exact shape of a checkbox answer (an array is assumed, a bare string
-tolerated) and whether `getRespondentEmail()` is populated on this domain.
-One test submission settles both.
+**7b works against a real response**, read 2026-09-21: checkbox answers are
+arrays, `getRespondentEmail()` is populated, and the option text round trips
+as `SLUG - description`.
 
 Responses are scoped **by the date the student confirmed**, not by a time
 window -- the confirmation checkbox is the scoping key. Latest response per

@@ -294,13 +294,21 @@ def from_spreadsheet_export(path, name_column="Full Name:", skill_columns=None,
     return Roster(students)
 
 
-def to_toml(roster):
-    """Serialise a roster, for the import step to write out."""
+def to_toml(roster, written_by="checkit-printit"):
+    """Serialise a roster. `written_by` is the command to blame for it.
+
+    Several commands regenerate this file -- `roster import`, `roster drop`,
+    `roster restore` and `form pull` -- so the header has to say which one
+    did, and must not claim that nothing will do it again. It used to say
+    exactly that, while `form pull` rewrote it.
+    """
     def quote(s):
         return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
-    lines = ["# Written by `checkit-printit import`. Edit freely -- this is the",
-             "# tool's own format, and nothing regenerates it.", ""]
+    lines = [f"# Written by `{written_by}`. This is the tool's own format, and",
+             "# it is safe to edit -- but `roster import`, `roster drop`,",
+             "# `roster restore` and `form pull` all rewrite the whole file,",
+             "# so a comment added here will not survive the next one.", ""]
     for s in roster:
         lines.append("[[student]]")
         lines.append(f"name      = {quote(s.name)}")
