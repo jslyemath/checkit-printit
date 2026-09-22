@@ -7,6 +7,7 @@ way nothing downstream should inherit.
 """
 
 import csv
+import os
 import dataclasses
 import tomllib
 
@@ -220,6 +221,57 @@ def apply_selection_modes(roster, simply_print=(), default_when_missing=(),
 
         out.append(dataclasses.replace(student, skills=chosen))
     return Roster(out)
+
+
+# ---------------------------------------------------------------- dropping --
+
+@dataclasses.dataclass
+class DropResult:
+    """What `set_dropped` did, for a caller to render however it likes."""
+    student: "Student"
+    changed: bool
+    dropped: bool
+    seats_emptied: int = 0
+    seating_checked: bool = False
+
+
+def set_dropped(roster_path, who, dropped, seating_path=None):
+    """Flag a student dropped, or undo it. Empties their seat on the way out.
+
+    The roster keeps them, because the print record refers to them. The
+    seating chart loses them, because the chart is the print list and that is
+    what actually stops the printing. The seat is emptied rather than removed:
+    version letters come from position, so deleting the entry would re-letter
+    that student's tablemates.
+
+    Raises RosterError for a name that matches nothing or several people.
+    Returns a DropResult; it never prints, so the CLI and the GUI can share it.
+    """
+    from . import seating as seating_mod
+
+    people = load(roster_path)
+    student = find(people, who)
+
+    if student.dropped == dropped:
+        return DropResult(student=student, changed=False, dropped=dropped)
+
+    student.dropped = dropped
+    student.dropped_by = "instructor" if dropped else ""
+    with open(roster_path, "w", encoding="utf-8") as f:
+        f.write(to_toml(people, "checkit-printit roster drop"))
+
+    result = DropResult(student=student, changed=True, dropped=dropped)
+
+    if dropped and seating_path and os.path.isfile(seating_path):
+        result.seating_checked = True
+        with open(seating_path, encoding="utf-8") as f:
+            text = f.read()
+        new, count = seating_mod.blank_seat(text, student.name)
+        result.seats_emptied = count
+        if count:
+            with open(seating_path, "w", encoding="utf-8") as f:
+                f.write(new)
+    return result
 
 
 # ---------------------------------------------------------------------------
