@@ -1,5 +1,6 @@
 """checkit-printit — turn a bank and a roster into a printable class set."""
 
+import dataclasses
 import os
 import random
 import sys
@@ -12,6 +13,7 @@ from . import clasp as clasp_mod
 from . import classlist as classlist_mod
 from . import form as form_mod
 from . import record as record_mod
+from . import responses as responses_mod
 from . import course as course_mod
 from . import manifest as manifest_mod
 from .assemble import assemble, AssemblyError
@@ -442,6 +444,115 @@ def form_connect(space, url):
     form_mod.save(path, conn)
     click.echo(f"next: `checkit-printit form map -c {space!r}` to say which "
                f"item is which")
+
+
+@form.command(name="pull")
+@click.option("-c", "--course", "space", required=True)
+@click.option("--dry-run", is_flag=True,
+              help="Report what was found, and write nothing.")
+@click.option("--force", is_flag=True,
+              help="Write the roster even when some responses could not be "
+                   "placed.")
+def form_pull(space, dry_run, force):
+    """Read this assessment's responses into the roster.
+
+    Scoped by the date each student confirmed, not by a time window: a form
+    accumulates responses all term, and the confirmation checkbox is what
+    says which assessment an answer is for. Where a student answered twice,
+    the later answer wins.
+    """
+    path = _space_path(space)
+    conn = form_mod.load(path)
+    try:
+        av = availability_mod.load(course_mod.file_in(space, "availability"))
+    except availability_mod.AvailabilityError as exc:
+        raise click.ClickException(str(exc))
+
+    roster_path = course_mod.file_in(space, "roster")
+    if not os.path.isfile(roster_path):
+        raise click.ClickException(
+            f"{roster_path} does not exist, so there is nobody to match "
+            f"responses to. Import a class list first.")
+    try:
+        people = roster_mod.load(roster_path)
+    except (OSError, roster_mod.RosterError) as exc:
+        raise click.ClickException(str(exc))
+
+    try:
+        answer = form_mod.call(conn, "responses")
+    except form_mod.FormError as exc:
+        raise click.ClickException(str(exc))
+    raw = answer.get("responses") or []
+    click.echo(f"the form holds {len(raw)} response(s)")
+
+    bank = _bank_for(space)
+    known = tuple(bank.slugs()) if bank is not None else tuple(av.skills)
+    if bank is None:
+        click.echo("(no bank configured, so only the open skills are "
+                   "recognised)")
+
+    try:
+        pulled = responses_mod.collect(raw, people, conn.items, av.date, known)
+    except responses_mod.ResponseError as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(f"for {av.name or 'this assessment'} on "
+               f"{availability_mod.spoken_date(av.date) or av.date}:")
+    click.echo(f"  {pulled.answered} student(s) answered")
+    for key, (student, picked) in sorted(
+            pulled.by_student.items(), key=lambda kv: kv[1][0].name.lower()):
+        click.echo(f"    {student.name:28} {', '.join(picked) or '(nothing)'}")
+
+    if pulled.silent:
+        click.echo(f"  {len(pulled.silent)} did not answer; they will get "
+                   f"[selection] default_when_missing")
+
+    # Everything below is a reason a student might not get the paper they
+    # asked for, so none of it is allowed to be quiet.
+    trouble = False
+    if pulled.unknown_emails:
+        trouble = True
+        click.echo(f"  ! {len(pulled.unknown_emails)} response(s) from an "
+                   f"address nobody on the roster has:")
+        for address in pulled.unknown_emails:
+            click.echo(f"      {address}")
+        click.echo("    add the address to that student with "
+                   "`roster import`, or check for a typo.")
+    if pulled.unrecognised:
+        trouble = True
+        click.echo(f"  ! {len(pulled.unrecognised)} answer(s) name a skill "
+                   f"the bank does not have:")
+        for address, option in pulled.unrecognised:
+            click.echo(f"      {address}: {option[:60]}")
+    if pulled.unconfirmed:
+        click.echo(f"  {pulled.unconfirmed} response(s) confirmed no date, "
+                   f"so they belong to no assessment")
+    if pulled.out_of_scope:
+        click.echo(f"  {pulled.out_of_scope} response(s) are for another day")
+    if pulled.superseded:
+        click.echo(f"  {pulled.superseded} response(s) superseded by a later "
+                   f"one from the same student")
+
+    if dry_run:
+        click.echo("\ndry run -- the roster was not written.")
+        return
+    if trouble and not force:
+        raise click.ClickException(
+            "some responses could not be placed, so the roster was not "
+            "written. Fix them, or pass --force to write the rest.")
+
+    updated = []
+    for student in people:
+        key = student.sid or student.alt_id or student.email or student.name
+        if key in pulled.chosen:
+            updated.append(dataclasses.replace(
+                student, skills=list(pulled.chosen[key])))
+        else:
+            updated.append(student)
+    with open(roster_path, "w", encoding="utf-8") as f:
+        f.write(roster_mod.to_toml(roster_mod.Roster(updated)))
+    click.echo(f"\nwrote {roster_path}")
+    click.echo("next: build the job that names this course.")
 
 
 @form.command(name="map")
