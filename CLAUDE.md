@@ -128,6 +128,7 @@ that outlives one print job.
 | `form map` | `-c`. Say which existing item is which |
 | `form add-items` | `-c`. Create only the ones missing |
 | `form push` | `-c`, `--dry-run` |
+| `form pull` | `-c`, `--dry-run`, `--force`. Responses into the roster |
 | `form setup` / `form connect --url` | the manual path, for when clasp is not an option |
 
 `tools/verify_run.py <job> <out> [--against DIR]` checks a finished run
@@ -245,7 +246,7 @@ student sees.
 
 ## Where things stand
 
-Stages 1-6c are built. **7a ran against a real Google account on
+Stages 1-7b are built. **7a ran against a real Google account on
 2026-09-21 and works**: attach, add-items, dry-run and push all write the
 four slots. Seven bugs were found doing it, none of them the predicted ones.
 Read "Stage 7a, against a real Google account" in `../checkit/CODEBASE_NOTES.md`
@@ -270,5 +271,16 @@ Four of those are worth carrying in your head:
 authorize the script before any call works. The editor's deploy flow does
 this automatically and clasp's does not.
 
-Next: finish that, then 7b (pull responses), 8 (the seating GUI), 9 (the
-gradebook). The full plan is `../checkit/PRINT_TOOL_DESIGN.md` section 12.
+**7b (`form pull`) has never read a real response.** The scratch form holds
+none, so the op has only been exercised returning an empty list. Unknown: the
+exact shape of a checkbox answer (an array is assumed, a bare string
+tolerated) and whether `getRespondentEmail()` is populated on this domain.
+One test submission settles both.
+
+Responses are scoped **by the date the student confirmed**, not by a time
+window -- the confirmation checkbox is the scoping key. Latest response per
+student wins, and matching is by address through `all_emails()`, never by
+name.
+
+Next: 8 (the seating GUI, with the cold-call system), 9 (the gradebook). The
+full plan is `../checkit/PRINT_TOOL_DESIGN.md` section 12.
