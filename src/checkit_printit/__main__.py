@@ -183,6 +183,19 @@ def _ensure_login():
         raise click.ClickException(str(exc))
 
 
+def _report_identity(conn, answer):
+    """Record which form we reached, and say where it is.
+
+    `ping` is the only thing that knows: the script id cannot be turned into
+    a form URL. This lived inline in two places, and patching one of them
+    left `form attach` unchanged while appearing to fix it.
+    """
+    conn.form_id = answer.get("formId", "") or conn.form_id
+    click.echo(f"  connected to {answer.get('form', '')!r}")
+    if answer.get("editUrl"):
+        click.echo(f"  {answer['editUrl']}")
+
+
 def _deploy_and_record(space, directory, conn, rename_to=""):
     click.echo("pushing the script...")
     clasp_mod.push(directory)
@@ -198,7 +211,7 @@ def _deploy_and_record(space, directory, conn, rename_to=""):
         # clasp's --title named the script project; the form itself is still
         # untitled. Only at creation -- a push must never touch the title.
         answer = form_mod.call(conn, "rename", {"title": rename_to})
-    click.echo(f"  connected to {answer.get('form', '')!r}")
+    _report_identity(conn, answer)
 
     click.echo("creating the items printit writes to...")
     made = form_mod.call(conn, "addItems",
@@ -238,8 +251,8 @@ def form_create(space, title, folder):
 
     click.echo(f"creating the form {title!r}...")
     try:
-        conn.form_id = clasp_mod.create_form(title, directory, folder)
-        click.echo(f"  script {conn.form_id}")
+        conn.script_id = clasp_mod.create_form(title, directory, folder)
+        click.echo(f"  script {conn.script_id}")
         _deploy_and_record(space, directory, conn,
                            rename_to=title)
     except (clasp_mod.ClaspError, form_mod.FormError) as exc:
@@ -276,7 +289,7 @@ def form_attach(space, script_id):
     try:
         clasp_mod.clone(script_id, directory)
         _stage_script(space, conn.secret)      # our files, over the fetched ones
-        conn.form_id = script_id
+        conn.script_id = script_id
         click.echo("pushing the script...")
         clasp_mod.push(directory)
         click.echo("deploying it as a web app...")
@@ -286,8 +299,8 @@ def form_attach(space, script_id):
     except (clasp_mod.ClaspError, form_mod.FormError) as exc:
         raise click.ClickException(str(exc))
 
+    _report_identity(conn, answer)
     form_mod.save(path, conn)
-    click.echo(f"  connected to {answer.get('form', '')!r}")
     click.echo("")
     click.echo("nothing on the form was changed. Next:")
     click.echo(f"  checkit-printit form map -c {space!r}")

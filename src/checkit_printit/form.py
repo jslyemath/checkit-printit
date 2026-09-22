@@ -51,6 +51,10 @@ class FormError(Exception):
 class Connection:
     url: str = ""
     secret: str = ""
+    #: The bound script. A separate Drive file from the form: a URL built
+    #: from this id 404s, which is why `form_id` exists too.
+    script_id: str = ""
+    #: The form itself, learned from `ping`. What an edit URL is built from.
     form_id: str = ""
     items: dict = dataclasses.field(default_factory=dict)
 
@@ -95,7 +99,9 @@ def load(course_path):
         with open(config, "rb") as f:
             raw = tomllib.load(f)
         block = raw.get("form", {})
-        conn.form_id = str(block.get("id", "")).strip()
+        conn.script_id = str(block.get("script_id",
+                                       block.get("id", ""))).strip()
+        conn.form_id = str(block.get("form_id", "")).strip()
         conn.items = {k: str(v).strip()
                       for k, v in (raw.get("items") or {}).items()
                       if str(v).strip()}
@@ -118,7 +124,10 @@ def _quote(value):
 def save(course_path, conn):
     config = os.path.join(course_path, FILENAME)
     lines = [
-        "# Which form, and which item in it holds each thing printit writes.",
+        "# Which script, which form, and which item holds each thing printit",
+        "# writes. `script_id` is the bound script, a separate Drive file",
+        "# from the form -- a form URL cannot be built from it, which is",
+        "# why `form_id` is recorded too, learned from the script itself.",
         "#",
         "# Ids, not positions: responses are stored against a question's id,",
         "# so the skill question has to keep its own while its options change",
@@ -129,7 +138,8 @@ def save(course_path, conn):
         "# and live in secrets/.",
         "",
         "[form]",
-        f"id = {_quote(conn.form_id)}",
+        f"script_id = {_quote(conn.script_id)}",
+        f"form_id   = {_quote(conn.form_id)}",
         "",
         "[items]",
     ]
