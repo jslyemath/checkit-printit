@@ -63,6 +63,8 @@ function doPost(e) {
         // by push: the form's title belongs to the instructor.
         FormApp.getActiveForm().setTitle(String(body.payload.title || ''));
         return json_(identity_());
+      case 'configure':
+        return json_(configure_(body.payload || {}));
       case 'describe':
         return json_({ok: true, items: describe_()});
       case 'push':
@@ -126,6 +128,81 @@ function identity_() {
     editUrl: form.getEditUrl(),
     liveUrl: form.getPublishedUrl()
   };
+}
+
+
+/**
+ * Form-level settings for a form printit just made.
+ *
+ * Called only by `form create`. Never by push or attach: an existing form's
+ * settings are the instructor's, like its banner and its title.
+ */
+function configure_(payload) {
+  var form = FormApp.getActiveForm();
+  var did = [];
+  var skipped = [];
+
+  if (payload.requireLogin) {
+    // Restricts the responder view to the owner's organization. Throws on a
+    // consumer account, where Google does not offer the option at all, so a
+    // failure here is reported and not fatal -- printit has other users.
+    try {
+      form.setRequireLogin(true);
+      did.push('restricted to the organization');
+    } catch (err) {
+      skipped.push('could not restrict to the organization: ' + String(err));
+    }
+  }
+
+  if (payload.removeDefaultQuestion) {
+    // A new Google Form ships with one empty multiple-choice question called
+    // "Untitled Question". Removed only while it still looks untouched: the
+    // stock title, no help text, and no real choices. Anything the
+    // instructor has edited fails one of those and is left alone.
+    var keep = payload.keep || {};
+    var ours = {};
+    Object.keys(keep).forEach(function (k) { ours[String(keep[k])] = true; });
+
+    form.getItems().forEach(function (item) {
+      if (ours[String(item.getId())]) { return; }
+      if (item.getTitle() !== 'Untitled Question') { return; }
+
+      // Past this point it is titled like the placeholder, so anything that
+      // stops the removal gets said out loud. A guard that declines in
+      // silence is indistinguishable from one that never ran.
+      var why = null;
+      if (item.getHelpText()) {
+        why = 'it has help text';
+      } else if (item.getType() !== FormApp.ItemType.MULTIPLE_CHOICE) {
+        why = 'it is a ' + item.getType();
+      } else {
+        // Google's placeholder carries one choice, and it is not blank --
+        // it reads "Option 1". Requiring blank kept the very item this
+        // exists to delete.
+        var values = item.asMultipleChoiceItem().getChoices()
+            .map(function (c) { return c.getValue(); });
+        var stock = values.every(function (v) {
+          return !v || /^Option \d+$/.test(v);
+        });
+        if (!stock) {
+          why = 'its choices have been edited: ' + values.join(', ');
+        }
+      }
+
+      if (why) {
+        skipped.push('kept "Untitled Question" (id ' + item.getId() +
+                     ') because ' + why);
+        return;
+      }
+      form.deleteItem(item);
+      did.push('removed the default "Untitled Question"');
+    });
+  }
+
+  var out = identity_();
+  out.did = did;
+  out.skipped = skipped;
+  return out;
 }
 
 
