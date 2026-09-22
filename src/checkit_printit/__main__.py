@@ -550,7 +550,8 @@ def form_pull(space, dry_run, force):
         else:
             updated.append(student)
     with open(roster_path, "w", encoding="utf-8") as f:
-        f.write(roster_mod.to_toml(roster_mod.Roster(updated)))
+        f.write(roster_mod.to_toml(roster_mod.Roster(updated),
+                                   "checkit-printit form pull"))
     click.echo(f"\nwrote {roster_path}")
     click.echo("next: build the job that names this course.")
 
@@ -989,7 +990,7 @@ def roster_import(class_list, out, section, covers, seating_path, dry_run):
         click.echo("\ndry run -- nothing was written.")
         return
     with open(out, "w", encoding="utf-8") as f:
-        f.write(roster_mod.to_toml(merged))
+        f.write(roster_mod.to_toml(merged, "checkit-printit roster import"))
     click.echo(f"\nwrote {out}")
 
     # Dropping empties the seat, whoever initiated it. Leaving that to the
@@ -1054,7 +1055,7 @@ def _set_dropped(who, roster_path, seating_path, dropped):
     student.dropped = dropped
     student.dropped_by = "instructor" if dropped else ""
     with open(roster_path, "w", encoding="utf-8") as f:
-        f.write(roster_mod.to_toml(people))
+        f.write(roster_mod.to_toml(people, "checkit-printit roster drop"))
     click.echo(f"{'dropped' if dropped else 'restored'} {student.name}"
                f"  ({roster_path})")
 
@@ -1086,7 +1087,7 @@ def import_csv(csv_path, out):
     except roster_mod.RosterError as exc:
         raise click.ClickException(str(exc))
     with open(out, "w", encoding="utf-8") as f:
-        f.write(roster_mod.to_toml(roster))
+        f.write(roster_mod.to_toml(roster, "checkit-printit roster restore"))
     click.echo(f"wrote {out}: {len(roster)} students, "
                f"{len(roster.skills_used())} distinct skills")
     click.echo("Read it before printing from it.")
