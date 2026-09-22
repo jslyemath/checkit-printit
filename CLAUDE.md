@@ -70,6 +70,19 @@ same `--seed`. Checking the preview's seeds proves nothing about the build's.
 pushed the design somewhere worse. The browser loopback flow works; what was
 missing was an OAuth *client*, a different problem with a different answer.
 
+### A fix applied to one path is not applied to the others
+
+Three times in one day. The `workspace`->`course` rename replaced `"-w"` in
+option definitions but not ` -w ` in message strings, nor `` `-w` `` in the
+CLI table. `form attach` carries its own copy of deploy/ping/echo, so a fix
+to `_deploy_and_record` left it unchanged while appearing to work. And
+`form connect`, the hand-deployment path, missed every improvement the clasp
+path got.
+
+**When a change to shared behaviour does not show up, ask "is there a second
+copy", not "did it deploy".** Both times that question was asked late, the
+deployment was fine.
+
 ### A change with reasoning gets a dated section in the notes
 
 `../checkit/CODEBASE_NOTES.md`, a `##` heading with today's date. The commit
@@ -106,20 +119,27 @@ that outlives one print job.
 | `course init NAME` | `-b BANK`, `--adopt JOBDIR` |
 | `roster import FILE` | `-o`, `--section`, `--covers`, `-s/--seating`, `--dry-run` |
 | `roster drop WHO` / `roster restore WHO` | `-r`, `-s` |
-| `skills open SLUGS…` | `-w`, `--add` |
-| `skills set` | `-w`, `--name`, `--date`, `--due`, `--choose`, `--limit` |
-| `skills preview` | `-w`. Changes nothing; `open` is the verb |
-| `record runs` / `record student WHO` / `record skills` | `-w` |
-| `form create` | `-w`, `--title`, `--folder`. New form, script, deploy, items, ids |
-| `form attach --script-id ID` | `-w`. Same wiring for an existing form, changing nothing on it |
-| `form map` | `-w`. Say which existing item is which |
-| `form add-items` | `-w`. Create only the ones missing |
-| `form push` | `-w`, `--dry-run` |
+| `skills open SLUGS…` | `-c`, `--add` |
+| `skills set` | `-c`, `--name`, `--date`, `--due`, `--choose`, `--limit` |
+| `skills preview` | `-c`. Changes nothing; `open` is the verb |
+| `record runs` / `record student WHO` / `record skills` | `-c` |
+| `form create` | `-c`, `--title`, `--folder`. New form, script, deploy, items, ids |
+| `form attach --script-id ID` | `-c`. Same wiring for an existing form, changing nothing on it |
+| `form map` | `-c`. Say which existing item is which |
+| `form add-items` | `-c`. Create only the ones missing |
+| `form push` | `-c`, `--dry-run` |
 | `form setup` / `form connect --url` | the manual path, for when clasp is not an option |
 
 `tools/verify_run.py <job> <out> [--against DIR]` checks a finished run
 against the job that asked for it. **A check that examined nothing fails** --
 that rule is the point of the file.
+
+`tools/audit.py` checks the tool against itself: stale flags and renamed
+commands, commands named in messages or docs that do not exist, options that
+are not real, duplicated call sites, dead parameters, and whether all 21
+commands parse. It derives the real CLI by running `--help`, so it cannot go
+stale the way a hand-written table does. **Run it after any rename or any new
+command.**
 
 ## The course
 

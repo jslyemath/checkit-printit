@@ -15,6 +15,7 @@ import pytest
 
 from checkit_printit import assemble as assemble_mod
 from checkit_printit import manifest as manifest_mod
+import checkit_printit.__main__ as main_mod
 from checkit_printit import compile as compile_mod
 from checkit_printit import publication as pub_mod
 from checkit_printit import roster as roster_mod
@@ -1060,3 +1061,28 @@ class TestVersionsAreDistinct:
         with pytest.raises(assemble_mod.AssemblyError, match="distinct"):
             assemble_mod.choose_seeds(
                 bank, too_many, self.publication(bank_dir), random.Random(0))
+
+class TestTheRunSeed:
+    """A replay must not invent a seed.
+
+    Replaying the 2026-09-21 run reproduced all twelve files byte for byte
+    and wrote `seed = 65131431` -- a number that had chosen nothing. Passing
+    it to `--seed` would give different papers, and record.db, where it also
+    landed, outlives the output folder.
+    """
+
+    def test_a_plain_run_uses_the_seed_it_was_given(self):
+        assert main_mod._choose_run_seed(None, 4242) == 4242
+
+    def test_a_plain_run_with_no_seed_draws_one(self):
+        a = main_mod._choose_run_seed(None, None)
+        assert isinstance(a, int) and a >= 0
+
+    def test_a_replay_carries_the_replayed_run_s_seed(self):
+        record = {"run": {"seed": 258981610}, "paper": [{}]}
+        assert main_mod._choose_run_seed(record, None) == 258981610
+
+    def test_a_replay_ignores_an_explicit_seed_too(self):
+        """--seed says which draw to repeat, and a replay does not draw."""
+        record = {"run": {"seed": 258981610}, "paper": [{}]}
+        assert main_mod._choose_run_seed(record, 999) == 258981610

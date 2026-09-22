@@ -340,6 +340,9 @@ def form_attach(space, script_id):
 
     if not conn.secret:
         conn.secret = form_mod.new_secret()
+    # Before the clone, so the directory exists for clasp to fetch into;
+    # again afterwards, because the clone brings the remote's files down on
+    # top of ours.
     directory = _stage_script(space, conn.secret)
 
     click.echo("fetching the existing script...")
@@ -431,13 +434,14 @@ def form_connect(space, url):
         raise click.ClickException(
             "no secret yet -- run `checkit-printit form setup` first.")
     conn.url = url.strip()
-    try:
-        answer = form_mod.call(conn, "ping")
-    except form_mod.FormError as exc:
-        raise click.ClickException(str(exc))
+    # The same path the clasp commands take: a hand-deployed web app needs
+    # authorizing exactly as much as one clasp deployed, and the form id is
+    # only knowable by asking the script.
+    answer = _ping_authorized(conn)
+    _report_identity(conn, answer)
     form_mod.save(path, conn)
-    click.echo(f"connected to the form {answer.get('form', '')!r}")
-    click.echo("next: `checkit-printit form map` to say which item is which")
+    click.echo(f"next: `checkit-printit form map -c {space!r}` to say which "
+               f"item is which")
 
 
 @form.command(name="map")
@@ -1068,7 +1072,7 @@ def build(pub_path, out, do_compile, seed, preview, replay):
     # Every run has a seed now, generated when one is not given, so the draw
     # can be repeated afterwards. Without it a --preview can never be carried
     # into the build it previewed, and yesterday's set is unrecoverable.
-    run_seed = seed if seed is not None else random.randrange(2**31)
+    run_seed = _choose_run_seed(record, seed)
     rng = random.Random(run_seed)
 
     if preview:
@@ -1080,7 +1084,8 @@ def build(pub_path, out, do_compile, seed, preview, replay):
     except (AssemblyError, BankError) as exc:
         raise click.ClickException(str(exc))
 
-    _report(report, out, theme_origin, publication, run_seed)
+    _report(report, out, theme_origin, publication, run_seed,
+            replayed=record is not None)
 
     if preview:
         click.echo("\npreview only -- nothing was written.")
@@ -1134,11 +1139,34 @@ def _record_run(publication, report, out, run_seed):
                    f"but not attributed")
 
 
-def _report(report, out, theme_origin, publication, run_seed):
+def _choose_run_seed(record, seed):
+    """Which number goes in the manifest and the print record.
+
+    A replay draws nothing -- every version comes from the manifest -- so it
+    must not invent one. Carrying the replayed run's keeps both files honest:
+    a fresh number would be written having chosen nothing, and anyone who
+    later passed it to `--seed` would get different papers. `record.db`
+    outlives the folder, so the lie would outlive it too.
+    """
+    if record is not None:
+        return int(record.get("run", {}).get("seed", 0))
+    if seed is not None:
+        return seed
+    return random.randrange(2**31)
+
+
+def _report(report, out, theme_origin, publication, run_seed, replayed=False):
     click.echo(f"bank    {publication.bank_path}")
     click.echo(f"theme   {theme_origin}")
     click.echo(f"out     {out}")
-    click.echo(f"seed    {run_seed}   (repeat this draw with --seed {run_seed})")
+    if replayed:
+        # Not "repeat this draw with --seed": nothing was drawn, and the
+        # versions came from the manifest rather than from this number.
+        click.echo(f"seed    {run_seed}   (carried from the run being "
+                   f"replayed; it drew nothing here)")
+    else:
+        click.echo(f"seed    {run_seed}   (repeat this draw with "
+                   f"--seed {run_seed})")
     click.echo("")
     click.echo(f"  students {report['students']}")
     if report["extras"]:
