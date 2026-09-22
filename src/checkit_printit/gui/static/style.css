@@ -128,7 +128,11 @@ button.link {
 button.link:hover { color: var(--ink); }
 
 table {
-  width: 100%;
+  /* `auto`, not 100%: the widths come from a <colgroup> that app.js sizes to
+     the content, so the table is as wide as it needs to be and no wider. A
+     stretched table made Nickname and Section as wide as Email. */
+  width: auto;
+  table-layout: fixed;
   border-collapse: collapse;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -200,7 +204,10 @@ th button.sort.sorted { color: var(--accent); }
    column instead, which shifted every heading after it one place left --
    silently dropping a column is worse than a scrollbar. */
 .scroller { overflow-x: auto; }
-.scroller table { min-width: 720px; }
+
+/* Columns are capped, so a long email is clipped rather than allowed to take
+   over the table. The whole value is still in the cell's tooltip. */
+th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 720px) {
   main { padding: 16px; }

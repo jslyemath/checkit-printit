@@ -21,15 +21,19 @@ const VIEWS = [
 // used to be two lists that could drift, and did: a rule hid the SID cell on
 // a narrow window but not its heading, so every column after it read one
 // place to the left.
+// `min` and `max` are the column's width in pixels. Content decides the width
+// between them: an <input> reports its own default width (about twenty
+// characters) whatever it contains, so a column of short nicknames comes out
+// as wide as a column of long emails unless the values are measured.
 const COLUMNS = [
-  { key: "name",      label: "Name",     edit: true },
-  { key: "preferred", label: "Nickname", edit: true },
-  { key: "section",   label: "Section",  edit: true },
-  { key: "email",     label: "Email",    edit: true },
-  { key: "sid",       label: "SID",      cls: "ro",
+  { key: "name",      label: "Name",     edit: true, min: 110, max: 260 },
+  { key: "preferred", label: "Nickname", edit: true, min: 80,  max: 170 },
+  { key: "section",   label: "Section",  edit: true, min: 64,  max: 110 },
+  { key: "email",     label: "Email",    edit: true, min: 130, max: 300 },
+  { key: "sid",       label: "SID",      cls: "ro",  min: 72,  max: 140,
     text: s => s.sid || s.alt_id || "—",
     value: s => s.sid || s.alt_id || "" },
-  { key: "_actions",  label: "",         sortable: false },
+  { key: "_actions",  label: "",         sortable: false, min: 64, max: 64 },
 ];
 
 let students = [];
@@ -156,6 +160,47 @@ function sortBy(key) {
   renderRoster();
 }
 
+// Text measurement, for sizing columns to what is actually in them.
+let ruler = null;
+function textWidth(text, font) {
+  if (!ruler) ruler = document.createElement("canvas").getContext("2d");
+  ruler.font = font;
+  return ruler.measureText(String(text)).width;
+}
+
+const CELL_PADDING = 16 + 14;   // td padding, plus the input's own border/pad
+
+function sizeColumns(rows) {
+  const table = document.getElementById("roster");
+  const probe = table.querySelector("tbody td") || table.querySelector("th");
+  if (!probe) return;
+  const style = getComputedStyle(probe);
+  const bodyFont = `${style.fontSize} ${style.fontFamily}`;
+  const headStyle = getComputedStyle(table.querySelector("th"));
+  // Headings are smaller but letter-spaced and upper-cased, so they are
+  // measured with their own font and a little slack for the sort arrow.
+  const headFont = `${headStyle.fontWeight} ${headStyle.fontSize} ${headStyle.fontFamily}`;
+
+  let group = table.querySelector("colgroup");
+  if (group) group.remove();
+  group = document.createElement("colgroup");
+
+  for (const column of COLUMNS) {
+    let widest = textWidth(column.label.toUpperCase(), headFont) + 18;
+    for (const student of rows) {
+      const value = column.value ? column.value(student)
+                  : column.text ? column.text(student)
+                  : (student[column.key] || "");
+      widest = Math.max(widest, textWidth(value, bodyFont) + CELL_PADDING);
+    }
+    const col = document.createElement("col");
+    col.style.width =
+      Math.round(Math.min(column.max, Math.max(column.min, widest))) + "px";
+    group.appendChild(col);
+  }
+  table.insertBefore(group, table.firstChild);
+}
+
 function renderHeader() {
   const row = document.querySelector("#roster thead tr");
   row.textContent = "";
@@ -210,15 +255,24 @@ function renderRoster() {
         td.appendChild(b);
       } else if (column.edit) {
         td.classList.add("cell-" + column.key);
-        td.appendChild(cellInput(student, column.key));
+        const input = cellInput(student, column.key);
+        // Clamped columns clip. The full value is a hover away rather than
+        // gone, which matters most for an email.
+        input.title = student[column.key] || "";
+        td.appendChild(input);
       } else {
-        td.textContent = column.text ? column.text(student)
-                                     : (student[column.key] || "—");
+        const value = column.text ? column.text(student)
+                                  : (student[column.key] || "—");
+        td.textContent = value;
+        td.title = value;
       }
       tr.appendChild(td);
     }
     body.appendChild(tr);
   }
+
+  // After the rows exist, so the measurements use the real fonts.
+  sizeColumns(shown);
 
   const empty = document.getElementById("roster-empty");
   empty.hidden = shown.length > 0;
