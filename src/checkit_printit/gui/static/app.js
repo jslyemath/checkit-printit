@@ -25,15 +25,20 @@ const VIEWS = [
 // between them: an <input> reports its own default width (about twenty
 // characters) whatever it contains, so a column of short nicknames comes out
 // as wide as a column of long emails unless the values are measured.
+// Minimums measured against the real MAT 106 roster rather than guessed: the
+// longest name there is 22 characters (~167px in this font) and the longest
+// address 19. A minimum below that clips the common case, which is what the
+// first pass did -- it was set from a two-row scratch roster whose longest
+// name was "Test Student".
 const COLUMNS = [
-  { key: "name",      label: "Name",     edit: true, min: 110, max: 260 },
-  { key: "preferred", label: "Nickname", edit: true, min: 80,  max: 170 },
-  { key: "section",   label: "Section",  edit: true, min: 64,  max: 110 },
-  { key: "email",     label: "Email",    edit: true, min: 130, max: 300 },
-  { key: "sid",       label: "SID",      cls: "ro",  min: 72,  max: 140,
+  { key: "name",      label: "Name",     edit: true, min: 200, max: 330 },
+  { key: "preferred", label: "Nickname", edit: true, min: 130, max: 210 },
+  { key: "section",   label: "Section",  edit: true, min: 74,  max: 110 },
+  { key: "email",     label: "Email",    edit: true, min: 215, max: 340 },
+  { key: "sid",       label: "SID",      cls: "ro",  min: 86,  max: 140,
     text: s => s.sid || s.alt_id || "—",
     value: s => s.sid || s.alt_id || "" },
-  { key: "_actions",  label: "",         sortable: false, min: 64, max: 64 },
+  { key: "_actions",  label: "",         sortable: false, min: 70, max: 70 },
 ];
 
 let students = [];
