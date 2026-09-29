@@ -30,6 +30,16 @@ Always `Write` the script to the scratchpad, then run it. And put
 `assert old in text` in it, so a missed match writes nothing rather than
 writing the wrong thing.
 
+### Replace by anchor, never by index
+
+Slicing `app.js` between two `str.index` positions removed a function that
+had been added between them an hour earlier, and the tab loaded with an empty
+preview. The patch script was correct about both ends and wrong about what
+lay in the middle.
+
+An anchored `text.replace(old, new)` with `assert text.count(old) == 1`
+cannot do this. Index slicing has no way to notice.
+
 ### `command | tail` reports tail's exit code, not the command's
 
 A failed build reads as success. Redirect to a file, check `$?` on its own
