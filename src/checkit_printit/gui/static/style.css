@@ -203,6 +203,11 @@ th button.sort.sorted { color: var(--accent); }
 th button.sort.sorted { opacity: .75; }
 th button.sort.primary-sort { opacity: 1; font-weight: 700; }
 
+/* The reset sits over the drop column's empty heading, pushed right so
+   it does not read as a label for the links beneath it. */
+th.actions-head { text-align: right; }
+th.actions-head button.link { text-transform: none; letter-spacing: 0; }
+
 /* A narrow window scrolls the table sideways. It used to hide the SID
    column instead, which shifted every heading after it one place left --
    silently dropping a column is worse than a scrollbar. */
