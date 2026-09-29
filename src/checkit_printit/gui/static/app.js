@@ -9,7 +9,7 @@ const TOKEN = window.PRINTIT_TOKEN;
 const VIEWS = [
   { id: "overview", label: "Overview" },
   { id: "roster", label: "Roster" },
-  { id: "skills", label: "Skills" },
+  { id: "form", label: "Update form" },
   { id: "responses", label: "Responses", soon: "Who answered and what they chose, pulled into the roster. Today: `form pull`." },
   { id: "print", label: "Print job", soon: "Skills, per-skill variants, extras and keys, then build. Today: a job folder and `build`." },
   { id: "record", label: "Record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
@@ -124,7 +124,7 @@ function show(id) {
     // Loaded the first time it is opened rather than at boot: the Skills
     // view reads the bank, and a course with no bank should still show a
     // roster without waiting for one.
-    if (id === "skills" && skills === null) loadSkills();
+    if (id === "form" && skills === null) loadSkills();
   }
   location.hash = id;
 }
@@ -456,15 +456,26 @@ function assessmentInputs() {
 
 function readAssessment() {
   const f = assessmentInputs();
+  const unlimited = f.limit.value === ANY;
   return {
     name: f.name.value,
     date: f.date.value,
     // The browser's datetime-local gives "2026-10-01T23:59"; the file wants
     // seconds, and as_datetime accepts either.
     due: f.due.value,
-    choose: Number(f.choose.value || 0),
-    limit: f.limit.value,
+    // Zero is how the file says "as many as they like"; the dropdown says it
+    // in words and the count disappears.
+    choose: unlimited ? 0 : Number(f.choose.value || 1),
+    limit: unlimited ? (skills ? skills.assessment.limit : "at most")
+                     : f.limit.value,
   };
+}
+
+function syncLimitControls() {
+  const f = assessmentInputs();
+  const unlimited = f.limit.value === ANY;
+  document.getElementById("choose-wrap").hidden = unlimited;
+  if (!unlimited && Number(f.choose.value || 0) < 1) f.choose.value = 1;
 }
 
 function sameMinute(a, b) {
@@ -498,29 +509,71 @@ function refreshSkillsDirty() {
     `— ${openNow.size} of ${skills ? skills.skills.length : 0}`;
 }
 
+// "any number" is a choice in the dropdown rather than a zero typed into
+// the count. The file still stores choose = 0 for it -- that is the format
+// and the retired script's convention -- but nobody has to know that to use
+// the form.
+const ANY = "any number";
+
+function fakeCheckbox() {
+  /* Not a real input: it must look like the form without inviting a click
+     that would do nothing. */
+  const box = document.createElement("span");
+  box.className = "fauxbox";
+  box.setAttribute("aria-hidden", "true");
+  return box;
+}
+
+function card(title) {
+  const d = document.createElement("div");
+  d.className = "fcard";
+  if (title) {
+    const h = document.createElement("div");
+    h.className = "fcard-title";
+    h.textContent = title;
+    d.appendChild(h);
+  }
+  return d;
+}
+
 function renderWording(w) {
   const box = document.getElementById("wording");
   box.textContent = "";
-  const line = (text, cls) => {
+
+  const text = (parent, s, cls) => {
     const p = document.createElement("p");
-    p.className = "wline " + (cls || "");
-    p.textContent = text;
-    box.appendChild(p);
+    p.className = "fcard-text " + (cls || "");
+    p.textContent = s;
+    parent.appendChild(p);
+    return p;
   };
-  line(w.selecting_for);
-  line(w.confirm_date, "check");
-  line(w.due_notice);
-  line(w.question_title, "qtitle");
-  if (w.question_help) line(w.question_help, "muted");
-  const ul = document.createElement("ul");
-  ul.className = "choices";
-  for (const c of w.choices) {
-    const li = document.createElement("li");
-    li.textContent = c;
-    ul.appendChild(li);
+
+  // One card per item, as a Google Form stacks them.
+  const one = card();
+  text(one, w.selecting_for);
+  box.appendChild(one);
+
+  const two = card();
+  const row = document.createElement("label");
+  row.className = "fopt";
+  row.append(fakeCheckbox(), document.createTextNode(w.confirm_date));
+  two.appendChild(row);
+  box.appendChild(two);
+
+  const three = card();
+  text(three, w.due_notice);
+  box.appendChild(three);
+
+  const four = card(w.question_title);
+  if (w.question_help) text(four, w.question_help, "muted");
+  for (const choice of w.choices) {
+    const opt = document.createElement("label");
+    opt.className = "fopt";
+    opt.append(fakeCheckbox(), document.createTextNode(choice));
+    four.appendChild(opt);
   }
-  box.appendChild(ul);
-  line(w.validation.help || "(no limit)", "muted");
+  if (w.validation.help) text(four, w.validation.help, "muted rule");
+  box.appendChild(four);
 }
 
 async function refreshPreview() {
@@ -570,7 +623,7 @@ function fillAssessment() {
   const f = assessmentInputs();
   const a = skills.assessment;
   f.limit.textContent = "";
-  for (const option of skills.limits) {
+  for (const option of [...skills.limits, ANY]) {
     const o = document.createElement("option");
     o.value = o.textContent = option;
     f.limit.appendChild(o);
@@ -578,11 +631,13 @@ function fillAssessment() {
   f.name.value = a.name || "";
   f.date.value = (a.date || "").slice(0, 10);
   f.due.value = (a.due || "").replace(" ", "T").slice(0, 16);
-  f.choose.value = a.choose || 0;
-  f.limit.value = a.limit || skills.limits[0];
+  f.choose.value = a.choose || 1;
+  f.limit.value = a.choose ? (a.limit || skills.limits[0]) : ANY;
+  syncLimitControls();
   assessment = readAssessment();
   for (const input of Object.values(f)) {
     input.oninput = input.onchange = () => {
+      syncLimitControls();
       assessment = readAssessment();
       refreshSkillsDirty();
       refreshPreview();
@@ -592,114 +647,24 @@ function fillAssessment() {
 
 function renderPushState() {
   const note = document.getElementById("push-state");
-  const diffBtn = document.getElementById("form-diff");
+  const push = document.getElementById("form-push");
   if (!skills.form.connected) {
-    note.textContent = "No form is connected to this course yet. "
-      + "Run `checkit-printit form create` or `form attach` first.";
-    diffBtn.disabled = true;
+    note.textContent = "No form is connected to this course yet. Run "
+      + "`checkit-printit form create` or `form attach` first.";
+    push.disabled = true;
   } else if (!skills.form.mapped.length) {
-    note.textContent = "The form is connected but no items are mapped. "
-      + "Run `checkit-printit form map`.";
-    diffBtn.disabled = true;
+    note.textContent = "The form is connected but no items are mapped. Run "
+      + "`checkit-printit form map`.";
+    push.disabled = true;
   } else {
-    note.textContent = "A push replaces what students see. Look at the "
-      + "changes first.";
-    diffBtn.disabled = false;
+    // No separate "show what would change" step: the preview above is what
+    // would be there, and a push replaces the four slots wholesale. A diff
+    // of a wholesale replacement is a second way of reading the same thing.
+    note.textContent = "Replaces the four slots above with the preview. "
+      + "Students see it immediately.";
+    push.disabled = false;
   }
 }
-
-function renderDiff(data) {
-  const box = document.getElementById("diff");
-  box.textContent = "";
-  let changes = 0;
-
-  const FIELD = { help: "help text", choice: "the checkbox option",
-                  title: "title" };
-
-  for (const row of data.rows) {
-    const d = document.createElement("div");
-    d.className = "diffrow";
-    const h = document.createElement("div");
-    h.className = "difflabel";
-    // Say which field is being compared: a push changes a different one per
-    // slot, and a row that does not say so can hold a title against an
-    // option and call it a change.
-    h.textContent = row.label + "  \u2014  " + (FIELD[row.field] || row.field)
-      + (row.mapped ? "" : "  (not mapped)");
-    d.appendChild(h);
-
-    if (!row.known) {
-      const p = document.createElement("p");
-      p.className = "muted";
-      p.textContent = "not on the form yet; it will be written.";
-      d.appendChild(p);
-      changes += 1;
-    } else if ((row.before || "") === (row.after || "")) {
-      const p = document.createElement("p");
-      p.className = "muted";
-      p.textContent = "unchanged";
-      d.appendChild(p);
-    } else {
-      changes += 1;
-      for (const [cls, sign, text] of [["was", "\u2212", row.before],
-                                       ["now", "+", row.after]]) {
-        const p = document.createElement("p");
-        p.className = "diffline " + cls;
-        p.textContent = sign + " " + (text || "(empty)");
-        d.appendChild(p);
-      }
-    }
-    box.appendChild(d);
-  }
-
-  // The options, compared as a list rather than squashed into a line.
-  const before = data.choices.before;
-  const after = data.choices.after;
-  const d = document.createElement("div");
-  d.className = "diffrow";
-  const h = document.createElement("div");
-  h.className = "difflabel";
-  h.textContent = "The skill question's options";
-  d.appendChild(h);
-  const same = Array.isArray(before) && before.length === after.length
-    && before.every((v, i) => v === after[i]);
-  if (same) {
-    const p = document.createElement("p");
-    p.className = "muted";
-    p.textContent = `unchanged (${after.length})`;
-    d.appendChild(p);
-  } else {
-    changes += 1;
-    const gone = (before || []).filter(v => !after.includes(v));
-    const added = after.filter(v => !(before || []).includes(v));
-    for (const [cls, sign, list] of [["was", "\u2212", gone],
-                                     ["now", "+", added]]) {
-      for (const text of list) {
-        const p = document.createElement("p");
-        p.className = "diffline " + cls;
-        p.textContent = sign + " " + text;
-        d.appendChild(p);
-      }
-    }
-    if (!gone.length && !added.length) {
-      const p = document.createElement("p");
-      p.className = "muted";
-      p.textContent = "same options, different order";
-      d.appendChild(p);
-    }
-  }
-  box.appendChild(d);
-
-  const foot = document.createElement("p");
-  foot.className = "muted";
-  foot.textContent = "validation: " +
-    (data.validation.mode + " " + (data.validation.count || "")).trim();
-  box.appendChild(foot);
-
-  document.getElementById("form-push").hidden = false;
-  return changes;
-}
-
 
 async function loadSkills() {
   try {
@@ -710,6 +675,7 @@ async function loadSkills() {
   renderSkills();
   renderWording(skills.wording);
   renderPushState();
+  refreshGoogle();
 }
 
 async function saveSkills() {
@@ -733,28 +699,75 @@ function revertSkills() {
   toast("Discarded");
 }
 
-async function showDiff() {
+async function pushForm() {
   if (skillsDirty()) {
     toast("Save first — the form would be sent the saved wording, not what "
           + "is on screen.", true);
     return;
   }
+  if (!confirm("Push this to the form?\n\nIt replaces the four slots shown "
+               + "in the preview, and students see the change immediately."))
+    return;
   try {
-    const changes = renderDiff(await api("/api/form/diff"));
-    toast(changes ? `${changes} slot(s) would change` : "Nothing would change");
+    const out = await api("/api/form/push", {});
+    // What actually changed is worth saying, since a push that changed
+    // nothing and a push that rewrote everything look identical otherwise.
+    toast(out.changed.length
+      ? "Pushed: " + out.changed.join(", ")
+      : "Pushed; the form already said this.");
   } catch (err) { toast(err.message, true); }
 }
 
-async function pushForm() {
-  if (!confirm("Push this to the form?\n\nStudents see the change "
-               + "immediately.")) return;
+
+// --------------------------------------------------------------- google --
+
+async function refreshGoogle(force) {
+  const bar = document.getElementById("google-bar");
+  let state;
   try {
-    const out = await api("/api/form/push", {});
-    toast("Pushed: " + (out.changed.join(", ") || "nothing"));
-    document.getElementById("diff").textContent = "";
-    document.getElementById("form-push").hidden = true;
-  } catch (err) { toast(err.message, true); }
+    state = await api("/api/google", { force: Boolean(force) });
+  } catch { bar.hidden = true; return; }
+
+  bar.textContent = "";
+  if (state.signingIn) {
+    bar.className = "banner waiting";
+    bar.textContent = "Waiting for the Google sign-in in your browser… ";
+    const again = document.createElement("button");
+    again.className = "link";
+    again.textContent = "check now";
+    again.onclick = () => refreshGoogle(true);
+    bar.appendChild(again);
+    bar.hidden = false;
+    setTimeout(() => refreshGoogle(true), 4000);
+    return;
+  }
+  if (state.loggedIn) { bar.hidden = true; return; }
+
+  bar.className = "banner warn";
+  if (state.error) {
+    // Not "signed out" -- something else is wrong, and a sign-in button
+    // would send you round a loop that cannot fix it.
+    bar.textContent = "Could not check the Google sign-in: " + state.error;
+    bar.hidden = false;
+    return;
+  }
+  bar.append(document.createTextNode(
+    "Not signed in to Google, so pushing will fail. Sessions expire after a "
+    + "week or two whether or not you use them. "));
+  const go = document.createElement("button");
+  go.className = "link";
+  go.textContent = "Sign in";
+  go.onclick = async () => {
+    try {
+      await api("/api/google/login", {});
+      toast("A browser window should open. Sign in there.");
+      refreshGoogle(true);
+    } catch (err) { toast(err.message, true); }
+  };
+  bar.appendChild(go);
+  bar.hidden = false;
 }
+
 
 // ----------------------------------------------------------------- boot --
 
@@ -767,7 +780,6 @@ async function boot() {
   document.getElementById("skills-none").onclick = () => {
     openNow.clear(); renderSkills(); refreshPreview();
   };
-  document.getElementById("form-diff").onclick = showDiff;
   document.getElementById("form-push").onclick = pushForm;
   document.getElementById("show-dropped").onchange = (e) => {
     showDropped = e.target.checked;

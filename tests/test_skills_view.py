@@ -183,10 +183,6 @@ class TestTheSkillsView:
             gui_mod.api_skills_save(course, {"assessment": {"limit": "nope"}})
         assert course.availability().limit == "at most"
 
-    def test_the_diff_needs_a_form(self, course):
-        with pytest.raises(gui_mod.GuiError, match="not connected"):
-            gui_mod.api_form_diff(course, {})
-
     def test_pushing_needs_a_form(self, course):
         with pytest.raises(gui_mod.GuiError, match="not connected"):
             gui_mod.api_form_push(course, {})

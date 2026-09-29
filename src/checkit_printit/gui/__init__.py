@@ -31,6 +31,7 @@ import webbrowser
 
 from .. import course as course_mod
 from .. import availability as availability_mod
+from .. import clasp as clasp_mod
 from .. import classlist as classlist_mod
 from .. import form as form_mod
 from ..bank import Bank, BankError
@@ -274,6 +275,83 @@ def api_roster_drop(course, body):
             "students": [_student_json(s, i) for i, s in enumerate(people)]}
 
 
+# --------------------------------------------------------------- google --
+
+class Google:
+    """Whether clasp holds a usable session, and starting one that does.
+
+    Google expires a session holding sensitive scopes after a week or two
+    whether or not it is used, so "logged in once" is not a durable answer
+    and the app has to keep asking.
+    """
+
+    #: Asking costs an npx invocation and several seconds, so the answer is
+    #: reused briefly. Short enough that signing in shows up promptly.
+    TTL = 45
+
+    def __init__(self):
+        self.checked_at = 0.0
+        self.ok = None
+        self.error = ""
+        self.signing_in = False
+        self.last_attempt = ""
+
+    def status(self, force=False):
+        import time
+        stale = (time.time() - self.checked_at) > self.TTL
+        if force or self.ok is None or stale:
+            try:
+                self.ok = clasp_mod.logged_in()
+                self.error = ""
+            except clasp_mod.ClaspError as exc:
+                # Not the same as "signed out": something else is wrong, and
+                # offering a sign-in button would send the instructor round a
+                # loop that cannot fix it.
+                self.ok = None
+                self.error = str(exc)
+            self.checked_at = time.time()
+        return {"loggedIn": self.ok, "error": self.error,
+                "signingIn": self.signing_in,
+                "lastAttempt": self.last_attempt}
+
+    def sign_in(self):
+        """Start clasp's browser sign-in. Returns at once.
+
+        clasp opens the browser itself. Waiting for it here would hold the
+        request open for as long as someone takes to find their password,
+        and the page would look hung.
+        """
+        if self.signing_in:
+            return {"started": False, "note": "already waiting for the browser"}
+        self.signing_in = True
+        self.last_attempt = ""
+
+        def run():
+            try:
+                clasp_mod.login()
+                self.last_attempt = "done"
+            except clasp_mod.ClaspError as exc:
+                self.last_attempt = str(exc)
+            finally:
+                self.signing_in = False
+                self.ok = None          # force a fresh check
+                self.checked_at = 0.0
+
+        threading.Thread(target=run, daemon=True).start()
+        return {"started": True}
+
+
+GOOGLE = Google()
+
+
+def api_google(_course, body):
+    return GOOGLE.status(force=bool(body.get("force")))
+
+
+def api_google_login(_course, _body):
+    return GOOGLE.sign_in()
+
+
 def _wording(course, av):
     """Exactly what the form will say, worded by the same code that pushes it.
 
@@ -397,75 +475,6 @@ def api_skills_save(course, body):
     return api_skills(course, {})
 
 
-def api_form_diff(course, _body):
-    """What a push would change, line by line.
-
-    The design calls for a visible diff rather than a confirmation box,
-    because a push rewrites what students are looking at. `describe` gives
-    the titles and help text currently on the form; `payload_for` gives what
-    would replace them.
-    """
-    conn = form_mod.load(course.path)
-    if not conn.ready:
-        raise GuiError(
-            "this course is not connected to a form yet. Run "
-            "`checkit-printit form create` or `form attach` first.")
-    try:
-        av = course.availability()
-    except availability_mod.AvailabilityError as exc:
-        raise GuiError(str(exc)) from None
-    payload = _wording(course, av)
-
-    try:
-        current = {i["id"]: i for i in form_mod.call(conn, "describe")["items"]}
-    except form_mod.FormError as exc:
-        raise GuiError(str(exc)) from None
-
-    # Each row says which field it compares, because a push touches a
-    # different one per slot: the help text of a section header, the single
-    # option of the confirmation checkbox, the title of the skill question.
-    # Comparing the wrong one made the confirmation row look changed every
-    # time and hid whether it really was.
-    PLAN = [
-        ("selecting_for", "What am I selecting skills for?", "help",
-         lambda p: p["selecting_for"]),
-        ("confirm_date", "The date students confirm", "choice",
-         lambda p: p["confirm_date"]),
-        ("due_notice", "When is this form due?", "help",
-         lambda p: p["due_notice"]),
-        ("choose_skills", "The skill question's title", "title",
-         lambda p: p["question_title"]),
-    ]
-
-    rows = []
-    for slot, label, field, after_of in PLAN:
-        item_id = conn.items.get(slot)
-        was = current.get(str(item_id), {})
-        if field == "choice":
-            choices = was.get("choices") or []
-            before = choices[0] if choices else ""
-            known = "choices" in was
-        elif field == "help":
-            before = was.get("help", "") or was.get("title", "")
-            known = bool(was)
-        else:
-            before = was.get("title", "")
-            known = bool(was)
-        rows.append({
-            "slot": slot, "label": label, "field": field,
-            "mapped": bool(item_id), "known": known,
-            "before": before, "after": after_of(payload),
-        })
-
-    # The option list is rewritten wholesale every push, so it is compared as
-    # a list rather than pretending it is one line of text.
-    chose = current.get(str(conn.items.get("choose_skills")), {})
-    return {"rows": rows,
-            "choices": {"before": chose.get("choices"),
-                        "after": payload["choices"]},
-            "validation": payload["validation"]}
-
-
 def api_form_push(course, _body):
     """Send it. The same call `form push` makes."""
     conn = form_mod.load(course.path)
@@ -487,10 +496,11 @@ ROUTES = {
     "/api/roster": api_roster,
     "/api/roster/save": api_roster_save,
     "/api/roster/drop": api_roster_drop,
+    "/api/google": api_google,
+    "/api/google/login": api_google_login,
     "/api/skills": api_skills,
     "/api/skills/preview": api_skills_preview,
     "/api/skills/save": api_skills_save,
-    "/api/form/diff": api_form_diff,
     "/api/form/push": api_form_push,
 }
 

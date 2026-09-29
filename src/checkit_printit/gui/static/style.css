@@ -293,37 +293,64 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 .skill.orphan .slug { color: var(--warn); }
 
-/* The wording, shown as the form lays it out rather than as a data dump. */
-.wording {
-  border-left: 3px solid var(--accent);
-  padding-left: 12px;
-}
-.wording .wline { margin: 6px 0; }
-.wording .qtitle { font-weight: 600; }
-.wording .check::before { content: "\2610  "; color: var(--muted); }
-.wording .choices { margin: 6px 0; padding-left: 20px; }
-.wording .choices li { font-size: 13px; margin: 2px 0; }
+/* The preview, laid out as a Google Form stacks it: one rounded card per
+   item, so the four things a push writes read as four things rather than
+   six lines of prose. */
+.wording { display: flex; flex-direction: column; gap: 10px; }
 
-.diffrow { margin: 10px 0; }
-.difflabel {
+.fcard {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.fcard-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.fcard-text { margin: 4px 0; }
+.fcard-text.rule {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
   font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  color: var(--muted);
-  margin-bottom: 3px;
 }
-.diffline {
-  margin: 2px 0;
-  padding: 3px 8px;
-  border-radius: 4px;
+
+/* An option line. The box is a span, not an input: it has to look like the
+   form without inviting a click that would do nothing. */
+.fopt {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 4px 0;
+  line-height: 1.45;
+}
+.fauxbox {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 2px solid var(--muted);
+  border-radius: 3px;
+  opacity: .8;
+}
+
+/* A banner across the top of a view, for a state that blocks the work
+   rather than a message about something just done. */
+.banner {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+  margin-bottom: 14px;
   font-size: 13px;
-  white-space: pre-wrap;
 }
-.diffline.was {
-  background: color-mix(in srgb, var(--warn) 16%, transparent);
-  text-decoration: line-through;
-  text-decoration-color: color-mix(in srgb, var(--warn) 60%, transparent);
+.banner.warn {
+  border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
 }
-.diffline.now {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+.banner.waiting {
+  border-color: var(--dirty);
+  background: color-mix(in srgb, var(--dirty) 12%, transparent);
 }
+.banner button.link { text-transform: none; }
+

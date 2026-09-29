@@ -50,19 +50,25 @@
     <p id="roster-empty" class="muted" hidden></p>
   </section>
 
-  <section id="view-skills" class="view" hidden>
-    <h2>Skills</h2>
+  <section id="view-form" class="view" hidden>
+    <h2>Update form</h2>
+
+    <div id="google-bar" class="banner" hidden></div>
 
     <div class="panel">
       <h3>The next assessment</h3>
       <div class="fields">
-        <label>Name<input id="a-name" type="text" spellcheck="false"></label>
-        <label>Date<input id="a-date" type="date"></label>
-        <label>Form closes<input id="a-due" type="datetime-local"></label>
-        <label>Choose<input id="a-choose" type="number" min="0" max="40"></label>
-        <label>Limit<select id="a-limit"></select></label>
+        <label title="What this sitting is called. It prints on the paper and appears in the form's wording.">Name
+          <input id="a-name" type="text" spellcheck="false"></label>
+        <label title="The day students sit it. This is also how a response is matched to an assessment, so it must be right.">Date
+          <input id="a-date" type="date"></label>
+        <label title="When the form stops accepting choices. Students are told this date in the form.">Form closes
+          <input id="a-due" type="datetime-local"></label>
+        <label title="Whether students pick at most, at least, or exactly a number of skills — or as many as they like.">How many
+          <select id="a-limit"></select></label>
+        <label id="choose-wrap" title="How many skills that limit refers to.">Skills
+          <input id="a-choose" type="number" min="1" max="40"></label>
       </div>
-      <p class="muted">Choose 0 means any number, and the form says so.</p>
     </div>
 
     <div class="panel">
@@ -78,20 +84,14 @@
     </div>
 
     <div class="panel">
-      <h3>What the form will say</h3>
-      <p class="muted">Updates as you type. Worded by the same code that
-        pushes it, so this is not an approximation.</p>
+      <h3>Form preview</h3>
       <div id="wording" class="wording"></div>
     </div>
 
     <div class="panel">
       <h3>Push to the form</h3>
       <p class="muted" id="push-state"></p>
-      <div class="toolbar">
-        <button id="form-diff">Show what would change</button>
-        <button id="form-push" class="primary" hidden>Push it</button>
-      </div>
-      <div id="diff"></div>
+      <button id="form-push" class="primary">Push it</button>
     </div>
   </section>
 
