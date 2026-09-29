@@ -32,6 +32,7 @@ import webbrowser
 from .. import course as course_mod
 from .. import availability as availability_mod
 from .. import clasp as clasp_mod
+from .. import boilerplate as boilerplate_mod
 from .. import classlist as classlist_mod
 from .. import form as form_mod
 from ..bank import Bank, BankError
@@ -372,6 +373,12 @@ def _wording(course, av):
     return form_mod.payload_for(av, conn, descriptions)
 
 
+def _preview(course, av):
+    """The whole form as a student meets it: the boilerplate parts and the
+    derived ones, in order."""
+    return boilerplate_mod.preview(_wording(course, av))
+
+
 def api_skills(course, _body):
     """Everything the Skills view draws: the bank, the open list, the
     assessment, and the wording those produce."""
@@ -414,6 +421,7 @@ def api_skills(course, _body):
         },
         "limits": list(availability_mod.LIMITS),
         "wording": _wording(course, av),
+        "preview": _preview(course, av),
         "form": {"connected": conn.ready,
                  "mapped": sorted(conn.items),
                  "missing": conn.missing() if hasattr(conn, "missing") else []},
@@ -448,7 +456,8 @@ def api_skills_preview(course, body):
         )
     except (availability_mod.AvailabilityError, ValueError, TypeError) as exc:
         raise GuiError(f"that is not a usable value: {exc}") from None
-    return {"wording": _wording(course, proposed)}
+    return {"wording": _wording(course, proposed),
+            "preview": _preview(course, proposed)}
 
 
 def api_skills_save(course, body):

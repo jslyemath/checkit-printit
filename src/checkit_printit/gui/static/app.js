@@ -536,44 +536,73 @@ function card(title) {
   return d;
 }
 
-function renderWording(w) {
+function renderWording(parts) {
+  /* The whole form, top to bottom, from the server's `preview`: the fixed
+     boilerplate and the wording a push derives, in the order a student
+     meets them. */
   const box = document.getElementById("wording");
   box.textContent = "";
 
-  const text = (parent, s, cls) => {
-    const p = document.createElement("p");
-    p.className = "fcard-text " + (cls || "");
-    p.textContent = s;
-    parent.appendChild(p);
-    return p;
-  };
+  for (const part of parts) {
+    if (part.kind === "form-title") {
+      const head = document.createElement("div");
+      head.className = "fhead";
+      const h = document.createElement("div");
+      h.className = "fhead-title";
+      h.textContent = part.title;
+      head.appendChild(h);
+      box.appendChild(head);
+      continue;
+    }
+    if (part.kind === "form-description") {
+      const last = box.querySelector(".fhead");
+      const d = document.createElement("div");
+      d.className = "fhead-desc";
+      d.textContent = part.body;
+      (last || box).appendChild(d);
+      continue;
+    }
 
-  // One card per item, as a Google Form stacks them.
-  const one = card();
-  text(one, w.selecting_for);
-  box.appendChild(one);
+    const cardEl = card(part.title);
+    if (part.missing) cardEl.classList.add("needs-text");
 
-  const two = card();
-  const row = document.createElement("label");
-  row.className = "fopt";
-  row.append(fakeCheckbox(), document.createTextNode(w.confirm_date));
-  two.appendChild(row);
-  box.appendChild(two);
+    // Required items are marked, because an instructor editing the
+    // boilerplate later needs to know which two cannot be left out.
+    if (part.required) {
+      const tag = document.createElement("span");
+      tag.className = "fkind";
+      tag.textContent = "required";
+      tag.title = part.note;
+      cardEl.insertBefore(tag, cardEl.firstChild);
+    }
 
-  const three = card();
-  text(three, w.due_notice);
-  box.appendChild(three);
-
-  const four = card(w.question_title);
-  if (w.question_help) text(four, w.question_help, "muted");
-  for (const choice of w.choices) {
-    const opt = document.createElement("label");
-    opt.className = "fopt";
-    opt.append(fakeCheckbox(), document.createTextNode(choice));
-    four.appendChild(opt);
+    if (part.body) {
+      const p = document.createElement("p");
+      p.className = "fcard-text";
+      p.textContent = part.body;
+      cardEl.appendChild(p);
+    }
+    for (const option of part.options) {
+      const opt = document.createElement("label");
+      opt.className = "fopt";
+      opt.append(fakeCheckbox(), document.createTextNode(option));
+      cardEl.appendChild(opt);
+    }
+    if (part.footnote) {
+      const p = document.createElement("p");
+      p.className = "fcard-text muted rule";
+      p.textContent = part.footnote;
+      cardEl.appendChild(p);
+    }
+    if (part.missing) {
+      const p = document.createElement("p");
+      p.className = "fnote";
+      p.textContent = "printit has no text for this section yet. It is on "
+        + "the live form, added by hand; the boilerplate editor will own it.";
+      cardEl.appendChild(p);
+    }
+    box.appendChild(cardEl);
   }
-  if (w.validation.help) text(four, w.validation.help, "muted rule");
-  box.appendChild(four);
 }
 
 async function refreshPreview() {
@@ -584,7 +613,7 @@ async function refreshPreview() {
     try {
       const data = await api("/api/skills/preview",
         { assessment: readAssessment(), open: [...openNow] });
-      renderWording(data.wording);
+      renderWording(data.preview);
     } catch (err) { toast(err.message, true); }
   }, 250);
 }
@@ -673,7 +702,7 @@ async function loadSkills() {
   openNow = new Set(skills.open);
   fillAssessment();
   renderSkills();
-  renderWording(skills.wording);
+  renderWording(skills.preview);
   renderPushState();
   refreshGoogle();
 }
@@ -685,7 +714,7 @@ async function saveSkills() {
     openNow = new Set(skills.open);
     fillAssessment();
     renderSkills();
-    renderWording(skills.wording);
+    renderWording(skills.preview);
     renderPushState();
     toast("Saved");
   } catch (err) { toast(err.message, true); }
@@ -695,7 +724,7 @@ function revertSkills() {
   openNow = new Set(skills.open);
   fillAssessment();
   renderSkills();
-  renderWording(skills.wording);
+  renderWording(skills.preview);
   toast("Discarded");
 }
 

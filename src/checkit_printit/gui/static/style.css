@@ -31,6 +31,11 @@
 
 * { box-sizing: border-box; }
 
+/* `display: flex` on a selector beats the browser's own
+   `[hidden] { display: none }`, so hiding the "Skills" field left its label
+   on screen with the input gone. Anything marked hidden is hidden. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -354,3 +359,33 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 .banner button.link { text-transform: none; }
 
+/* The form's own title and description, above the items -- as a student
+   meets them, before any question. */
+.fhead {
+  padding: 2px 2px 10px;
+  border-bottom: 2px solid var(--accent);
+  margin-bottom: 4px;
+}
+.fhead-title { font-size: 19px; font-weight: 600; }
+.fhead-desc { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+/* A section printit does not have the text for yet. Said out loud rather
+   than quietly rendered empty, which would read as "this section is blank
+   on the form". */
+.fcard.needs-text {
+  border-style: dashed;
+  border-color: var(--dirty);
+}
+.fcard .fnote {
+  font-size: 12px;
+  color: var(--dirty);
+  margin: 4px 0 0;
+}
+.fcard .fkind {
+  float: right;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+  font-weight: 600;
+}
