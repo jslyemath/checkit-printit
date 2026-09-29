@@ -44,7 +44,7 @@ const COLUMNS = [
   { key: "sid",       label: "SID",      cls: "ro",  min: 86,  max: 140,
     text: s => s.sid || s.alt_id || "—",
     value: s => s.sid || s.alt_id || "" },
-  { key: "_actions",  label: "",         sortable: false, min: 70, max: 70 },
+  { key: "_actions",  label: "",         sortable: false, min: 92, max: 92 },
 ];
 
 let students = [];
@@ -278,7 +278,19 @@ function renderHeader() {
   for (const column of COLUMNS) {
     const th = document.createElement("th");
     if (column.sortable === false) {
-      th.textContent = column.label;
+      // The one unsortable heading is empty, so the reset lives there --
+      // over the column it belongs beside, rather than in the toolbar where
+      // it sat next to controls it has nothing to do with. Right-aligned so
+      // it does not read as a heading for the drop links beneath it.
+      th.className = "actions-head";
+      const reset = document.createElement("button");
+      reset.className = "link";
+      reset.id = "reset-sort";
+      reset.textContent = "reset";
+      reset.title = "Back to section, then surname.";
+      reset.hidden = isDefaultSort();
+      reset.onclick = clearSort;
+      th.appendChild(reset);
       row.appendChild(th);
       continue;
     }
@@ -299,43 +311,26 @@ function renderHeader() {
       + (entry && sorts.length > 1 ? " " + rank : "");
     if (entry) b.classList.add("sorted");
     if (rank === 1) b.classList.add("primary-sort");
-    b.title = (column.sortKeys
-        ? "Cycles through " + column.sortKeys.map(k => k[1]).join(" and ")
-          + " name, each way. "
-        : "")
-      + "Sorting by another column keeps this one as a tiebreaker.";
+    // Per state, not one string for all of them: the primary column was
+    // being told it was a tiebreaker.
+    b.title = (rank === 1 ? "Primary sort column."
+             : rank ? `Tier ${rank} tiebreaker.`
+             : "Sort by this column.")
+      + (column.sortKeys ? " Cycles last and first name, each way." : "");
     b.onclick = () => sortBy(column);
     th.appendChild(b);
     row.appendChild(th);
   }
 }
 
-function describeSort() {
-  /* "section, then last name" -- so the order in force is legible without
-     decoding four little arrows. */
-  const parts = sorts.map(s => {
-    const column = columnOwning(s.key);
-    if (!column) return null;
-    const note = (cycleOf(column).find(([k]) => k === s.key) || [])[2];
-    return (note ? `${column.label.toLowerCase()} (${note})` : column.label.toLowerCase())
-      + (s.desc ? ", reversed" : "");
-  }).filter(Boolean);
-  if (!parts.length) return "unsorted";
-  return "sorted by " + parts.join(", then ");
-}
-
-function renderSortNote() {
-  const isDefault =
-    sorts.length === DEFAULT_SORT.length &&
-    sorts.every((s, i) => s.key === DEFAULT_SORT[i].key &&
-                          s.desc === DEFAULT_SORT[i].desc);
-  document.getElementById("sort-note").textContent = describeSort();
-  document.getElementById("reset-sort").hidden = isDefault;
+function isDefaultSort() {
+  return sorts.length === DEFAULT_SORT.length
+    && sorts.every((s, i) => s.key === DEFAULT_SORT[i].key
+                          && s.desc === DEFAULT_SORT[i].desc);
 }
 
 function renderRoster() {
   renderHeader();
-  renderSortNote();
   const body = document.querySelector("#roster tbody");
   body.textContent = "";
 
@@ -444,7 +439,6 @@ async function boot() {
   buildNav();
   document.getElementById("save").onclick = save;
   document.getElementById("revert").onclick = revert;
-  document.getElementById("reset-sort").onclick = clearSort;
   document.getElementById("show-dropped").onchange = (e) => {
     showDropped = e.target.checked;
     renderRoster();
