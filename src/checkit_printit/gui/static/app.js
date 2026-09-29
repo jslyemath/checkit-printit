@@ -9,7 +9,7 @@ const TOKEN = window.PRINTIT_TOKEN;
 const VIEWS = [
   { id: "overview", label: "Overview" },
   { id: "roster", label: "Roster" },
-  { id: "skills", label: "Skills", soon: "Toggle which skills are open, set the assessment's date and limit, and push the wording to the form. Today: `skills open`, `skills set`, `form push`." },
+  { id: "skills", label: "Skills" },
   { id: "responses", label: "Responses", soon: "Who answered and what they chose, pulled into the roster. Today: `form pull`." },
   { id: "print", label: "Print job", soon: "Skills, per-skill variants, extras and keys, then build. Today: a job folder and `build`." },
   { id: "record", label: "Record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
@@ -121,6 +121,10 @@ function show(id) {
     document.getElementById("view-soon").hidden = false;
   } else {
     document.getElementById("view-" + id).hidden = false;
+    // Loaded the first time it is opened rather than at boot: the Skills
+    // view reads the bank, and a course with no bank should still show a
+    // roster without waiting for one.
+    if (id === "skills" && skills === null) loadSkills();
   }
   location.hash = id;
 }
@@ -433,12 +437,338 @@ function revert() {
   toast("Discarded");
 }
 
+// --------------------------------------------------------------- skills --
+
+let skills = null;            // the last state the server reported
+let openNow = new Set();      // the checkboxes, before saving
+let assessment = {};          // the fields, before saving
+let previewTimer = null;
+
+function assessmentInputs() {
+  return {
+    name: document.getElementById("a-name"),
+    date: document.getElementById("a-date"),
+    due: document.getElementById("a-due"),
+    choose: document.getElementById("a-choose"),
+    limit: document.getElementById("a-limit"),
+  };
+}
+
+function readAssessment() {
+  const f = assessmentInputs();
+  return {
+    name: f.name.value,
+    date: f.date.value,
+    // The browser's datetime-local gives "2026-10-01T23:59"; the file wants
+    // seconds, and as_datetime accepts either.
+    due: f.due.value,
+    choose: Number(f.choose.value || 0),
+    limit: f.limit.value,
+  };
+}
+
+function sameMinute(a, b) {
+  /* The file says "2026-10-01 23:59:00" and a datetime-local input reads
+     back "2026-10-01T23:59". Compared raw they never match, which left the
+     form dirty the instant it loaded -- Save lit before anything had been
+     touched, and so meaning nothing when something had. */
+  const tidy = (v) => String(v || "").replace("T", " ").slice(0, 16);
+  return tidy(a) === tidy(b);
+}
+
+function skillsDirty() {
+  if (!skills) return false;
+  const was = skills.assessment;
+  const now = assessment;
+  const sameFields = ["name", "date", "limit"].every(k => (was[k] || "") === (now[k] || ""))
+    && Number(was.choose || 0) === Number(now.choose || 0)
+    && sameMinute(was.due, now.due);
+  const sameOpen = skills.open.length === openNow.size
+    && skills.open.every(s => openNow.has(s));
+  return !(sameFields && sameOpen);
+}
+
+function refreshSkillsDirty() {
+  const dirty = skillsDirty();
+  document.getElementById("skills-dirty").hidden = !dirty;
+  document.getElementById("skills-dirty").textContent = "unsaved changes";
+  document.getElementById("skills-save").disabled = !dirty;
+  document.getElementById("skills-revert").disabled = !dirty;
+  document.getElementById("open-count").textContent =
+    `— ${openNow.size} of ${skills ? skills.skills.length : 0}`;
+}
+
+function renderWording(w) {
+  const box = document.getElementById("wording");
+  box.textContent = "";
+  const line = (text, cls) => {
+    const p = document.createElement("p");
+    p.className = "wline " + (cls || "");
+    p.textContent = text;
+    box.appendChild(p);
+  };
+  line(w.selecting_for);
+  line(w.confirm_date, "check");
+  line(w.due_notice);
+  line(w.question_title, "qtitle");
+  if (w.question_help) line(w.question_help, "muted");
+  const ul = document.createElement("ul");
+  ul.className = "choices";
+  for (const c of w.choices) {
+    const li = document.createElement("li");
+    li.textContent = c;
+    ul.appendChild(li);
+  }
+  box.appendChild(ul);
+  line(w.validation.help || "(no limit)", "muted");
+}
+
+async function refreshPreview() {
+  /* Debounced: the wording comes from the server so there is exactly one
+     implementation of it, and a request per keystroke would be silly. */
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    try {
+      const data = await api("/api/skills/preview",
+        { assessment: readAssessment(), open: [...openNow] });
+      renderWording(data.wording);
+    } catch (err) { toast(err.message, true); }
+  }, 250);
+}
+
+function renderSkills() {
+  const list = document.getElementById("skill-list");
+  list.textContent = "";
+  for (const s of skills.skills) {
+    const label = document.createElement("label");
+    label.className = "skill" + (s.inBank ? "" : " orphan");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = openNow.has(s.slug);
+    box.onchange = () => {
+      if (box.checked) openNow.add(s.slug); else openNow.delete(s.slug);
+      label.classList.toggle("on", box.checked);
+      refreshSkillsDirty();
+      refreshPreview();
+    };
+    label.classList.toggle("on", box.checked);
+    const slug = document.createElement("span");
+    slug.className = "slug";
+    slug.textContent = s.slug;
+    const desc = document.createElement("span");
+    desc.className = "desc";
+    desc.textContent = s.inBank ? s.description
+      : "not in the bank any more — untick to remove it";
+    desc.title = desc.textContent;
+    label.append(box, slug, desc);
+    list.appendChild(label);
+  }
+  refreshSkillsDirty();
+}
+
+function fillAssessment() {
+  const f = assessmentInputs();
+  const a = skills.assessment;
+  f.limit.textContent = "";
+  for (const option of skills.limits) {
+    const o = document.createElement("option");
+    o.value = o.textContent = option;
+    f.limit.appendChild(o);
+  }
+  f.name.value = a.name || "";
+  f.date.value = (a.date || "").slice(0, 10);
+  f.due.value = (a.due || "").replace(" ", "T").slice(0, 16);
+  f.choose.value = a.choose || 0;
+  f.limit.value = a.limit || skills.limits[0];
+  assessment = readAssessment();
+  for (const input of Object.values(f)) {
+    input.oninput = input.onchange = () => {
+      assessment = readAssessment();
+      refreshSkillsDirty();
+      refreshPreview();
+    };
+  }
+}
+
+function renderPushState() {
+  const note = document.getElementById("push-state");
+  const diffBtn = document.getElementById("form-diff");
+  if (!skills.form.connected) {
+    note.textContent = "No form is connected to this course yet. "
+      + "Run `checkit-printit form create` or `form attach` first.";
+    diffBtn.disabled = true;
+  } else if (!skills.form.mapped.length) {
+    note.textContent = "The form is connected but no items are mapped. "
+      + "Run `checkit-printit form map`.";
+    diffBtn.disabled = true;
+  } else {
+    note.textContent = "A push replaces what students see. Look at the "
+      + "changes first.";
+    diffBtn.disabled = false;
+  }
+}
+
+function renderDiff(data) {
+  const box = document.getElementById("diff");
+  box.textContent = "";
+  let changes = 0;
+
+  const FIELD = { help: "help text", choice: "the checkbox option",
+                  title: "title" };
+
+  for (const row of data.rows) {
+    const d = document.createElement("div");
+    d.className = "diffrow";
+    const h = document.createElement("div");
+    h.className = "difflabel";
+    // Say which field is being compared: a push changes a different one per
+    // slot, and a row that does not say so can hold a title against an
+    // option and call it a change.
+    h.textContent = row.label + "  \u2014  " + (FIELD[row.field] || row.field)
+      + (row.mapped ? "" : "  (not mapped)");
+    d.appendChild(h);
+
+    if (!row.known) {
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = "not on the form yet; it will be written.";
+      d.appendChild(p);
+      changes += 1;
+    } else if ((row.before || "") === (row.after || "")) {
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = "unchanged";
+      d.appendChild(p);
+    } else {
+      changes += 1;
+      for (const [cls, sign, text] of [["was", "\u2212", row.before],
+                                       ["now", "+", row.after]]) {
+        const p = document.createElement("p");
+        p.className = "diffline " + cls;
+        p.textContent = sign + " " + (text || "(empty)");
+        d.appendChild(p);
+      }
+    }
+    box.appendChild(d);
+  }
+
+  // The options, compared as a list rather than squashed into a line.
+  const before = data.choices.before;
+  const after = data.choices.after;
+  const d = document.createElement("div");
+  d.className = "diffrow";
+  const h = document.createElement("div");
+  h.className = "difflabel";
+  h.textContent = "The skill question's options";
+  d.appendChild(h);
+  const same = Array.isArray(before) && before.length === after.length
+    && before.every((v, i) => v === after[i]);
+  if (same) {
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = `unchanged (${after.length})`;
+    d.appendChild(p);
+  } else {
+    changes += 1;
+    const gone = (before || []).filter(v => !after.includes(v));
+    const added = after.filter(v => !(before || []).includes(v));
+    for (const [cls, sign, list] of [["was", "\u2212", gone],
+                                     ["now", "+", added]]) {
+      for (const text of list) {
+        const p = document.createElement("p");
+        p.className = "diffline " + cls;
+        p.textContent = sign + " " + text;
+        d.appendChild(p);
+      }
+    }
+    if (!gone.length && !added.length) {
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = "same options, different order";
+      d.appendChild(p);
+    }
+  }
+  box.appendChild(d);
+
+  const foot = document.createElement("p");
+  foot.className = "muted";
+  foot.textContent = "validation: " +
+    (data.validation.mode + " " + (data.validation.count || "")).trim();
+  box.appendChild(foot);
+
+  document.getElementById("form-push").hidden = false;
+  return changes;
+}
+
+
+async function loadSkills() {
+  try {
+    skills = await api("/api/skills");
+  } catch (err) { toast(err.message, true); return; }
+  openNow = new Set(skills.open);
+  fillAssessment();
+  renderSkills();
+  renderWording(skills.wording);
+  renderPushState();
+}
+
+async function saveSkills() {
+  try {
+    skills = await api("/api/skills/save",
+      { open: [...openNow], assessment: readAssessment() });
+    openNow = new Set(skills.open);
+    fillAssessment();
+    renderSkills();
+    renderWording(skills.wording);
+    renderPushState();
+    toast("Saved");
+  } catch (err) { toast(err.message, true); }
+}
+
+function revertSkills() {
+  openNow = new Set(skills.open);
+  fillAssessment();
+  renderSkills();
+  renderWording(skills.wording);
+  toast("Discarded");
+}
+
+async function showDiff() {
+  if (skillsDirty()) {
+    toast("Save first — the form would be sent the saved wording, not what "
+          + "is on screen.", true);
+    return;
+  }
+  try {
+    const changes = renderDiff(await api("/api/form/diff"));
+    toast(changes ? `${changes} slot(s) would change` : "Nothing would change");
+  } catch (err) { toast(err.message, true); }
+}
+
+async function pushForm() {
+  if (!confirm("Push this to the form?\n\nStudents see the change "
+               + "immediately.")) return;
+  try {
+    const out = await api("/api/form/push", {});
+    toast("Pushed: " + (out.changed.join(", ") || "nothing"));
+    document.getElementById("diff").textContent = "";
+    document.getElementById("form-push").hidden = true;
+  } catch (err) { toast(err.message, true); }
+}
+
 // ----------------------------------------------------------------- boot --
 
 async function boot() {
   buildNav();
   document.getElementById("save").onclick = save;
   document.getElementById("revert").onclick = revert;
+  document.getElementById("skills-save").onclick = saveSkills;
+  document.getElementById("skills-revert").onclick = revertSkills;
+  document.getElementById("skills-none").onclick = () => {
+    openNow.clear(); renderSkills(); refreshPreview();
+  };
+  document.getElementById("form-diff").onclick = showDiff;
+  document.getElementById("form-push").onclick = pushForm;
   document.getElementById("show-dropped").onchange = (e) => {
     showDropped = e.target.checked;
     renderRoster();

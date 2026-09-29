@@ -81,17 +81,36 @@ def run(args, cwd=None, timeout=300, check=True):
     return done.returncode, output
 
 
+#: Ways Google says "sign in again", all of which mean the same thing here.
+#:
+#: `invalid_rapt` is the one that turned up in practice, eight days after a
+#: successful login: Google's reauth policy expires a session holding
+#: sensitive scopes, and clasp passes the raw JSON through. None of the
+#: earlier three words appear in it, so `logged_in` raised "could not tell
+#: whether clasp is logged in" and dumped a blob, when the answer was simply
+#: no and the fix was a fresh browser sign-in.
+#: "login" does not match "You are not logged in." -- a gap in the original
+#: three words, found by writing the phrases out rather than by trusting the
+#: list. Both spellings are here now.
+NEEDS_LOGIN = (
+    "login", "not logged in", "log in", "credential", "unauthor",
+    "invalid_grant", "invalid_rapt", "reauth",
+    "token has been expired", "token expired",
+)
+
+
 def logged_in():
-    """Whether clasp already holds credentials.
+    """Whether clasp already holds *usable* credentials.
 
     Checked by asking rather than by looking for a file, because clasp keeps
-    them in more than one place depending on version and platform.
+    them in more than one place depending on version and platform -- and
+    because a file can exist holding a session Google has since expired.
     """
     code, output = run(["list-scripts"], check=False, timeout=120)
     if code == 0:
         return True
     lowered = output.lower()
-    if "login" in lowered or "credential" in lowered or "unauthor" in lowered:
+    if any(sign in lowered for sign in NEEDS_LOGIN):
         return False
     raise ClaspError(f"could not tell whether clasp is logged in:\n{output.strip()}")
 

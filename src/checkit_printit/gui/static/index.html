@@ -50,6 +50,51 @@
     <p id="roster-empty" class="muted" hidden></p>
   </section>
 
+  <section id="view-skills" class="view" hidden>
+    <h2>Skills</h2>
+
+    <div class="panel">
+      <h3>The next assessment</h3>
+      <div class="fields">
+        <label>Name<input id="a-name" type="text" spellcheck="false"></label>
+        <label>Date<input id="a-date" type="date"></label>
+        <label>Form closes<input id="a-due" type="datetime-local"></label>
+        <label>Choose<input id="a-choose" type="number" min="0" max="40"></label>
+        <label>Limit<select id="a-limit"></select></label>
+      </div>
+      <p class="muted">Choose 0 means any number, and the form says so.</p>
+    </div>
+
+    <div class="panel">
+      <h3>Open for retake <span id="open-count" class="muted"></span></h3>
+      <div class="toolbar">
+        <button id="skills-none" class="link">clear all</button>
+        <span class="spacer"></span>
+        <span id="skills-dirty" class="dirty" hidden></span>
+        <button id="skills-save" class="primary" disabled>Save</button>
+        <button id="skills-revert" disabled>Discard</button>
+      </div>
+      <div id="skill-list" class="skill-list"></div>
+    </div>
+
+    <div class="panel">
+      <h3>What the form will say</h3>
+      <p class="muted">Updates as you type. Worded by the same code that
+        pushes it, so this is not an approximation.</p>
+      <div id="wording" class="wording"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Push to the form</h3>
+      <p class="muted" id="push-state"></p>
+      <div class="toolbar">
+        <button id="form-diff">Show what would change</button>
+        <button id="form-push" class="primary" hidden>Push it</button>
+      </div>
+      <div id="diff"></div>
+    </div>
+  </section>
+
   <section id="view-soon" class="view" hidden>
     <h2 id="soon-title">Not built yet</h2>
     <p class="muted" id="soon-body"></p>

@@ -257,3 +257,68 @@ def describe(av, descriptions=None):
         text = (descriptions or {}).get(slug)
         lines.append(f"  {slug:6} {text}" if text else f"  {slug}")
     return "\n".join(lines)
+
+# ------------------------------------------------------------- setting it --
+
+def set_open(path, slugs, add=False, known=None):
+    """Set which skills are open for retake. Returns the new list.
+
+    `known` is the bank's slugs when there is a bank. A typo here reaches
+    students as a missing option on the form and a missing paper in the pile,
+    so an unrecognised slug is refused rather than written.
+
+    Never prints: the CLI renders the returned list and the GUI serialises it.
+    """
+    current = load(path)
+    if known is not None:
+        unknown = [s for s in slugs if s not in known]
+        if unknown:
+            raise AvailabilityError(
+                f"not in the bank: {', '.join(unknown)}. It has "
+                f"{', '.join(sorted(known))}.")
+
+    wanted = list(current.skills) if add else []
+    for slug in slugs:
+        if slug not in wanted:
+            wanted.append(slug)
+
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(set_values(text, {"skills": wanted}))
+    return wanted
+
+
+def set_assessment(path, name=None, date=None, due=None, choose=None,
+                   limit=None):
+    """Set the next assessment's name, dates and selection rule.
+
+    Each argument is left alone when None, so a caller may set one field
+    without knowing the others -- which is what a form with five inputs and
+    one changed box needs.
+
+    Returns the reloaded Availability. Raises rather than writing a partial
+    change if any value is unusable.
+    """
+    values = {}
+    if name is not None:
+        values["name"] = name
+    if date is not None:
+        values["date"] = as_date(date) if date else ""
+    if due is not None:
+        values["due"] = as_datetime(due) if due else ""
+    if choose is not None:
+        values["choose"] = int(choose)
+    if limit is not None:
+        if limit not in LIMITS:
+            raise AvailabilityError(
+                f"{limit!r} is not a limit. Use one of: {', '.join(LIMITS)}.")
+        values["limit"] = limit
+    if not values:
+        raise AvailabilityError("nothing to set.")
+
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(set_values(text, values))
+    return load(path)
