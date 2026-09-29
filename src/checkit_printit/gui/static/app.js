@@ -50,8 +50,23 @@ const COLUMNS = [
 let students = [];
 let edits = new Map();          // "index:field" -> value
 let showDropped = false;
-let sortKey = null;
-let sortDesc = false;
+// Sorts stack, the way a spreadsheet's do: the most recent click is the
+// primary key and the ones before it survive as tiebreakers. Sorting by
+// surname and then by section gives 820 A-Z, then 830 A-Z.
+//
+// Index 0 is primary. Four is plenty; beyond that nobody can predict the
+// result, and an unbounded stack would quietly keep a key you set minutes
+// ago and have forgotten.
+const SORT_DEPTH = 4;
+
+// What the table opens on: grouped by section, alphabetical by surname
+// within each. That is the order an instructor reads a roster in.
+const DEFAULT_SORT = [
+  { key: "section", desc: false },
+  { key: "sort_last", desc: false },
+];
+
+let sorts = DEFAULT_SORT.map(s => ({ ...s }));
 
 // ------------------------------------------------------------------ api --
 
@@ -176,12 +191,43 @@ function cycleOf(column) {
   return out;
 }
 
+function columnOwning(key) {
+  return COLUMNS.find(c => c.key === key)
+    || COLUMNS.find(c => (c.sortKeys || []).some(([k]) => k === key));
+}
+
+function rankOf(key) {
+  const at = sorts.findIndex(s => s.key === key);
+  return at < 0 ? null : at + 1;
+}
+
 function sortBy(column) {
   const cycle = cycleOf(column);
-  const at = cycle.findIndex(([k, d]) => k === sortKey && d === sortDesc);
-  const [key, desc] = cycle[(at + 1) % cycle.length];
-  sortKey = key;
-  sortDesc = desc;
+  const primary = sorts[0];
+  const isPrimary = primary && cycle.some(([k]) => k === primary.key);
+
+  let key, desc;
+  if (isPrimary) {
+    // Already the primary key, so step this heading's own cycle: ascending,
+    // descending, and for Name on to the given-name order.
+    const at = cycle.findIndex(([k, d]) => k === primary.key && d === primary.desc);
+    [key, desc] = cycle[(at + 1) % cycle.length];
+  } else {
+    // A new primary. Everything already in the stack drops one place and
+    // keeps working as a tiebreaker.
+    [key, desc] = cycle[0];
+  }
+
+  // One entry per key: re-sorting by section must not leave an older section
+  // entry further down, where it would do nothing but take up a slot.
+  const owned = new Set(cycle.map(([k]) => k));
+  sorts = [{ key, desc },
+           ...sorts.filter(s => !owned.has(s.key))].slice(0, SORT_DEPTH);
+  renderRoster();
+}
+
+function clearSort() {
+  sorts = DEFAULT_SORT.map(s => ({ ...s }));
   renderRoster();
 }
 
@@ -237,42 +283,76 @@ function renderHeader() {
       continue;
     }
     const cycle = cycleOf(column);
-    const active = cycle.find(([k, d]) => k === sortKey && d === sortDesc);
+    const entry = sorts.find(s => cycle.some(([k]) => k === s.key));
+    const note = entry && (cycle.find(([k]) => k === entry.key) || [])[2];
+    const rank = entry ? rankOf(entry.key) : null;
+
     const b = document.createElement("button");
     b.className = "sort";
     // A column with two orders has to say which one it is on: "Name" alone
-    // would not tell you whether it sorted by surname or given name.
+    // would not tell you whether it sorted by surname or given name. The
+    // rank appears only when more than one key is in play, because a lone
+    // "1" would be noise.
     b.textContent = column.label
-      + (active && active[2] ? " · " + active[2] : "")
-      + (active ? (sortDesc ? " ↓" : " ↑") : "");
-    if (active) b.classList.add("sorted");
-    if (column.sortKeys) {
-      b.title = "Cycles through " + column.sortKeys.map(k => k[1]).join(" and ")
-              + " name, each way.";
-    }
+      + (note ? " · " + note : "")
+      + (entry ? (entry.desc ? " ↓" : " ↑") : "")
+      + (entry && sorts.length > 1 ? " " + rank : "");
+    if (entry) b.classList.add("sorted");
+    if (rank === 1) b.classList.add("primary-sort");
+    b.title = (column.sortKeys
+        ? "Cycles through " + column.sortKeys.map(k => k[1]).join(" and ")
+          + " name, each way. "
+        : "")
+      + "Sorting by another column keeps this one as a tiebreaker.";
     b.onclick = () => sortBy(column);
     th.appendChild(b);
     row.appendChild(th);
   }
 }
 
+function describeSort() {
+  /* "section, then last name" -- so the order in force is legible without
+     decoding four little arrows. */
+  const parts = sorts.map(s => {
+    const column = columnOwning(s.key);
+    if (!column) return null;
+    const note = (cycleOf(column).find(([k]) => k === s.key) || [])[2];
+    return (note ? `${column.label.toLowerCase()} (${note})` : column.label.toLowerCase())
+      + (s.desc ? ", reversed" : "");
+  }).filter(Boolean);
+  if (!parts.length) return "unsorted";
+  return "sorted by " + parts.join(", then ");
+}
+
+function renderSortNote() {
+  const isDefault =
+    sorts.length === DEFAULT_SORT.length &&
+    sorts.every((s, i) => s.key === DEFAULT_SORT[i].key &&
+                          s.desc === DEFAULT_SORT[i].desc);
+  document.getElementById("sort-note").textContent = describeSort();
+  document.getElementById("reset-sort").hidden = isDefault;
+}
+
 function renderRoster() {
   renderHeader();
+  renderSortNote();
   const body = document.querySelector("#roster tbody");
   body.textContent = "";
 
   let shown = students.filter(s => showDropped || !s.dropped);
-  if (sortKey) {
-    // The key may be one a column offers rather than one it displays, so
-    // find the column that owns it either way.
-    const column = COLUMNS.find(c => c.key === sortKey)
-      || COLUMNS.find(c => (c.sortKeys || []).some(([k]) => k === sortKey));
+  if (sorts.length) {
     // Sorting only reorders what is displayed. Edits are keyed to each
     // student's own index, not to a row position, so they survive it.
+    const keys = sorts
+      .map(s => ({ ...s, column: columnOwning(s.key) }))
+      .filter(s => s.column);
     shown = [...shown].sort((a, b) => {
-      const cmp = sortValue(sortKey, column, a).localeCompare(
-        sortValue(sortKey, column, b), undefined, { numeric: true });
-      return sortDesc ? -cmp : cmp;
+      for (const { key, desc, column } of keys) {
+        const cmp = sortValue(key, column, a).localeCompare(
+          sortValue(key, column, b), undefined, { numeric: true });
+        if (cmp) return desc ? -cmp : cmp;
+      }
+      return 0;
     });
   }
 
@@ -364,6 +444,7 @@ async function boot() {
   buildNav();
   document.getElementById("save").onclick = save;
   document.getElementById("revert").onclick = revert;
+  document.getElementById("reset-sort").onclick = clearSort;
   document.getElementById("show-dropped").onchange = (e) => {
     showDropped = e.target.checked;
     renderRoster();
