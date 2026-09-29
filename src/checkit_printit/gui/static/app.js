@@ -30,8 +30,14 @@ const VIEWS = [
 // address 19. A minimum below that clips the common case, which is what the
 // first pass did -- it was set from a two-row scratch roster whose longest
 // name was "Test Student".
+// `sortKeys` lets one column offer more than one order. Name offers surname
+// and given name, because the roster holds a single full name -- splitting it
+// into two editable columns would put a guessed surname in the file beside
+// the name that actually prints, and the two could then disagree. The server
+// derives the keys; nothing is stored. See `_sort_names`.
 const COLUMNS = [
-  { key: "name",      label: "Name",     edit: true, min: 200, max: 330 },
+  { key: "name",      label: "Name",     edit: true, min: 200, max: 330,
+    sortKeys: [["sort_last", "last"], ["sort_first", "first"]] },
   { key: "preferred", label: "Nickname", edit: true, min: 130, max: 210 },
   { key: "section",   label: "Section",  edit: true, min: 74,  max: 110 },
   { key: "email",     label: "Email",    edit: true, min: 215, max: 340 },
@@ -154,14 +160,28 @@ function cellInput(student, field) {
   return input;
 }
 
-function sortValue(column, student) {
+function sortValue(key, column, student) {
+  // `key` may be a derived one the column offers (sort_last, sort_first)
+  // rather than the field the column displays.
+  if (key !== column.key && key in student) return String(student[key]).toLowerCase();
   const raw = column.value ? column.value(student) : (student[column.key] || "");
   return String(raw).toLowerCase();
 }
 
-function sortBy(key) {
-  if (sortKey === key) sortDesc = !sortDesc;
-  else { sortKey = key; sortDesc = false; }
+function cycleOf(column) {
+  /* Every (key, direction) this heading steps through, in order. */
+  const keys = column.sortKeys || [[column.key, null]];
+  const out = [];
+  for (const [key, note] of keys) out.push([key, false, note], [key, true, note]);
+  return out;
+}
+
+function sortBy(column) {
+  const cycle = cycleOf(column);
+  const at = cycle.findIndex(([k, d]) => k === sortKey && d === sortDesc);
+  const [key, desc] = cycle[(at + 1) % cycle.length];
+  sortKey = key;
+  sortDesc = desc;
   renderRoster();
 }
 
@@ -213,17 +233,25 @@ function renderHeader() {
     const th = document.createElement("th");
     if (column.sortable === false) {
       th.textContent = column.label;
-    } else {
-      const b = document.createElement("button");
-      b.className = "sort";
-      b.textContent = column.label;
-      if (sortKey === column.key) {
-        b.classList.add("sorted");
-        b.textContent += sortDesc ? " ↓" : " ↑";
-      }
-      b.onclick = () => sortBy(column.key);
-      th.appendChild(b);
+      row.appendChild(th);
+      continue;
     }
+    const cycle = cycleOf(column);
+    const active = cycle.find(([k, d]) => k === sortKey && d === sortDesc);
+    const b = document.createElement("button");
+    b.className = "sort";
+    // A column with two orders has to say which one it is on: "Name" alone
+    // would not tell you whether it sorted by surname or given name.
+    b.textContent = column.label
+      + (active && active[2] ? " · " + active[2] : "")
+      + (active ? (sortDesc ? " ↓" : " ↑") : "");
+    if (active) b.classList.add("sorted");
+    if (column.sortKeys) {
+      b.title = "Cycles through " + column.sortKeys.map(k => k[1]).join(" and ")
+              + " name, each way.";
+    }
+    b.onclick = () => sortBy(column);
+    th.appendChild(b);
     row.appendChild(th);
   }
 }
@@ -235,12 +263,15 @@ function renderRoster() {
 
   let shown = students.filter(s => showDropped || !s.dropped);
   if (sortKey) {
-    const column = COLUMNS.find(c => c.key === sortKey);
+    // The key may be one a column offers rather than one it displays, so
+    // find the column that owns it either way.
+    const column = COLUMNS.find(c => c.key === sortKey)
+      || COLUMNS.find(c => (c.sortKeys || []).some(([k]) => k === sortKey));
     // Sorting only reorders what is displayed. Edits are keyed to each
     // student's own index, not to a row position, so they survive it.
     shown = [...shown].sort((a, b) => {
-      const cmp = sortValue(column, a).localeCompare(
-        sortValue(column, b), undefined, { numeric: true });
+      const cmp = sortValue(sortKey, column, a).localeCompare(
+        sortValue(sortKey, column, b), undefined, { numeric: true });
       return sortDesc ? -cmp : cmp;
     });
   }

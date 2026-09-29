@@ -29,6 +29,7 @@ import urllib.parse
 import webbrowser
 
 from .. import course as course_mod
+from .. import classlist as classlist_mod
 from .. import roster as roster_mod
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -41,6 +42,29 @@ class GuiError(Exception):
 
 # ------------------------------------------------------------------- data --
 
+def _sort_names(student):
+    """Keys for sorting by surname or by given name. Never stored.
+
+    The roster carries one full name, because that is what prints and what
+    the seating chart matches on. `last` and `first` exist but are empty on
+    every real roster here: those came from a single "Full Name" column.
+
+    So the two orders are derived, on the way out, and written nowhere. The
+    splitter is only reliable on the `Last, First` comma form -- from
+    `First Last` it guesses, and it guesses wrong on at least one real
+    student, whose compound surname comes back as its last word alone. A
+    wrong guess therefore puts a row in an odd position in a sort, which you
+    can see, instead of putting a wrong surname in a file, which you cannot.
+
+    `classlist.split_full_name` does the work, so the rule has one
+    implementation and the browser has none of it.
+    """
+    if student.last or student.first:
+        return student.last, student.first        # a real import filled these
+    last, first, _ = classlist_mod.split_full_name(student.name)
+    return last, first
+
+
 def _student_json(student, index):
     """One row of the roster table.
 
@@ -48,9 +72,13 @@ def _student_json(student, index):
     is the whole point of the nickname column -- and not the SID, which some
     class lists do not carry.
     """
+    sort_last, sort_first = _sort_names(student)
     return {
         "index": index,
         "name": student.name,
+        # Derived for sorting only; see _sort_names. Not editable, not saved.
+        "sort_last": sort_last,
+        "sort_first": sort_first,
         "last": student.last,
         "first": student.first,
         "preferred": student.preferred,

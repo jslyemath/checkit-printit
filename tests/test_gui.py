@@ -138,6 +138,60 @@ class TestTheRosterTable:
         assert list(gui_mod.Course("Test").roster())[0].preferred == ""
 
 
+class TestSortingByName:
+    """The roster holds one full name, because that is what prints and what
+    the seating chart matches on. Surname and given-name order are derived
+    for sorting and stored nowhere."""
+
+    def _student(self, **kw):
+        from checkit_printit.roster import Student
+        kw.setdefault("skills", [])
+        return Student(**kw)
+
+    def test_a_plain_name_splits_the_obvious_way(self):
+        assert gui_mod._sort_names(self._student(name="Ada Lovelace")) == \
+            ("Lovelace", "Ada")
+
+    def test_a_real_import_wins_over_the_guess(self):
+        """`split_full_name` only gets a compound surname right from the
+        comma form. Where an import has already filled the fields, they are
+        used verbatim -- the guess is the fallback, never the override."""
+        student = self._student(name="Belinda Soriano Garcia",
+                                last="Soriano Garcia", first="Belinda")
+        assert gui_mod._sort_names(student) == ("Soriano Garcia", "Belinda")
+
+    def test_the_guess_is_wrong_on_a_compound_surname_and_that_is_why_it_is_not_saved(self):
+        """Recorded rather than fixed. Guessing from `First Last` cannot get
+        this right, so the guess is confined to sort order: a wrong guess
+        puts one row in an odd place, which is visible, instead of writing a
+        wrong surname into roster.toml, which is not."""
+        assert gui_mod._sort_names(
+            self._student(name="Belinda Soriano Garcia")) == ("Garcia", "Belinda")
+
+    def test_a_one_word_name_does_not_crash(self):
+        assert gui_mod._sort_names(self._student(name="Cher")) == ("Cher", "")
+
+    def test_the_keys_reach_the_table(self, course):
+        rows = gui_mod.api_roster(course, {})["students"]
+        assert rows[0]["sort_last"] == "Lovelace"
+        assert rows[0]["sort_first"] == "Ada"
+
+    def test_they_are_not_editable(self, course):
+        for field in ("sort_last", "sort_first"):
+            with pytest.raises(gui_mod.GuiError, match="not editable"):
+                gui_mod.api_roster_save(course, {"edits": [
+                    {"index": 0, "field": field, "value": "x"}]})
+
+    def test_nothing_derived_is_written_to_the_file(self, course):
+        gui_mod.api_roster(course, {})
+        gui_mod.api_roster_save(course, {"edits": [
+            {"index": 0, "field": "preferred", "value": "Ada L"}]})
+        text = open(course.file("roster"), encoding="utf-8").read()
+        assert "sort_last" not in text and "sort_first" not in text
+        # and the empty last/first stay empty rather than being filled in
+        assert list(gui_mod.Course("Test").roster())[0].last == ""
+
+
 class TestDropping:
     def test_it_goes_through_the_same_call_the_cli_makes(self, course):
         """Not a reimplementation: `roster.set_dropped` is the rule, and it

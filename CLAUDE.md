@@ -70,6 +70,26 @@ same `--seed`. Checking the preview's seeds proves nothing about the build's.
 pushed the design somewhere worse. The browser loopback flow works; what was
 missing was an OAuth *client*, a different problem with a different answer.
 
+### After editing gui/, restart the server before believing the page
+
+Twice in one sitting a change was on disk and something was still running the
+old copy. The browser had cached `app.js` (fixed: the server sends
+`Cache-Control: no-store`), and then the running `checkit-printit gui` had
+loaded `gui/__init__.py` from before the edit -- Python does not reload a
+module in a live process. Sorting by surname went on producing given-name
+order, which read as a bug in the sort.
+
+The front end falls back rather than erroring when a key is missing, which is
+right, and is exactly what makes a stale server hard to see.
+
+### A fixture small enough to be convenient hides what you are measuring
+
+The roster column widths were tuned against the two-row scratch course, whose
+longest name is "Test Student", and clipped most of every real row. Use
+`Scratch 48` -- forty-eight synthetic students shaped like the real roster,
+same section split, same name lengths, same chart shape -- for anything whose
+size or layout matters.
+
 ### A fix applied to one path is not applied to the others
 
 Three times in one day. The `workspace`->`course` rename replaced `"-w"` in
