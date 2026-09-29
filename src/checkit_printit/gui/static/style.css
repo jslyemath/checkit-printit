@@ -199,6 +199,9 @@ th button.sort {
 }
 th button.sort:hover { color: var(--ink); }
 th button.sort.sorted { color: var(--accent); }
+/* The primary key carries the weight; the tiebreakers are dimmer. */
+th button.sort.sorted { opacity: .75; }
+th button.sort.primary-sort { opacity: 1; font-weight: 700; }
 
 /* A narrow window scrolls the table sideways. It used to hide the SID
    column instead, which shifted every heading after it one place left --
