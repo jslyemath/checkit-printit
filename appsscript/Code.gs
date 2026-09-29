@@ -236,12 +236,20 @@ function responses_() {
 
 function describe_() {
   return FormApp.getActiveForm().getItems().map(function (item) {
-    return {
+    var out = {
       id: String(item.getId()),
       type: String(item.getType()),
       title: item.getTitle(),
       help: item.getHelpText()
     };
+    // Choices too, because a push rewrites a checkbox's options and not its
+    // title -- without these a diff has nothing to compare and ends up
+    // holding a title against an option, which always looks like a change.
+    if (item.getType() === FormApp.ItemType.CHECKBOX) {
+      out.choices = item.asCheckboxItem().getChoices()
+        .map(function (c) { return c.getValue(); });
+    }
+    return out;
   });
 }
 

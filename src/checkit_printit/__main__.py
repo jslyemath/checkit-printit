@@ -791,29 +791,13 @@ def skills_open(slugs, space, add):
     Slugs are checked against the bank, because a typo here reaches students
     as a missing option on the form and a missing paper in the pile.
     """
-    path = _availability_path(space)
+    bank = _bank_for(space)
     try:
-        av = availability_mod.load(path)
+        wanted = availability_mod.set_open(
+            _availability_path(space), slugs, add=add,
+            known=set(bank.slugs()) if bank is not None else None)
     except availability_mod.AvailabilityError as exc:
         raise click.ClickException(str(exc))
-
-    bank = _bank_for(space)
-    if bank is not None:
-        known = set(bank.slugs())
-        unknown = [s for s in slugs if s not in known]
-        if unknown:
-            raise click.ClickException(
-                f"not in the bank: {', '.join(unknown)}. It has "
-                f"{', '.join(sorted(known))}.")
-
-    wanted = list(av.skills) if add else []
-    for slug in slugs:
-        if slug not in wanted:
-            wanted.append(slug)
-
-    text = open(path, encoding="utf-8").read()
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(availability_mod.set_values(text, {"skills": wanted}))
     click.echo(f"open for retake ({len(wanted)}): {', '.join(wanted)}")
 
 
@@ -829,31 +813,12 @@ def skills_open(slugs, space, add):
               default=None)
 def skills_set(space, name, date, due, choose, limit):
     """Set the next assessment's name, dates and selection limit."""
-    path = _availability_path(space)
-    values = {}
     try:
-        if name is not None:
-            values["name"] = name
-        if date is not None:
-            values["date"] = availability_mod.as_date(date)
-        if due is not None:
-            values["due"] = availability_mod.as_datetime(due)
-        if choose is not None:
-            values["choose"] = choose
-        if limit is not None:
-            values["limit"] = limit
+        av = availability_mod.set_assessment(
+            _availability_path(space), name=name, date=date, due=due,
+            choose=choose, limit=limit)
     except availability_mod.AvailabilityError as exc:
         raise click.ClickException(str(exc))
-    if not values:
-        raise click.ClickException("nothing to set.")
-
-    text = open(path, encoding="utf-8").read()
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(availability_mod.set_values(text, values))
-    except availability_mod.AvailabilityError as exc:
-        raise click.ClickException(str(exc))
-    av = availability_mod.load(path)
     click.echo(availability_mod.describe(av))
 
 

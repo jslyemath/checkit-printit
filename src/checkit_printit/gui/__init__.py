@@ -18,6 +18,7 @@ the background. A random token is minted per run, injected into the page, and
 required on every API call as a header a cross-origin form cannot set.
 """
 
+import dataclasses
 import http.server
 import json
 import mimetypes
@@ -29,7 +30,10 @@ import urllib.parse
 import webbrowser
 
 from .. import course as course_mod
+from .. import availability as availability_mod
 from .. import classlist as classlist_mod
+from .. import form as form_mod
+from ..bank import Bank, BankError
 from .. import roster as roster_mod
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -144,6 +148,29 @@ class Course:
             },
         }
 
+    def bank(self):
+        """The bank this course prints from, or None.
+
+        None is a normal state, not a failure: a course can exist before it
+        is pointed at a bank, and the Skills view then shows the open list
+        without descriptions rather than refusing to load.
+        """
+        import tomllib
+        config = os.path.join(self.path, course_mod.CONFIG)
+        if not os.path.isfile(config):
+            return None
+        with open(config, "rb") as f:
+            declared = str(tomllib.load(f).get("bank", {}).get("path", "")).strip()
+        if not declared:
+            return None
+        try:
+            return Bank(os.path.normpath(os.path.join(self.path, declared)))
+        except BankError:
+            return None
+
+    def availability(self):
+        return availability_mod.load(self.file("availability"))
+
     def save_roster(self, people):
         with open(self.file("roster"), "w", encoding="utf-8") as f:
             f.write(roster_mod.to_toml(people, "checkit-printit gui"))
@@ -247,11 +274,224 @@ def api_roster_drop(course, body):
             "students": [_student_json(s, i) for i, s in enumerate(people)]}
 
 
+def _wording(course, av):
+    """Exactly what the form will say, worded by the same code that pushes it.
+
+    `payload_for` is what `form push` sends, so a preview that used anything
+    else would be a second implementation of the wording -- and the one
+    place a difference would show up is on a form students are already
+    looking at.
+    """
+    bank = course.bank()
+    descriptions = {}
+    if bank is not None:
+        for slug in av.skills:
+            try:
+                descriptions[slug] = bank.description(slug)
+            except BankError:
+                descriptions[slug] = ""
+    conn = form_mod.load(course.path)
+    return form_mod.payload_for(av, conn, descriptions)
+
+
+def api_skills(course, _body):
+    """Everything the Skills view draws: the bank, the open list, the
+    assessment, and the wording those produce."""
+    try:
+        av = course.availability()
+    except availability_mod.AvailabilityError as exc:
+        raise GuiError(str(exc)) from None
+
+    bank = course.bank()
+    open_now = list(av.skills)
+    if bank is None:
+        slugs = open_now
+        descriptions = {s: "" for s in slugs}
+    else:
+        slugs = list(bank.slugs())
+        descriptions = {}
+        for slug in slugs:
+            try:
+                descriptions[slug] = bank.description(slug)
+            except BankError:
+                descriptions[slug] = ""
+        # A slug that is open but no longer in the bank still has to appear,
+        # or it could not be turned off from here.
+        for slug in open_now:
+            if slug not in descriptions:
+                slugs.append(slug)
+                descriptions[slug] = ""
+
+    conn = form_mod.load(course.path)
+    return {
+        "hasBank": bank is not None,
+        "skills": [{"slug": s, "description": descriptions.get(s, ""),
+                    "open": s in open_now,
+                    "inBank": bank is None or s in set(bank.slugs())}
+                   for s in slugs],
+        "open": open_now,
+        "assessment": {
+            "name": av.name, "date": str(av.date or ""),
+            "due": str(av.due or ""), "choose": av.choose, "limit": av.limit,
+        },
+        "limits": list(availability_mod.LIMITS),
+        "wording": _wording(course, av),
+        "form": {"connected": conn.ready,
+                 "mapped": sorted(conn.items),
+                 "missing": conn.missing() if hasattr(conn, "missing") else []},
+    }
+
+
+def api_skills_preview(course, body):
+    """The wording for values that have not been saved.
+
+    Being able to see "Choose At Most TWO Skills" before committing to it is
+    most of the point of the view. It builds an Availability in memory and
+    hands it to the same `_wording` the push uses -- nothing is written, and
+    there is still only one implementation of the wording.
+    """
+    try:
+        saved = course.availability()
+    except availability_mod.AvailabilityError as exc:
+        raise GuiError(str(exc)) from None
+
+    fields = body.get("assessment") or {}
+    try:
+        proposed = dataclasses.replace(
+            saved,
+            name=fields.get("name", saved.name),
+            date=(availability_mod.as_date(fields["date"]) if fields.get("date")
+                  else (None if "date" in fields else saved.date)),
+            due=(availability_mod.as_datetime(fields["due"]) if fields.get("due")
+                 else (None if "due" in fields else saved.due)),
+            choose=int(fields.get("choose", saved.choose) or 0),
+            limit=fields.get("limit", saved.limit),
+            skills=tuple(body.get("open", saved.skills)),
+        )
+    except (availability_mod.AvailabilityError, ValueError, TypeError) as exc:
+        raise GuiError(f"that is not a usable value: {exc}") from None
+    return {"wording": _wording(course, proposed)}
+
+
+def api_skills_save(course, body):
+    """Apply the open list and the assessment fields, then report the wording.
+
+    Both go through the functions `skills open` and `skills set` call.
+    """
+    path = course.file("availability")
+    bank = course.bank()
+    try:
+        if "open" in body:
+            availability_mod.set_open(
+                path, list(body["open"]), add=False,
+                known=set(bank.slugs()) if bank is not None else None)
+        fields = body.get("assessment") or {}
+        if fields:
+            availability_mod.set_assessment(
+                path,
+                name=fields.get("name"), date=fields.get("date"),
+                due=fields.get("due"), choose=fields.get("choose"),
+                limit=fields.get("limit"))
+    except availability_mod.AvailabilityError as exc:
+        raise GuiError(str(exc)) from None
+    return api_skills(course, {})
+
+
+def api_form_diff(course, _body):
+    """What a push would change, line by line.
+
+    The design calls for a visible diff rather than a confirmation box,
+    because a push rewrites what students are looking at. `describe` gives
+    the titles and help text currently on the form; `payload_for` gives what
+    would replace them.
+    """
+    conn = form_mod.load(course.path)
+    if not conn.ready:
+        raise GuiError(
+            "this course is not connected to a form yet. Run "
+            "`checkit-printit form create` or `form attach` first.")
+    try:
+        av = course.availability()
+    except availability_mod.AvailabilityError as exc:
+        raise GuiError(str(exc)) from None
+    payload = _wording(course, av)
+
+    try:
+        current = {i["id"]: i for i in form_mod.call(conn, "describe")["items"]}
+    except form_mod.FormError as exc:
+        raise GuiError(str(exc)) from None
+
+    # Each row says which field it compares, because a push touches a
+    # different one per slot: the help text of a section header, the single
+    # option of the confirmation checkbox, the title of the skill question.
+    # Comparing the wrong one made the confirmation row look changed every
+    # time and hid whether it really was.
+    PLAN = [
+        ("selecting_for", "What am I selecting skills for?", "help",
+         lambda p: p["selecting_for"]),
+        ("confirm_date", "The date students confirm", "choice",
+         lambda p: p["confirm_date"]),
+        ("due_notice", "When is this form due?", "help",
+         lambda p: p["due_notice"]),
+        ("choose_skills", "The skill question's title", "title",
+         lambda p: p["question_title"]),
+    ]
+
+    rows = []
+    for slot, label, field, after_of in PLAN:
+        item_id = conn.items.get(slot)
+        was = current.get(str(item_id), {})
+        if field == "choice":
+            choices = was.get("choices") or []
+            before = choices[0] if choices else ""
+            known = "choices" in was
+        elif field == "help":
+            before = was.get("help", "") or was.get("title", "")
+            known = bool(was)
+        else:
+            before = was.get("title", "")
+            known = bool(was)
+        rows.append({
+            "slot": slot, "label": label, "field": field,
+            "mapped": bool(item_id), "known": known,
+            "before": before, "after": after_of(payload),
+        })
+
+    # The option list is rewritten wholesale every push, so it is compared as
+    # a list rather than pretending it is one line of text.
+    chose = current.get(str(conn.items.get("choose_skills")), {})
+    return {"rows": rows,
+            "choices": {"before": chose.get("choices"),
+                        "after": payload["choices"]},
+            "validation": payload["validation"]}
+
+
+def api_form_push(course, _body):
+    """Send it. The same call `form push` makes."""
+    conn = form_mod.load(course.path)
+    if not conn.ready:
+        raise GuiError("this course is not connected to a form yet.")
+    if not conn.items:
+        raise GuiError("no items are mapped yet -- run "
+                       "`checkit-printit form map`.")
+    try:
+        av = course.availability()
+        answer = form_mod.call(conn, "push", _wording(course, av))
+    except (availability_mod.AvailabilityError, form_mod.FormError) as exc:
+        raise GuiError(str(exc)) from None
+    return {"changed": answer.get("changed", [])}
+
+
 ROUTES = {
     "/api/course": api_course,
     "/api/roster": api_roster,
     "/api/roster/save": api_roster_save,
     "/api/roster/drop": api_roster_drop,
+    "/api/skills": api_skills,
+    "/api/skills/preview": api_skills_preview,
+    "/api/skills/save": api_skills_save,
+    "/api/form/diff": api_form_diff,
+    "/api/form/push": api_form_push,
 }
 
 

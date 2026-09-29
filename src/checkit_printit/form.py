@@ -266,11 +266,17 @@ def payload_for(availability, conn, descriptions):
                           "help": "You may choose any amount of skills."}
         else:
             from .availability import number_word
+            # "at most" and "at least" appear in the help text; "exactly"
+            # does not. That is the retired script's wording rather than an
+            # oversight here -- control_center.gs line 607 reads
+            # `Please choose ${lowercaseSkillAmt} skill(s).` with no
+            # limiter, while 595 and 601 include theirs. The reference is
+            # the specification for anything a student reads.
+            says = "" if availability.limit == "exactly" else f"{availability.limit} "
             validation = {
                 "mode": availability.limit,
                 "count": count,
-                "help": f"Please choose {availability.limit} "
-                        f"{number_word(count)} skill(s).",
+                "help": f"Please choose {says}{number_word(count)} skill(s).",
             }
 
     day = availability.weekday()
