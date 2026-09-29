@@ -279,9 +279,13 @@ def payload_for(availability, conn, descriptions):
                 "help": f"Please choose {says}{number_word(count)} skill(s).",
             }
 
+    from . import boilerplate
     day = availability.weekday()
     return {
         "items": dict(conn.items),
+        # The fixed headings, so `addItems` is told what to call each item
+        # rather than holding its own copy.
+        "titles": boilerplate.titles(),
         "selecting_for": availability.selecting_for(),
         "confirm_date": availability.confirmation(),
         "due_notice": availability.due_notice(),

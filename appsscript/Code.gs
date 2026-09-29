@@ -339,6 +339,11 @@ function validation_(spec) {
 function addItems_(payload) {
   var form = FormApp.getActiveForm();
   var have = payload.items || {};
+  // Titles come from printit's boilerplate module rather than being written
+  // here. A title in two places is a title that will disagree with itself.
+  // The literals below are a fallback for an older printit, not a second
+  // source of truth.
+  var titles = payload.titles || {};
   var made = {};
 
   function exists(id) {
@@ -350,7 +355,7 @@ function addItems_(payload) {
     made.selecting_for = String(have.selecting_for);
   } else {
     made.selecting_for = String(form.addSectionHeaderItem()
-        .setTitle('What am I selecting skills for?')
+        .setTitle(titles.selecting_for || 'What am I selecting skills for?')
         .setHelpText('(printit fills this in)').getId());
   }
 
@@ -358,7 +363,7 @@ function addItems_(payload) {
     made.confirm_date = String(have.confirm_date);
   } else {
     made.confirm_date = String(form.addCheckboxItem()
-        .setTitle('Confirm Skill Checkpoint Date')
+        .setTitle(titles.confirm_date || 'Confirm Skill Checkpoint Date')
         .setRequired(true)
         .setChoiceValues(['(printit fills this in)']).getId());
   }
@@ -367,7 +372,7 @@ function addItems_(payload) {
     made.due_notice = String(have.due_notice);
   } else {
     made.due_notice = String(form.addSectionHeaderItem()
-        .setTitle('When is this form due?')
+        .setTitle(titles.due_notice || 'When is this form due?')
         .setHelpText('(printit fills this in)').getId());
   }
 
@@ -375,7 +380,7 @@ function addItems_(payload) {
     made.choose_skills = String(have.choose_skills);
   } else {
     made.choose_skills = String(form.addCheckboxItem()
-        .setTitle('Choose Skills')
+        .setTitle(titles.choose_skills || 'Choose Skills')
         .setRequired(true)
         .setChoiceValues(['(printit fills this in)']).getId());
   }
