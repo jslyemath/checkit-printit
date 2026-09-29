@@ -11,7 +11,7 @@ const VIEWS = [
   { id: "roster", label: "Roster" },
   { id: "form", label: "Update form" },
   { id: "responses", label: "Responses", soon: "Who answered and what they chose, pulled into the roster. Today: `form pull`." },
-  { id: "print", label: "Print job", soon: "Skills, per-skill variants, extras and keys, then build. Today: a job folder and `build`." },
+  { id: "print", label: "Print job", soon: "The staging area for one sitting: each student's choices with a manual override, skills appended for everyone, defaults for whoever did not respond, the per-skill variant, extras and keys — then build and open the PDF. Today: a job folder and `build`." },
   { id: "record", label: "Record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
   { id: "seating", label: "Seating", soon: "Drag students between seats, randomise, swap two. No CLI equivalent exists yet -- this is new code, not a face on something tested." },
   { id: "callout", label: "Cold call", soon: "Pick a random student, pick several, refresh the call list. No CLI equivalent yet." },
