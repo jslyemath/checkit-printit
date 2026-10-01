@@ -5,7 +5,8 @@ course state around it. The platform is a sibling repo and **the fuller guide
 lives there**: `../checkit/CLAUDE.md`. Read that too.
 
 ```bash
-./.venv/Scripts/python.exe -m pytest -q          # 361 tests
+./.venv/Scripts/python.exe tools/check.py        # everything, one exit code
+./.venv/Scripts/python.exe -m pytest -q
 ./.venv/Scripts/python.exe -m checkit_printit --help
 ```
 
@@ -196,6 +197,14 @@ that outlives one print job.
 | `form pull` | `-c`, `--dry-run`, `--force`. Responses into the roster |
 | `form setup` / `form connect --url` | the manual path, for when clasp is not an option |
 | `gui` | `-c`, `--port`, `--open/--no-open`. The local web app (8a-8d) |
+
+`tools/check.py` is the one to run before a commit: printit's tests, the
+audit, and the platform's tests, with **one exit code and three lines of
+output**. The short output is the point -- a page of pytest dots is what
+makes people reach for `| tail`, and a pipeline reports tail's exit code,
+which is how a suite with six failures in it got committed and pushed.
+`--quick` skips the platform suite. A run that collected no tests fails
+rather than passing quietly.
 
 `tools/verify_run.py <job> <out> [--against DIR]` checks a finished run
 against the job that asked for it. **A check that examined nothing fails** --
