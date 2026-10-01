@@ -837,23 +837,37 @@ function refreshPrintDirty() {
 }
 
 function skillPicker(selected, onChange) {
-  /* A short multi-select rather than 29 checkboxes: these lists are usually
-     empty or hold one or two slugs, and a wall of boxes for a rare case
-     buries the common one. */
-  const sel = document.createElement("select");
-  sel.multiple = true;
-  sel.size = 5;
-  sel.className = "picker";
+  /* Checkboxes, matching the Update form tab's list. A multi-select was
+     tried first and was wrong twice: it needs ctrl-click to pick a second
+     item, which nobody discovers, and it made the same choice look like a
+     different kind of control than the one two tabs away. */
+  const box = document.createElement("div");
+  box.className = "skill-list short";
   for (const s of printState.skills) {
-    const o = document.createElement("option");
-    o.value = s.slug;
-    o.textContent = s.description ? `${s.slug} — ${s.description}` : s.slug;
-    o.selected = selected.includes(s.slug);
-    o.title = s.description || s.slug;
-    sel.appendChild(o);
+    const label = document.createElement("label");
+    label.className = "skill";
+    const tick = document.createElement("input");
+    tick.type = "checkbox";
+    tick.checked = selected.includes(s.slug);
+    label.classList.toggle("on", tick.checked);
+    tick.onchange = () => {
+      const now = [...box.querySelectorAll("input:checked")]
+        .map(i => i.dataset.slug);
+      label.classList.toggle("on", tick.checked);
+      onChange(now);
+    };
+    tick.dataset.slug = s.slug;
+    const slug = document.createElement("span");
+    slug.className = "slug";
+    slug.textContent = s.slug;
+    const desc = document.createElement("span");
+    desc.className = "desc";
+    desc.textContent = s.description;
+    desc.title = s.description;
+    label.append(tick, slug, desc);
+    box.appendChild(label);
   }
-  sel.onchange = () => onChange([...sel.selectedOptions].map(o => o.value));
-  return sel;
+  return box;
 }
 
 function renderModes() {
@@ -969,6 +983,11 @@ function willGet(student) {
   return out;
 }
 
+function badSlugs(slugs) {
+  const known = new Set(printState.skills.map(s => s.slug));
+  return slugs.filter(s => !known.has(s));
+}
+
 function renderWho() {
   const body = document.querySelector("#who tbody");
   body.textContent = "";
@@ -984,28 +1003,76 @@ function renderWho() {
       tr.appendChild(td);
       return td;
     };
-    add(student.name);
+    // The nickname where there is one. `name` is what prints and what the
+    // seating chart matches on, so this is a display name only.
+    const nameCell = add(student.display);
+    if (student.display !== student.name) nameCell.title = student.name;
     add(student.section, "ro");
+
+    // Version: the seat's, unless this run moves them.
+    const vtd = document.createElement("td");
+    const vsel = document.createElement("select");
+    vsel.className = "vpick";
+    const asSeated = document.createElement("option");
+    asSeated.value = "";
+    asSeated.textContent = student.seatVersion || "—";
+    vsel.appendChild(asSeated);
+    for (const letter of printState.versionsAvailable) {
+      const o = document.createElement("option");
+      o.value = letter;
+      o.textContent = letter;
+      vsel.appendChild(o);
+    }
+    vsel.value = student.version || "";
+    vsel.classList.toggle("moved", Boolean(student.version));
+    vsel.title = student.version
+      ? `Moved to ${student.version} for this run; the seat says `
+        + `${student.seatVersion || "nothing"}.`
+      : "The version this seat gives. Change it for this run only.";
+    vsel.onchange = () => {
+      if (vsel.value) draft.versions[student.key] = vsel.value;
+      else delete draft.versions[student.key];
+      student.version = vsel.value;
+      renderWho();
+      refreshPrintDirty();
+    };
+    vtd.appendChild(vsel);
+    tr.appendChild(vtd);
+
     add(gets.join(", ") || "—");
+
     const td = document.createElement("td");
     const input = document.createElement("input");
     input.value = (draft.overrides[student.key] || []).join(", ");
     input.placeholder = student.chose.join(", ") || "nothing chosen";
     input.spellcheck = false;
-    input.onchange = () => {
+    const check = () => {
       const slugs = input.value.split(",").map(s => s.trim()).filter(Boolean);
+      const bad = badSlugs(slugs);
+      input.classList.toggle("bad", bad.length > 0);
+      // Named as you type, because "W9" and "W4" differ by one key and the
+      // build would only say so after writing a job folder.
+      input.title = bad.length ? "not in the bank: " + bad.join(", ") : "";
+      return slugs;
+    };
+    input.oninput = check;
+    input.onchange = () => {
+      const slugs = check();
       if (slugs.length) draft.overrides[student.key] = slugs;
       else delete draft.overrides[student.key];
       renderVariants();
       renderWho();
       refreshPrintDirty();
     };
+    check();
     td.appendChild(input);
     tr.appendChild(td);
     body.appendChild(tr);
   }
+  const moved = Object.keys(draft.versions).length;
   document.getElementById("who-count").textContent =
-    `— ${printState.students.length} students, ${papers} papers`;
+    `— ${printState.students.length} students, ${papers} papers`
+    + (moved ? `, ${moved} moved to another version` : "");
 }
 
 function renderPrintFields() {
@@ -1145,7 +1212,8 @@ async function loadPrint() {
 
 async function savePrint() {
   try {
-    printState = await api("/api/print/save", { draft });
+    printState = await api("/api/print/save",
+      { draft: { ...draft, versionsAvailable: printState.versionsAvailable } });
     draft = JSON.parse(JSON.stringify(printState.draft));
     renderPrintFields();
     renderModes();

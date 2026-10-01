@@ -429,3 +429,34 @@ table.seeds td {
 }
 .warnline { color: var(--warn); }
 #build-out p { margin: 4px 0; }
+
+/* A checkbox is shorter than a text input, so in a row of fields it sat on
+   the baseline and read as misaligned. Centre the row, and let a checkbox
+   field size itself rather than stretching. */
+.fields label:has(input[type="checkbox"]) {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-end;
+  padding-bottom: 7px;
+}
+.fields input[type="checkbox"] { width: 15px; height: 15px; margin: 0; }
+
+/* The pickers inside Print job are the same control as the Update form's
+   list, just shorter. */
+.skill-list.short { max-height: 190px; margin-top: 4px; }
+
+select.vpick {
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 2px 4px;
+}
+select.vpick.moved { border-color: var(--dirty); color: var(--dirty); }
+
+#who td input.bad {
+  border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}

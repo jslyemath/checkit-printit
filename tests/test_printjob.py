@@ -73,12 +73,14 @@ class TestTheDraftRoundTrips:
         named for its key is found either way."""
         bad = '\n'.join(['title = "x"',
                          'variants = "not a table"',
-                         'overrides = 7'])
+                         'overrides = 7',
+                         'versions = []'])
         with open(printjob.draft_path(space), "w", encoding="utf-8") as f:
             f.write(bad)
         draft = printjob.load_draft(space)
         assert draft["variants"] == {}
         assert draft["overrides"] == {}
+        assert draft["versions"] == {}
 
     def test_every_key_in_a_table_is_declared(self):
         """The pairing that stops this breaking again: a key written into a
@@ -139,3 +141,78 @@ class TestWritingTheJob:
         folder = printjob.folder_for(draft, root=str(tmp_path))
         assert os.path.dirname(folder) == str(tmp_path)
         assert "/" not in os.path.basename(folder)
+
+class TestMovingOneStudentToAnotherVersion:
+    """The letter comes from a seat, which is right almost always. The
+    exception is the run where it is not -- someone sitting elsewhere that
+    day, two who ended up adjacent after a drop. Today that means editing
+    the seating chart and putting it back."""
+
+    def test_it_round_trips_through_the_draft(self, space):
+        printjob.save_draft(space, {"versions": {"806001": "D"}})
+        assert printjob.load_draft(space)["versions"] == {"806001": "D"}
+
+    def test_it_reaches_the_publication(self, space, tmp_path):
+        draft = dict(printjob.load_draft(space))
+        draft.update(FULL, versions={"806001": "C"})
+        folder = printjob.write_job(space, draft, course_name="MAT 106",
+                                    root=str(tmp_path / "jobs"))
+        pub = pub_mod.load(os.path.join(folder, "publication.toml"))
+        assert pub.student_versions == {"806001": "C"}
+
+    def test_the_seating_chart_is_not_touched(self, space, tmp_path):
+        """A property of the run, not of the room: next week's print is
+        unaffected, and nothing has to be put back."""
+        draft = dict(printjob.load_draft(space))
+        draft.update(FULL, versions={"806001": "C"})
+        folder = printjob.write_job(space, draft, course_name="MAT 106",
+                                    root=str(tmp_path / "jobs"))
+        text = open(os.path.join(folder, "publication.toml"),
+                    encoding="utf-8").read()
+        assert "[versions]" in text and "[seating]" not in text
+
+    def test_no_override_writes_no_table(self, space, tmp_path):
+        folder = printjob.write_job(space, printjob.load_draft(space)
+                                    | {"date": "2026-10-02"},
+                                    course_name="MAT 106",
+                                    root=str(tmp_path / "jobs"))
+        text = open(os.path.join(folder, "publication.toml"),
+                    encoding="utf-8").read()
+        assert "[versions]" not in text
+
+class TestThePinnedVersionIsUsed:
+    """Reaching publication.toml is not the same as reaching the paper."""
+
+    def _handouts(self, pinned, seat_version="A"):
+        from checkit_printit.assemble import build_handouts
+        from checkit_printit.roster import Student, Roster
+        from checkit_printit import seating as seating_mod
+
+        student = Student(name="Ada Lovelace", skills=["AD"], sid="806001")
+        chart = seating_mod.Chart(
+            seats=[seating_mod.Seat(name="Ada Lovelace", group=0,
+                                    version=seat_version)],
+            versions=("A", "B"))
+
+        class Pub:
+            student_versions = pinned
+            names = True
+        seeds = {("A", "AD"): 401, ("B", "AD"): 402}
+        # build_handouts returns (handouts, unseated).
+        return build_handouts(Roster([student]), chart, Pub(), seeds)[0]
+
+    def test_with_no_override_the_seat_decides(self):
+        handouts = self._handouts({}, seat_version="A")
+        assert handouts[0].version == "A"
+        assert handouts[0].versions == [("AD", 401)]
+
+    def test_an_override_beats_the_seat(self):
+        handouts = self._handouts({"806001": "B"}, seat_version="A")
+        assert handouts[0].version == "B"
+        assert handouts[0].versions == [("AD", 402)], \
+            "the seed has to change too, or only the label moved"
+
+    def test_it_is_keyed_by_id_not_name(self):
+        """Like everything else that must survive a rename."""
+        assert self._handouts({"Ada Lovelace": "B"})[0].version == "B"
+        assert self._handouts({"someone else": "B"})[0].version == "A"

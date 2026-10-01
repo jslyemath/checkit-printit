@@ -216,3 +216,54 @@ class TestTheWordingItself:
     def test_no_limit_says_so(self):
         assert self.one(choose=0)["validation"]["help"] == \
             "You may choose any amount of skills."
+
+class TestThePrintDraftIsChecked:
+    """A slug typed into an override reaches the build as "X asked for 'W9',
+    which is not in the bank" -- after a job folder has been written. Caught
+    at save time instead, while the box is still on screen."""
+
+    @pytest.fixture
+    def printable(self, tmp_path, monkeypatch, bank_dir):
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(tmp_path))
+        course_mod.init("P", bank=str(bank_dir), adopt=None)
+        return gui_mod.Course("P")
+
+    def test_a_slug_the_bank_does_not_have_is_refused(self, printable):
+        with pytest.raises(gui_mod.GuiError, match="not in the bank"):
+            gui_mod.api_print_save(printable, {"draft": {
+                "overrides": {"806001": ["AD", "W9"]}}})
+
+    def test_the_message_names_the_slug_and_the_student(self, printable):
+        with pytest.raises(gui_mod.GuiError, match="806001.*W9"):
+            gui_mod.api_print_save(printable, {"draft": {
+                "overrides": {"806001": ["W9"]}}})
+
+    @pytest.mark.parametrize("field", ["simply_print", "default_when_missing",
+                                       "append_for_everyone"])
+    def test_the_three_modes_are_checked_too(self, printable, field):
+        with pytest.raises(gui_mod.GuiError, match="not in the bank"):
+            gui_mod.api_print_save(printable, {"draft": {field: ["NOPE"]}})
+
+    def test_an_extra_naming_a_missing_skill_is_refused(self, printable):
+        with pytest.raises(gui_mod.GuiError, match="not in the bank"):
+            gui_mod.api_print_save(printable, {"draft": {
+                "extras": [{"skill": "NOPE", "copies": 1}]}})
+
+    def test_a_good_draft_saves(self, printable):
+        out = gui_mod.api_print_save(printable, {"draft": {
+            "simply_print": ["AD"], "date": "2026-10-02"}})
+        assert out["draft"]["simply_print"] == ["AD"]
+
+    def test_a_version_the_chart_does_not_have_is_refused(self, printable):
+        with pytest.raises(gui_mod.GuiError, match="not a version"):
+            gui_mod.api_print_save(printable, {"draft": {
+                "versions": {"806001": "Z"},
+                "versionsAvailable": ["A", "B"]}})
+
+    def test_a_refused_draft_is_not_written(self, printable):
+        from checkit_printit import printjob
+        before = printjob.load_draft("P")
+        with pytest.raises(gui_mod.GuiError):
+            gui_mod.api_print_save(printable, {"draft": {
+                "simply_print": ["NOPE"]}})
+        assert printjob.load_draft("P") == before
