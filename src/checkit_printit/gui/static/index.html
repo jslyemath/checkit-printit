@@ -104,6 +104,8 @@
       <button id="print-reset" class="link"
               title="Empty every field on this tab, ready for the next run. Save to keep it; Discard puts it back.">Reset this print job</button>
     </div>
+    <p class="muted">Everything on this tab is one job. The bar at the
+      bottom saves all of it.</p>
     <p id="print-blocked" class="banner warn" hidden></p>
 
     <div class="panel">
@@ -146,13 +148,6 @@
 
     <div class="panel">
       <h3>Who gets what <span id="who-count" class="muted"></span></h3>
-      <div class="toolbar">
-        <span id="print-news" class="news" hidden></span>
-        <span class="spacer"></span>
-        <span id="print-dirty" class="dirty" hidden></span>
-        <button id="print-save" class="primary" disabled>Save</button>
-        <button id="print-revert" disabled>Discard</button>
-      </div>
       <div class="scroller">
         <table id="who">
           <thead><tr><th>Name</th><th>Section</th>
@@ -176,6 +171,14 @@
         <button id="p-reveal" class="link" hidden>open the folder</button>
       </div>
       <div id="build-out"></div>
+    </div>
+
+    <div class="savebar">
+      <span id="print-news" class="news" hidden></span>
+      <span class="spacer"></span>
+      <span id="print-dirty" class="dirty" hidden></span>
+      <button id="print-save" class="primary" disabled>Save</button>
+      <button id="print-revert" disabled>Discard</button>
     </div>
   </section>
 
