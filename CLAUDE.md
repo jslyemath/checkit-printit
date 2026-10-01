@@ -92,6 +92,20 @@ order, which read as a bug in the sort.
 The front end falls back rather than erroring when a key is missing, which is
 right, and is exactly what makes a stale server hard to see.
 
+### "Failed to fetch" means the handler died, not that the server is down
+
+`_api` used to catch `GuiError`, `RosterError` and `OSError` and let
+everything else escape, and an escaped exception closes the connection
+without a response. A missing `import sys` therefore reached the browser as
+`net::ERR_EMPTY_RESPONSE` -- indistinguishable from the server being down,
+the token being wrong, or a typo in the URL, so the first hour goes on
+three things that were never broken.
+
+It now catches everything, prints the traceback to the terminal, and
+returns a 500 naming the exception. **An error path that produces no output
+is worse than one that produces a wrong message**, because a wrong message
+is at least a lead.
+
 ### A fixture small enough to be convenient hides what you are measuring
 
 The roster column widths were tuned against the two-row scratch course, whose
@@ -359,6 +373,7 @@ rather than widths, and a column hidden by a rule that beat `[hidden]`.
 | rule | lives in |
 |---|---|
 | what name to show a person | `Student.display` |
+| which version letters a run needs | `assemble.versions_for` |
 | which spellings a seat may use | `seating.index_by_name` |
 | dropping a student | `roster.set_dropped` |
 | the open list, the assessment | `availability.set_open`, `set_assessment` |

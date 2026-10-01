@@ -25,7 +25,9 @@ import mimetypes
 import os
 import secrets
 import socketserver
+import sys
 import threading
+import traceback
 import urllib.parse
 import webbrowser
 
@@ -602,6 +604,9 @@ def api_print(course, _body):
                    "professor": identity.get("professor", "")},
         "jobFolder": printjob_mod.folder_for(draft),
         "versionsAvailable": versions_available,
+        # So "Reset this print job" is an ordinary edit that Discard can
+        # undo, rather than a second way to write the file.
+        "defaults": dict(printjob_mod.DEFAULTS),
     }
 
 
@@ -633,12 +638,16 @@ def api_print_save(course, body):
             named = "; ".join(f"{k}: {', '.join(v)}" for k, v in bad.items())
             raise GuiError(f"not in the bank -- {named}")
 
-    letters = set(draft.get("versionsAvailable") or [])
+    # A letter beyond the chart's is allowed: that is how a version is
+    # added from the app, and `assemble` draws seeds for whatever the pins
+    # name. It still has to be a version letter and not prose, because the
+    # value ends up in a filename and on a paper.
     for key, letter in (draft.get("versions") or {}).items():
-        if letters and letter not in letters:
+        if not (isinstance(letter, str) and len(letter) == 1
+                and "A" <= letter <= "Z"):
             raise GuiError(
-                f"{letter!r} is not a version this seating chart has "
-                f"({', '.join(sorted(letters))}).")
+                f"{letter!r} is not a version letter. Versions are a single "
+                f"capital, A to Z.")
 
     printjob_mod.save_draft(course.name, draft)
     return api_print(course, {})
@@ -680,9 +689,11 @@ def _build(course, preview, seed=None):
                   for (v, s), n in sorted(report["seeds"].items(),
                                           key=lambda kv: (kv[0][1], kv[0][0]))
                   if s in report["skills"]],
-        "collisions": [f"{a.name} and {b.name} share version {a.version} "
-                       f"at table {a.group}"
-                       for a, b in report["collisions"]],
+        # Triples since the collision check started reading the paper
+        # rather than the chart: the letter printed is not the seat's.
+        "collisions": [f"{a.name} and {b.name} were both printed version "
+                       f"{version} at table {a.group}"
+                       for a, b, version in report["collisions"]],
         "unseated": list(report["unseated"]),
         "missingFields": {k: list(v) for k, v in report["missing_fields"].items()},
         "pdf": result.pdf,
@@ -838,6 +849,14 @@ def make_handler(course, token):
                 self._send(400, {"error": str(exc)})
             except OSError as exc:
                 self._send(500, {"error": f"could not read or write a file: {exc}"})
+            except Exception as exc:                      # noqa: BLE001
+                # Anything else is a bug, and a bug must still answer. Left
+                # uncaught, the handler dies without writing a response and
+                # the browser can only say "failed to fetch" -- which is
+                # what a missing `import sys` looked like for a week. The
+                # traceback goes to the terminal, where it is useful.
+                traceback.print_exc()
+                self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
 
     return Handler
 
