@@ -299,39 +299,68 @@ student sees.
 
 ## Where things stand
 
-Stages 1-7b are built. **7a ran against a real Google account on
-2026-09-21 and works**: attach, add-items, dry-run and push all write the
-four slots. Seven bugs were found doing it, none of them the predicted ones.
-Read "Stage 7a, against a real Google account" in `../checkit/CODEBASE_NOTES.md`
-before touching `clasp.py` or `Code.gs`.
+Stages 1-7b are done. **7a and 7b both ran against a real Google account**
+and work: create, attach, map, add-items, push, and pull. Read "Stage 7a,
+against a real Google account" and "7b against a real response" in
+`../checkit/CODEBASE_NOTES.md` before touching `clasp.py` or `Code.gs`.
 
-Four of those are worth carrying in your head:
+**Stage 8, the local web app, is four views in:**
 
-- **clasp exits 0 when it refuses.** `run()` therefore checks the *output*
-  for refusal phrases, not just the exit code. Do not undo that.
-- **`clasp create-script` overwrites `appsscript.json`** in `--rootDir`,
-  dropping the `webapp` block and leaving the deployment with no entry point.
-  `create_form` restores the staged one; `attach` re-stages over the clone.
-- **Apps Script 404s a live deployment at random**, about one call in three.
-  `call()` retries 404 and timeout. It must never retry 401 or 403 -- those
-  are real configuration errors and a retry only buries the message.
-- **Subcommand names are pinned by tests** against `clasp --help` on 3.4.1
-  (`create-script --type forms`, `push`, `create-deployment`). The old tests
-  could not catch a wrong name because they assert on what the deployment
-  replies, never on the argv.
+| | | |
+|---|---|---|
+| 8a | shell | done |
+| 8b | **Roster** | done -- editable table, drop/restore, stacked sorting |
+| 8c | **Update form** | done -- open skills, the assessment, a form-shaped preview, the push |
+| 8d | **Print job** | done -- selection modes, variants, extras, per-student override and version, preview, build |
+| 8e | **Record** + the response pull | next |
+| 8f | **Seating** | not started; genuinely new code |
+| 8g | **Cold call** | not started; genuinely new code |
+| 8h | **Setup** | not started -- create a form from the app, and the boilerplate editor |
 
-**`form create` is still unfinished**: a new form needs one browser visit to
-authorize the script before any call works. The editor's deploy flow does
-this automatically and clasp's does not.
+**Three decisions are open and block 8e.** They are in
+`../checkit/PRINT_TOOL_DESIGN.md` 12.6 under "Open, and blocking the next
+slice": whether the nickname prints, whether Responses stays its own tab,
+and whether "simply print" becomes a mode switch. Each changes a layout, so
+building on them first means redoing the work. **Ask before starting 8e.**
 
-**7b works against a real response**, read 2026-09-21: checkbox answers are
-arrays, `getRespondentEmail()` is populated, and the option text round trips
-as `SLUG - description`.
+## Working on the web app
 
-Responses are scoped **by the date the student confirmed**, not by a time
-window -- the confirmation checkbox is the scoping key. Latest response per
-student wins, and matching is by address through `all_emails()`, never by
-name.
+```bash
+./.venv/Scripts/python.exe -m checkit_printit gui -c "Scratch 48"
+```
 
-Next: 8 (the seating GUI, with the cold-call system), 9 (the gradebook). The
-full plan is `../checkit/PRINT_TOOL_DESIGN.md` section 12.
+`Scratch` is a two-student course wired to a **real Google Form**; use it for
+anything touching Google. `Scratch 48` is forty-eight synthetic students
+shaped like the real roster -- same section split, same name lengths, same
+chart including the three-seat table and the lone seat -- and is what
+anything about size or layout should be checked against.
+
+**Restart the server after editing anything under `gui/`.** Python does not
+reload a module in a live process, and the front end falls back rather than
+erroring when a key is missing, so a stale server looks like a logic bug.
+
+**Check the browser at the pane's real width**, around 530px, not only wide.
+Two bugs lived in the gap: a table whose columns silently became proportions
+rather than widths, and a column hidden by a rule that beat `[hidden]`.
+
+## The rule the GUI is built on
+
+**Every handler calls the function the CLI calls.** Not a copy of it.
+
+| rule | lives in |
+|---|---|
+| dropping a student | `roster.set_dropped` |
+| the open list, the assessment | `availability.set_open`, `set_assessment` |
+| the form's wording | `form.payload_for` |
+| the form's fixed text | `boilerplate.py` |
+| building | `runner.run` |
+| a draft becoming a job folder | `printjob.py` |
+
+Each was lifted out of a `@click.command` body that mixed it with
+`click.echo`. If the GUI needs a rule that is still inside one, **move it
+out rather than reimplementing it** -- and prefer an alias to a deletion.
+
+A GUI print job **writes a job folder and calls `build` on it**. The folder
+is what makes a run reproducible and what `--replay` reads, so there is no
+second way in.
+
