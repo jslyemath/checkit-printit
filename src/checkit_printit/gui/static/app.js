@@ -1222,6 +1222,10 @@ function renderBuild(out) {
   box.appendChild(table);
 
   for (const c of out.collisions) line("⚠ " + c, "warnline");
+  if (out.unmatchedOverrides && out.unmatchedOverrides.length)
+    line("⚠ override(s) for " + out.unmatchedOverrides.join(", ")
+         + " matched nobody in the roster, so nothing changed for them",
+         "warnline");
   if (out.unseated.length)
     line("⚠ not in the seating chart, printed last: " + out.unseated.join(", "),
          "warnline");

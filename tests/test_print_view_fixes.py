@@ -242,6 +242,7 @@ class TestTheBuildReportNamesCollisions:
             recorded = 0
             record_error = ""
             theme_installed = ""
+            unmatched_overrides = ()
             report = {"students": 2, "extras": 0, "skills": [], "versions": 0,
                       "keys": 0, "seeds": {}, "unseated": [],
                       "missing_fields": {},

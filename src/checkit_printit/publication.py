@@ -52,6 +52,12 @@ class Publication:
     #: not in seating.toml.
     student_versions: dict = dataclasses.field(default_factory=dict)
 
+    #: One student's skills for this run, replacing what they chose. Keyed
+    #: the same way as `student_versions`. The selection modes still
+    #: compose on top, so `append_for_everyone` is added to an override and
+    #: `simply_print` replaces it -- which is what the staging table shows.
+    student_overrides: dict = dataclasses.field(default_factory=dict)
+
     # which versions
     #
     # `seeds` pins a letter across every skill in the run, which only means
@@ -179,6 +185,8 @@ def load(path):
         variants={str(k): str(v) for k, v in (raw.get("variants") or {}).items()},
         student_versions={str(k): str(v) for k, v
                           in (raw.get("versions") or {}).items()},
+        student_overrides={str(k): [str(s) for s in v] for k, v
+                           in (raw.get("overrides") or {}).items()},
         simply_print=tuple(raw.get("selection", {}).get("simply_print", [])),
         default_when_missing=tuple(raw.get("selection", {}).get("default_when_missing", [])),
         append_for_everyone=tuple(raw.get("selection", {}).get("append_for_everyone", [])),

@@ -212,6 +212,38 @@ def find(roster, who):
     raise NotFound(f"no student matching {who!r}.")
 
 
+def keys_of(student):
+    """Every id a per-run table may be keyed by, strongest first.
+
+    The name is last and is a weak key. It is here because a roster built
+    from a spreadsheet may carry nothing else, not because it is safe.
+    """
+    return tuple(k for k in (student.sid, student.alt_id, student.email,
+                             student.name) if k)
+
+
+def apply_overrides(roster, overrides):
+    """Replace one student's chosen skills, for this run only.
+
+    Returns `(roster, unmatched)`. The unmatched keys are reported rather
+    than dropped: a line the instructor typed that silently does nothing is
+    how this went wrong in the first place.
+    """
+    if not overrides:
+        return roster, []
+    used, out = set(), []
+    for student in roster:
+        for key in keys_of(student):
+            if key in overrides:
+                out.append(dataclasses.replace(student,
+                                               skills=list(overrides[key])))
+                used.add(key)
+                break
+        else:
+            out.append(student)
+    return Roster(out), sorted(set(overrides) - used)
+
+
 def apply_selection_modes(roster, simply_print=(), default_when_missing=(),
                           append_for_everyone=()):
     """The three selection overrides, which compose.

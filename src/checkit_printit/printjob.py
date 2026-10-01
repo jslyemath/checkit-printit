@@ -204,6 +204,16 @@ def publication_text(space, draft, course_name, semester="", professor=""):
         for slug, case in sorted(draft["variants"].items()):
             lines.append(f"{slug} = {_quote(case)}")
         lines.append("")
+    if draft["overrides"]:
+        lines += [
+            "# One student's skills for this run, replacing what they chose.",
+            "# Keyed by whichever id the roster carries; the selection modes",
+            "# below still compose on top.",
+            "[overrides]",
+        ]
+        for key, slugs in sorted(draft["overrides"].items()):
+            lines.append(f"{_quote(key)} = {_list(slugs)}")
+        lines.append("")
     if draft["versions"]:
         lines.append("[versions]")
         for key, letter in sorted(draft["versions"].items()):

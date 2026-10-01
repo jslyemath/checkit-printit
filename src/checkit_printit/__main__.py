@@ -1193,6 +1193,10 @@ def _report(result):
     for a, b, version in report["collisions"]:
         click.echo(f"  WARNING  {a.name} and {b.name} are adjacent in group "
                    f"{a.group} and were both printed version {version}")
+    if result.unmatched_overrides:
+        click.echo(f"  WARNING  override(s) for "
+                   f"{', '.join(result.unmatched_overrides)} matched nobody "
+                   f"in the roster, so nothing was changed for them")
     if report["unseated"]:
         click.echo(f"  WARNING  not in the seating chart, printed last: "
                    f"{', '.join(report['unseated'])}")
