@@ -453,47 +453,23 @@ def form_pull(space, dry_run, force):
     says which assessment an answer is for. Where a student answered twice,
     the later answer wins.
     """
-    path = _space_path(space)
-    conn = form_mod.load(path)
     try:
-        av = availability_mod.load(course_mod.file_in(space, "availability"))
-    except availability_mod.AvailabilityError as exc:
-        raise click.ClickException(str(exc))
-
-    roster_path = course_mod.file_in(space, "roster")
-    if not os.path.isfile(roster_path):
-        raise click.ClickException(
-            f"{roster_path} does not exist, so there is nobody to match "
-            f"responses to. Import a class list first.")
-    try:
-        people = roster_mod.load(roster_path)
-    except (OSError, roster_mod.RosterError) as exc:
-        raise click.ClickException(str(exc))
-
-    try:
-        answer = form_mod.call(conn, "responses")
-    except form_mod.FormError as exc:
-        raise click.ClickException(str(exc))
-    raw = answer.get("responses") or []
-    click.echo(f"the form holds {len(raw)} response(s)")
-
-    bank = _bank_for(space)
-    known = tuple(bank.slugs()) if bank is not None else tuple(av.skills)
-    if bank is None:
-        click.echo("(no bank configured, so only the open skills are "
-                   "recognised)")
-
-    try:
-        pulled = responses_mod.collect(raw, people, conn.items, av.date, known)
+        out = responses_mod.pull_for_course(space, write=not dry_run,
+                                            force=force)
     except responses_mod.ResponseError as exc:
         raise click.ClickException(str(exc))
+    pulled = out.pulled
 
-    click.echo(f"for {av.name or 'this assessment'} on "
-               f"{availability_mod.spoken_date(av.date) or av.date}:")
+    click.echo(f"the form holds {out.total} response(s)")
+    if not out.known_from_bank:
+        click.echo("(no bank configured, so only the open skills are "
+                   "recognised)")
+    click.echo(f"for {out.assessment or 'this assessment'} on "
+               f"{availability_mod.spoken_date(out.date) or out.date}:")
     click.echo(f"  {pulled.answered} student(s) answered")
     for key, (student, picked) in sorted(
             pulled.by_student.items(), key=lambda kv: kv[1][0].name.lower()):
-        click.echo(f"    {student.name:28} {', '.join(picked) or '(nothing)'}")
+        click.echo(f"    {student.display:28} {', '.join(picked) or '(nothing)'}")
 
     if pulled.silent:
         click.echo(f"  {len(pulled.silent)} did not answer; they will get "
@@ -501,9 +477,7 @@ def form_pull(space, dry_run, force):
 
     # Everything below is a reason a student might not get the paper they
     # asked for, so none of it is allowed to be quiet.
-    trouble = False
     if pulled.unknown_emails:
-        trouble = True
         click.echo(f"  ! {len(pulled.unknown_emails)} response(s) from an "
                    f"address nobody on the roster has:")
         for address in pulled.unknown_emails:
@@ -511,7 +485,6 @@ def form_pull(space, dry_run, force):
         click.echo("    add the address to that student with "
                    "`roster import`, or check for a typo.")
     if pulled.unrecognised:
-        trouble = True
         click.echo(f"  ! {len(pulled.unrecognised)} answer(s) name a skill "
                    f"the bank does not have:")
         for address, option in pulled.unrecognised:
@@ -528,23 +501,11 @@ def form_pull(space, dry_run, force):
     if dry_run:
         click.echo("\ndry run -- the roster was not written.")
         return
-    if trouble and not force:
+    if not out.written:
         raise click.ClickException(
             "some responses could not be placed, so the roster was not "
             "written. Fix them, or pass --force to write the rest.")
-
-    updated = []
-    for student in people:
-        key = student.sid or student.alt_id or student.email or student.name
-        if key in pulled.chosen:
-            updated.append(dataclasses.replace(
-                student, skills=list(pulled.chosen[key])))
-        else:
-            updated.append(student)
-    with open(roster_path, "w", encoding="utf-8") as f:
-        f.write(roster_mod.to_toml(roster_mod.Roster(updated),
-                                   "checkit-printit form pull"))
-    click.echo(f"\nwrote {roster_path}")
+    click.echo(f"\nwrote {out.roster_path}")
     click.echo("next: build the job that names this course.")
 
 
@@ -815,20 +776,8 @@ def skills_set(space, name, date, due, choose, limit):
 
 
 def _bank_for(space):
-    """The course's bank, or None when it names none or cannot be read."""
-    import tomllib
-    config = os.path.join(course_mod.path_for(space), course_mod.CONFIG)
-    if not os.path.isfile(config):
-        return None
-    with open(config, "rb") as f:
-        declared = str(tomllib.load(f).get("bank", {}).get("path", "")).strip()
-    if not declared:
-        return None
-    try:
-        return Bank(os.path.normpath(
-            os.path.join(course_mod.path_for(space), declared)))
-    except BankError:
-        return None
+    """The course's bank, or None. Kept as a name the CLI already uses."""
+    return course_mod.bank_for(space)
 
 
 # These three moved into `runner`, which needs them with no click attached.

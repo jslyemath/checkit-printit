@@ -17,10 +17,13 @@ can be tested without a network. The script returns what the form holds and
 judges nothing.
 """
 
+import dataclasses
 import datetime
+import os
 import re
 
 from . import availability as availability_mod
+from . import roster as roster_mod
 
 
 class ResponseError(Exception):
@@ -187,11 +190,120 @@ def collect(raw_responses, roster, items, date, known_skills=()):
                 out.unrecognised.append((email, str(option)))
             elif slug not in picked:
                 picked.append(slug)
-        key = student.sid or student.alt_id or student.email or student.name
+        key = roster_mod.key_of(student)
         out.by_student[key] = (student, picked)
         out.chosen[key] = picked
 
     answered = {id(s) for s, _ in out.by_student.values()}
     out.silent = [s for s in roster
                   if not s.dropped and id(s) not in answered]
+    return out
+
+
+@dataclasses.dataclass
+class PullOutcome:
+    """What a pull found and what it did, so a caller only has to report.
+
+    Every count the CLI used to compute inline lives here, because the web
+    app needs the same ones and a second derivation of "how many were out
+    of scope" is a second thing to get wrong.
+    """
+
+    pulled: "Pull"
+    #: Responses the form holds in total, before any scoping.
+    total: int
+    assessment: str
+    date: object
+    #: False when the course names no bank, so only the open skills were
+    #: recognised -- worth saying, because it changes what counts as an
+    #: unrecognised answer.
+    known_from_bank: bool
+    written: bool = False
+    roster_path: str = ""
+
+    @property
+    def trouble(self):
+        """Reasons a student might not get the paper they asked for.
+
+        A property rather than a flag set once at the end, so a new kind of
+        trouble added to `Pull` cannot be forgotten here.
+        """
+        return bool(self.pulled.unknown_emails or self.pulled.unrecognised)
+
+
+def pull_for_course(space, *, write=True, force=False):
+    """Read this assessment's responses, and write them into the roster.
+
+    Scoped by the date each student confirmed, not by a time window: a form
+    accumulates responses all term, and the confirmation checkbox is what
+    says which assessment an answer is for. Where a student answered twice,
+    the later answer wins.
+
+    `write=False` is the dry run -- it decides everything and touches
+    nothing. `force` writes the rest when some responses could not be
+    placed; without it that is a refusal, because a roster written from a
+    pull that half worked is a stack of wrong papers.
+
+    Everything it can go wrong with arrives as `ResponseError`, so a caller
+    has one thing to catch and one message to show.
+    """
+    from . import course as course_mod
+    from . import form as form_mod
+
+    if not course_mod.exists(space):
+        raise ResponseError(f"no course named {space!r}.")
+
+    try:
+        conn = form_mod.load(course_mod.path_for(space))
+        av = availability_mod.load(course_mod.file_in(space, "availability"))
+    except (availability_mod.AvailabilityError, form_mod.FormError) as exc:
+        raise ResponseError(str(exc)) from None
+
+    roster_path = course_mod.file_in(space, "roster")
+    if not os.path.isfile(roster_path):
+        raise ResponseError(
+            f"{roster_path} does not exist, so there is nobody to match "
+            f"responses to. Import a class list first.")
+    try:
+        people = roster_mod.load(roster_path)
+    except (OSError, roster_mod.RosterError) as exc:
+        raise ResponseError(str(exc)) from None
+
+    try:
+        answer = form_mod.call(conn, "responses")
+    except form_mod.FormError as exc:
+        raise ResponseError(str(exc)) from None
+    raw = answer.get("responses") or []
+
+    # A course with no bank still has an open list, and that is enough to
+    # recognise an answer by.
+    bank = course_mod.bank_for(space)
+    known = tuple(bank.slugs()) if bank is not None else tuple(av.skills)
+
+    out = PullOutcome(
+        pulled=collect(raw, people, conn.items, av.date, known),
+        total=len(raw), assessment=av.name, date=av.date,
+        known_from_bank=bank is not None, roster_path=roster_path)
+
+    if not write:
+        return out
+    if out.trouble and not force:
+        # Returned, not raised. The caller is holding the detail -- which
+        # address, which answer -- and a refusal with none of it attached
+        # sends you looking for a problem this function already knows
+        # about. `written` carries the decision; `trouble` explains it.
+        return out
+
+    updated = []
+    for student in people:
+        key = roster_mod.key_of(student)
+        if key in out.pulled.chosen:
+            updated.append(dataclasses.replace(
+                student, skills=list(out.pulled.chosen[key])))
+        else:
+            updated.append(student)
+    with open(roster_path, "w", encoding="utf-8") as f:
+        f.write(roster_mod.to_toml(roster_mod.Roster(updated),
+                                   "checkit-printit form pull"))
+    out.written = True
     return out

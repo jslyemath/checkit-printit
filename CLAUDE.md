@@ -357,7 +357,8 @@ against a real Google account" and "7b against a real response" in
 | 8b | **Roster** | done -- editable table, drop/restore, stacked sorting |
 | 8c | **Update form** | done -- open skills, the assessment, a form-shaped preview, the push |
 | 8d | **Print job** | done -- selection modes, variants, extras, per-student override and version, preview, build |
-| 8e | **Record** + the response pull | next |
+| 8e | the response pull | done -- Print job's first card |
+| 8e | **Record** | next |
 | 8f | **Seating** | not started; genuinely new code |
 | 8g | **Cold call** | not started; genuinely new code |
 | 8h | **Setup** | not started -- create a form from the app, and the boilerplate editor |
@@ -370,9 +371,9 @@ what each one cost":
 - Responses is **not** a tab; the pull becomes Print job's first card
 - simply-print is a **mode**, a segmented control at the top of the tab
 
-The first and third are built. **The second is the next slice**: fold
-`form pull` into Print job, report its failures in place, and drop
-Responses from the nav.
+All three are built. Responses is gone from the nav; the pull is Print
+job's first card, hidden on a course with no form and in the mode where
+what students chose does not apply.
 
 ## Working on the web app
 
@@ -409,6 +410,9 @@ rather than widths, and a column hidden by a rule that beat `[hidden]`.
 | which version letters a run needs | `assemble.versions_for` |
 | which ids a per-run table may use | `roster.keys_of` |
 | a per-student override | `roster.apply_overrides` |
+| which id a student is filed under | `roster.key_of` |
+| which bank a course prints from | `course.bank_for` |
+| reading responses into the roster | `responses.pull_for_course` |
 | which spellings a seat may use | `seating.index_by_name` |
 | dropping a student | `roster.set_dropped` |
 | the open list, the assessment | `availability.set_open`, `set_assessment` |

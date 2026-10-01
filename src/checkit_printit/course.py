@@ -138,6 +138,32 @@ skills = []
 '''
 
 
+def bank_for(name, root=None):
+    """The bank this course prints from, or None.
+
+    None is a normal state rather than a failure: a course can exist before
+    it is pointed at a bank, and the views that do not need one still load.
+
+    One function because there were two -- the CLI's `_bank_for` and the web
+    app's `Course.bank` -- which is the shape of bug this codebase keeps
+    finding late.
+    """
+    import tomllib
+    from .bank import Bank, BankError
+    here = path_for(name, root)
+    config = os.path.join(here, CONFIG)
+    if not os.path.isfile(config):
+        return None
+    with open(config, "rb") as f:
+        declared = str(tomllib.load(f).get("bank", {}).get("path", "")).strip()
+    if not declared:
+        return None
+    try:
+        return Bank(os.path.normpath(os.path.join(here, declared)))
+    except BankError:
+        return None
+
+
 def init(name, bank="", root=None, adopt=None):
     """Create a course. Returns (path, notes).
 
