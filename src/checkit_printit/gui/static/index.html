@@ -95,6 +95,76 @@
     </div>
   </section>
 
+  <section id="view-print" class="view" hidden>
+    <h2>Print job</h2>
+    <p id="print-blocked" class="banner warn" hidden></p>
+
+    <div class="panel">
+      <h3>This run</h3>
+      <div class="fields">
+        <label title="Prints at the top of every paper, and names the job folder.">Title
+          <input id="p-title" type="text" spellcheck="false"></label>
+        <label title="Prints on the paper and names the job folder.">Date
+          <input id="p-date" type="date"></label>
+        <label title="Print an answer key for each distinct paper.">Keys
+          <input id="p-keys" type="checkbox"></label>
+        <label title="How many copies of each key." id="p-keycopies-wrap">Key copies
+          <input id="p-key-copies" type="number" min="1" max="9"></label>
+        <label title="Print each student's name on their paper. Turn off for an anonymous set.">Names
+          <input id="p-names" type="checkbox"></label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>What everyone gets</h3>
+      <p class="muted">These three compose, in this order. Leave them empty to
+        print exactly what each student chose.</p>
+      <div id="modes"></div>
+    </div>
+
+    <div class="panel" id="variants-panel" hidden>
+      <h3>Variants</h3>
+      <p class="muted">Only skills that offer a choice appear here, and only
+        once they are in the run.</p>
+      <div id="variants" class="fields"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Extras <span id="extras-count" class="muted"></span></h3>
+      <p class="muted">Spare copies, printed after the class set with a blank
+        name line.</p>
+      <div id="extras"></div>
+      <button id="extras-add" class="link">add a spare</button>
+    </div>
+
+    <div class="panel">
+      <h3>Who gets what <span id="who-count" class="muted"></span></h3>
+      <div class="toolbar">
+        <span class="spacer"></span>
+        <span id="print-dirty" class="dirty" hidden></span>
+        <button id="print-save" class="primary" disabled>Save</button>
+        <button id="print-revert" disabled>Discard</button>
+      </div>
+      <div class="scroller">
+        <table id="who">
+          <thead><tr><th>Name</th><th>Section</th><th>Chose</th><th>Override</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Build</h3>
+      <div class="toolbar">
+        <button id="p-preview">Preview the draw</button>
+        <button id="p-build" class="primary">Build the PDF</button>
+        <span class="spacer"></span>
+        <button id="p-reveal" class="link" hidden>open the folder</button>
+      </div>
+      <div id="build-out"></div>
+    </div>
+  </section>
+
   <section id="view-soon" class="view" hidden>
     <h2 id="soon-title">Not built yet</h2>
     <p class="muted" id="soon-body"></p>

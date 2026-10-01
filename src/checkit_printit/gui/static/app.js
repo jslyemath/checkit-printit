@@ -11,7 +11,7 @@ const VIEWS = [
   { id: "roster", label: "Roster" },
   { id: "form", label: "Update form" },
   { id: "responses", label: "Responses", soon: "Who answered and what they chose, pulled into the roster. Today: `form pull`." },
-  { id: "print", label: "Print job", soon: "The staging area for one sitting: each student's choices with a manual override, skills appended for everyone, defaults for whoever did not respond, the per-skill variant, extras and keys — then build and open the PDF. Today: a job folder and `build`." },
+  { id: "print", label: "Print job" },
   { id: "record", label: "Record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
   { id: "seating", label: "Seating", soon: "Drag students between seats, randomise, swap two. No CLI equivalent exists yet -- this is new code, not a face on something tested." },
   { id: "callout", label: "Cold call", soon: "Pick a random student, pick several, refresh the call list. No CLI equivalent yet." },
@@ -125,6 +125,7 @@ function show(id) {
     // view reads the bank, and a course with no bank should still show a
     // roster without waiting for one.
     if (id === "form" && skills === null) loadSkills();
+    if (id === "print" && printState === null) loadPrint();
   }
   location.hash = id;
 }
@@ -798,6 +799,370 @@ async function refreshGoogle(force) {
 }
 
 
+
+
+// ------------------------------------------------------------ print job --
+
+let printState = null;
+let draft = null;          // the edited copy, before Save
+
+const MODES = [
+  ["simply_print", "Simply print",
+   "Everyone gets exactly these, and individual choices are ignored."],
+  ["default_when_missing", "Default when nobody chose",
+   "What a student who chose nothing gets."],
+  ["append_for_everyone", "Append for everyone",
+   "Added on top of whatever each student ends with."],
+];
+
+function printDirty() {
+  return printState && JSON.stringify(draft) !== JSON.stringify(printState.draft);
+}
+
+function refreshPrintDirty() {
+  const d = printDirty();
+  document.getElementById("print-dirty").hidden = !d;
+  document.getElementById("print-dirty").textContent = "unsaved changes";
+  document.getElementById("print-save").disabled = !d;
+  document.getElementById("print-revert").disabled = !d;
+}
+
+function skillPicker(selected, onChange) {
+  /* A short multi-select rather than 29 checkboxes: these lists are usually
+     empty or hold one or two slugs, and a wall of boxes for a rare case
+     buries the common one. */
+  const sel = document.createElement("select");
+  sel.multiple = true;
+  sel.size = 5;
+  sel.className = "picker";
+  for (const s of printState.skills) {
+    const o = document.createElement("option");
+    o.value = s.slug;
+    o.textContent = s.description ? `${s.slug} — ${s.description}` : s.slug;
+    o.selected = selected.includes(s.slug);
+    o.title = s.description || s.slug;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => onChange([...sel.selectedOptions].map(o => o.value));
+  return sel;
+}
+
+function renderModes() {
+  const box = document.getElementById("modes");
+  box.textContent = "";
+  for (const [key, label, note] of MODES) {
+    const wrap = document.createElement("div");
+    wrap.className = "mode";
+    const h = document.createElement("div");
+    h.className = "mode-label";
+    h.textContent = label;
+    h.title = note;
+    const n = document.createElement("div");
+    n.className = "muted";
+    n.textContent = note;
+    wrap.append(h, n, skillPicker(draft[key], (picked) => {
+      draft[key] = picked;
+      renderVariants();
+      renderWho();
+      refreshPrintDirty();
+    }));
+    box.appendChild(wrap);
+  }
+}
+
+function skillsInPlay() {
+  /* Every slug this run could print: the three modes, each student's own
+     choices or their override, and the extras. A variant only matters for a
+     skill actually in the run. */
+  const out = new Set([...draft.simply_print, ...draft.append_for_everyone,
+                       ...draft.default_when_missing]);
+  if (!draft.simply_print.length) {
+    for (const s of printState.students) {
+      for (const slug of (draft.overrides[s.key] || s.chose)) out.add(slug);
+    }
+  }
+  for (const e of draft.extras) if (e.skill) out.add(e.skill);
+  return [...out];
+}
+
+function renderVariants() {
+  const panel = document.getElementById("variants-panel");
+  const box = document.getElementById("variants");
+  box.textContent = "";
+  const relevant = skillsInPlay().filter(s => printState.variants[s]);
+  panel.hidden = relevant.length === 0;
+  for (const slug of relevant.sort()) {
+    const label = document.createElement("label");
+    label.textContent = slug;
+    const sel = document.createElement("select");
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "(any)";
+    sel.appendChild(none);
+    for (const option of printState.variants[slug]) {
+      const o = document.createElement("option");
+      o.value = o.textContent = option;
+      sel.appendChild(o);
+    }
+    sel.value = draft.variants[slug] || "";
+    sel.onchange = () => {
+      if (sel.value) draft.variants[slug] = sel.value;
+      else delete draft.variants[slug];
+      refreshPrintDirty();
+    };
+    label.appendChild(sel);
+    box.appendChild(label);
+  }
+  // A variant pinned for a skill no longer in the run would be carried into
+  // publication.toml and refused at build time, so drop it as it leaves.
+  for (const slug of Object.keys(draft.variants)) {
+    if (!relevant.includes(slug)) delete draft.variants[slug];
+  }
+}
+
+function renderExtras() {
+  const box = document.getElementById("extras");
+  box.textContent = "";
+  draft.extras.forEach((extra, i) => {
+    const row = document.createElement("div");
+    row.className = "extra";
+    const sel = document.createElement("select");
+    for (const s of printState.skills) {
+      const o = document.createElement("option");
+      o.value = o.textContent = s.slug;
+      o.selected = s.slug === extra.skill;
+      sel.appendChild(o);
+    }
+    sel.onchange = () => { extra.skill = sel.value; renderVariants(); refreshPrintDirty(); };
+    const n = document.createElement("input");
+    n.type = "number"; n.min = "1"; n.max = "99"; n.value = extra.copies;
+    n.onchange = () => { extra.copies = Number(n.value || 1); refreshPrintDirty(); };
+    const rm = document.createElement("button");
+    rm.className = "link";
+    rm.textContent = "remove";
+    rm.onclick = () => { draft.extras.splice(i, 1); renderExtras(); renderVariants(); refreshPrintDirty(); };
+    row.append(sel, n, document.createTextNode(" copies"), rm);
+    box.appendChild(row);
+  });
+  document.getElementById("extras-count").textContent =
+    draft.extras.length ? `— ${draft.extras.reduce((a, e) => a + Number(e.copies || 0), 0)} sheets` : "";
+}
+
+function willGet(student) {
+  /* The same composition `roster.apply_selection_modes` does, so the table
+     says what will actually print. An override replaces the student's own
+     choices and nothing else -- the modes still apply on top. */
+  let chosen = draft.overrides[student.key] || student.chose;
+  if (draft.simply_print.length) chosen = draft.simply_print;
+  else if (!chosen.length) chosen = draft.default_when_missing;
+  const out = [...chosen];
+  for (const s of draft.append_for_everyone) if (!out.includes(s)) out.push(s);
+  return out;
+}
+
+function renderWho() {
+  const body = document.querySelector("#who tbody");
+  body.textContent = "";
+  let papers = 0;
+  for (const student of printState.students) {
+    const gets = willGet(student);
+    papers += gets.length;
+    const tr = document.createElement("tr");
+    const add = (text, cls) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      if (cls) td.className = cls;
+      tr.appendChild(td);
+      return td;
+    };
+    add(student.name);
+    add(student.section, "ro");
+    add(gets.join(", ") || "—");
+    const td = document.createElement("td");
+    const input = document.createElement("input");
+    input.value = (draft.overrides[student.key] || []).join(", ");
+    input.placeholder = student.chose.join(", ") || "nothing chosen";
+    input.spellcheck = false;
+    input.onchange = () => {
+      const slugs = input.value.split(",").map(s => s.trim()).filter(Boolean);
+      if (slugs.length) draft.overrides[student.key] = slugs;
+      else delete draft.overrides[student.key];
+      renderVariants();
+      renderWho();
+      refreshPrintDirty();
+    };
+    td.appendChild(input);
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
+  document.getElementById("who-count").textContent =
+    `— ${printState.students.length} students, ${papers} papers`;
+}
+
+function renderPrintFields() {
+  const f = {
+    title: document.getElementById("p-title"),
+    date: document.getElementById("p-date"),
+    keys: document.getElementById("p-keys"),
+    key_copies: document.getElementById("p-key-copies"),
+    names: document.getElementById("p-names"),
+  };
+  f.title.value = draft.title || "";
+  f.date.value = draft.date || "";
+  f.keys.checked = Boolean(draft.keys);
+  f.key_copies.value = draft.key_copies || 1;
+  f.names.checked = Boolean(draft.names);
+  document.getElementById("p-keycopies-wrap").hidden = !draft.keys;
+  for (const [key, input] of Object.entries(f)) {
+    input.oninput = input.onchange = () => {
+      draft[key] = input.type === "checkbox" ? input.checked
+                 : input.type === "number" ? Number(input.value || 1)
+                 : input.value;
+      document.getElementById("p-keycopies-wrap").hidden = !draft.keys;
+      refreshPrintDirty();
+    };
+  }
+}
+
+function renderBuild(out) {
+  const box = document.getElementById("build-out");
+  box.textContent = "";
+  const line = (text, cls) => {
+    const p = document.createElement("p");
+    p.className = cls || "";
+    p.textContent = text;
+    box.appendChild(p);
+  };
+  line(`${out.students} students, ${out.skills.length} skill(s): `
+       + out.skills.join(", "));
+  line(`${out.versions} distinct papers, ${out.keys} key page(s)`
+       + (out.extras ? `, ${out.extras} spare(s)` : ""));
+  // Not a prediction: a build draws again unless given this number, which
+  // is why it is carried across rather than shown and forgotten.
+  line(out.preview
+    ? `seed ${out.seed} — the build below will reuse it, so what you see is `
+      + `what you get`
+    : `seed ${out.seed} — pass it to --seed to reproduce this run`, "muted");
+
+  const table = document.createElement("table");
+  table.className = "seeds";
+  for (const s of out.seeds) {
+    const tr = document.createElement("tr");
+    for (const v of [s.version, s.slug, "v" + s.seed]) {
+      const td = document.createElement("td");
+      td.textContent = v;
+      tr.appendChild(td);
+    }
+    table.appendChild(tr);
+  }
+  box.appendChild(table);
+
+  for (const c of out.collisions) line("⚠ " + c, "warnline");
+  if (out.unseated.length)
+    line("⚠ not in the seating chart, printed last: " + out.unseated.join(", "),
+         "warnline");
+  for (const [slug, fields] of Object.entries(out.missingFields))
+    line(`note: ${slug}'s template asked for ${fields.join(", ")}, which its `
+         + `generator does not set.`, "muted");
+
+  if (out.preview) {
+    line("Nothing was written.", "muted");
+  } else {
+    line("PDF: " + out.pdf);
+    if (out.recorded) line(`${out.recorded} paper(s) recorded`, "muted");
+    if (out.recordError) line("could not write the print record: "
+                              + out.recordError, "warnline");
+    const reveal = document.getElementById("p-reveal");
+    reveal.hidden = false;
+    reveal.onclick = async () => {
+      try { await api("/api/print/reveal", { path: out.out }); }
+      catch (err) { toast(err.message, true); }
+    };
+  }
+}
+
+let lastSeed = null;
+
+async function runPrint(which) {
+  if (printDirty()) {
+    toast("Save first — the build reads the file, not the screen.", true);
+    return;
+  }
+  const btn = document.getElementById(which === "build" ? "p-build" : "p-preview");
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = which === "build" ? "Building…" : "Drawing…";
+  try {
+    // A build reuses the previewed seed, so the papers are the ones just
+    // shown. Without that they are drawn independently and the preview
+    // proved nothing about what shipped.
+    const body = which === "build" && lastSeed !== null ? { seed: lastSeed } : {};
+    const out = await api("/api/print/" + which, body);
+    lastSeed = out.seed;
+    renderBuild(out);
+    toast(which === "build" ? "Built" : "Drawn — nothing written");
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = was;
+  }
+}
+
+async function loadPrint() {
+  try {
+    printState = await api("/api/print");
+  } catch (err) { toast(err.message, true); return; }
+  draft = JSON.parse(JSON.stringify(printState.draft));
+
+  const blocked = document.getElementById("print-blocked");
+  const why = !printState.hasRoster
+    ? "This course has no roster yet, so there is nobody to print for."
+    : !printState.hasBank
+    ? "This course names no bank, so there are no skills to print."
+    : "";
+  blocked.textContent = why;
+  blocked.hidden = !why;
+  document.getElementById("p-preview").disabled = Boolean(why);
+  document.getElementById("p-build").disabled = Boolean(why);
+
+  renderPrintFields();
+  renderModes();
+  renderVariants();
+  renderExtras();
+  renderWho();
+  refreshPrintDirty();
+}
+
+async function savePrint() {
+  try {
+    printState = await api("/api/print/save", { draft });
+    draft = JSON.parse(JSON.stringify(printState.draft));
+    renderPrintFields();
+    renderModes();
+    renderVariants();
+    renderExtras();
+    renderWho();
+    refreshPrintDirty();
+    // The draw depends on the file, so a save invalidates a previewed seed.
+    lastSeed = null;
+    toast("Saved");
+  } catch (err) { toast(err.message, true); }
+}
+
+function revertPrint() {
+  draft = JSON.parse(JSON.stringify(printState.draft));
+  renderPrintFields();
+  renderModes();
+  renderVariants();
+  renderExtras();
+  renderWho();
+  refreshPrintDirty();
+  toast("Discarded");
+}
+
+
+
 // ----------------------------------------------------------------- boot --
 
 async function boot() {
@@ -810,6 +1175,14 @@ async function boot() {
     openNow.clear(); renderSkills(); refreshPreview();
   };
   document.getElementById("form-push").onclick = pushForm;
+  document.getElementById("print-save").onclick = savePrint;
+  document.getElementById("print-revert").onclick = revertPrint;
+  document.getElementById("p-preview").onclick = () => runPrint("preview");
+  document.getElementById("p-build").onclick = () => runPrint("build");
+  document.getElementById("extras-add").onclick = () => {
+    draft.extras.push({ skill: printState.skills[0].slug, copies: 1 });
+    renderExtras(); renderVariants(); refreshPrintDirty();
+  };
   document.getElementById("show-dropped").onchange = (e) => {
     showDropped = e.target.checked;
     renderRoster();

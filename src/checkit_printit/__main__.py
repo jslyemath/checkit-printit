@@ -16,20 +16,12 @@ from . import record as record_mod
 from . import responses as responses_mod
 from . import course as course_mod
 from . import manifest as manifest_mod
+from . import runner
 from .assemble import assemble, AssemblyError
 from .bank import Bank, BankError
 from .compile import compile_pdf, CompileError
 
 
-def default_output_root():
-    """Where builds land unless told otherwise.
-
-    A canonical local place, so the same PDF can be rebuilt months later. Not a
-    repository: this is a local record, not a published artefact.
-    """
-    return os.environ.get("CHECKIT_PRINTIT_HOME") or os.path.join(
-        os.path.expanduser("~"), "CheckItPrintIt"
-    )
 
 
 @click.group()
@@ -839,6 +831,14 @@ def _bank_for(space):
         return None
 
 
+# These three moved into `runner`, which needs them with no click attached.
+# Aliases rather than copies, and rather than deletions: one implementation,
+# and `main._safe` still resolves for anything that reaches for it.
+default_output_root = runner.default_output_root
+_safe = runner.safe_name
+_choose_run_seed = runner.choose_run_seed
+
+
 @main.group()
 def course():
     """The course state that outlives a single print job."""
@@ -1106,175 +1106,62 @@ def import_csv(csv_path, out):
 def build(pub_path, out, do_compile, seed, preview, replay):
     """Assemble the class set, and compile it."""
     try:
-        publication = pub_mod.load(pub_path)
-    except pub_mod.PublicationError as exc:
+        result = runner.run(pub_path, out=out, do_compile=do_compile,
+                            seed=seed, preview=preview, replay=replay)
+    except runner.BuildError as exc:
         raise click.ClickException(str(exc))
 
-    record = None
-    if replay:
-        # Checked before any work: a replay that cannot be faithful should say
-        # so instead of producing a folder that looks right.
-        try:
-            record = manifest_mod.load(replay)
-            refusals, notes = manifest_mod.check(
-                record, Bank(publication.bank_path), publication)
-        except (manifest_mod.ManifestError, BankError) as exc:
-            raise click.ClickException(str(exc))
-        for note in notes:
-            click.echo(f"replay  note: {note}")
-        if refusals:
-            raise click.ClickException(
-                "this run cannot be reproduced from its manifest:\n  "
-                + "\n  ".join(refusals))
-        publication = manifest_mod.apply(record, publication)
-        click.echo(f"replay  {len(record['paper'])} papers pinned from "
+    for note in result.replay_notes:
+        click.echo(f"replay  note: {note}")
+    if result.replayed:
+        click.echo(f"replay  {result.replay_papers} papers pinned from "
                    f"{os.path.join(replay, manifest_mod.FILENAME)}")
+    if result.theme_installed:
+        click.echo(f"theme   wrote {result.theme_installed} -- edit it to "
+                   f"change the look")
+    if result.theme_declared:
+        click.echo("theme   declared it in the bank's bank.xml, so "
+                   "`checkit generate` publishes it")
 
-    if not publication.roster_path:
-        raise click.ClickException(f"{pub_path}: [roster] path is required.")
-    try:
-        roster = roster_mod.load(publication.roster_path)
-    except (OSError, roster_mod.RosterError) as exc:
-        raise click.ClickException(str(exc))
+    _report(result)
 
-    roster = roster_mod.apply_selection_modes(
-        roster,
-        simply_print=publication.simply_print,
-        default_when_missing=publication.default_when_missing,
-        append_for_everyone=publication.append_for_everyone,
-    )
-
-    chart = None
-    if publication.seating_path:
-        try:
-            chart = seating.load(publication.seating_path)
-        except (OSError, seating.SeatingError) as exc:
-            raise click.ClickException(str(exc))
-
-    out = out or os.path.join(
-        default_output_root(),
-        _safe(publication.course or "bank"),
-        _safe(publication.full_title or "print"),
-    )
-
-    # A bank with no theme of its own gets one, so the file it prints from is
-    # a file it can edit -- and so CheckIt publishes it with the bank, which is
-    # what lets the viewer's Assessment tab match these handouts. Writing into
-    # someone's bank is worth saying out loud, hence the printed line rather
-    # than a silent copy. A preview writes nothing, here as everywhere.
-    if publication.bank_path and not preview:
-        try:
-            installed_at, action, declared = theme.install(publication.bank_path)
-        except theme.ThemeError as exc:
-            raise click.ClickException(str(exc))
-        if action == "installed":
-            click.echo(f"theme   wrote {installed_at} -- edit it to change the look")
-        if declared:
-            click.echo("theme   declared it in the bank's bank.xml, so "
-                       "`checkit generate` publishes it")
-
-    try:
-        theme_source, theme_origin = theme.load(publication.bank_path)
-    except theme.ThemeError as exc:
-        raise click.ClickException(str(exc))
-    # Every run has a seed now, generated when one is not given, so the draw
-    # can be repeated afterwards. Without it a --preview can never be carried
-    # into the build it previewed, and yesterday's set is unrecoverable.
-    run_seed = _choose_run_seed(record, seed)
-    rng = random.Random(run_seed)
-
-    if preview:
-        do_compile = False
-
-    try:
-        report = assemble(publication, roster, chart, out, theme_source,
-                          rng=rng, dry_run=preview, run_seed=run_seed)
-    except (AssemblyError, BankError) as exc:
-        raise click.ClickException(str(exc))
-
-    _report(report, out, theme_origin, publication, run_seed,
-            replayed=record is not None)
-
-    if preview:
+    if result.preview:
         click.echo("\npreview only -- nothing was written.")
         return
 
-    # Recorded when the folder is written, not when it compiles: the papers
-    # exist either way, and --no-compile is a normal way to finish. A preview
-    # writes nothing and records nothing, which is the honest line.
-    _record_run(publication, report, out, run_seed)
+    if result.record_error:
+        click.echo(f"\ncould not write the print record: {result.record_error}")
+    elif result.record_path:
+        click.echo(f"\nrecorded {result.recorded} paper(s) in "
+                   f"{result.record_path}")
+        if result.unnamed:
+            click.echo(f"  {result.unnamed} handout(s) had no student id and "
+                       f"were counted but not attributed")
 
-    if not do_compile:
-        click.echo(f"\nnot compiled. To build it yourself:\n  cd {out} && pdflatex main.tex")
+    if not result.compiled:
+        click.echo(f"\nnot compiled. To build it yourself:\n  "
+                   f"cd {result.out} && pdflatex main.tex")
         return
-
-    try:
-        pdf = compile_pdf(out)
-    except CompileError as exc:
-        raise click.ClickException(str(exc))
-    click.echo(f"\nPDF: {pdf}")
+    click.echo(f"\nPDF: {result.pdf}")
 
 
-def _record_run(publication, report, out, run_seed):
-    """Note what was printed, when the job belongs to a course.
-
-    A side effect of building, never an input to it: nothing here is read back
-    when choosing what to print. A job with no course records nothing and
-    says nothing, because there is nowhere to put it.
-    """
-    if not publication.course_folder:
-        return
-    import datetime
-    path = course_mod.file_in(publication.course_folder, "record")
-    try:
-        rows, unnamed = record_mod.write_run(
-            path,
-            run_id=os.path.basename(os.path.normpath(out)),
-            title=publication.title,
-            date=str(publication.date),
-            built=datetime.datetime.now().isoformat(timespec="seconds"),
-            seed=run_seed,
-            output=os.path.abspath(out),
-            handouts=report.get("handouts", []),
-            extras=report.get("extras", 0),
-        )
-    except Exception as exc:                     # never lose a built PDF to it
-        click.echo(f"\ncould not write the print record: {exc}")
-        return
-    click.echo(f"\nrecorded {rows} paper(s) in {path}")
-    if unnamed:
-        click.echo(f"  {unnamed} handout(s) had no student id and were counted "
-                   f"but not attributed")
 
 
-def _choose_run_seed(record, seed):
-    """Which number goes in the manifest and the print record.
-
-    A replay draws nothing -- every version comes from the manifest -- so it
-    must not invent one. Carrying the replayed run's keeps both files honest:
-    a fresh number would be written having chosen nothing, and anyone who
-    later passed it to `--seed` would get different papers. `record.db`
-    outlives the folder, so the lie would outlive it too.
-    """
-    if record is not None:
-        return int(record.get("run", {}).get("seed", 0))
-    if seed is not None:
-        return seed
-    return random.randrange(2**31)
 
 
-def _report(report, out, theme_origin, publication, run_seed, replayed=False):
+def _report(result):
+    report, publication = result.report, result.publication
     click.echo(f"bank    {publication.bank_path}")
-    click.echo(f"theme   {theme_origin}")
-    click.echo(f"out     {out}")
-    if replayed:
+    click.echo(f"theme   {result.theme_origin}")
+    click.echo(f"out     {result.out}")
+    if result.replayed:
         # Not "repeat this draw with --seed": nothing was drawn, and the
         # versions came from the manifest rather than from this number.
-        click.echo(f"seed    {run_seed}   (carried from the run being "
+        click.echo(f"seed    {result.run_seed}   (carried from the run being "
                    f"replayed; it drew nothing here)")
     else:
-        click.echo(f"seed    {run_seed}   (repeat this draw with "
-                   f"--seed {run_seed})")
+        click.echo(f"seed    {result.run_seed}   (repeat this draw with "
+                   f"--seed {result.run_seed})")
     click.echo("")
     click.echo(f"  students {report['students']}")
     if report["extras"]:
@@ -1307,10 +1194,6 @@ def _report(report, out, theme_origin, publication, run_seed, replayed=False):
                    f"{', '.join(report['unseated'])}")
 
 
-def _safe(name):
-    for ch in '<>:"/\\|?*':
-        name = name.replace(ch, "_")
-    return name.strip().strip(".") or "print"
 
 
 if __name__ == "__main__":
