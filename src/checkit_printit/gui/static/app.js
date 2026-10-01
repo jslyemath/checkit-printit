@@ -824,14 +824,30 @@ async function refreshGoogle(force) {
 let printState = null;
 let draft = null;          // the edited copy, before Save
 
-const MODES = [
-  ["simply_print", "Simply print",
-   "Everyone gets exactly these, and individual choices are ignored."],
-  ["default_when_missing", "Default when nobody chose",
-   "What a student who chose nothing gets."],
-  ["append_for_everyone", "Append for everyone",
-   "Added on top of whatever each student ends with."],
+/* The two jobs this tab can assemble. Which one is chosen decides what is
+   on screen *and* what the job folder carries -- `publication_text` writes
+   only the half that applies, so a saved job cannot say "everyone sits the
+   same thing" and also hold per-student overrides. */
+const MODE_LABELS = [
+  ["chose", "Students chose",
+   "Papers come from what each student asked for, with a default for "
+   + "anyone who did not answer."],
+  ["same", "Everyone sits the same thing",
+   "One list, for the whole class. Individual choices do not apply."],
 ];
+
+const MODE_PICKERS = {
+  chose: [
+    ["default_when_missing", "Default when nobody chose",
+     "What a student who chose nothing gets."],
+    ["append_for_everyone", "Append for everyone",
+     "Added on top of whatever each student ends with."],
+  ],
+  same: [
+    ["simply_print", "What everyone gets",
+     "Every paper is this list."],
+  ],
+};
 
 /* Every version letter this run knows about: the chart's, plus any added
    from the table. A pin may name a letter the chart has never heard of --
@@ -919,7 +935,41 @@ function skillPicker(selected, onChange) {
 function renderModes() {
   const box = document.getElementById("modes");
   box.textContent = "";
-  for (const [key, label, note] of MODES) {
+
+  const head = document.createElement("div");
+  head.className = "modehead";
+  const lead = document.createElement("span");
+  lead.className = "muted";
+  lead.textContent = "This run:";
+  const seg = document.createElement("div");
+  seg.className = "segmented";
+  let activeNote = "";
+  for (const [value, label, why] of MODE_LABELS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.title = why;
+    b.setAttribute("aria-pressed", String(draft.mode === value));
+    if (draft.mode === value) activeNote = why;
+    b.onclick = () => {
+      if (draft.mode === value) return;
+      draft.mode = value;
+      // The other half's lists are kept, not cleared, so switching back
+      // restores them. They simply are not written into the job.
+      renderModes();
+      renderVariants();
+      renderWho();
+      refreshPrintDirty();
+    };
+    seg.appendChild(b);
+  }
+  head.append(lead, seg);
+  const why = document.createElement("p");
+  why.className = "muted";
+  why.textContent = activeNote;
+  box.append(head, why);
+
+  for (const [key, label, note] of MODE_PICKERS[draft.mode]) {
     const wrap = document.createElement("div");
     wrap.className = "mode";
     const h = document.createElement("div");
@@ -943,9 +993,12 @@ function skillsInPlay() {
   /* Every slug this run could print: the three modes, each student's own
      choices or their override, and the extras. A variant only matters for a
      skill actually in the run. */
-  const out = new Set([...draft.simply_print, ...draft.append_for_everyone,
-                       ...draft.default_when_missing]);
-  if (!draft.simply_print.length) {
+  const out = new Set();
+  if (draft.mode === "same") {
+    for (const slug of draft.simply_print) out.add(slug);
+  } else {
+    for (const slug of [...draft.append_for_everyone,
+                        ...draft.default_when_missing]) out.add(slug);
     for (const s of printState.students) {
       for (const slug of (draft.overrides[s.key] || s.chose)) out.add(slug);
     }
@@ -1021,9 +1074,9 @@ function willGet(student) {
   /* The same composition `roster.apply_selection_modes` does, so the table
      says what will actually print. An override replaces the student's own
      choices and nothing else -- the modes still apply on top. */
+  if (draft.mode === "same") return [...draft.simply_print];
   let chosen = draft.overrides[student.key] || student.chose;
-  if (draft.simply_print.length) chosen = draft.simply_print;
-  else if (!chosen.length) chosen = draft.default_when_missing;
+  if (!chosen.length) chosen = draft.default_when_missing;
   const out = [...chosen];
   for (const s of draft.append_for_everyone) if (!out.includes(s)) out.push(s);
   return out;
@@ -1153,6 +1206,11 @@ function renderWho() {
     tr.appendChild(td);
     body.appendChild(tr);
   }
+  // Hidden by one rule covering the heading and the cells together: a
+  // rule that hid cells and left the heading once made every column after
+  // it read one place to the left.
+  document.getElementById("who").classList.toggle("hide-override",
+                                                  draft.mode === "same");
   const movedCount = Object.keys(draft.versions).length;
   const overrideCount = Object.keys(draft.overrides).length;
   document.getElementById("who-count").textContent =

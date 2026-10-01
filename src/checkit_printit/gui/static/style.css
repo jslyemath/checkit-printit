@@ -487,6 +487,25 @@ button.reset:hover { color: var(--ink); background: var(--line); }
 button.reset.off { visibility: hidden; }
 th button.reset { margin-left: 4px; }
 
+/* The mode switch. The same control as the view nav at the top of the
+   app, deliberately: switching mode changes which cards exist, which is
+   what a nav-shaped control is for. Smaller and without the accent border
+   so it does not compete with the real nav. */
+.modehead { display: flex; align-items: center; gap: 10px;
+            flex-wrap: wrap; margin-bottom: 4px; }
+.segmented { display: inline-flex; border: 1px solid var(--line);
+             border-radius: 7px; overflow: hidden; }
+.segmented button { font: inherit; border: none; background: none;
+                    color: var(--muted); padding: 6px 13px; cursor: pointer; }
+.segmented button + button { border-left: 1px solid var(--line); }
+.segmented button:hover { color: var(--ink); }
+.segmented button[aria-pressed="true"] { background: var(--accent);
+                                         color: var(--accent-ink); }
+
+/* One rule for the heading and the cells, so they cannot drift apart. */
+#who.hide-override th:nth-child(5),
+#who.hide-override td:nth-child(5) { display: none; }
+
 /* What the Roster changed while this tab was away. */
 .news { font-size: 12px; color: var(--muted); }
 

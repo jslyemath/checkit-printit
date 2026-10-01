@@ -353,14 +353,17 @@ against a real Google account" and "7b against a real response" in
 | 8g | **Cold call** | not started; genuinely new code |
 | 8h | **Setup** | not started -- create a form from the app, and the boilerplate editor |
 
-**Two decisions are open and block 8e.** They are in
-`../checkit/PRINT_TOOL_DESIGN.md` 12.6 under "Open, and blocking the next
-slice": whether Responses stays its own tab, and whether "simply print"
-becomes a mode switch. Both change the same layout, so building on them
-first means redoing the work. **Ask before starting 8e.**
+**All three decisions that were blocking 8e are settled**, on
+2026-10-01. See `../checkit/PRINT_TOOL_DESIGN.md` 12.6 under "Settled, and
+what each one cost":
 
-The third, whether the preferred name prints, was settled on 2026-10-01: it
-does, everywhere.
+- the preferred name prints, everywhere
+- Responses is **not** a tab; the pull becomes Print job's first card
+- simply-print is a **mode**, a segmented control at the top of the tab
+
+The first and third are built. **The second is the next slice**: fold
+`form pull` into Print job, report its failures in place, and drop
+Responses from the nav.
 
 ## Working on the web app
 
@@ -395,6 +398,8 @@ rather than widths, and a column hidden by a rule that beat `[hidden]`.
 |---|---|
 | what name to show a person | `Student.display` |
 | which version letters a run needs | `assemble.versions_for` |
+| which ids a per-run table may use | `roster.keys_of` |
+| a per-student override | `roster.apply_overrides` |
 | which spellings a seat may use | `seating.index_by_name` |
 | dropping a student | `roster.set_dropped` |
 | the open list, the assessment | `availability.set_open`, `set_assessment` |

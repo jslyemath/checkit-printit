@@ -254,6 +254,18 @@ class TestThePrintDraftIsChecked:
             "simply_print": ["AD"], "date": "2026-10-02"}})
         assert out["draft"]["simply_print"] == ["AD"]
 
+    @pytest.mark.parametrize("mode", ["", "simply", "SAME", "chosen", 3])
+    def test_a_mode_the_tool_does_not_have_is_refused(self, printable, mode):
+        """The mode decides which half of the job is written, so a value
+        nobody recognises would quietly write the wrong half."""
+        with pytest.raises(gui_mod.GuiError, match="not a mode"):
+            gui_mod.api_print_save(printable, {"draft": {"mode": mode}})
+
+    @pytest.mark.parametrize("mode", ["same", "chose"])
+    def test_both_real_modes_save(self, printable, mode):
+        out = gui_mod.api_print_save(printable, {"draft": {"mode": mode}})
+        assert out["draft"]["mode"] == mode
+
     def test_a_letter_beyond_the_chart_is_how_a_version_is_added(self, printable):
         """It used to be refused. Adding a version from the app means
         naming a letter the chart has never heard of, and `assemble` draws

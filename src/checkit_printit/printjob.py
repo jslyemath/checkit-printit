@@ -30,7 +30,14 @@ class PrintJobError(Exception):
 
 #: What the draft carries. Anything absent falls back to these, so a course
 #: that has never had a print job still opens with a usable form.
+#: "chose" -- papers come from what each student asked for, with
+#: defaults, an append-for-everyone list and per-student overrides.
+#: "same"  -- one list, for the whole class; none of that machinery
+#:            applies, so none of it is written into the job.
+MODES = ("chose", "same")
+
 DEFAULTS = {
+    "mode": "chose",
     "title": "Skill Checkpoint",
     "date": "",
     "keys": True,
@@ -92,6 +99,15 @@ def load_draft(space):
             block = raw.get(table) or {}
             if key in block:
                 out[key] = block[key]
+
+    # A draft written before the mode existed says which it is by whether
+    # anything is in `simply_print`. Without this, every saved job that was
+    # printing one list for the class would quietly switch to reading the
+    # students' own choices the first time it was opened.
+    if "mode" not in raw:
+        out["mode"] = "same" if out["simply_print"] else "chose"
+    if out["mode"] not in MODES:
+        out["mode"] = "chose"
     return out
 
 
@@ -114,6 +130,7 @@ def save_draft(space, draft):
         "# visits. Building copies it into a job folder as publication.toml,",
         "# and that copy is what the manifest's fingerprints refer to.",
         "",
+        f"mode       = {_quote(merged['mode'])}",
         f"title      = {_quote(merged['title'])}",
         f"date       = {_quote(merged['date'])}",
         f"keys       = {'true' if merged['keys'] else 'false'}",
@@ -191,9 +208,15 @@ def publication_text(space, draft, course_name, semester="", professor=""):
         f"names      = {'true' if draft['names'] else 'false'}",
         "",
     ]
-    selection = {k: draft[k] for k in
-                 ("simply_print", "default_when_missing", "append_for_everyone")
-                 if draft[k]}
+    # Only the keys this mode uses. The build would ignore the others --
+    # `simply_print` replaces each student's choices, and
+    # `default_when_missing` is dead whenever it is set -- but a file that
+    # carries a setting the run does not use is a file that will be read
+    # back later and believed.
+    mode = draft.get("mode") or "chose"
+    wanted = (("simply_print",) if mode == "same"
+              else ("default_when_missing", "append_for_everyone"))
+    selection = {k: draft[k] for k in wanted if draft[k]}
     if selection:
         lines.append("[selection]")
         for key, values in selection.items():
@@ -204,7 +227,7 @@ def publication_text(space, draft, course_name, semester="", professor=""):
         for slug, case in sorted(draft["variants"].items()):
             lines.append(f"{slug} = {_quote(case)}")
         lines.append("")
-    if draft["overrides"]:
+    if draft["overrides"] and mode != "same":
         lines += [
             "# One student's skills for this run, replacing what they chose.",
             "# Keyed by whichever id the roster carries; the selection modes",
