@@ -261,6 +261,7 @@ function sizeColumns(rows) {
   if (group) group.remove();
   group = document.createElement("colgroup");
 
+  let total = 0;
   for (const column of COLUMNS) {
     let widest = textWidth(column.label.toUpperCase(), headFont) + 18;
     for (const student of rows) {
@@ -270,11 +271,19 @@ function sizeColumns(rows) {
       widest = Math.max(widest, textWidth(value, bodyFont) + CELL_PADDING);
     }
     const col = document.createElement("col");
-    col.style.width =
-      Math.round(Math.min(column.max, Math.max(column.min, widest))) + "px";
+    const px = Math.round(Math.min(column.max, Math.max(column.min, widest)));
+    col.style.width = px + "px";
+    total += px;
     group.appendChild(col);
   }
   table.insertBefore(group, table.firstChild);
+  // Without this the widths are only proportions. A `table-layout: fixed`
+  // table cannot be wider than its container, so in a narrow window the
+  // browser squashes every column to fit -- 814px of columns became 482 --
+  // and the scroller has nothing to scroll because the table never
+  // overflows. Setting the sum as a floor is what makes it overflow, and
+  // therefore what makes the scrollbar appear.
+  table.style.minWidth = total + "px";
 }
 
 function renderHeader() {
@@ -1188,6 +1197,14 @@ async function boot() {
     renderRoster();
   };
   window.onbeforeunload = (e) => { if (edits.size) e.preventDefault(); };
+
+  // Back and forward change the hash without reloading, so without this
+  // they appear to do nothing at all -- the URL moves and the page does
+  // not, which reads as the app being stuck.
+  window.addEventListener("hashchange", () => {
+    const id = location.hash.slice(1);
+    if (VIEWS.some(v => v.id === id)) show(id);
+  });
 
   try {
     renderOverview(await api("/api/course"));
