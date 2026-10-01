@@ -389,3 +389,43 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   color: var(--muted);
   font-weight: 600;
 }
+
+/* ---------------------------------------------------------- print job -- */
+
+.mode { margin-bottom: 14px; }
+.mode-label { font-weight: 600; font-size: 13px; }
+.mode .muted { margin-bottom: 4px; }
+select.picker {
+  width: 100%;
+  max-width: 560px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px;
+}
+select.picker option { padding: 2px 4px; }
+
+.extra { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.extra select, .extra input {
+  font: inherit; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px;
+}
+.extra input[type="number"] { width: 64px; }
+
+#who td input {
+  width: 100%; font: inherit; color: inherit; padding: 3px 6px;
+  border: 1px solid transparent; border-radius: 5px; background: none;
+}
+#who td input:hover { border-color: var(--line); }
+#who td input:focus { border-color: var(--accent); outline: none; background: var(--bg); }
+#who { min-width: 640px; }
+
+table.seeds { width: auto; margin: 8px 0; border: none; background: none; }
+table.seeds td {
+  border: none; padding: 1px 12px 1px 0;
+  font-variant-numeric: tabular-nums; font-size: 13px;
+}
+.warnline { color: var(--warn); }
+#build-out p { margin: 4px 0; }

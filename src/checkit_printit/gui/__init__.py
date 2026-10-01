@@ -34,6 +34,8 @@ from .. import availability as availability_mod
 from .. import clasp as clasp_mod
 from .. import boilerplate as boilerplate_mod
 from .. import classlist as classlist_mod
+from .. import printjob as printjob_mod
+from .. import runner as runner_mod
 from .. import form as form_mod
 from ..bank import Bank, BankError
 from .. import roster as roster_mod
@@ -500,6 +502,181 @@ def api_form_push(course, _body):
     return {"changed": answer.get("changed", [])}
 
 
+# ------------------------------------------------------------ print job --
+
+def _variants_in(bank, slugs):
+    """{slug: [case, ...]} for the skills that declare any.
+
+    There is no declaration to read: the generator wrapper writes the label
+    into each version's data, so the only way to know is to look. Walking
+    the whole print tier for 29 outcomes is slow, so a slice is enough to
+    find every case -- a variant that appears in none of sixty versions is
+    not one an instructor can be offered anyway.
+    """
+    out = {}
+    for slug in slugs:
+        seen = []
+        for seed in range(400, 460):
+            try:
+                case = bank.variant(slug, seed)
+            except Exception:
+                break
+            if case and case not in seen:
+                seen.append(case)
+        if seen:
+            out[slug] = sorted(seen)
+    return out
+
+
+def _course_identity(course):
+    import tomllib
+    config = os.path.join(course.path, course_mod.CONFIG)
+    if not os.path.isfile(config):
+        return {}
+    with open(config, "rb") as f:
+        return tomllib.load(f)
+
+
+def api_print(course, _body):
+    """Everything the staging view draws."""
+    draft = printjob_mod.load_draft(course.name)
+    people = course.roster()
+    bank = course.bank()
+
+    slugs = list(bank.slugs()) if bank is not None else []
+    descriptions = {}
+    if bank is not None:
+        for slug in slugs:
+            try:
+                descriptions[slug] = bank.description(slug)
+            except BankError:
+                descriptions[slug] = ""
+
+    students = []
+    if people is not None:
+        for i, s in enumerate(people):
+            if s.dropped:
+                continue
+            key = s.sid or s.alt_id or s.email or s.name
+            students.append({
+                "index": i, "key": key, "name": s.name,
+                "section": s.section,
+                "chose": list(s.skills),
+                "override": list(draft["overrides"].get(key, []))
+                            if key in draft["overrides"] else None,
+            })
+
+    identity = _course_identity(course)
+    return {
+        "draft": draft,
+        "students": students,
+        "skills": [{"slug": s, "description": descriptions.get(s, "")}
+                   for s in slugs],
+        "variants": _variants_in(bank, slugs) if bank is not None else {},
+        "hasBank": bank is not None,
+        "hasRoster": people is not None,
+        "course": {"name": identity.get("code") or identity.get("name", ""),
+                   "semester": identity.get("semester", ""),
+                   "professor": identity.get("professor", "")},
+        "jobFolder": printjob_mod.folder_for(draft),
+    }
+
+
+def api_print_save(course, body):
+    printjob_mod.save_draft(course.name, body.get("draft") or {})
+    return api_print(course, {})
+
+
+def _build(course, preview, seed=None):
+    draft = printjob_mod.load_draft(course.name)
+    identity = _course_identity(course)
+    try:
+        folder = printjob_mod.write_job(
+            course.name, draft,
+            course_name=identity.get("code") or identity.get("name", ""),
+            semester=identity.get("semester", ""),
+            professor=identity.get("professor", ""))
+    except printjob_mod.PrintJobError as exc:
+        raise GuiError(str(exc)) from None
+
+    try:
+        result = runner_mod.run(
+            os.path.join(folder, "publication.toml"),
+            do_compile=not preview, seed=seed, preview=preview)
+    except runner_mod.BuildError as exc:
+        raise GuiError(str(exc)) from None
+
+    report = result.report
+    return {
+        "folder": folder,
+        "out": result.out,
+        "seed": result.run_seed,
+        "preview": preview,
+        "students": report["students"],
+        "extras": report["extras"],
+        "skills": list(report["skills"]),
+        "versions": report["versions"],
+        "keys": report["keys"],
+        # (version, skill) -> seed. Different skills have unrelated pools, so
+        # "version A" is one seed per skill rather than one seed.
+        "seeds": [{"version": v, "slug": s, "seed": n}
+                  for (v, s), n in sorted(report["seeds"].items(),
+                                          key=lambda kv: (kv[0][1], kv[0][0]))
+                  if s in report["skills"]],
+        "collisions": [f"{a.name} and {b.name} share version {a.version} "
+                       f"at table {a.group}"
+                       for a, b in report["collisions"]],
+        "unseated": list(report["unseated"]),
+        "missingFields": {k: list(v) for k, v in report["missing_fields"].items()},
+        "pdf": result.pdf,
+        "recorded": result.recorded,
+        "recordError": result.record_error,
+        "themeInstalled": result.theme_installed,
+    }
+
+
+def api_print_preview(course, body):
+    """Draw and report, writing nothing.
+
+    The seed it reports is **not** a prediction: a build draws again unless
+    given the same one. The view carries it across, which is the whole
+    reason every run has a seed.
+    """
+    return _build(course, preview=True, seed=body.get("seed"))
+
+
+def api_print_build(course, body):
+    return _build(course, preview=False, seed=body.get("seed"))
+
+
+def api_print_reveal(_course, body):
+    """Show a finished run in the file manager.
+
+    Opening the PDF itself would hand the instructor one file; the folder
+    holds the manifest and the per-skill .tex too, which is what you want
+    when something looks wrong.
+    """
+    import subprocess
+    path = str(body.get("path", ""))
+    root = runner_mod.default_output_root()
+    if not path or not os.path.abspath(path).startswith(os.path.abspath(root)):
+        # Only ever somewhere printit wrote. This opens a window on the
+        # instructor's machine, so it does not take an arbitrary path.
+        raise GuiError("that is not a printit output folder.")
+    if not os.path.exists(path):
+        raise GuiError(f"{path} is not there any more.")
+    try:
+        if sys.platform == "win32":
+            os.startfile(path)                      # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.run(["open", path], check=False)
+        else:
+            subprocess.run(["xdg-open", path], check=False)
+    except OSError as exc:
+        raise GuiError(f"could not open it: {exc}") from None
+    return {"opened": path}
+
+
 ROUTES = {
     "/api/course": api_course,
     "/api/roster": api_roster,
@@ -507,6 +684,11 @@ ROUTES = {
     "/api/roster/drop": api_roster_drop,
     "/api/google": api_google,
     "/api/google/login": api_google_login,
+    "/api/print": api_print,
+    "/api/print/save": api_print_save,
+    "/api/print/preview": api_print_preview,
+    "/api/print/build": api_print_build,
+    "/api/print/reveal": api_print_reveal,
     "/api/skills": api_skills,
     "/api/skills/preview": api_skills_preview,
     "/api/skills/save": api_skills_save,
