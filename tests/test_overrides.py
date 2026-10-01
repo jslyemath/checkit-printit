@@ -145,8 +145,14 @@ class TestTheOrderTheyCompose:
             draft.update(title="T", date="2026-10-02", **draft_kw)
             folder = printjob.write_job("T", draft, course_name="MAT 106",
                                         root=str(tmp / "jobs"))
+            # `install_theme=False` is not an optimisation: the bank
+            # fixture is session-scoped, and a build that installs the
+            # theme into it leaves TestThemeInstall asserting against a
+            # bank that already has one. These tests pass alone and fail
+            # in the suite, which is the worst way to find out.
             return runner_mod.run(os.path.join(folder, "publication.toml"),
-                                  out=str(tmp / "out"), do_compile=False)
+                                  out=str(tmp / "out"), do_compile=False,
+                                  install_theme=False)
         return build
 
     def _pages(self, result):
