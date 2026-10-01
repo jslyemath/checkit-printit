@@ -10,7 +10,6 @@ const VIEWS = [
   { id: "overview", label: "Overview" },
   { id: "roster", label: "Roster" },
   { id: "form", label: "Update form" },
-  { id: "responses", label: "Responses", soon: "Who answered and what they chose, pulled into the roster. Today: `form pull`." },
   { id: "print", label: "Print job" },
   { id: "record", label: "Record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
   { id: "seating", label: "Seating", soon: "Drag students between seats, randomise, swap two. No CLI equivalent exists yet -- this is new code, not a face on something tested." },
@@ -936,6 +935,9 @@ function renderModes() {
   const box = document.getElementById("modes");
   box.textContent = "";
 
+  document.getElementById("pull-panel").hidden =
+    !(printState.hasForm && draft.mode === "chose");
+
   const head = document.createElement("div");
   head.className = "modehead";
   const lead = document.createElement("span");
@@ -1221,6 +1223,88 @@ function renderWho() {
   document.getElementById("reset-overrides").classList.toggle("off", !overrideCount);
 }
 
+function renderPull(data) {
+  /* What the pull found, and every reason a student might not get the
+     paper they asked for. The per-student choices are deliberately not
+     repeated here -- the table below is the view of those, which is why
+     this is a card and not a tab. */
+  const box = document.getElementById("pull-out");
+  box.textContent = "";
+  if (!data) return;
+  const line = (text, cls) => {
+    const p = document.createElement("p");
+    p.className = cls || "";
+    p.textContent = text;
+    box.appendChild(p);
+  };
+
+  const when = data.spokenDate || data.date || "this assessment";
+  line(`${data.total} response(s) on the form; `
+       + `${data.answered} are for ${data.assessment || "this assessment"} `
+       + `on ${when}, and are in the table below.`);
+  if (!data.knownFromBank)
+    line("This course names no bank, so only the open skills were "
+         + "recognised.", "muted");
+  if (data.silent.length)
+    line(`${data.silent.length} did not answer; they get whatever `
+         + `"Default when nobody chose" says.`, "muted");
+
+  if (data.unknownEmails.length) {
+    line(`⚠ ${data.unknownEmails.length} response(s) came from an address `
+         + `nobody on the roster has:`, "warnline");
+    for (const address of data.unknownEmails) line("    " + address, "muted");
+    line("Add the address to that student on the Roster tab, or check for "
+         + "a typo.", "muted");
+  }
+  if (data.unrecognised.length) {
+    line(`⚠ ${data.unrecognised.length} answer(s) name a skill the bank `
+         + `does not have:`, "warnline");
+    for (const r of data.unrecognised)
+      line(`    ${r.email}: ${r.option.slice(0, 60)}`, "muted");
+  }
+  for (const [n, text] of [
+    [data.unconfirmed, "confirmed no date, so they belong to no assessment"],
+    [data.outOfScope, "are for another day"],
+    [data.superseded, "were superseded by a later answer from the same student"],
+  ]) if (n) line(`${n} response(s) ${text}`, "muted");
+
+  if (data.written) {
+    line("The roster was updated.", "muted");
+  } else if (data.trouble) {
+    line("Nothing was written, because some responses could not be placed.",
+         "warnline");
+    const again = document.createElement("button");
+    again.textContent = "Write the rest anyway";
+    again.title = "Save the responses that did match, and leave the rest.";
+    again.onclick = () => runPull({ write: true, force: true });
+    box.appendChild(again);
+  } else {
+    line("Nothing was written -- this was a check.", "muted");
+  }
+}
+
+async function runPull(body) {
+  const buttons = ["pull-run", "pull-dry"].map(id => document.getElementById(id));
+  for (const b of buttons) b.disabled = true;
+  try {
+    const out = await api("/api/print/pull", body);
+    // A pull rewrites the roster, and the table below is showing it. The
+    // draft is left alone: this changed what students chose, not what the
+    // instructor has been assembling.
+    printState.students = out.print.students;
+    printState.hasForm = out.print.hasForm;
+    renderPull(out.pull);
+    renderVariants();
+    renderWho();
+    toast(out.pull.written ? "Pulled" : "Checked — nothing written");
+  } catch (err) {
+    renderPull(null);
+    toast(err.message, true);
+  } finally {
+    for (const b of buttons) b.disabled = false;
+  }
+}
+
 function renderPrintFields() {
   const f = {
     title: document.getElementById("p-title"),
@@ -1386,6 +1470,7 @@ async function loadPrint() {
 
   renderPrintFields();
   renderModes();
+  renderPull(null);
   renderVariants();
   renderExtras();
   renderWho();
@@ -1471,6 +1556,10 @@ async function boot() {
   document.getElementById("print-save").onclick = savePrint;
   document.getElementById("print-revert").onclick = revertPrint;
   document.getElementById("print-reset").onclick = resetPrint;
+  document.getElementById("pull-run").onclick =
+    () => runPull({ write: true });
+  document.getElementById("pull-dry").onclick =
+    () => runPull({ write: false });
   document.getElementById("reset-versions").onclick = () => {
     draft.versions = {};
     for (const s of printState.students) s.version = "";

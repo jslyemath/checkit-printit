@@ -33,6 +33,7 @@ import webbrowser
 
 from .. import course as course_mod
 from .. import availability as availability_mod
+from .. import responses as responses_mod
 from .. import clasp as clasp_mod
 from .. import boilerplate as boilerplate_mod
 from .. import classlist as classlist_mod
@@ -156,24 +157,9 @@ class Course:
         }
 
     def bank(self):
-        """The bank this course prints from, or None.
-
-        None is a normal state, not a failure: a course can exist before it
-        is pointed at a bank, and the Skills view then shows the open list
-        without descriptions rather than refusing to load.
-        """
-        import tomllib
-        config = os.path.join(self.path, course_mod.CONFIG)
-        if not os.path.isfile(config):
-            return None
-        with open(config, "rb") as f:
-            declared = str(tomllib.load(f).get("bank", {}).get("path", "")).strip()
-        if not declared:
-            return None
-        try:
-            return Bank(os.path.normpath(os.path.join(self.path, declared)))
-        except BankError:
-            return None
+        """The bank this course prints from, or None. See
+        `course.bank_for` -- this used to be a second copy of it."""
+        return course_mod.bank_for(self.name)
 
     def availability(self):
         return availability_mod.load(self.file("availability"))
@@ -576,7 +562,7 @@ def api_print(course, _body):
         for i, s in enumerate(people):
             if s.dropped:
                 continue
-            key = s.sid or s.alt_id or s.email or s.name
+            key = roster_mod.key_of(s)
             students.append({
                 "index": i, "key": key, "name": s.name,
                 # What prints, and so what this view shows. One
@@ -602,6 +588,9 @@ def api_print(course, _body):
         "course": {"name": identity.get("code") or identity.get("name", ""),
                    "semester": identity.get("semester", ""),
                    "professor": identity.get("professor", "")},
+        # Whether to offer the pull at all. A course can print happily
+        # without ever having had a form.
+        "hasForm": os.path.isfile(course.file("form")),
         "jobFolder": printjob_mod.folder_for(draft),
         "versionsAvailable": versions_available,
         # So "Reset this print job" is an ordinary edit that Discard can
@@ -710,6 +699,54 @@ def _build(course, preview, seed=None):
     }
 
 
+def _pull_json(outcome):
+    """One shape for both the dry run and the real thing.
+
+    Every count comes off `PullOutcome` rather than being re-derived here;
+    a second derivation of "how many were out of scope" is a second thing
+    to get wrong.
+    """
+    pulled = outcome.pulled
+    return {
+        "total": outcome.total,
+        "assessment": outcome.assessment,
+        "date": str(outcome.date or ""),
+        "spokenDate": (availability_mod.spoken_date(outcome.date)
+                       or str(outcome.date or "")),
+        "knownFromBank": outcome.known_from_bank,
+        "written": outcome.written,
+        "trouble": outcome.trouble,
+        "answered": pulled.answered,
+        "silent": sorted(s.display for s in pulled.silent),
+        "unknownEmails": list(pulled.unknown_emails),
+        "unrecognised": [{"email": e, "option": o}
+                         for e, o in pulled.unrecognised],
+        "unconfirmed": pulled.unconfirmed,
+        "outOfScope": pulled.out_of_scope,
+        "superseded": pulled.superseded,
+    }
+
+
+def api_print_pull(course, body):
+    """Read this assessment's responses, from the Print job view.
+
+    `write` false is the dry run. `force` is the instructor saying "write
+    the rest anyway" after seeing what could not be placed -- which is why
+    the card shows the detail first and offers that button second.
+
+    Returns the refreshed Print job payload alongside, because a pull
+    rewrites the roster and the table underneath is showing it.
+    """
+    try:
+        outcome = responses_mod.pull_for_course(
+            course.name,
+            write=bool(body.get("write", True)),
+            force=bool(body.get("force")))
+    except responses_mod.ResponseError as exc:
+        raise GuiError(str(exc)) from None
+    return {"pull": _pull_json(outcome), "print": api_print(course, {})}
+
+
 def api_print_preview(course, body):
     """Draw and report, writing nothing.
 
@@ -761,6 +798,7 @@ ROUTES = {
     "/api/google/login": api_google_login,
     "/api/print": api_print,
     "/api/print/save": api_print_save,
+    "/api/print/pull": api_print_pull,
     "/api/print/preview": api_print_preview,
     "/api/print/build": api_print_build,
     "/api/print/reveal": api_print_reveal,

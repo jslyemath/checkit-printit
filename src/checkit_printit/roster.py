@@ -222,6 +222,17 @@ def keys_of(student):
                              student.name) if k)
 
 
+def key_of(student):
+    """The one id this student is filed under.
+
+    `keys_of` is what a *lookup* tries, strongest first; this is what a
+    *write* uses, so a student's pulled choices and their override land
+    under the same key and the later one replaces the earlier.
+    """
+    keys = keys_of(student)
+    return keys[0] if keys else ""
+
+
 def apply_overrides(roster, overrides):
     """Replace one student's chosen skills, for this run only.
 
