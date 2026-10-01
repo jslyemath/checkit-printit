@@ -433,12 +433,22 @@ table.seeds td {
 /* A checkbox is shorter than a text input, so in a row of fields it sat on
    the baseline and read as misaligned. Centre the row, and let a checkbox
    field size itself rather than stretching. */
-.fields label:has(input[type="checkbox"]) {
-  flex-direction: row;
+/* Keys and Names keep their heading above the box, like every other
+   field. Putting the heading inline aligned the ticks nicely and made the
+   two read as a different kind of control from the ones beside them. The
+   wrapper is the same height as a text input -- same padding, a border
+   that is there but invisible -- so the row still lines up along the
+   bottom without the heading having to move. */
+.fields .tickwrap {
+  display: flex;
   align-items: center;
-  gap: 7px;
-  align-self: flex-end;
-  padding-bottom: 7px;
+  /* The same height as a text input beside it. Under the global
+     border-box that is the whole 30px, not the 18px line box: an input is
+     an 18px line plus 5px padding and a 1px border, top and bottom.
+     Measured against #p-title -- at 27px the ticks sat three pixels high. */
+  min-height: 30px;
+  padding: 5px 0;
+  border: 1px solid transparent;
 }
 .fields input[type="checkbox"] { width: 15px; height: 15px; margin: 0; }
 
@@ -455,6 +465,30 @@ select.vpick {
   padding: 2px 4px;
 }
 select.vpick.moved { border-color: var(--dirty); color: var(--dirty); }
+
+/* A control and its reset. The reset keeps its space when hidden, so a row
+   moving on or off its default does not resize the column under the
+   pointer. */
+.cellwrap { display: flex; align-items: center; gap: 5px; }
+.cellwrap input { flex: 1 1 auto; min-width: 0; }
+
+button.reset {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--dirty);
+  cursor: pointer;
+}
+button.reset:hover { color: var(--ink); background: var(--line); }
+button.reset.off { visibility: hidden; }
+th button.reset { margin-left: 4px; }
+
+/* What the Roster changed while this tab was away. */
+.news { font-size: 12px; color: var(--muted); }
 
 #who td input.bad {
   border-color: var(--warn);

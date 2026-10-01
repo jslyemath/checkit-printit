@@ -254,11 +254,23 @@ class TestThePrintDraftIsChecked:
             "simply_print": ["AD"], "date": "2026-10-02"}})
         assert out["draft"]["simply_print"] == ["AD"]
 
-    def test_a_version_the_chart_does_not_have_is_refused(self, printable):
-        with pytest.raises(gui_mod.GuiError, match="not a version"):
+    def test_a_letter_beyond_the_chart_is_how_a_version_is_added(self, printable):
+        """It used to be refused. Adding a version from the app means
+        naming a letter the chart has never heard of, and `assemble` draws
+        seeds for whatever the pins name."""
+        out = gui_mod.api_print_save(printable, {"draft": {
+            "versions": {"806001": "E"},
+            "versionsAvailable": ["A", "B"]}})
+        assert out["draft"]["versions"] == {"806001": "E"}
+
+    @pytest.mark.parametrize("letter", ["", "AA", "a", "4", "best one"])
+    def test_something_that_is_not_a_version_letter_is_refused(
+            self, printable, letter):
+        """The value reaches a filename and a printed paper, so it has to be
+        a letter even though it no longer has to be one of the chart's."""
+        with pytest.raises(gui_mod.GuiError, match="not a version letter"):
             gui_mod.api_print_save(printable, {"draft": {
-                "versions": {"806001": "Z"},
-                "versionsAvailable": ["A", "B"]}})
+                "versions": {"806001": letter}}})
 
     def test_a_refused_draft_is_not_written(self, printable):
         from checkit_printit import printjob

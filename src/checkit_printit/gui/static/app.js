@@ -128,7 +128,10 @@ function show(id) {
     // view reads the bank, and a course with no bank should still show a
     // roster without waiting for one.
     if (id === "form" && skills === null) loadSkills();
-    if (id === "print" && printState === null) loadPrint();
+    // Reloaded every time, not only the first. It used to load once, so a
+    // name edited in Roster and saved never reached this table until the
+    // print job itself was saved -- which read as the table being stale.
+    if (id === "print") loadPrint();
   }
   location.hash = id;
 }
@@ -830,6 +833,43 @@ const MODES = [
    "Added on top of whatever each student ends with."],
 ];
 
+/* Every version letter this run knows about: the chart's, plus any added
+   from the table. A pin may name a letter the chart has never heard of --
+   `assemble` draws seeds for whatever the pins name. */
+function versionsInPlay() {
+  const seen = new Set(printState.versionsAvailable || []);
+  for (const v of Object.values(draft.versions)) if (v) seen.add(v);
+  return [...seen].sort();
+}
+
+/* The letter after the highest in play, which is the one a dropdown offers
+   to add. Next-after-highest rather than first-unused: filling a gap would
+   offer C for a chart of A, B, D, which reads as a mistake rather than as
+   a new version. */
+function nextVersionLetter() {
+  const highest = versionsInPlay().reduce((m, v) => (v > m ? v : m), "@");
+  return highest >= "Z" ? "" : String.fromCharCode(highest.charCodeAt(0) + 1);
+}
+
+/* The version a student gets when this run does not move them. */
+function seatedVersion(student) {
+  return student.seatVersion || (printState.versionsAvailable || [])[0] || "A";
+}
+
+/* U+21BA. ⟲ (U+27F2) renders as an emoji on some systems and ⭯ is absent
+   from most fonts; ↺ is the glyph in common use for reset. */
+const RESET_GLYPH = "\u21BA";
+
+function resetButton(title, onClick) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "reset";
+  b.textContent = RESET_GLYPH;
+  b.title = title;
+  b.onclick = onClick;
+  return b;
+}
+
 function printDirty() {
   return printState && JSON.stringify(draft) !== JSON.stringify(printState.draft);
 }
@@ -1015,39 +1055,64 @@ function renderWho() {
     if (student.display !== student.name) nameCell.title = student.name;
     add(student.section, "ro");
 
-    // Version: the seat's, unless this run moves them.
+    // Version. The seat's letter unless this run moves them -- and the
+    // seat's letter is simply the one selected, not a second entry above
+    // the list. Showing it twice said nothing the outline does not.
+    const seated = seatedVersion(student);
+    const moved = Boolean(student.version) && student.version !== seated;
     const vtd = document.createElement("td");
+    const vwrap = document.createElement("div");
+    vwrap.className = "cellwrap";
     const vsel = document.createElement("select");
     vsel.className = "vpick";
-    const asSeated = document.createElement("option");
-    asSeated.value = "";
-    asSeated.textContent = student.seatVersion || "—";
-    vsel.appendChild(asSeated);
-    for (const letter of printState.versionsAvailable) {
+    for (const letter of versionsInPlay()) {
       const o = document.createElement("option");
       o.value = letter;
       o.textContent = letter;
       vsel.appendChild(o);
     }
-    vsel.value = student.version || "";
-    vsel.classList.toggle("moved", Boolean(student.version));
-    vsel.title = student.version
-      ? `Moved to ${student.version} for this run; the seat says `
-        + `${student.seatVersion || "nothing"}.`
-      : "The version this seat gives. Change it for this run only.";
+    const next = nextVersionLetter();
+    if (next) {
+      const add = document.createElement("option");
+      add.value = ADD_VERSION;
+      add.textContent = "+ " + next;
+      add.title = `Add version ${next} and put this student on it.`;
+      vsel.appendChild(add);
+    }
+    vsel.value = student.version || seated;
+    vsel.classList.toggle("moved", moved);
+    vsel.title = moved
+      ? `Moved to ${student.version} for this run; the seat gives ${seated}.`
+      : `The version this seat gives. Change it for this run only.`;
     vsel.onchange = () => {
-      if (vsel.value) draft.versions[student.key] = vsel.value;
+      const picked = vsel.value === ADD_VERSION ? nextVersionLetter() : vsel.value;
+      // Choosing the seat's own letter is not a move, so it clears the pin
+      // rather than recording one that changes nothing.
+      if (picked && picked !== seated) draft.versions[student.key] = picked;
       else delete draft.versions[student.key];
-      student.version = vsel.value;
+      student.version = draft.versions[student.key] || "";
       renderWho();
       refreshPrintDirty();
     };
-    vtd.appendChild(vsel);
+    vwrap.appendChild(vsel);
+    const vreset = resetButton(`Back to ${seated}, the seat's version.`, () => {
+      delete draft.versions[student.key];
+      student.version = "";
+      renderWho();
+      refreshPrintDirty();
+    });
+    // Hidden rather than absent, so the column does not resize as rows
+    // move on and off their default.
+    vreset.classList.toggle("off", !moved);
+    vwrap.appendChild(vreset);
+    vtd.appendChild(vwrap);
     tr.appendChild(vtd);
 
     add(gets.join(", ") || "—");
 
     const td = document.createElement("td");
+    const owrap = document.createElement("div");
+    owrap.className = "cellwrap";
     const input = document.createElement("input");
     input.value = (draft.overrides[student.key] || []).join(", ");
     input.placeholder = student.chose.join(", ") || "nothing chosen";
@@ -1071,14 +1136,31 @@ function renderWho() {
       refreshPrintDirty();
     };
     check();
-    td.appendChild(input);
+    owrap.appendChild(input);
+    // Beside the box rather than inside it: an overlay would sit on top of
+    // the text it is there to clear, and the two columns read the same
+    // when their controls are in the same place.
+    const oreset = resetButton("Clear this override; use what they chose.",
+      () => {
+        delete draft.overrides[student.key];
+        renderVariants();
+        renderWho();
+        refreshPrintDirty();
+      });
+    oreset.classList.toggle("off", !(draft.overrides[student.key] || []).length);
+    owrap.appendChild(oreset);
+    td.appendChild(owrap);
     tr.appendChild(td);
     body.appendChild(tr);
   }
-  const moved = Object.keys(draft.versions).length;
+  const movedCount = Object.keys(draft.versions).length;
+  const overrideCount = Object.keys(draft.overrides).length;
   document.getElementById("who-count").textContent =
     `— ${printState.students.length} students, ${papers} papers`
-    + (moved ? `, ${moved} moved to another version` : "");
+    + (movedCount ? `, ${movedCount} moved to another version` : "");
+  // One reset per column, shown on the same condition as the row ones.
+  document.getElementById("reset-versions").classList.toggle("off", !movedCount);
+  document.getElementById("reset-overrides").classList.toggle("off", !overrideCount);
 }
 
 function renderPrintFields() {
@@ -1164,6 +1246,8 @@ function renderBuild(out) {
 }
 
 let lastSeed = null;
+let rosterNews = null;
+const ADD_VERSION = "\u0000add";
 
 async function runPrint(which) {
   if (printDirty()) {
@@ -1191,11 +1275,41 @@ async function runPrint(which) {
   }
 }
 
+function peopleByKey(students) {
+  const out = {};
+  for (const s of students) out[s.key] = s;
+  return out;
+}
+
+/* What the Roster changed while this tab was away. Counted rather than
+   listed: the point is to explain why a row looks different, and a list of
+   names on screen is a list of names on screen. */
+function rosterChanges(before, after) {
+  const was = peopleByKey(before), now = peopleByKey(after);
+  const news = { names: 0, sections: 0, added: 0, removed: 0 };
+  for (const [key, s] of Object.entries(now)) {
+    if (!(key in was)) { news.added++; continue; }
+    if (was[key].display !== s.display) news.names++;
+    if (was[key].section !== s.section) news.sections++;
+  }
+  for (const key of Object.keys(was)) if (!(key in now)) news.removed++;
+  news.total = news.names + news.sections + news.added + news.removed;
+  return news;
+}
+
 async function loadPrint() {
+  const before = printState ? printState.students : null;
+  // Unsaved work survives a reload: `printDirty` compares the local draft
+  // with the saved file, so replacing the file's copy and keeping the
+  // local one leaves that comparison correct.
+  const keepDraft = printState !== null && printDirty();
+  let next;
   try {
-    printState = await api("/api/print");
+    next = await api("/api/print");
   } catch (err) { toast(err.message, true); return; }
-  draft = JSON.parse(JSON.stringify(printState.draft));
+  printState = next;
+  if (!keepDraft) draft = JSON.parse(JSON.stringify(printState.draft));
+  rosterNews = before ? rosterChanges(before, printState.students) : null;
 
   const blocked = document.getElementById("print-blocked");
   const why = !printState.hasRoster
@@ -1213,7 +1327,24 @@ async function loadPrint() {
   renderVariants();
   renderExtras();
   renderWho();
+  renderRosterNews();
   refreshPrintDirty();
+}
+
+function renderRosterNews() {
+  const el = document.getElementById("print-news");
+  const n = rosterNews;
+  if (!n || !n.total) { el.hidden = true; return; }
+  const plural = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+  const bits = [];
+  if (n.names) bits.push(plural(n.names, "name", "names"));
+  if (n.sections) bits.push(plural(n.sections, "section", "sections"));
+  if (n.added) bits.push(plural(n.added, "student added", "students added"));
+  if (n.removed) bits.push(plural(n.removed, "no longer listed",
+                                  "no longer listed"));
+  el.textContent = "From Roster since this tab last opened: "
+                 + bits.join(", ") + ". Already shown below.";
+  el.hidden = false;
 }
 
 async function savePrint() {
@@ -1226,11 +1357,28 @@ async function savePrint() {
     renderVariants();
     renderExtras();
     renderWho();
+    // Saved, so there is nothing left to explain about the other tab.
+    rosterNews = null;
+    renderRosterNews();
     refreshPrintDirty();
     // The draw depends on the file, so a save invalidates a previewed seed.
     lastSeed = null;
     toast("Saved");
   } catch (err) { toast(err.message, true); }
+}
+
+function resetPrint() {
+  /* An ordinary edit, not a second way to write the file: it fills the
+     local draft with the server's defaults and leaves saving to Save, so
+     Discard still undoes it. */
+  draft = JSON.parse(JSON.stringify(printState.defaults));
+  renderPrintFields();
+  renderModes();
+  renderVariants();
+  renderExtras();
+  renderWho();
+  refreshPrintDirty();
+  toast("Reset — Save to keep it, Discard to put it back.");
 }
 
 function revertPrint() {
@@ -1260,6 +1408,19 @@ async function boot() {
   document.getElementById("form-push").onclick = pushForm;
   document.getElementById("print-save").onclick = savePrint;
   document.getElementById("print-revert").onclick = revertPrint;
+  document.getElementById("print-reset").onclick = resetPrint;
+  document.getElementById("reset-versions").onclick = () => {
+    draft.versions = {};
+    for (const s of printState.students) s.version = "";
+    renderWho();
+    refreshPrintDirty();
+  };
+  document.getElementById("reset-overrides").onclick = () => {
+    draft.overrides = {};
+    renderVariants();
+    renderWho();
+    refreshPrintDirty();
+  };
   document.getElementById("p-preview").onclick = () => runPrint("preview");
   document.getElementById("p-build").onclick = () => runPrint("build");
   document.getElementById("extras-add").onclick = () => {

@@ -126,6 +126,17 @@ def build_handouts(roster, chart, publication, seeds):
         for slug in student.skills:
             seed = seeds.get((version, slug))
             if seed is None:
+                # Two very different faults reach here, and saying the wrong
+                # one sends the instructor to the bank when the problem is a
+                # pin. Measured: a student pinned to an undrawn letter was
+                # reported as asking for a skill that is in the bank.
+                drawn = {v for v, _ in seeds}
+                if version not in drawn:
+                    raise AssemblyError(
+                        f"{student.display} is pinned to version {version!r}, "
+                        f"which this run drew no papers for (it has "
+                        f"{', '.join(sorted(drawn)) or 'none'})."
+                    )
                 raise AssemblyError(
                     f"{student.display} asked for {slug!r}, which is "
                     f"not in the bank."
@@ -358,6 +369,24 @@ def check_dropped_are_unseated(roster, chart):
         )
 
 
+def versions_for(chart, publication):
+    """Every version letter this run needs seeds for.
+
+    The chart's, plus any letter a per-run pin names -- which is how a
+    version is added from the app. Without this the pin reaches
+    `build_handouts`, finds no seed, and is reported as a skill missing
+    from the bank.
+
+    Appended rather than sorted in, because `versions[0]` is what an
+    unseated student gets and reordering it would move them silently.
+    """
+    versions = list(chart.versions) if chart else ["A"]
+    for letter in sorted(set((publication.student_versions or {}).values())):
+        if letter and letter not in versions:
+            versions.append(letter)
+    return versions
+
+
 def assemble(publication, roster, chart, out_dir, theme, rng=None,
              dry_run=False, run_seed=None):
     """Write a complete, compilable folder. Returns a short report."""
@@ -369,7 +398,7 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None,
     env_misses = set()
     env = make_env(missing=env_misses)
 
-    versions = list(chart.versions) if chart else ["A"]
+    versions = versions_for(chart, publication)
     seeds = choose_seeds(bank, versions, publication, rng)
 
     handouts, unseated = build_handouts(roster, chart, publication, seeds)

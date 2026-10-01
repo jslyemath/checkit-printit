@@ -98,7 +98,12 @@
   </section>
 
   <section id="view-print" class="view" hidden>
-    <h2>Print job</h2>
+    <div class="toolbar">
+      <h2>Print job</h2>
+      <span class="spacer"></span>
+      <button id="print-reset" class="link"
+              title="Empty every field on this tab, ready for the next run. Save to keep it; Discard puts it back.">Reset this print job</button>
+    </div>
     <p id="print-blocked" class="banner warn" hidden></p>
 
     <div class="panel">
@@ -109,11 +114,11 @@
         <label title="Prints on the paper and names the job folder.">Date
           <input id="p-date" type="date"></label>
         <label title="Print an answer key for each distinct paper.">Keys
-          <input id="p-keys" type="checkbox"></label>
+          <span class="tickwrap"><input id="p-keys" type="checkbox"></span></label>
         <label title="How many copies of each key." id="p-keycopies-wrap">Key copies
           <input id="p-key-copies" type="number" min="1" max="9"></label>
         <label title="Print each student's name on their paper. Turn off for an anonymous set.">Names
-          <input id="p-names" type="checkbox"></label>
+          <span class="tickwrap"><input id="p-names" type="checkbox"></span></label>
       </div>
     </div>
 
@@ -142,6 +147,7 @@
     <div class="panel">
       <h3>Who gets what <span id="who-count" class="muted"></span></h3>
       <div class="toolbar">
+        <span id="print-news" class="news" hidden></span>
         <span class="spacer"></span>
         <span id="print-dirty" class="dirty" hidden></span>
         <button id="print-save" class="primary" disabled>Save</button>
@@ -149,7 +155,13 @@
       </div>
       <div class="scroller">
         <table id="who">
-          <thead><tr><th>Name</th><th>Section</th><th>Version</th><th>Will get</th><th>Override</th></tr></thead>
+          <thead><tr><th>Name</th><th>Section</th>
+            <th>Version <button id="reset-versions" type="button" class="reset off"
+                title="Put every student back on their seat's version.">&#8634;</button></th>
+            <th>Will get</th>
+            <th>Override <button id="reset-overrides" type="button" class="reset off"
+                title="Clear every override; use what each student chose.">&#8634;</button></th>
+          </tr></thead>
           <tbody></tbody>
         </table>
       </div>
