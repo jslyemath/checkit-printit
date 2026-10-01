@@ -490,6 +490,26 @@ th button.reset { margin-left: 4px; }
 /* What the Roster changed while this tab was away. */
 .news { font-size: 12px; color: var(--muted); }
 
+/* Save covers the whole tab, so it is pinned to the bottom of the view
+   rather than sitting in one of its six cards. Sticky to the bottom
+   instead of under the header, because the header wraps to two rows at a
+   narrow width and a fixed offset would be wrong at one of them. */
+.savebar {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 -8px 20px rgba(0, 0, 0, .3);
+}
+
 #who td input.bad {
   border-color: var(--warn);
   background: color-mix(in srgb, var(--warn) 10%, transparent);

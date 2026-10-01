@@ -74,6 +74,27 @@ name that imports as a duplicate student. Real files are in `~/Downloads` and
 `build --preview` and `build` draw independently unless both are given the
 same `--seed`. Checking the preview's seeds proves nothing about the build's.
 
+### Operate the control; do not call what you think it calls
+
+A reported "open the folder does nothing" was fixed and then "verified" by
+POSTing to `/api/print/reveal` with a hand-picked path. It returned 200.
+It also opened the wrong folder, because the button sends the run just
+built and the test sent a job folder from a fortnight earlier -- and a job
+folder holds one file, so it looked like the build had produced nothing.
+
+Calling the endpoint tests the endpoint. It cannot catch a button wired to
+the wrong field, which is the bug being reported. Click the thing.
+
+### A run writes two folders, and one of them is nearly empty
+
+| | holds |
+|---|---|
+| `~/CheckItPrintIt/jobs/<title> <date>/` | the **job**: `publication.toml` |
+| `~/CheckItPrintIt/<course>/<title> <date>/` | the **run**: `main.pdf`, `main.tex`, `manifest.toml`, `compile.log`, a folder per skill |
+
+"Open the folder" means the second. Opening the first looks like a failed
+build.
+
 ### Do not declare something impossible without checking
 
 "A CLI cannot sign in to Google" was said twice, was wrong both times, and
