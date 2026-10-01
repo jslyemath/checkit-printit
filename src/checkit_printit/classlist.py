@@ -228,7 +228,10 @@ def parse(path, section=""):
             skills=[],
             last=last,
             first=first,
-            preferred=first,
+            # Deliberately not `first`. `preferred` is the whole name to
+            # print, and the registrar never supplies one -- only the
+            # instructor does, by typing it.
+            preferred="",
             sid=cell(row, "sid"),
             alt_id=cell(row, "alt_id"),
             email=cell(row, "email").lower(),
@@ -311,7 +314,7 @@ def _index(students):
         for kind, value in s.ids():
             if value:
                 out[(kind, value)] = s
-        for spelling in (s.name, f"{s.first} {s.last}", f"{s.preferred} {s.last}"):
+        for spelling in (s.name, f"{s.first} {s.last}", s.preferred):
             key = _norm(spelling)
             if key:
                 out.setdefault(("name", key), s)
@@ -401,8 +404,6 @@ def merge(existing, incoming, scope=None):
             changed.append("re-enrolled")
         elif match.dropped:
             report.kept_dropped.append(match.name)
-        if not match.preferred:
-            match.preferred = match.first
         if changed:
             report.updated.append(f"{match.name} ({', '.join(changed)})")
         else:

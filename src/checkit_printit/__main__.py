@@ -1006,9 +1006,13 @@ def roster_import(class_list, out, section, covers, seating_path, dry_run):
     if report.dropped and os.path.isfile(seating_path):
         text = open(seating_path, encoding="utf-8").read()
         emptied = 0
+        by_name = {s.name: s for s in merged}
         for name in report.dropped:
-            text, count = seating.blank_seat(text, name)
-            emptied += count
+            student = by_name.get(name)
+            for spelling in {name, student.display if student else ""}:
+                if spelling:
+                    text, count = seating.blank_seat(text, spelling)
+                    emptied += count
         if emptied:
             with open(seating_path, "w", encoding="utf-8") as f:
                 f.write(text)
@@ -1186,9 +1190,9 @@ def _report(result):
                    f"Rendered as nothing -- fine if it is inside a LaTeX "
                    f"comment, a bug if it is not.")
 
-    for a, b in report["collisions"]:
+    for a, b, version in report["collisions"]:
         click.echo(f"  WARNING  {a.name} and {b.name} are adjacent in group "
-                   f"{a.group} and share version {a.version}")
+                   f"{a.group} and were both printed version {version}")
     if report["unseated"]:
         click.echo(f"  WARNING  not in the seating chart, printed last: "
                    f"{', '.join(report['unseated'])}")

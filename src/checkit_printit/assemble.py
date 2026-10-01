@@ -12,6 +12,7 @@ import re
 import shutil
 
 from . import manifest
+from . import seating as seating_mod
 from . import spatext
 from . import theme as theme_mod
 from .bank import Bank
@@ -126,13 +127,16 @@ def build_handouts(roster, chart, publication, seeds):
             seed = seeds.get((version, slug))
             if seed is None:
                 raise AssemblyError(
-                    f"{student.name} asked for {slug!r}, which is not in the bank."
+                    f"{student.display} asked for {slug!r}, which is "
+                    f"not in the bank."
                 )
             versions.append((slug, seed))
         handouts.append(Handout(
             sid=student.sid,
             version=version,
-            name=student.name,
+            # What prints. `sid` above is what identifies; see
+            # `Student.display`.
+            name=student.display,
             section=student.section,
             versions=versions,
             blank_name=not publication.names,
@@ -340,8 +344,11 @@ def check_dropped_are_unseated(roster, chart):
     """
     if chart is None:
         return
+    # Either spelling counts as seated, because `Chart.order` accepts
+    # either. Checking only one would call a seat empty that still prints.
     seated = {seat.name for seat in chart}
-    still = sorted(s.name for s in roster if s.dropped and s.name in seated)
+    still = sorted(s.display for s in roster
+                   if s.dropped and {s.name, s.display} & seated)
     if still:
         raise AssemblyError(
             f"{len(still)} student(s) marked dropped are still in the seating "
@@ -381,7 +388,7 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None,
         for handout in list(handouts) + list(extras):
             written.update(handout.versions)
         return _report_dict(handouts, extras, keys, written, unseated, chart,
-                            seeds, {})
+                            seeds, {}, roster)
 
     # -- write ------------------------------------------------------------
     os.makedirs(out_dir, exist_ok=True)
@@ -439,18 +446,60 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None,
         manifest.write(out_dir, publication, run_seed, seeds, bank, slugs_used)
 
     return _report_dict(handouts, extras, keys, written, unseated, chart,
-                        seeds, missing)
+                        seeds, missing, roster)
 
 
-def _report_dict(handouts, extras, keys, written, unseated, chart, seeds, missing):
+def printed_collisions(chart, roster, handouts):
+    """Adjacent students who were actually handed the same version.
+
+    `Chart.collisions` compares the letters in the chart, which is what the
+    room was arranged for. `[versions]` moves one student for one run and
+    leaves the chart alone, so the two disagree exactly when it matters: a
+    build asking the chart reports no collisions while two neighbours hold
+    the same questions. Measured on a real 48-student run -- the build said
+    none, the compiled PDF had one.
+
+    Returns `(seat, seat, version)`, so a caller can name the letter that
+    was printed rather than the one the seat was assigned.
+    """
+    if chart is None:
+        return []
+    people = list(roster)
+    index = seating_mod.index_by_name(people)
+    by_sid = {h.sid: h.version for h in handouts if h.sid}
+    by_name = {h.name: h.version for h in handouts}
+
+    def printed(seat):
+        hits = index.get(seat.name)
+        if not hits or len(hits) > 1:
+            return None            # unseated, or ambiguous and already refused
+        student = people[hits[0]]
+        if student.sid and student.sid in by_sid:
+            return by_sid[student.sid]
+        return by_name.get(student.display)
+
+    found = []
+    for a, b in zip(chart.seats, chart.seats[1:]):
+        if a.group != b.group:
+            continue
+        version = printed(a)
+        if version is not None and version == printed(b):
+            found.append((a, b, version))
+    return found
+
+
+def _report_dict(handouts, extras, keys, written, unseated, chart, seeds,
+                 missing, roster):
     return {
         "students": len(handouts),
         "extras": len(extras),
         "skills": sorted({slug for slug, _ in written}),
         "versions": len(written),
         "keys": len(keys["versions"]) * keys["copies"] if keys else 0,
-        "unseated": [s.name for s in unseated],
-        "collisions": chart.collisions() if chart else [],
+        "unseated": [s.display for s in unseated],
+        # What was printed, not what the chart says. See
+        # `printed_collisions`.
+        "collisions": printed_collisions(chart, roster, handouts),
         "seeds": seeds,
         "missing_fields": {k: sorted(v) for k, v in sorted(missing.items())},
         # Enough for the print record, which is written by the caller rather

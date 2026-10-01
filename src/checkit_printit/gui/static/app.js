@@ -23,8 +23,8 @@ const VIEWS = [
 // place to the left.
 // `min` and `max` are the column's width in pixels. Content decides the width
 // between them: an <input> reports its own default width (about twenty
-// characters) whatever it contains, so a column of short nicknames comes out
-// as wide as a column of long emails unless the values are measured.
+// characters) whatever it contains, so a column of short values comes out as
+// wide as a column of long emails unless the values are measured.
 // Minimums measured against the real MAT 106 roster rather than guessed: the
 // longest name there is 22 characters (~167px in this font) and the longest
 // address 19. A minimum below that clips the common case, which is what the
@@ -38,7 +38,10 @@ const VIEWS = [
 const COLUMNS = [
   { key: "name",      label: "Name",     edit: true, min: 200, max: 330,
     sortKeys: [["sort_last", "last"], ["sort_first", "first"]] },
-  { key: "preferred", label: "Nickname", edit: true, min: 130, max: 210 },
+  // Not "Nickname": that invites "Matt", and this replaces the whole
+  // printed name. Same widths as Name, because it holds the same thing.
+  { key: "preferred", label: "Prints as", edit: true, min: 200, max: 330,
+    placeholder: s => s.name },
   { key: "section",   label: "Section",  edit: true, min: 74,  max: 110 },
   { key: "email",     label: "Email",    edit: true, min: 215, max: 340 },
   { key: "sid",       label: "SID",      cls: "ro",  min: 86,  max: 140,
@@ -166,10 +169,13 @@ function refreshDirty() {
   document.getElementById("revert").disabled = n === 0;
 }
 
-function cellInput(student, field) {
+function cellInput(student, field, column) {
   const input = document.createElement("input");
   input.value = student[field] || "";
   input.spellcheck = false;
+  // An empty "Prints as" is not missing data -- it means the roster name is
+  // used -- so the box shows that name greyed rather than sitting blank.
+  if (column && column.placeholder) input.placeholder = column.placeholder(student);
   input.oninput = () => {
     const k = key(student.index, field);
     if (input.value === (student[field] || "")) edits.delete(k);
@@ -380,7 +386,7 @@ function renderRoster() {
         td.appendChild(b);
       } else if (column.edit) {
         td.classList.add("cell-" + column.key);
-        const input = cellInput(student, column.key);
+        const input = cellInput(student, column.key, column);
         // Clamped columns clip. The full value is a hover away rather than
         // gone, which matters most for an email.
         input.title = student[column.key] || "";
@@ -1003,8 +1009,8 @@ function renderWho() {
       tr.appendChild(td);
       return td;
     };
-    // The nickname where there is one. `name` is what prints and what the
-    // seating chart matches on, so this is a display name only.
+    // `display` is the printed name; `name` is still what identifies the
+    // student in the roster file, so it stays on hover.
     const nameCell = add(student.display);
     if (student.display !== student.name) nameCell.title = student.name;
     add(student.section, "ro");

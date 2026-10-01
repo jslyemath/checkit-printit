@@ -168,13 +168,15 @@ def main():
 
     # ---- every student got exactly what the roster says
     printed = dict(handouts(student_chunk))
+    # The page carries the printed name, so that is what to look it up by.
     problems = []
     for student in roster:
-        got = printed.get(student.name)
+        got = printed.get(student.display)
         if got is None:
-            problems.append(f"{student.name} is not in the PDF")
+            problems.append(f"{student.display} is not in the PDF")
         elif sorted(s for s, _ in got) != sorted(student.skills):
-            problems.append(f"{student.name}: wanted {sorted(student.skills)}, "
+            problems.append(f"{student.display}: wanted "
+                            f"{sorted(student.skills)}, "
                             f"got {sorted(s for s, _ in got)}")
     report.record("students match the roster", len(list(roster)), problems,
                   "; ".join(problems[:3]))
@@ -206,13 +208,25 @@ def main():
         seats = list(chart)
         problems = []
         pairs = 0
+        # A seat holds either spelling; the page holds only the printed
+        # one. Looking a seat up directly would miss every renamed student
+        # and compare two empty sets, which passes while examining nothing.
+        shown = {}
+        for s in roster:
+            for spelling in {s.name, s.display}:
+                shown[spelling] = s.display
+        unresolved = sorted({seat.name for seat in seats
+                             if seat.name and seat.name not in shown})
         for a, b in zip(seats, seats[1:]):
             if a.group != b.group:
                 continue
             pairs += 1
-            shared = set(printed.get(a.name, [])) & set(printed.get(b.name, []))
+            ap, bp = shown.get(a.name, a.name), shown.get(b.name, b.name)
+            shared = set(printed.get(ap, [])) & set(printed.get(bp, []))
             if shared:
-                problems.append(f"{a.name} and {b.name} share {sorted(shared)}")
+                problems.append(f"{ap} and {bp} share {sorted(shared)}")
+        problems += [f"seat {n!r} matches nobody in the roster"
+                     for n in unresolved]
         if pairs == 0:
             report.not_applicable("neighbours hold different papers",
                                   "no two seats are adjacent in this chart")
