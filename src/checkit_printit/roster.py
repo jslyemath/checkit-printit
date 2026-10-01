@@ -42,7 +42,14 @@ class Student:
     last: str = ""
     first: str = ""
 
-    # the display first name; `name` is the display full name
+    #: What to print instead of `name` -- the *whole* name, not a first
+    #: name. "Matt Clifford", not "Matt".
+    #:
+    #: It meant a first name until 2026-10-01, defaulted from the
+    #: registrar's `first` on import, and nothing ever read it. `first`,
+    #: `last` and `preferred` are empty on all eight real rosters, so there
+    #: was nothing to migrate and the meaning was free to fix. Had it stayed
+    #: a first name, every paper would have carried one word.
     preferred: str = ""
 
     #: the other id system, when an export carries it
@@ -70,6 +77,17 @@ class Student:
 
     #: Set by seating, not by the roster.
     version: str = ""
+
+    @property
+    def display(self):
+        """What a person should see: the preferred name, else the roster one.
+
+        Every surface that *shows* this student goes through here -- the
+        printed paper, the seating chart, the tables. Every surface that
+        *matches* one keeps using `sid`, `alt_id`, `email` and `name`,
+        because a name an instructor can retype is not a key.
+        """
+        return self.preferred or self.name
 
     def all_emails(self):
         """The primary first, then any other address seen, de-duplicated."""
@@ -266,7 +284,12 @@ def set_dropped(roster_path, who, dropped, seating_path=None):
         result.seating_checked = True
         with open(seating_path, encoding="utf-8") as f:
             text = f.read()
-        new, count = seating_mod.blank_seat(text, student.name)
+        count = 0
+        # Both spellings, for the same reason `Chart.order` reads both.
+        for spelling in {student.name, student.display}:
+            text, emptied = seating_mod.blank_seat(text, spelling)
+            count += emptied
+        new = text
         result.seats_emptied = count
         if count:
             with open(seating_path, "w", encoding="utf-8") as f:
@@ -368,7 +391,7 @@ def to_toml(roster, written_by="checkit-printit"):
             lines.append(f"last      = {quote(s.last)}")
         if s.first:
             lines.append(f"first     = {quote(s.first)}")
-        if s.preferred and s.preferred != s.first:
+        if s.preferred:
             lines.append(f"preferred = {quote(s.preferred)}")
         if s.sid:
             lines.append(f"sid       = {quote(s.sid)}")

@@ -77,9 +77,9 @@ def _sort_names(student):
 def _student_json(student, index):
     """One row of the roster table.
 
-    `index` is the identity the browser sends back. Not the name -- a rename
-    is the whole point of the nickname column -- and not the SID, which some
-    class lists do not carry.
+    `index` is the identity the browser sends back. Not the name -- the row
+    exists to be renamed -- and not the SID, which some class lists do not
+    carry.
     """
     sort_last, sort_first = _sort_names(student)
     return {
@@ -577,10 +577,9 @@ def api_print(course, _body):
             key = s.sid or s.alt_id or s.email or s.name
             students.append({
                 "index": i, "key": key, "name": s.name,
-                # What the app shows. `name` is what prints and what the
-                # chart matches on, so the nickname is a display name here
-                # and nothing more until that is decided.
-                "display": s.preferred or s.name,
+                # What prints, and so what this view shows. One
+                # definition, on the Student. See `Student.display`.
+                "display": s.display,
                 "section": s.section,
                 "chose": list(s.skills),
                 "override": list(draft["overrides"].get(key, []))

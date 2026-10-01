@@ -5,7 +5,7 @@ course state around it. The platform is a sibling repo and **the fuller guide
 lives there**: `../checkit/CLAUDE.md`. Read that too.
 
 ```bash
-./.venv/Scripts/python.exe -m pytest -q          # 219 tests
+./.venv/Scripts/python.exe -m pytest -q          # 361 tests
 ./.venv/Scripts/python.exe -m checkit_printit --help
 ```
 
@@ -160,7 +160,7 @@ that outlives one print job.
 | `form push` | `-c`, `--dry-run` |
 | `form pull` | `-c`, `--dry-run`, `--force`. Responses into the roster |
 | `form setup` / `form connect --url` | the manual path, for when clasp is not an option |
-| `gui` | `-c`, `--port`, `--open/--no-open`. The local web app (8a, 8b) |
+| `gui` | `-c`, `--port`, `--open/--no-open`. The local web app (8a-8d) |
 
 `tools/verify_run.py <job> <out> [--against DIR]` checks a finished run
 against the job that asked for it. **A check that examined nothing fails** --
@@ -191,9 +191,10 @@ roster file it writes is headed "Written by checkit-printit roster drop". If a
 rule needs to be reachable from the GUI, move it out of the `@click.command`
 body rather than copying it. See the footgun above about one of two copies.
 
-Built: **8a** the shell, **8b** the roster table. The other six views are
-listed in the nav and say what they will do and which CLI command does it
-today. Order and rationale: `../checkit/PRINT_TOOL_DESIGN.md` 12.6.
+Built: **8a** the shell, **8b** Roster, **8c** Update form, **8d** Print job.
+The other four views are listed in the nav and say what they will do and
+which CLI command does it today. Order and rationale:
+`../checkit/PRINT_TOOL_DESIGN.md` 12.6, and "Where things stand" below.
 
 ## The course
 
@@ -317,11 +318,14 @@ against a real Google account" and "7b against a real response" in
 | 8g | **Cold call** | not started; genuinely new code |
 | 8h | **Setup** | not started -- create a form from the app, and the boilerplate editor |
 
-**Three decisions are open and block 8e.** They are in
+**Two decisions are open and block 8e.** They are in
 `../checkit/PRINT_TOOL_DESIGN.md` 12.6 under "Open, and blocking the next
-slice": whether the nickname prints, whether Responses stays its own tab,
-and whether "simply print" becomes a mode switch. Each changes a layout, so
-building on them first means redoing the work. **Ask before starting 8e.**
+slice": whether Responses stays its own tab, and whether "simply print"
+becomes a mode switch. Both change the same layout, so building on them
+first means redoing the work. **Ask before starting 8e.**
+
+The third, whether the preferred name prints, was settled on 2026-10-01: it
+does, everywhere.
 
 ## Working on the web app
 
@@ -334,6 +338,11 @@ anything touching Google. `Scratch 48` is forty-eight synthetic students
 shaped like the real roster -- same section split, same name lengths, same
 chart including the three-seat table and the lone seat -- and is what
 anything about size or layout should be checked against.
+
+The browser pane's server list comes from `.claude/launch.json` in the
+**session's working directory**, which is usually `../checkit`. Both scratch
+courses are registered there as `printit-gui` (8765) and `printit-gui-google`
+(8766); a gui started any other way will not appear in that list.
 
 **Restart the server after editing anything under `gui/`.** Python does not
 reload a module in a live process, and the front end falls back rather than
@@ -349,6 +358,8 @@ rather than widths, and a column hidden by a rule that beat `[hidden]`.
 
 | rule | lives in |
 |---|---|
+| what name to show a person | `Student.display` |
+| which spellings a seat may use | `seating.index_by_name` |
 | dropping a student | `roster.set_dropped` |
 | the open list, the assessment | `availability.set_open`, `set_assessment` |
 | the form's wording | `form.payload_for` |

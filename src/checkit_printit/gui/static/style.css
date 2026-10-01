@@ -135,7 +135,7 @@ button.link:hover { color: var(--ink); }
 table {
   /* `auto`, not 100%: the widths come from a <colgroup> that app.js sizes to
      the content, so the table is as wide as it needs to be and no wider. A
-     stretched table made Nickname and Section as wide as Email. */
+     stretched table made Prints as and Section as wide as Email. */
   width: auto;
   table-layout: fixed;
   border-collapse: collapse;

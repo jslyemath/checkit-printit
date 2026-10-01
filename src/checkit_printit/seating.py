@@ -144,6 +144,22 @@ def blank_seat(text, name):
     return "".join(out), count
 
 
+def index_by_name(people):
+    """Every spelling a seat may legitimately use, to the student's position.
+
+    `seating.toml` holds no id -- a seat is a name and nothing else -- so
+    this is the one join in the tool made on a name, and it accepts both the
+    roster name and the printed one. A list per spelling, because a clash is
+    for the caller to refuse rather than for this to guess at.
+    """
+    index = {}
+    for i, s in enumerate(people):
+        for spelling in {s.name, s.display}:
+            if spelling:
+                index.setdefault(spelling, []).append(i)
+    return index
+
+
 @dataclasses.dataclass
 class Chart:
     seats: list
@@ -167,6 +183,11 @@ class Chart:
         Only possible once a seat is pinned -- plain alternation cannot collide.
         Reported rather than raised: a pin is a deliberate act, and the operator
         may have a reason.
+
+        This is what the *chart* says. A per-run pin in a publication's
+        `[versions]` changes the paper without touching the chart, so a
+        build must ask `assemble.printed_collisions` instead; this one
+        would answer for a room that is not the one being printed.
         """
         found = []
         for a, b in zip(self.seats, self.seats[1:]):
@@ -181,15 +202,30 @@ class Chart:
         version. Anyone in the roster but not seated follows, so a missing seat
         loses a student's place in the stack but never the student.
         """
-        by_name = {s.name: s for s in roster}
+        people = list(roster)
+        index = index_by_name(people)
+
         ordered, seated = [], set()
         for seat in self.seats:
-            student = by_name.get(seat.name)
-            if student is None:
+            hits = index.get(seat.name)
+            if not hits:
                 continue
-            ordered.append(dataclasses.replace(student, version=seat.version))
-            seated.add(seat.name)
-        unseated = [s for s in roster if s.name not in seated]
+            if len(hits) > 1:
+                raise SeatingError(
+                    f"seat {seat.name!r} matches {len(hits)} students. One of "
+                    f"them has it as a printed name and another as a roster "
+                    f"name; give the seat whichever is unique."
+                )
+            if hits[0] in seated:
+                raise SeatingError(
+                    f"{people[hits[0]].display} is in two seats. Accepting "
+                    f"both spellings means a chart naming each once names "
+                    f"the same person twice; empty one of them."
+                )
+            seated.add(hits[0])
+            ordered.append(dataclasses.replace(people[hits[0]],
+                                               version=seat.version))
+        unseated = [s for i, s in enumerate(people) if i not in seated]
         return ordered, unseated
 
 
