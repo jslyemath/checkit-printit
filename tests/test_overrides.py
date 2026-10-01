@@ -186,12 +186,16 @@ class TestTheOrderTheyCompose:
                      append_for_everyone=["AD"])
         assert self._pages(result)["Ada Lovelace"] == ["SU", "AD"]
 
-    def test_simply_print_still_wins(self, job, tmp_path):
-        """Everyone sitting the same thing means everyone, which is why the
-        override box is hidden in that mode rather than merely ignored."""
-        result = job(tmp_path, overrides={"806001": ["SU"]},
+    def test_the_same_mode_ignores_an_override_by_not_carrying_it(
+            self, job, tmp_path):
+        """Everyone sitting the same thing means everyone. It used to be
+        that `simply_print` won at build time while the override sat in the
+        file looking as though it meant something; now the job folder does
+        not carry it at all."""
+        result = job(tmp_path, mode="same", overrides={"806001": ["SU"]},
                      simply_print=["AD"])
         assert self._pages(result)["Ada Lovelace"] == ["AD"]
+        assert result.publication.student_overrides == {}
 
     def test_an_override_for_nobody_is_carried_out_of_the_build(self, job,
                                                                 tmp_path):

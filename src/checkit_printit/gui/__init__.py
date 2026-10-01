@@ -638,6 +638,12 @@ def api_print_save(course, body):
             named = "; ".join(f"{k}: {', '.join(v)}" for k, v in bad.items())
             raise GuiError(f"not in the bank -- {named}")
 
+    mode = draft.get("mode", "chose")
+    if mode not in printjob_mod.MODES:
+        raise GuiError(
+            f"{mode!r} is not a mode. It is one of "
+            f"{', '.join(printjob_mod.MODES)}.")
+
     # A letter beyond the chart's is allowed: that is how a version is
     # added from the app, and `assemble` draws seeds for whatever the pins
     # name. It still has to be a version letter and not prose, because the

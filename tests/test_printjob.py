@@ -90,6 +90,66 @@ class TestTheDraftRoundTrips:
             assert table in ("selection", key)
 
 
+class TestTheJobCannotContradictItself:
+    """`simply_print` silently cancelled each student's choices and
+    `default_when_missing`, and nothing on screen said so. The mode is now
+    explicit, and only the keys it uses are written -- so a job that says
+    everyone sits the same thing cannot also carry per-student overrides
+    for somebody to find later and believe."""
+
+    def test_the_same_mode_writes_one_list_and_nothing_else(self, space,
+                                                             tmp_path):
+        draft = dict(printjob.load_draft(space))
+        draft.update(FULL, mode="same")
+        text = printjob.publication_text(space, draft, "MAT 106")
+        assert "simply_print" in text
+        assert "default_when_missing" not in text
+        assert "append_for_everyone" not in text
+        assert "[overrides]" not in text
+
+    def test_the_chose_mode_writes_the_other_half(self, space, tmp_path):
+        draft = dict(printjob.load_draft(space))
+        draft.update(FULL, mode="chose")
+        text = printjob.publication_text(space, draft, "MAT 106")
+        assert "simply_print" not in text
+        assert "default_when_missing" in text
+        assert "append_for_everyone" in text
+        assert "[overrides]" in text
+
+    @pytest.mark.parametrize("mode", ["same", "chose"])
+    def test_what_both_modes_keep(self, space, tmp_path, mode):
+        """Variants, version pins and extras are about the papers, not
+        about where the choices came from."""
+        draft = dict(printjob.load_draft(space))
+        draft.update(FULL, mode=mode, versions={"806001": "C"})
+        text = printjob.publication_text(space, draft, "MAT 106")
+        assert "[variants]" in text and "[versions]" in text
+        assert "[[extras]]" in text
+
+    def test_it_round_trips(self, space):
+        printjob.save_draft(space, dict(FULL, mode="same"))
+        assert printjob.load_draft(space)["mode"] == "same"
+
+    def test_a_draft_from_before_the_mode_existed_keeps_working(self, space):
+        """It says which mode it is by whether `simply_print` has anything
+        in it. Without this, every saved job printing one list for the
+        class would silently switch to reading the students' choices."""
+        with open(printjob.draft_path(space), "w", encoding="utf-8") as f:
+            f.write('title = "x"\n[selection]\nsimply_print = ["W1"]\n')
+        assert printjob.load_draft(space)["mode"] == "same"
+
+    def test_and_one_with_no_list_reads_as_the_students_choosing(self, space):
+        with open(printjob.draft_path(space), "w", encoding="utf-8") as f:
+            f.write('title = "x"\n')
+        assert printjob.load_draft(space)["mode"] == "chose"
+
+    def test_a_nonsense_mode_falls_back_rather_than_crashing(self, space):
+        """These files are hand-editable, and the view has to render."""
+        with open(printjob.draft_path(space), "w", encoding="utf-8") as f:
+            f.write('mode = "whatever"\ntitle = "x"\n')
+        assert printjob.load_draft(space)["mode"] == "chose"
+
+
 class TestWritingTheJob:
     def test_it_writes_a_publication_the_loader_accepts(self, space, tmp_path):
         printjob.save_draft(space, FULL)
@@ -101,8 +161,12 @@ class TestWritingTheJob:
         assert pub.title == "Redo"
         assert pub.course == "MAT 106"
         assert pub.course_folder == space
-        assert pub.simply_print == ("W1", "W2")
+        # FULL names every key, which no real draft does any more: the
+        # mode decides which half is written. It defaults to "chose", so
+        # the students' half is here and `simply_print` is not.
+        assert pub.simply_print == ()
         assert pub.append_for_everyone == ("D1-E",)
+        assert pub.default_when_missing == ("D1",)
         assert pub.variants == {"W4": "multiplication"}
         assert [e.skill for e in pub.extras] == ["W1"]
         assert pub.keys is False and pub.key_copies == 3
