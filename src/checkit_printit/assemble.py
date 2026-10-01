@@ -12,6 +12,7 @@ import re
 import shutil
 
 from . import manifest
+from . import roster as roster_mod
 from . import seating as seating_mod
 from . import spatext
 from . import theme as theme_mod
@@ -118,8 +119,8 @@ def build_handouts(roster, chart, publication, seeds):
         # A version set for this run wins over the seat's. The collision
         # check still runs afterwards, so moving someone onto their
         # neighbour's version is reported rather than silently printed.
-        for key in (student.sid, student.alt_id, student.email, student.name):
-            if key and key in pinned:
+        for key in roster_mod.keys_of(student):
+            if key in pinned:
                 version = pinned[key]
                 break
         versions = []

@@ -57,6 +57,9 @@ class BuildResult:
     pdf: str = ""
     compiled: bool = False
     preview: bool = False
+    #: Override keys that matched nobody in the roster -- a mistyped id, or
+    #: a student who has left since. Reported, never dropped.
+    unmatched_overrides: tuple = ()
 
 
 def default_output_root():
@@ -128,6 +131,11 @@ def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
     except (OSError, roster_mod.RosterError) as exc:
         raise BuildError(str(exc)) from None
 
+    # Before the modes, so a student with an override but no choices of
+    # their own does not also collect `default_when_missing`.
+    people, unmatched_overrides = roster_mod.apply_overrides(
+        people, publication.student_overrides)
+
     people = roster_mod.apply_selection_modes(
         people,
         simply_print=publication.simply_print,
@@ -149,6 +157,7 @@ def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
     )
 
     result = BuildResult(publication=publication, out=out, run_seed=0,
+                         unmatched_overrides=tuple(unmatched_overrides),
                          report={}, replayed=record is not None,
                          replay_notes=tuple(notes),
                          replay_papers=len(record["paper"]) if record else 0,
