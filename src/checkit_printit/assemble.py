@@ -111,8 +111,16 @@ def build_handouts(roster, chart, publication, seeds):
     """Students in seating order, each with their versions resolved."""
     ordered, unseated = chart.order(roster) if chart else (list(roster), [])
     handouts = []
+    pinned = publication.student_versions or {}
     for student in ordered + unseated:
         version = student.version or (chart.versions[0] if chart else "A")
+        # A version set for this run wins over the seat's. The collision
+        # check still runs afterwards, so moving someone onto their
+        # neighbour's version is reported rather than silently printed.
+        for key in (student.sid, student.alt_id, student.email, student.name):
+            if key and key in pinned:
+                version = pinned[key]
+                break
         versions = []
         for slug in student.skills:
             seed = seeds.get((version, slug))

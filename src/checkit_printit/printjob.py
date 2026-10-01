@@ -42,6 +42,7 @@ DEFAULTS = {
     "variants": {},
     "extras": [],
     "overrides": {},
+    "versions": {},
 }
 
 
@@ -61,6 +62,7 @@ IN_TABLE = {
     "append_for_everyone": "selection",
     "variants": "variants",
     "overrides": "overrides",
+    "versions": "versions",
 }
 
 
@@ -70,6 +72,7 @@ def load_draft(space):
     out["variants"] = {}
     out["extras"] = []
     out["overrides"] = {}
+    out["versions"] = {}
     path = draft_path(space)
     if not os.path.isfile(path):
         return out
@@ -137,6 +140,15 @@ def save_draft(space, draft):
         for sid, slugs in sorted(merged["overrides"].items()):
             lines.append(f"{_quote(sid)} = {_list(slugs)}")
         lines.append("")
+    if merged["versions"]:
+        lines += [
+            "# A student moved to another version for this run. The seating",
+            "# chart is unchanged -- this is a property of the run.",
+            "[versions]",
+        ]
+        for key, letter in sorted(merged["versions"].items()):
+            lines.append(f"{_quote(key)} = {_quote(letter)}")
+        lines.append("")
     for extra in merged["extras"]:
         lines += ["[[extras]]",
                   f"skill  = {_quote(extra['skill'])}",
@@ -191,6 +203,11 @@ def publication_text(space, draft, course_name, semester="", professor=""):
         lines.append("[variants]")
         for slug, case in sorted(draft["variants"].items()):
             lines.append(f"{slug} = {_quote(case)}")
+        lines.append("")
+    if draft["versions"]:
+        lines.append("[versions]")
+        for key, letter in sorted(draft["versions"].items()):
+            lines.append(f"{_quote(key)} = {_quote(letter)}")
         lines.append("")
     for extra in draft["extras"]:
         lines += ["[[extras]]",

@@ -39,6 +39,7 @@ from .. import runner as runner_mod
 from .. import form as form_mod
 from ..bank import Bank, BankError
 from .. import roster as roster_mod
+from .. import seating as seating_mod
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 TOKEN_HEADER = "X-Printit-Token"
@@ -552,6 +553,22 @@ def api_print(course, _body):
             except BankError:
                 descriptions[slug] = ""
 
+    # The letter each seat gives, so the table can show what a student will
+    # get before anything is drawn. Read from the chart rather than guessed:
+    # it comes from a seat's position within its table, and a lone seat or a
+    # table of three is not the same arithmetic as a table of four.
+    seat_version, versions_available = {}, []
+    seating_path = course.file("seating")
+    if os.path.isfile(seating_path):
+        try:
+            chart = seating_mod.load(seating_path)
+            versions_available = list(chart.versions)
+            for seat in chart.seats:
+                if str(seat.name).strip():
+                    seat_version[seat.name] = seat.version
+        except (OSError, seating_mod.SeatingError):
+            pass
+
     students = []
     if people is not None:
         for i, s in enumerate(people):
@@ -560,10 +577,16 @@ def api_print(course, _body):
             key = s.sid or s.alt_id or s.email or s.name
             students.append({
                 "index": i, "key": key, "name": s.name,
+                # What the app shows. `name` is what prints and what the
+                # chart matches on, so the nickname is a display name here
+                # and nothing more until that is decided.
+                "display": s.preferred or s.name,
                 "section": s.section,
                 "chose": list(s.skills),
                 "override": list(draft["overrides"].get(key, []))
                             if key in draft["overrides"] else None,
+                "seatVersion": seat_version.get(s.name, ""),
+                "version": draft["versions"].get(key, ""),
             })
 
     identity = _course_identity(course)
@@ -579,11 +602,46 @@ def api_print(course, _body):
                    "semester": identity.get("semester", ""),
                    "professor": identity.get("professor", "")},
         "jobFolder": printjob_mod.folder_for(draft),
+        "versionsAvailable": versions_available,
     }
 
 
 def api_print_save(course, body):
-    printjob_mod.save_draft(course.name, body.get("draft") or {})
+    """Save the draft, refusing anything the build would refuse later.
+
+    A slug typed into an override reaches the build as
+    "X asked for 'W9', which is not in the bank" -- after the job folder has
+    been written. Caught here instead, while the box is still on screen.
+    """
+    draft = body.get("draft") or {}
+    bank = course.bank()
+    if bank is not None:
+        known = set(bank.slugs())
+        bad = {}
+        for key, slugs in (draft.get("overrides") or {}).items():
+            missing = [s for s in slugs if s not in known]
+            if missing:
+                bad[key] = missing
+        for field in ("simply_print", "default_when_missing",
+                      "append_for_everyone"):
+            missing = [s for s in (draft.get(field) or []) if s not in known]
+            if missing:
+                bad[field] = missing
+        for extra in (draft.get("extras") or []):
+            if extra.get("skill") and extra["skill"] not in known:
+                bad.setdefault("extras", []).append(extra["skill"])
+        if bad:
+            named = "; ".join(f"{k}: {', '.join(v)}" for k, v in bad.items())
+            raise GuiError(f"not in the bank -- {named}")
+
+    letters = set(draft.get("versionsAvailable") or [])
+    for key, letter in (draft.get("versions") or {}).items():
+        if letters and letter not in letters:
+            raise GuiError(
+                f"{letter!r} is not a version this seating chart has "
+                f"({', '.join(sorted(letters))}).")
+
+    printjob_mod.save_draft(course.name, draft)
     return api_print(course, {})
 
 

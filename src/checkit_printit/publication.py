@@ -46,6 +46,12 @@ class Publication:
     names: bool = True
     extras: tuple = ()
 
+    #: One student moved to another version, for this run only. Keyed by
+    #: student id. The seating chart still says what it said -- this is a
+    #: property of the run, not of the room, which is why it lives here and
+    #: not in seating.toml.
+    student_versions: dict = dataclasses.field(default_factory=dict)
+
     # which versions
     #
     # `seeds` pins a letter across every skill in the run, which only means
@@ -171,6 +177,8 @@ def load(path):
         seeds=flat_seeds,
         skill_seeds=skill_seeds,
         variants={str(k): str(v) for k, v in (raw.get("variants") or {}).items()},
+        student_versions={str(k): str(v) for k, v
+                          in (raw.get("versions") or {}).items()},
         simply_print=tuple(raw.get("selection", {}).get("simply_print", [])),
         default_when_missing=tuple(raw.get("selection", {}).get("default_when_missing", [])),
         append_for_everyone=tuple(raw.get("selection", {}).get("append_for_everyone", [])),
