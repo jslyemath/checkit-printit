@@ -935,9 +935,6 @@ function renderModes() {
   const box = document.getElementById("modes");
   box.textContent = "";
 
-  document.getElementById("pull-panel").hidden =
-    !(printState.hasForm && draft.mode === "chose");
-
   const head = document.createElement("div");
   head.className = "modehead";
   const lead = document.createElement("span");
@@ -959,6 +956,7 @@ function renderModes() {
       // The other half's lists are kept, not cleared, so switching back
       // restores them. They simply are not written into the job.
       renderModes();
+      renderPullState();
       renderVariants();
       renderWho();
       refreshPrintDirty();
@@ -1223,6 +1221,32 @@ function renderWho() {
   document.getElementById("reset-overrides").classList.toggle("off", !overrideCount);
 }
 
+function renderPullState() {
+  /* The card is always on the tab. It used to hide itself when the course
+     had no form and when the mode was "same", and with Responses gone from
+     the nav that left no trace of the feature anywhere -- on the course
+     the instructor actually had open, both were true. */
+  const why = document.getElementById("pull-why");
+  const connected = Boolean(printState.hasForm);
+  for (const id of ["pull-run", "pull-dry"])
+    document.getElementById(id).disabled = !connected;
+
+  if (!connected) {
+    why.textContent = "This course has no Google Form connected, so there "
+      + "is nothing to pull yet. `form create` makes one; `form attach` "
+      + "wires up a form you already have.";
+    why.hidden = false;
+    return;
+  }
+  // Worth saying, not worth hiding over: a pull writes choices into the
+  // roster, which outlives this run, so it is still the right thing to do
+  // on a day the whole class sits the same paper.
+  why.hidden = draft.mode !== "same";
+  why.textContent = "This run prints one list for everyone, so these "
+    + "choices will not change today's papers. They are kept on the roster "
+    + "for the next run that uses them.";
+}
+
 function renderPull(data) {
   /* What the pull found, and every reason a student might not get the
      paper they asked for. The per-student choices are deliberately not
@@ -1293,6 +1317,7 @@ async function runPull(body) {
     // instructor has been assembling.
     printState.students = out.print.students;
     printState.hasForm = out.print.hasForm;
+    renderPullState();
     renderPull(out.pull);
     renderVariants();
     renderWho();
@@ -1470,6 +1495,7 @@ async function loadPrint() {
 
   renderPrintFields();
   renderModes();
+  renderPullState();
   renderPull(null);
   renderVariants();
   renderExtras();
