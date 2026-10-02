@@ -372,8 +372,9 @@ what each one cost":
 - simply-print is a **mode**, a segmented control at the top of the tab
 
 All three are built. Responses is gone from the nav; the pull is Print
-job's first card, hidden on a course with no form and in the mode where
-what students chose does not apply.
+job's first card. It is always on the tab: with no form connected it says
+so and disables its buttons, rather than hiding and leaving no sign the
+feature exists.
 
 ## Working on the web app
 
