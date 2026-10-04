@@ -529,9 +529,12 @@ def _course_identity(course):
 
 def api_setup(course, _body):
     """What the Setup view draws: the Google session and the connection."""
+    # Deliberately does not ask whether Google is signed in. That is an
+    # `npx` invocation taking seconds, and this is a file read; behind it,
+    # the view spent ten seconds showing "Make a new form" on a course
+    # that already had one. The view asks `/api/google` separately.
     conn = form_mod.load(course.path)
     return {
-        "google": GOOGLE.status(),
         "connected": bool(conn.url),
         "url": conn.url,
         "scriptId": conn.script_id,
