@@ -33,6 +33,7 @@ import webbrowser
 
 from .. import course as course_mod
 from .. import availability as availability_mod
+from .. import provision as provision_mod
 from .. import responses as responses_mod
 from .. import clasp as clasp_mod
 from .. import boilerplate as boilerplate_mod
@@ -526,6 +527,96 @@ def _course_identity(course):
         return tomllib.load(f)
 
 
+def api_setup(course, _body):
+    """What the Setup view draws: the Google session and the connection."""
+    conn = form_mod.load(course.path)
+    return {
+        "google": GOOGLE.status(),
+        "connected": bool(conn.url),
+        "url": conn.url,
+        "scriptId": conn.script_id,
+        "formId": conn.form_id,
+        "items": dict(conn.items),
+        "missing": conn.missing_slots(),
+        "slots": dict(form_mod.SLOTS),
+    }
+
+
+def _provisioning(course, work, title=""):
+    """Run a step that talks to Google, and keep "not authorized" apart.
+
+    It is not a failure: the form and the web app exist by then, and the
+    way on is for the instructor to grant permissions and come back. A 400
+    would read as "that did not work", and the obvious response to that is
+    to try the whole thing again -- which would make a second form.
+    """
+    try:
+        said = work()
+    except provision_mod.NeedsAuthorization as needs:
+        state = api_setup(course, {})
+        state["said"] = []
+        state["needsAuthorization"] = {"url": needs.url,
+                                       "why": provision_mod.prompt(needs.url),
+                                       "title": title}
+        return state
+    except provision_mod.ProvisionError as exc:
+        raise GuiError(str(exc)) from None
+    state = api_setup(course, {})
+    state["said"] = list(said)
+    return state
+
+
+def api_setup_create(course, body):
+    """Make a new form and wire it up. The same call `form create` makes."""
+    title = str(body.get("title") or "Skill Selection Form").strip()
+    folder = str(body.get("folder") or "").strip()
+    return _provisioning(
+        course,
+        lambda: provision_mod.create_form(course.name, title, folder),
+        title=title)
+
+
+def api_setup_inspect(course, body):
+    """What attaching would overwrite in an existing script project.
+
+    Asked before attaching, not discovered after. printit stages `Code.gs`
+    and `appsscript.json`, which are the names most Apps Script projects
+    already use, and the push replaces them -- so a form still driven by
+    something else loses that something.
+    """
+    script_id = str(body.get("scriptId") or "").strip()
+    if not script_id:
+        raise GuiError("paste the bound script's id first.")
+    try:
+        return provision_mod.what_the_clone_would_replace(course.name,
+                                                          script_id)
+    except provision_mod.ProvisionError as exc:
+        raise GuiError(str(exc)) from None
+
+
+def api_setup_attach(course, body):
+    """Wire up an existing form, changing nothing on the form itself."""
+    script_id = str(body.get("scriptId") or "").strip()
+    if not script_id:
+        raise GuiError("paste the bound script's id first.")
+    return _provisioning(
+        course,
+        lambda: provision_mod.attach_form(course.name, script_id))
+
+
+def api_setup_finish(course, body):
+    """Carry on after Google authorizes the script.
+
+    Every step inside is safe to repeat, which is why coming back here is
+    the way on rather than starting over.
+    """
+    title = str(body.get("title") or "").strip()
+    return _provisioning(
+        course,
+        lambda: provision_mod.finish(course.name, rename_to=title),
+        title=title)
+
+
 def api_print(course, _body):
     """Everything the staging view draws."""
     draft = printjob_mod.load_draft(course.name)
@@ -796,6 +887,11 @@ ROUTES = {
     "/api/roster/drop": api_roster_drop,
     "/api/google": api_google,
     "/api/google/login": api_google_login,
+    "/api/setup": api_setup,
+    "/api/setup/create": api_setup_create,
+    "/api/setup/inspect": api_setup_inspect,
+    "/api/setup/attach": api_setup_attach,
+    "/api/setup/finish": api_setup_finish,
     "/api/print": api_print,
     "/api/print/save": api_print_save,
     "/api/print/pull": api_print_pull,
