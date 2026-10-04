@@ -13,6 +13,7 @@ const VIEWS = [
   { id: "print", label: "Print job" },
   { id: "record", label: "Record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
   { id: "seating", label: "Seating", soon: "Drag students between seats, randomise, swap two. No CLI equivalent exists yet -- this is new code, not a face on something tested." },
+  { id: "setup", label: "Setup" },
   { id: "callout", label: "Cold call", soon: "Pick a random student, pick several, refresh the call list. No CLI equivalent yet." },
 ];
 
@@ -131,6 +132,7 @@ function show(id) {
     // name edited in Roster and saved never reached this table until the
     // print job itself was saved -- which read as the table being stale.
     if (id === "print") loadPrint();
+    if (id === "setup") loadSetup();
   }
   location.hash = id;
 }
@@ -804,19 +806,184 @@ async function refreshGoogle(force) {
   const go = document.createElement("button");
   go.className = "link";
   go.textContent = "Sign in";
-  go.onclick = async () => {
-    try {
-      await api("/api/google/login", {});
-      toast("A browser window should open. Sign in there.");
-      refreshGoogle(true);
-    } catch (err) { toast(err.message, true); }
-  };
+  go.onclick = signInToGoogle;
   bar.appendChild(go);
   bar.hidden = false;
 }
 
 
 
+
+// ---------------------------------------------------------------- setup --
+
+let setupState = null;
+
+async function signInToGoogle() {
+  /* One copy: the banner and the Setup view both start the same sign-in,
+     and clasp opens the browser itself. */
+  try {
+    await api("/api/google/login", {});
+    toast("A browser window should open. Sign in there.");
+    refreshGoogle(true);
+    if (setupState) loadSetup();
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderSetup() {
+  const s = setupState;
+  const g = s.google || {};
+  const google = document.getElementById("setup-google");
+  const signin = document.getElementById("setup-signin");
+
+  if (g.signingIn) {
+    google.textContent = "Waiting for the Google sign-in in your browser…";
+    signin.disabled = true;
+    setTimeout(() => loadSetup(), 4000);
+  } else if (g.loggedIn) {
+    google.textContent = "Signed in. printit uses clasp's own sign-in and "
+      + "never sees your password. Google expires these after a week or "
+      + "two whether or not you use them.";
+    signin.disabled = true;
+    signin.textContent = "Signed in";
+  } else if (g.error) {
+    google.textContent = "Could not check the sign-in: " + g.error;
+    signin.disabled = true;
+  } else {
+    google.textContent = "Not signed in, so nothing here can reach Google "
+      + "yet.";
+    signin.disabled = false;
+    signin.textContent = "Sign in to Google";
+  }
+
+  // Connecting needs a session; saying so beats a failure three clicks on.
+  const ready = Boolean(g.loggedIn);
+  document.getElementById("setup-create").disabled = !ready;
+  document.getElementById("setup-inspect").disabled = !ready;
+
+  document.getElementById("setup-have").hidden = !s.connected;
+  document.getElementById("setup-new").hidden = s.connected;
+  document.getElementById("setup-existing").hidden = s.connected;
+
+  const auth = document.getElementById("setup-auth");
+  auth.hidden = !s.needsAuthorization;
+  if (s.needsAuthorization)
+    document.getElementById("setup-auth-why").textContent =
+      s.needsAuthorization.why;
+
+  if (s.connected) renderConnection(s);
+  renderSetupSaid(s.said);
+}
+
+function renderConnection(s) {
+  const box = document.getElementById("setup-conn");
+  box.textContent = "";
+  const row = (label, value, mono) => {
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = label + ": ";
+    const v = document.createElement(mono ? "code" : "span");
+    v.textContent = value || "—";
+    p.appendChild(v);
+    box.appendChild(p);
+  };
+  row("Form id", s.formId, true);
+  row("Script id", s.scriptId, true);
+  row("Web app", s.url, true);
+
+  // The four slots as the same label/value rows as above, not a table: the
+  // ids are long and unbroken, and a table of them set the page width.
+  for (const [slot, what] of Object.entries(s.slots)) {
+    const p = document.createElement("p");
+    p.className = s.items[slot] ? "muted" : "warnline";
+    const name = document.createElement("b");
+    name.textContent = what;
+    p.append(name, document.createTextNode(" — "));
+    const v = document.createElement("code");
+    v.textContent = s.items[slot] || "not on the form";
+    p.appendChild(v);
+    box.appendChild(p);
+  }
+
+  if (s.missing.length) {
+    const p = document.createElement("p");
+    p.className = "warnline";
+    p.textContent = `${s.missing.length} of the four are not on the form `
+      + `yet, so a push and a pull would both fail.`;
+    box.appendChild(p);
+    const add = document.createElement("button");
+    add.textContent = "Add the missing ones";
+    add.onclick = () => runSetup("/api/setup/finish", {});
+    box.appendChild(add);
+  }
+}
+
+function renderSetupSaid(said) {
+  const box = document.getElementById("setup-out");
+  box.textContent = "";
+  for (const line of said || []) {
+    const p = document.createElement("p");
+    p.className = line.startsWith("!") ? "warnline" : "muted";
+    p.textContent = line;
+    box.appendChild(p);
+  }
+}
+
+async function loadSetup() {
+  try {
+    setupState = await api("/api/setup", {});
+  } catch (err) { toast(err.message, true); return; }
+  setupState.said = setupState.said || [];
+  renderSetup();
+}
+
+async function runSetup(path, body) {
+  /* Every one of these talks to Google and takes a while, so the buttons
+     go down for the duration rather than letting a second click start a
+     second form. */
+  const buttons = [...document.querySelectorAll("#view-setup button")];
+  for (const b of buttons) b.disabled = true;
+  try {
+    setupState = await api(path, body);
+    renderSetup();
+    if (setupState.needsAuthorization)
+      toast("Almost -- grant the script permission, then come back.");
+    else if (setupState.connected) toast("Connected");
+  } catch (err) {
+    toast(err.message, true);
+    renderSetup();
+  }
+}
+
+
+async function inspectScript() {
+  const box = document.getElementById("setup-inspected");
+  box.textContent = "Looking…";
+  try {
+    const out = await api("/api/setup/inspect",
+      { scriptId: document.getElementById("setup-script").value });
+    box.textContent = "";
+    const line = (text, cls) => {
+      const p = document.createElement("p");
+      p.className = cls || "muted";
+      p.textContent = text;
+      box.appendChild(p);
+    };
+    line(`That project holds ${out.files.length} file(s): `
+         + out.files.join(", "));
+    if (out.replaced.length)
+      line("Attaching would overwrite: " + out.replaced.join(", "),
+           "warnline");
+    else
+      line("Nothing of printit's is there yet, so nothing would be "
+           + "overwritten.");
+    if (out.kept.length)
+      line("Left alone: " + out.kept.join(", "));
+    document.getElementById("setup-attach").disabled = false;
+  } catch (err) {
+    box.textContent = "";
+    toast(err.message, true);
+  }
+}
 
 // ------------------------------------------------------------ print job --
 
@@ -1232,9 +1399,17 @@ function renderPullState() {
     document.getElementById(id).disabled = !connected;
 
   if (!connected) {
-    why.textContent = "This course has no Google Form connected, so there "
-      + "is nothing to pull yet. `form create` makes one; `form attach` "
-      + "wires up a form you already have.";
+    why.textContent = "";
+    why.append(document.createTextNode(
+      "This course has no Google Form connected, so there is nothing to "
+      + "pull yet. "));
+    // Was two CLI commands, which is the thing this app exists to stop
+    // anyone having to know.
+    const go = document.createElement("button");
+    go.className = "link";
+    go.textContent = "Connect one in Setup";
+    go.onclick = () => show("setup");
+    why.appendChild(go);
     why.hidden = false;
     return;
   }
@@ -1582,6 +1757,24 @@ async function boot() {
   document.getElementById("print-save").onclick = savePrint;
   document.getElementById("print-revert").onclick = revertPrint;
   document.getElementById("print-reset").onclick = resetPrint;
+  document.getElementById("setup-signin").onclick = signInToGoogle;
+  document.getElementById("setup-create").onclick = () =>
+    runSetup("/api/setup/create", {
+      title: document.getElementById("setup-title").value,
+      folder: document.getElementById("setup-folder").value });
+  document.getElementById("setup-authed").onclick = () =>
+    runSetup("/api/setup/finish",
+             { title: (setupState.needsAuthorization || {}).title || "" });
+  document.getElementById("setup-inspect").onclick = inspectScript;
+  document.getElementById("setup-attach").onclick = () =>
+    runSetup("/api/setup/attach",
+             { scriptId: document.getElementById("setup-script").value });
+  document.getElementById("setup-script").oninput = () => {
+    // Looking is required before attaching, not merely advised: the push
+    // replaces files in somebody else's script project.
+    document.getElementById("setup-attach").disabled = true;
+    document.getElementById("setup-inspected").textContent = "";
+  };
   document.getElementById("pull-run").onclick =
     () => runPull({ write: true });
   document.getElementById("pull-dry").onclick =

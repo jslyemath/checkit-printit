@@ -506,6 +506,26 @@ th button.reset { margin-left: 4px; }
 #who.hide-override th:nth-child(5),
 #who.hide-override td:nth-child(5) { display: none; }
 
+/* The authorization wording comes from the same string the CLI prints,
+   so it keeps its line breaks. */
+.authwhy {
+  white-space: pre-wrap;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+tr.warnrow td { color: var(--dirty); }
+
+/* Script and deployment ids are long, unbroken and not meant to be read --
+   only copied. Letting them set the page width put a horizontal scrollbar
+   under every other view. */
+#setup-conn code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+
 /* What the Roster changed while this tab was away. */
 .news { font-size: 12px; color: var(--muted); }
 

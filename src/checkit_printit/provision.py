@@ -117,24 +117,40 @@ def reach(conn):
 
 
 def deploy_and_record(space, directory, conn, rename_to="", reach=reach):
-    """Push, deploy, check it answers, add the items, and save.
+    """Push, deploy, save what exists, then finish.
 
-    `reach` is injected because that is the only step where the two front
-    ends differ: the CLI can stop and wait for a keypress while the
-    instructor authorizes the script, and a request handler cannot. The
-    orchestration around it stays in one place.
+    The save in the middle is not tidiness. Google may not have authorized
+    the script yet, and at that point the form and the web app are already
+    real -- so a course that recorded nothing would start over, make a
+    second form, and leave the first one orphaned in Drive.
 
-    Returns a list of plain lines describing what happened, so the caller
-    reports rather than re-deriving. `rename_to` is set only at creation:
-    clasp's --title names the *script project*, leaving the form itself
-    untitled, and a push must never touch an existing form's title.
+    Returns plain lines describing what happened, so the caller reports
+    rather than re-deriving.
     """
-    said = []
     clasp_mod.push(directory)
     deployment = clasp_mod.deploy(directory)
     conn.url = clasp_mod.web_app_url(deployment)
-    said.append(f"deployed: {conn.url}")
+    form_mod.save(course_mod.path_for(space), conn)
+    return ([f"deployed: {conn.url}"]
+            + finish(space, rename_to=rename_to, reach=reach))
 
+
+def finish(space, rename_to="", reach=reach):
+    """Everything after Google authorizes the script.
+
+    Its own function because that is where a create or an attach stops,
+    and the instructor goes to a browser. **Every step is safe to repeat**:
+    `addItems` creates only what is missing, `rename` sets a title that may
+    already be set, and `configure` reports what it skipped. So the way
+    back from "not authorized yet" is to call this again, not to start
+    over.
+
+    `rename_to` is set only when printit made the form: clasp's --title
+    names the *script project* and leaves the form itself untitled. A push
+    must never touch an existing form's title.
+    """
+    conn = _course_conn(space)
+    said = []
     answer = reach(conn)
 
     if rename_to:
@@ -225,15 +241,12 @@ def attach_form(space, script_id, reach=reach):
     except (clasp_mod.ClaspError, form_mod.FormError) as exc:
         raise ProvisionError(str(exc)) from None
 
-    answer = reach(conn)
-    conn.form_id = answer.get("formId", "") or conn.form_id
+    # Saved before the authorization step, for the same reason as a
+    # create: the deploy has happened and starting over would leave it.
     form_mod.save(course_mod.path_for(space), conn)
-    said = [f"deployed: {conn.url}",
-            f"connected to {answer.get('form', '')!r}"]
-    if answer.get("editUrl"):
-        said.append(answer["editUrl"])
-    said.append("nothing on the form itself was changed")
-    return said
+    return ([f"deployed: {conn.url}"]
+            + finish(space, reach=reach)
+            + ["nothing on the form itself was changed"])
 
 
 def what_the_clone_would_replace(space, script_id):

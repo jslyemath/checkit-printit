@@ -194,6 +194,72 @@
     </div>
   </section>
 
+  <section id="view-setup" class="view" hidden>
+    <h2>Setup</h2>
+    <p class="muted">Start-of-semester work: connecting this course to a
+      Google Form, so students can choose skills and printit can read what
+      they chose.</p>
+
+    <div class="panel">
+      <h3>Google</h3>
+      <p id="setup-google" class="muted"></p>
+      <div class="toolbar">
+        <button id="setup-signin">Sign in to Google</button>
+      </div>
+    </div>
+
+    <div class="panel" id="setup-auth" hidden>
+      <h3>One step left</h3>
+      <p class="muted">The form and the script exist. Google will not let
+        anything call the script until you grant it permission once.</p>
+      <pre id="setup-auth-why" class="authwhy"></pre>
+      <div class="toolbar">
+        <button id="setup-authed" class="primary">I have granted it</button>
+      </div>
+    </div>
+
+    <div class="panel" id="setup-have" hidden>
+      <h3>This course's form</h3>
+      <div id="setup-conn"></div>
+    </div>
+
+    <div class="panel" id="setup-new">
+      <h3>Make a new form</h3>
+      <p class="muted">Creates the form and its script, deploys it, and adds
+        the four things printit writes to. Nothing to paste afterwards.</p>
+      <div class="fields">
+        <label>Title
+          <input id="setup-title" type="text" spellcheck="false"
+                 placeholder="Skill Selection Form"></label>
+        <label title="A Drive folder id. Leave it empty for the top of My Drive.">Drive folder
+          <input id="setup-folder" type="text" spellcheck="false"></label>
+      </div>
+      <div class="toolbar">
+        <button id="setup-create" class="primary">Create the form</button>
+      </div>
+    </div>
+
+    <div class="panel" id="setup-existing">
+      <h3>Use a form I already have</h3>
+      <p class="muted">Keeps the form exactly as it is &mdash; its banner, its
+        title, its questions. It does change the form's <b>bound Apps
+        Script</b>: printit's files are pushed over that project, and the
+        names it uses are the ones most projects already use. If something
+        else still drives this form, that something is what gets replaced.</p>
+      <div class="fields">
+        <label title="On the form: three-dot menu, Apps Script, then Project Settings.">Bound script id
+          <input id="setup-script" type="text" spellcheck="false"></label>
+      </div>
+      <div class="toolbar">
+        <button id="setup-inspect">What would this replace?</button>
+        <button id="setup-attach" disabled>Attach it</button>
+      </div>
+      <div id="setup-inspected"></div>
+    </div>
+
+    <div id="setup-out"></div>
+  </section>
+
   <section id="view-soon" class="view" hidden>
     <h2 id="soon-title">Not built yet</h2>
     <p class="muted" id="soon-body"></p>
