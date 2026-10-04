@@ -608,6 +608,26 @@ def api_setup_attach(course, body):
         lambda: provision_mod.attach_form(course.name, script_id))
 
 
+def api_setup_authorize(course, _body):
+    """Open this course's script in the instructor's own browser.
+
+    Not `window.open`: the page may be running in the desktop app's
+    browser pane, which has no Google session, while clasp's sign-in opens
+    the operating system's default browser. Two halves of one flow landing
+    in two browsers is how the authorization step became impossible to
+    complete.
+
+    The URL comes from `form.toml`, never from the request. An endpoint on
+    localhost that opened whatever it was handed would let any page in any
+    browser launch arbitrary URLs on this machine.
+    """
+    conn = form_mod.load(course.path)
+    if not conn.url:
+        raise GuiError("this course has no deployed script to authorize yet.")
+    webbrowser.open(conn.url)
+    return {"opened": conn.url}
+
+
 def api_setup_finish(course, body):
     """Carry on after Google authorizes the script.
 
@@ -895,6 +915,7 @@ ROUTES = {
     "/api/setup/create": api_setup_create,
     "/api/setup/inspect": api_setup_inspect,
     "/api/setup/attach": api_setup_attach,
+    "/api/setup/authorize": api_setup_authorize,
     "/api/setup/finish": api_setup_finish,
     "/api/print": api_print,
     "/api/print/save": api_print_save,
