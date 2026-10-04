@@ -16,6 +16,7 @@ from . import record as record_mod
 from . import responses as responses_mod
 from . import course as course_mod
 from . import manifest as manifest_mod
+from . import provision as provision_mod
 from . import runner
 from .assemble import assemble, AssemblyError
 from .bank import Bank, BankError
@@ -134,143 +135,71 @@ def _space_path(space):
 
 
 def _clasp_dir(space):
-    """Where the local copy of the Apps Script project lives.
-
-    Under secrets/, because printit writes the shared secret into the script
-    source before pushing it -- clasp cannot set a Script Property, and the
-    point of this path is that nothing is done by hand.
-    """
-    return os.path.join(course_mod.path_for(space), "secrets", "script")
-
-
-def _script_sources():
-    here = os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))))
-    return os.path.join(here, "appsscript")
+    """The local copy of the Apps Script project. See `provision`."""
+    return provision_mod.clasp_dir(space)
 
 
 def _stage_script(space, secret):
-    """Copy the script into the course and write the secret beside it."""
-    import shutil
-    target = _clasp_dir(space)
-    os.makedirs(target, exist_ok=True)
-    for name in ("Code.gs", "appsscript.json"):
-        shutil.copy(os.path.join(_script_sources(), name),
-                    os.path.join(target, name))
-    with open(os.path.join(target, "Secret.gs"), "w", encoding="utf-8") as f:
-        f.write(form_mod.secret_source(secret))
-    return target
+    """Copy the script into the course, with the secret. See `provision`."""
+    return provision_mod.stage_script(space, secret)
 
 
 def _ensure_login():
     try:
-        if clasp_mod.logged_in():
+        if provision_mod.signed_in():
             return
-    except clasp_mod.ClaspError as exc:
+    except provision_mod.ProvisionError as exc:
         raise click.ClickException(str(exc))
     click.echo("signing in to Google -- a browser window will open.")
     click.echo("  (this uses clasp's own sign-in; printit never sees your "
                "password)")
     try:
-        clasp_mod.login()
-    except clasp_mod.ClaspError as exc:
+        provision_mod.sign_in()
+    except provision_mod.ProvisionError as exc:
         raise click.ClickException(str(exc))
 
 
-def _authorize_prompt(conn):
-    """What to say when Google has not authorized the script yet."""
-    return (
-        "Google has not authorized this script yet, so it refuses every "
-        "call.\n\n"
-        "Open this once, signed in as the form's owner, and grant the "
-        "permissions:\n\n"
-        f"    {conn.url}\n\n"
-        "It will say 'Unverified'. That only means Google has not reviewed "
-        "it;\n"
-        "it is your script, in your own Drive. When it works you will see\n"
-        "'Script function not found: doGet' -- this script answers POST and "
-        "a\nbrowser sends GET, so that page is the success."
-    )
+def _reach(conn):
+    """Reach the script, waiting while the instructor authorizes it.
 
-
-def _ping_authorized(conn):
-    """Ping, walking the user through authorization if Google refuses.
-
-    The editor's deploy flow prompts for this; clasp's does not. Without it
-    the first call after `form create` answers 403 and looks exactly like a
-    domain policy blocking anonymous web apps -- which cost an hour on
-    2026-09-21.
+    This is the one step where the two front ends differ, and the reason
+    `provision` takes it as an argument: a terminal can stop and wait for a
+    keypress, a request handler cannot.
     """
     try:
-        return form_mod.call(conn, "ping")
-    except form_mod.FormError as first:
+        return provision_mod.reach(conn)
+    except provision_mod.NeedsAuthorization as first:
         if not sys.stdin.isatty():
             raise click.ClickException(
-                f"{first}\n\n{_authorize_prompt(conn)}\n\n"
+                f"{first.cause}\n\n{provision_mod.prompt(conn.url)}\n\n"
                 "Then run this command again."
             ) from None
         click.echo("")
-        click.echo(_authorize_prompt(conn))
+        click.echo(provision_mod.prompt(conn.url))
         click.echo("")
         click.confirm("authorized?", default=True, abort=True)
         try:
-            return form_mod.call(conn, "ping")
-        except form_mod.FormError as second:
+            return provision_mod.reach(conn)
+        except provision_mod.NeedsAuthorization as second:
             raise click.ClickException(
-                f"still refused after authorizing: {second}") from None
+                f"still refused after authorizing: {second.cause}") from None
+
+
+def _ping_authorized(conn):
+    """Kept as the name the other form commands already call."""
+    return _reach(conn)
 
 
 def _report_identity(conn, answer):
     """Record which form we reached, and say where it is.
 
     `ping` is the only thing that knows: the script id cannot be turned into
-    a form URL. This lived inline in two places, and patching one of them
-    left `form attach` unchanged while appearing to fix it.
+    a form URL.
     """
     conn.form_id = answer.get("formId", "") or conn.form_id
     click.echo(f"  connected to {answer.get('form', '')!r}")
     if answer.get("editUrl"):
         click.echo(f"  {answer['editUrl']}")
-
-
-def _deploy_and_record(space, directory, conn, rename_to=""):
-    click.echo("pushing the script...")
-    clasp_mod.push(directory)
-    click.echo("deploying it as a web app...")
-    deployment = clasp_mod.deploy(directory)
-    conn.url = clasp_mod.web_app_url(deployment)
-    click.echo(f"  {conn.url}")
-
-    click.echo("checking it answers...")
-    answer = _ping_authorized(conn)
-
-    if rename_to:
-        # clasp's --title named the script project; the form itself is still
-        # untitled. Only at creation -- a push must never touch the title.
-        answer = form_mod.call(conn, "rename", {"title": rename_to})
-    _report_identity(conn, answer)
-
-    click.echo("creating the items printit writes to...")
-    made = form_mod.call(conn, "addItems",
-                         {"items": dict(conn.items)})["items"]
-    conn.items = made
-
-    if rename_to:
-        # A form printit just made. Never for attach: an existing form's
-        # settings belong to the instructor, like its banner and its title.
-        click.echo("setting the form up...")
-        done = form_mod.call(conn, "configure", {
-            "requireLogin": True,
-            "removeDefaultQuestion": True,
-            "keep": dict(made),
-        })
-        for line in done.get("did", []):
-            click.echo(f"  {line}")
-        for line in done.get("skipped", []):
-            click.echo(f"  ! {line}")
-    form_mod.save(course_mod.path_for(space), conn)
-    for slot, item_id in made.items():
-        click.echo(f"  {slot:14} {item_id}")
 
 
 @form.command(name="create")
@@ -287,26 +216,14 @@ def form_create(space, title, folder):
     script, deploys the web app, adds the four items printit writes to, and
     records their ids -- so there is nothing to paste and nothing to map.
     """
-    path = _space_path(space)
-    conn = form_mod.load(path)
-    if conn.url:
-        raise click.ClickException(
-            "this course is already connected to a form. Use "
-            "`checkit-printit form push`, or clear secrets/form-secret.toml "
-            "to start over.")
+    _space_path(space)
     _ensure_login()
-
-    if not conn.secret:
-        conn.secret = form_mod.new_secret()
-    directory = _stage_script(space, conn.secret)
-
     click.echo(f"creating the form {title!r}...")
     try:
-        conn.script_id = clasp_mod.create_form(title, directory, folder)
-        click.echo(f"  script {conn.script_id}")
-        _deploy_and_record(space, directory, conn,
-                           rename_to=title)
-    except (clasp_mod.ClaspError, form_mod.FormError) as exc:
+        for line in provision_mod.create_form(space, title, folder,
+                                              reach=_reach):
+            click.echo(f"  {line}")
+    except provision_mod.ProvisionError as exc:
         raise click.ClickException(str(exc))
 
     click.echo("")
@@ -328,35 +245,16 @@ def form_attach(space, script_id):
     The script is pushed and deployed, but no items are created or changed --
     run `form map` afterwards to say which existing item is which.
     """
-    path = _space_path(space)
-    conn = form_mod.load(path)
+    _space_path(space)
     _ensure_login()
-
-    if not conn.secret:
-        conn.secret = form_mod.new_secret()
-    # Before the clone, so the directory exists for clasp to fetch into;
-    # again afterwards, because the clone brings the remote's files down on
-    # top of ours.
-    directory = _stage_script(space, conn.secret)
-
     click.echo("fetching the existing script...")
     try:
-        clasp_mod.clone(script_id, directory)
-        _stage_script(space, conn.secret)      # our files, over the fetched ones
-        conn.script_id = script_id
-        click.echo("pushing the script...")
-        clasp_mod.push(directory)
-        click.echo("deploying it as a web app...")
-        deployment = clasp_mod.deploy(directory)
-        conn.url = clasp_mod.web_app_url(deployment)
-    except (clasp_mod.ClaspError, form_mod.FormError) as exc:
+        for line in provision_mod.attach_form(space, script_id, reach=_reach):
+            click.echo(f"  {line}")
+    except provision_mod.ProvisionError as exc:
         raise click.ClickException(str(exc))
-    answer = _ping_authorized(conn)
-
-    _report_identity(conn, answer)
-    form_mod.save(path, conn)
     click.echo("")
-    click.echo("nothing on the form was changed. Next:")
+    click.echo("Next:")
     click.echo(f"  checkit-printit form map -c {space!r}")
 
 
