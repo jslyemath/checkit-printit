@@ -239,7 +239,32 @@ class TestTheSetupView:
         with pytest.raises(gui_mod.GuiError, match="script's id"):
             getattr(gui_mod, endpoint)(course, {"scriptId": "  "})
 
+    def test_authorizing_opens_the_url_printit_recorded(self, course, space,
+                                                        monkeypatch):
+        """Not one from the request. A localhost endpoint that opened
+        whatever it was handed would let any page in any browser launch
+        arbitrary URLs on this machine."""
+        opened = []
+        monkeypatch.setattr(gui_mod.webbrowser, "open", opened.append)
+        conn = form_mod.load(course_mod.path_for(space))
+        conn.url = "https://script.example/mine/exec"
+        form_mod.save(course_mod.path_for(space), conn)
+
+        out = gui_mod.api_setup_authorize(
+            course, {"url": "https://somewhere.else/evil"})
+        assert opened == ["https://script.example/mine/exec"]
+        assert out["opened"] == "https://script.example/mine/exec"
+
+    def test_there_is_nothing_to_authorize_before_a_deploy(self, course,
+                                                           monkeypatch):
+        opened = []
+        monkeypatch.setattr(gui_mod.webbrowser, "open", opened.append)
+        with pytest.raises(gui_mod.GuiError, match="no deployed script"):
+            gui_mod.api_setup_authorize(course, {})
+        assert opened == []
+
     def test_every_setup_route_is_wired(self):
         for path in ("/api/setup", "/api/setup/create", "/api/setup/inspect",
-                     "/api/setup/attach", "/api/setup/finish"):
+                     "/api/setup/attach", "/api/setup/authorize",
+                     "/api/setup/finish"):
             assert path in gui_mod.ROUTES

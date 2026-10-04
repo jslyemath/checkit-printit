@@ -876,6 +876,7 @@ function renderSetup() {
     // need clasp -- only something to authorize.
     "setup-authorize": need,
     "setup-authed": need,
+    "setup-copy": need,
   };
   for (const [id, on] of Object.entries(live))
     document.getElementById(id).disabled = !on;
@@ -1839,10 +1840,32 @@ async function boot() {
     runSetup("/api/setup/create", {
       title: document.getElementById("setup-title").value,
       folder: document.getElementById("setup-folder").value });
-  document.getElementById("setup-authorize").onclick = () => {
+  document.getElementById("setup-authorize").onclick = async () => {
+    // The server opens it, in the instructor's own default browser --
+    // where they are already signed in to Google. `window.open` would
+    // open it here, which may be a pane with no session at all.
+    try {
+      await api("/api/setup/authorize", {});
+      toast("Opened in your browser. This page will notice when it works.");
+      waitForAuth();
+    } catch (err) { toast(err.message, true); }
+  };
+  document.getElementById("setup-copy").onclick = async () => {
     const need = setupState && setupState.needsAuthorization;
     if (!need) return;
-    window.open(need.url, "_blank", "noopener");
+    try {
+      await navigator.clipboard.writeText(need.url);
+      toast("Link copied.");
+    } catch {
+      // Clipboard access can be refused, and a dead button is worse than
+      // a visible link.
+      const box = document.getElementById("setup-auth-notes");
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.style.overflowWrap = "anywhere";
+      p.textContent = need.url;
+      box.prepend(p);
+    }
     waitForAuth();
   };
   document.getElementById("setup-authed").onclick = () =>
