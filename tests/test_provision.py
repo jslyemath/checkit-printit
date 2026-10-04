@@ -168,6 +168,19 @@ class TestTheSetupView:
         assert set(out["slots"]) == set(form_mod.SLOTS)
         assert out["missing"] == list(form_mod.SLOTS)
 
+    def test_it_does_not_wait_on_google(self, course, monkeypatch):
+        """Asking clasp costs an `npx` invocation and several seconds.
+        Behind it, the view spent ten seconds showing "Make a new form" on
+        a course that already had one -- long enough to make a second.
+        Whether a form exists is a file read, and must not queue behind a
+        subprocess."""
+        def never(*a, **k):
+            raise AssertionError("api_setup asked clasp")
+        monkeypatch.setattr(gui_mod.clasp_mod, "logged_in", never)
+        out = gui_mod.api_setup(course, {})
+        assert "connected" in out
+        assert "google" not in out, "the view asks /api/google on its own clock"
+
     def test_a_connected_one_reports_its_ids(self, course, space):
         conn = form_mod.load(course_mod.path_for(space))
         conn.url = "https://script.example/x/exec"

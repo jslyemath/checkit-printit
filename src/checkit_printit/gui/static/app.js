@@ -821,6 +821,11 @@ let setupState = null;
    not merely advised, so it survives a re-render rather than being read
    back off a button that `runSetup` may have disabled. */
 let attachAllowed = false;
+/* Kept apart from `setupState` because it arrives on a different clock:
+   the connection is a file read and this is an `npx` call. A reply that
+   replaces the whole of `setupState` must not take the Google answer with
+   it. */
+let googleState = { checking: true };
 
 async function signInToGoogle() {
   /* One copy: the banner and the Setup view both start the same sign-in,
@@ -835,11 +840,15 @@ async function signInToGoogle() {
 
 function renderSetup() {
   const s = setupState;
-  const g = s.google || {};
+  const g = googleState;
+  document.getElementById("setup-checking").hidden = true;
   const google = document.getElementById("setup-google");
   const signin = document.getElementById("setup-signin");
 
-  if (g.signingIn) {
+  if (g.checking) {
+    google.textContent = "Checking the Google sign-in…";
+    signin.disabled = true;
+  } else if (g.signingIn) {
     google.textContent = "Waiting for the Google sign-in in your browser…";
     signin.disabled = true;
     setTimeout(() => loadSetup(), 4000);
@@ -938,13 +947,19 @@ function renderConnection(s) {
   }
 
   if (s.missing.length) {
+    /* Not a step of its own: creating a form adds these. Seeing it means
+       a create or an attach stopped part way -- almost always at Google's
+       authorization -- so it is named for finishing that, not for a
+       chore. */
     const p = document.createElement("p");
     p.className = "warnline";
-    p.textContent = `${s.missing.length} of the four are not on the form `
-      + `yet, so a push and a pull would both fail.`;
+    p.textContent = `Setup did not finish: ${s.missing.length} of the four `
+      + `things printit writes to are not on the form yet, so a push and a `
+      + `pull would both fail.`;
     box.appendChild(p);
     const add = document.createElement("button");
-    add.textContent = "Add the missing ones";
+    add.className = "primary";
+    add.textContent = "Finish setting up";
     add.onclick = () => runSetup("/api/setup/finish", {});
     box.appendChild(add);
   }
@@ -1002,11 +1017,32 @@ function waitForAuth() {
   }, 5000);
 }
 
+async function openAuthorizationPage() {
+  /* The server opens it, in the instructor's own default browser, where
+     they are already signed in. `window.open` opens wherever the page is,
+     and the page is often a pane with no Google session. */
+  try {
+    await api("/api/setup/authorize", {});
+    toast("Opened in your browser — this page will notice when it works.");
+    waitForAuth();
+  } catch (err) { toast(err.message, true); }
+}
+
 async function loadSetup() {
   try {
     setupState = await api("/api/setup", {});
   } catch (err) { toast(err.message, true); return; }
   setupState.said = setupState.said || [];
+  // Drawn at once, from a file read: whether this course already has a
+  // form is the thing that decides which buttons exist.
+  renderSetup();
+
+  googleState = { checking: true };
+  try {
+    googleState = await api("/api/google", {});
+  } catch (err) {
+    googleState = { error: err.message };
+  }
   renderSetup();
 }
 
@@ -1019,9 +1055,12 @@ async function runSetup(path, body) {
   try {
     setupState = await api(path, body);
     renderSetup();
-    if (setupState.needsAuthorization)
-      toast("One step left — grant the script permission, just below.");
-    else if (setupState.connected) toast("Connected");
+    if (setupState.needsAuthorization) {
+      // Straight there. The button existed because `window.open` needs a
+      // click to get past a popup blocker; the server has no such
+      // problem, so there is nothing for the instructor to do here.
+      await openAuthorizationPage();
+    } else if (setupState.connected) toast("Connected");
   } catch (err) {
     toast(err.message, true);
   } finally {
@@ -1840,16 +1879,7 @@ async function boot() {
     runSetup("/api/setup/create", {
       title: document.getElementById("setup-title").value,
       folder: document.getElementById("setup-folder").value });
-  document.getElementById("setup-authorize").onclick = async () => {
-    // The server opens it, in the instructor's own default browser --
-    // where they are already signed in to Google. `window.open` would
-    // open it here, which may be a pane with no session at all.
-    try {
-      await api("/api/setup/authorize", {});
-      toast("Opened in your browser. This page will notice when it works.");
-      waitForAuth();
-    } catch (err) { toast(err.message, true); }
-  };
+  document.getElementById("setup-authorize").onclick = openAuthorizationPage;
   document.getElementById("setup-copy").onclick = async () => {
     const need = setupState && setupState.needsAuthorization;
     if (!need) return;
