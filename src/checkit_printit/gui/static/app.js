@@ -817,6 +817,10 @@ async function refreshGoogle(force) {
 // ---------------------------------------------------------------- setup --
 
 let setupState = null;
+/* Looking at what attaching would replace is required before attaching,
+   not merely advised, so it survives a re-render rather than being read
+   back off a button that `runSetup` may have disabled. */
+let attachAllowed = false;
 
 async function signInToGoogle() {
   /* One copy: the banner and the Setup view both start the same sign-in,
@@ -855,20 +859,48 @@ function renderSetup() {
     signin.textContent = "Sign in to Google";
   }
 
-  // Connecting needs a session; saying so beats a failure three clicks on.
+  /* Every button this view owns, every render. `runSetup` turns them all
+     off while a call is in flight -- so that a second click cannot start a
+     second form -- and if this did not turn them back on explicitly, they
+     stayed off. That is how the authorization step ended up visible and
+     unclickable. */
   const ready = Boolean(g.loggedIn);
-  document.getElementById("setup-create").disabled = !ready;
-  document.getElementById("setup-inspect").disabled = !ready;
+  const need = Boolean(s.needsAuthorization);
+  const live = {
+    // Connecting needs a Google session; saying so beats failing three
+    // clicks later.
+    "setup-create": ready && !s.connected,
+    "setup-inspect": ready && !s.connected,
+    "setup-attach": ready && !s.connected && attachAllowed,
+    // These two are plain HTTPS to the deployed script, so they do not
+    // need clasp -- only something to authorize.
+    "setup-authorize": need,
+    "setup-authed": need,
+  };
+  for (const [id, on] of Object.entries(live))
+    document.getElementById(id).disabled = !on;
 
   document.getElementById("setup-have").hidden = !s.connected;
   document.getElementById("setup-new").hidden = s.connected;
   document.getElementById("setup-existing").hidden = s.connected;
 
   const auth = document.getElementById("setup-auth");
-  auth.hidden = !s.needsAuthorization;
-  if (s.needsAuthorization)
-    document.getElementById("setup-auth-why").textContent =
-      s.needsAuthorization.why;
+  auth.hidden = !need;
+  if (need) {
+    const notes = document.getElementById("setup-auth-notes");
+    notes.textContent = "";
+    for (const text of s.needsAuthorization.notes || []) {
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = text;
+      notes.appendChild(p);
+    }
+    // The panel sits above Create, so pressing Create had scrolled the one
+    // thing left to do off the top of the window.
+    auth.scrollIntoView({ block: "center", behavior: "smooth" });
+  } else {
+    stopWaitingForAuth();
+  }
 
   if (s.connected) renderConnection(s);
   renderSetupSaid(s.said);
@@ -928,6 +960,47 @@ function renderSetupSaid(said) {
   }
 }
 
+let authTimer = null;
+
+function stopWaitingForAuth() {
+  if (authTimer) clearInterval(authTimer);
+  authTimer = null;
+  const note = document.getElementById("setup-authwait");
+  if (note) note.hidden = true;
+}
+
+function waitForAuth() {
+  /* Having granted the permission in another tab, there is nothing useful
+     left for a person to tell us -- so the page asks for itself instead of
+     making them come back and press a second button. `finish` is safe to
+     repeat, which is what makes this allowed.
+
+     Bounded: Google is being asked each time, and a page that polls for
+     ever because somebody wandered off is its own small bug. */
+  stopWaitingForAuth();
+  const note = document.getElementById("setup-authwait");
+  note.textContent = "checking…";
+  note.hidden = false;
+  let tries = 0;
+  authTimer = setInterval(async () => {
+    if (++tries > 24) {                       // two minutes
+      stopWaitingForAuth();
+      return;
+    }
+    let out;
+    try {
+      out = await api("/api/setup/finish",
+                      { title: (setupState.needsAuthorization || {}).title
+                               || "" });
+    } catch { return; }                       // still refusing; keep waiting
+    if (out.needsAuthorization) return;
+    stopWaitingForAuth();
+    setupState = out;
+    renderSetup();
+    toast("Connected");
+  }, 5000);
+}
+
 async function loadSetup() {
   try {
     setupState = await api("/api/setup", {});
@@ -946,10 +1019,13 @@ async function runSetup(path, body) {
     setupState = await api(path, body);
     renderSetup();
     if (setupState.needsAuthorization)
-      toast("Almost -- grant the script permission, then come back.");
+      toast("One step left — grant the script permission, just below.");
     else if (setupState.connected) toast("Connected");
   } catch (err) {
     toast(err.message, true);
+  } finally {
+    // Whatever happened, the view decides what is live -- not the leftover
+    // state of a call that may have thrown.
     renderSetup();
   }
 }
@@ -978,6 +1054,7 @@ async function inspectScript() {
            + "overwritten.");
     if (out.kept.length)
       line("Left alone: " + out.kept.join(", "));
+    attachAllowed = true;
     document.getElementById("setup-attach").disabled = false;
   } catch (err) {
     box.textContent = "";
@@ -1762,6 +1839,12 @@ async function boot() {
     runSetup("/api/setup/create", {
       title: document.getElementById("setup-title").value,
       folder: document.getElementById("setup-folder").value });
+  document.getElementById("setup-authorize").onclick = () => {
+    const need = setupState && setupState.needsAuthorization;
+    if (!need) return;
+    window.open(need.url, "_blank", "noopener");
+    waitForAuth();
+  };
   document.getElementById("setup-authed").onclick = () =>
     runSetup("/api/setup/finish",
              { title: (setupState.needsAuthorization || {}).title || "" });
@@ -1772,6 +1855,7 @@ async function boot() {
   document.getElementById("setup-script").oninput = () => {
     // Looking is required before attaching, not merely advised: the push
     // replaces files in somebody else's script project.
+    attachAllowed = false;
     document.getElementById("setup-attach").disabled = true;
     document.getElementById("setup-inspected").textContent = "";
   };
