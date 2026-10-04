@@ -45,6 +45,19 @@ class NeedsAuthorization(ProvisionError):
         super().__init__(prompt(url))
 
 
+#: The two things that make the authorization page look like it failed
+#: when it worked. Separate from `prompt` so a browser can show them as
+#: prose next to a button, and the terminal can keep its paragraph,
+#: without the two drifting into different explanations.
+AUTHORIZE_NOTES = (
+    "It will say 'Unverified'. That only means Google has not reviewed it; "
+    "it is your script, in your own Drive.",
+    "When it works you will see 'Script function not found: doGet'. This "
+    "script answers POST and a browser sends GET, so that page is the "
+    "success.",
+)
+
+
 def prompt(url):
     """What to say when Google has not authorized the script yet."""
     return (
@@ -53,11 +66,7 @@ def prompt(url):
         "Open this once, signed in as the form's owner, and grant the "
         "permissions:\n\n"
         f"    {url}\n\n"
-        "It will say 'Unverified'. That only means Google has not reviewed "
-        "it;\n"
-        "it is your script, in your own Drive. When it works you will see\n"
-        "'Script function not found: doGet' -- this script answers POST and "
-        "a\nbrowser sends GET, so that page is the success."
+        + "\n\n".join(AUTHORIZE_NOTES)
     )
 
 

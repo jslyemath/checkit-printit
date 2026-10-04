@@ -506,14 +506,9 @@ th button.reset { margin-left: 4px; }
 #who.hide-override th:nth-child(5),
 #who.hide-override td:nth-child(5) { display: none; }
 
-/* The authorization wording comes from the same string the CLI prints,
-   so it keeps its line breaks. */
-.authwhy {
-  white-space: pre-wrap;
-  font: inherit;
-  font-size: 13px;
-  color: var(--muted);
-  margin: 0 0 10px;
+/* The one thing left to do, so it does not look like another card. */
+.panel.attention {
+  border-color: var(--accent);
 }
 tr.warnrow td { color: var(--dirty); }
 

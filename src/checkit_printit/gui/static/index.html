@@ -208,14 +208,18 @@
       </div>
     </div>
 
-    <div class="panel" id="setup-auth" hidden>
-      <h3>One step left</h3>
-      <p class="muted">The form and the script exist. Google will not let
-        anything call the script until you grant it permission once.</p>
-      <pre id="setup-auth-why" class="authwhy"></pre>
+    <div class="panel attention" id="setup-auth" hidden>
+      <h3>One step left: grant the script permission</h3>
+      <p>The form and the script exist and are recorded. Google will not let
+        anything call the script until you allow it once, signed in as the
+        form&rsquo;s owner.</p>
       <div class="toolbar">
-        <button id="setup-authed" class="primary">I have granted it</button>
+        <button id="setup-authorize" class="primary">Open the permissions
+          page</button>
+        <button id="setup-authed">I have done it</button>
+        <span id="setup-authwait" class="muted" hidden></span>
       </div>
+      <div id="setup-auth-notes"></div>
     </div>
 
     <div class="panel" id="setup-have" hidden>

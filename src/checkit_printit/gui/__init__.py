@@ -555,9 +555,13 @@ def _provisioning(course, work, title=""):
     except provision_mod.NeedsAuthorization as needs:
         state = api_setup(course, {})
         state["said"] = []
-        state["needsAuthorization"] = {"url": needs.url,
-                                       "why": provision_mod.prompt(needs.url),
-                                       "title": title}
+        state["needsAuthorization"] = {
+            "url": needs.url,
+            # The notes, not the terminal's paragraph: the page puts the
+            # URL on a button, so repeating it as text is noise.
+            "notes": list(provision_mod.AUTHORIZE_NOTES),
+            "title": title,
+        }
         return state
     except provision_mod.ProvisionError as exc:
         raise GuiError(str(exc)) from None

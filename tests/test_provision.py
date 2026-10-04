@@ -202,6 +202,29 @@ class TestTheSetupView:
         out = gui_mod.api_setup_create(course, {"title": "Mine"})
         assert out["needsAuthorization"]["title"] == "Mine"
 
+    def test_it_sends_the_notes_and_not_the_terminal_paragraph(
+            self, course, monkeypatch):
+        """The page puts the URL on a button, so repeating it as text is
+        noise -- but the explanation of 'Unverified' and the doGet message
+        still has to be there, and has to be the same explanation the CLI
+        gives."""
+        monkeypatch.setattr(
+            provision_mod, "create_form",
+            lambda *a, **k: (_ for _ in ()).throw(
+                provision_mod.NeedsAuthorization("https://script.example/x/exec")))
+        need = gui_mod.api_setup_create(course, {})["needsAuthorization"]
+        assert need["notes"] == list(provision_mod.AUTHORIZE_NOTES)
+        assert "Unverified" in " ".join(need["notes"])
+        assert "https://" not in " ".join(need["notes"]),             "the url belongs on the button, not in the prose"
+
+    def test_the_two_front_ends_give_one_explanation(self):
+        """`prompt` is what the terminal prints. If the notes drift out of
+        it, the app and the CLI start explaining Google differently."""
+        said = provision_mod.prompt("https://script.example/x/exec")
+        for note in provision_mod.AUTHORIZE_NOTES:
+            assert note in said
+        assert "https://script.example/x/exec" in said
+
     def test_a_real_failure_is_still_an_error(self, course, monkeypatch):
         monkeypatch.setattr(
             provision_mod, "create_form",
