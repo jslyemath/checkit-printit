@@ -45,6 +45,7 @@ FILENAMES = {
     "availability": "availability.toml",
     "form": "form.toml",
     "record": "record.db",
+    "room": "room.json",
 }
 
 

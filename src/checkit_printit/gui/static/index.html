@@ -194,6 +194,27 @@
     </div>
   </section>
 
+  <section id="view-seating" class="view" hidden>
+    <div class="toolbar">
+      <h2>Seating</h2>
+      <span class="spacer"></span>
+      <div id="seat-sections" class="segmented"></div>
+    </div>
+    <div class="toolbar">
+      <label class="tickline"><input type="checkbox" id="seat-versions"
+        checked> version letters</label>
+      <label class="tickline"><input type="checkbox" id="seat-labels"
+        checked> group labels</label>
+      <span class="spacer"></span>
+      <button id="seat-out" title="Zoom out">&minus;</button>
+      <button id="seat-fit">Fit</button>
+      <button id="seat-in" title="Zoom in">+</button>
+      <span id="seat-zoom" class="muted"></span>
+    </div>
+    <p id="seating-empty" class="muted" hidden></p>
+    <div class="canvaswrap"><div id="canvas" class="canvas"></div></div>
+  </section>
+
   <section id="view-setup" class="view" hidden>
     <h2>Setup</h2>
     <p class="muted">Start-of-semester work: connecting this course to a

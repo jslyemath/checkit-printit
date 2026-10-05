@@ -41,6 +41,71 @@ class RoomError(Exception):
     pass
 
 
+#: The desks and tables a room can be drawn with, and where people sit at
+#: them. Sizes are canvas units, which are CSS pixels at 100% zoom; a name
+#: card is 104 by 54, so a seat needs about that much room around its
+#: anchor.
+#:
+#: The anchors are only a starting point -- a real room has a table pushed
+#: against a wall with nobody on the far side -- so they are copied into
+#: the shape when it is added and can be dragged from there. Changing this
+#: table does not reach back into a room already drawn.
+SHAPES = {
+    "desk": {
+        "label": "desk", "w": 124, "h": 78, "css": "rect",
+        "seats": [(0, 0)],
+    },
+    "table-1x2": {
+        "label": "table, 2 across", "w": 252, "h": 78, "css": "rect",
+        "seats": [(-63, 0), (63, 0)],
+    },
+    "table-2x2": {
+        "label": "table, 2 by 2", "w": 252, "h": 168, "css": "rect",
+        "seats": [(-63, -44), (63, -44), (-63, 44), (63, 44)],
+    },
+    "table-1x3": {
+        "label": "table, 3 across", "w": 376, "h": 78, "css": "rect",
+        "seats": [(-126, 0), (0, 0), (126, 0)],
+    },
+    "round": {
+        "label": "round table", "w": 236, "h": 236, "css": "circle",
+        "seats": [(0, -74), (74, 0), (0, 74), (-74, 0)],
+    },
+    "oval": {
+        "label": "oval table", "w": 420, "h": 230, "css": "circle",
+        "seats": [(-130, -58), (0, -70), (130, -58),
+                  (-130, 58), (0, 70), (130, 58)],
+    },
+    "hex": {
+        "label": "hexagon", "w": 320, "h": 260, "css": "hex",
+        "seats": [(0, -104), (116, -52), (116, 52),
+                  (0, 104), (-116, 52), (-116, -52)],
+    },
+    "trapezoid": {
+        "label": "trapezoid", "w": 360, "h": 120, "css": "trapezoid",
+        "seats": [(-110, 24), (0, 24), (110, 24)],
+    },
+}
+
+
+def make_shape(kind, at, shape_id, seat_ids=None):
+    """A shape of this kind, with its default seats, ready to drop in."""
+    try:
+        spec = SHAPES[kind]
+    except KeyError:
+        raise RoomError(
+            f"{kind!r} is not a shape. There is "
+            f"{', '.join(sorted(SHAPES))}.") from None
+    ids = list(seat_ids or [])
+    seats = []
+    for i, (sx, sy) in enumerate(spec["seats"]):
+        seats.append({
+            "id": ids[i] if i < len(ids) else f"{shape_id}-{i}",
+            "at": [sx, sy], "student": "", "version": "",
+        })
+    return {"id": shape_id, "kind": kind, "at": list(at), "seats": seats}
+
+
 # ----------------------------------------------------------- the model --
 
 def empty(versions=("A", "B", "C", "D")):

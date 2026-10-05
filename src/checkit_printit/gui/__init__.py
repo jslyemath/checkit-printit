@@ -34,6 +34,7 @@ import webbrowser
 from .. import course as course_mod
 from .. import availability as availability_mod
 from .. import provision as provision_mod
+from .. import room as room_mod
 from .. import responses as responses_mod
 from .. import clasp as clasp_mod
 from .. import boilerplate as boilerplate_mod
@@ -644,6 +645,37 @@ def api_setup_finish(course, body):
         title=title)
 
 
+def api_seating(course, _body):
+    """Everything the canvas draws.
+
+    The room holds student ids; the names are sent beside it rather than
+    baked in, so a rename shows up on the next load without the room file
+    being touched. Split into two lines here because the card is two lines
+    -- squarer than one long one, and legible from the back of a room when
+    this is on the projector.
+    """
+    people = course.roster()
+    names = {}
+    if people is not None:
+        for student in people:
+            shown = student.display
+            cut = shown.find(" ")
+            names[roster_mod.key_of(student)] = {
+                "full": shown,
+                "top": shown[:cut] if cut > 0 else shown,
+                "bottom": shown[cut + 1:] if cut > 0 else "",
+            }
+    room = room_mod.load(course.file("room"))
+    return {
+        "room": room,
+        "names": names,
+        "shapes": {kind: {"label": spec["label"], "w": spec["w"],
+                          "h": spec["h"], "css": spec["css"]}
+                   for kind, spec in room_mod.SHAPES.items()},
+        "hasRoster": people is not None,
+    }
+
+
 def api_print(course, _body):
     """Everything the staging view draws."""
     draft = printjob_mod.load_draft(course.name)
@@ -920,6 +952,7 @@ ROUTES = {
     "/api/setup/attach": api_setup_attach,
     "/api/setup/authorize": api_setup_authorize,
     "/api/setup/finish": api_setup_finish,
+    "/api/seating": api_seating,
     "/api/print": api_print,
     "/api/print/save": api_print_save,
     "/api/print/pull": api_print_pull,
