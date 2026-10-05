@@ -349,20 +349,24 @@ and work: create, attach, map, add-items, push, and pull. Read "Stage 7a,
 against a real Google account" and "7b against a real response" in
 `../checkit/CODEBASE_NOTES.md` before touching `clasp.py` or `Code.gs`.
 
-**Stage 8, the local web app, is four views in:**
+Everything Google can now be done from the app as well, which is the point:
+**if the app ever tells someone to go and run a CLI command, that is a
+bug.** It did, in the Responses card, and that is what prompted Setup.
+
+**Stage 8, the local web app.** One row per slice, in the order they were
+built rather than alphabetically, because several are part-done:
 
 | | | |
 |---|---|---|
 | 8a | shell | done |
 | 8b | **Roster** | done -- editable table, drop/restore, stacked sorting |
 | 8c | **Update form** | done -- open skills, the assessment, a form-shaped preview, the push |
-| 8d | **Print job** | done -- selection modes, variants, extras, per-student override and version, preview, build |
-| 8e | the response pull | done -- Print job's first card |
-| 8h | **Setup** | half done -- a form can be created or attached from the app; the boilerplate editor is still to come |
-| 8e | **Record** | next |
-| 8f | **Seating** | stages 1-2 done -- `room.py`, the colouring, the chart writer, and the canvas. Dragging is next |
+| 8d | **Print job** | done -- modes, variants, extras, per-student override and version, preview, build |
+| 8e | the response pull | done -- it is Print job's first card, not a tab |
+| 8e | **Record** | **not started.** The only view still entirely untouched |
+| 8f | **Seating** | stages 1-2 of 6 done -- the model, the colouring, the chart writer, and a read-only canvas. **Dragging is next.** Specified in `../checkit/PRINT_TOOL_DESIGN.md` 12.11 |
 | 8g | **Cold call** | not started; genuinely new code |
-| 8h | **Setup** | not started -- create a form from the app, and the boilerplate editor |
+| 8h | **Setup** | half done -- a form can be created or attached from the app. The boilerplate editor is still to come |
 
 **All three decisions that were blocking 8e are settled**, on
 2026-10-01. See `../checkit/PRINT_TOOL_DESIGN.md` 12.6 under "Settled, and
