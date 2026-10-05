@@ -194,31 +194,58 @@
     </div>
   </section>
 
+  <!-- No <h2> here, unlike the other views. The nav already says which
+       tab this is and highlights it, and a row that only repeats it cost
+       about 39px of the one view where vertical space is the whole
+       problem. -->
   <section id="view-seating" class="view" hidden>
     <div class="toolbar">
-      <h2>Seating</h2>
-      <span class="spacer"></span>
       <div id="seat-sections" class="segmented"></div>
-    </div>
-    <div class="toolbar">
       <div id="seat-modes" class="segmented"></div>
       <span class="spacer"></span>
+      <button id="seat-present" class="primary"
+        title="The room on the whole screen, for the projector. Escape comes back.">Present</button>
+    </div>
+    <div class="toolbar">
       <label class="tickline"><input type="checkbox" id="seat-versions"
         checked> version letters</label>
       <label class="tickline"><input type="checkbox" id="seat-labels"
         checked> group labels</label>
       <span class="spacer"></span>
-      <button id="seat-out" title="Zoom out">&minus;</button>
-      <button id="seat-fit">Fit</button>
-      <button id="seat-in" title="Zoom in">+</button>
-      <span id="seat-zoom" class="muted"></span>
+      <!-- One group, so a wrap never leaves the minus on its own row
+           away from the plus. -->
+      <span class="zoomer">
+        <button id="seat-out" title="Zoom out">&minus;</button>
+        <button id="seat-fit">Fit</button>
+        <button id="seat-in" title="Zoom in">+</button>
+        <span id="seat-zoom" class="muted"></span>
+      </span>
     </div>
     <!-- What this mode lets you do. A canvas offers no affordance of its
          own: without a line of text, which thing is draggable is a
          guess. -->
     <p id="seat-hint" class="muted hint"></p>
     <p id="seating-empty" class="muted" hidden></p>
-    <div class="canvaswrap"><div id="canvas" class="canvas"></div></div>
+    <!-- Three elements, not two. `.canvas` is laid out at room size and
+         scaled, so its own layout box stays 984 wide however far it is
+         zoomed out -- and that box, not what you can see, is what the
+         scroller measures, which produced scrollbars for content that
+         was entirely on screen. `.canvasbox` is sized to the room's
+         *scaled* size and is what the scroller actually sees, and
+         `margin: auto` on it centres the room without clipping its top
+         left corner when it really is too big. -->
+    <div class="canvaswrap">
+      <div id="canvasbox" class="canvasbox">
+        <div id="canvas" class="canvas"></div>
+      </div>
+    </div>
+    <!-- Shown only while presenting: which room this is, and the way
+         out. Both are things a person standing at the front has no
+         other way to check. -->
+    <div id="seat-stage" class="stage" hidden>
+      <span id="stage-section"></span>
+      <span id="stage-keys" class="muted"></span>
+    </div>
     <!-- The tray and the save bar stick to the bottom together.
 
          Separately, the sticky save bar lifted out of the flow and

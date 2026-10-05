@@ -6,15 +6,20 @@
 
 const TOKEN = window.PRINTIT_TOKEN;
 
+/* `short` is what the tab is called when the window is narrow. Shorter
+   labels rather than a menu or a scrolling strip: at 515px the full set
+   wraps to two rows and costs about 35 vertical pixels, and both of the
+   usual fixes hide tabs behind a gesture. Nothing here is hidden; the
+   words just get smaller. */
 const VIEWS = [
-  { id: "overview", label: "Overview" },
-  { id: "roster", label: "Roster" },
-  { id: "form", label: "Update form" },
-  { id: "print", label: "Print job" },
-  { id: "record", label: "Record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
-  { id: "seating", label: "Seating" },
-  { id: "setup", label: "Setup" },
-  { id: "callout", label: "Cold call", soon: "Pick a random student, pick several, refresh the call list. No CLI equivalent yet." },
+  { id: "overview", label: "Overview", short: "Home" },
+  { id: "roster", label: "Roster", short: "Roster" },
+  { id: "form", label: "Update form", short: "Form" },
+  { id: "print", label: "Print job", short: "Print" },
+  { id: "record", label: "Record", short: "Record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
+  { id: "seating", label: "Seating", short: "Seats" },
+  { id: "setup", label: "Setup", short: "Setup" },
+  { id: "callout", label: "Cold call", short: "Call", soon: "Pick a random student, pick several, refresh the call list. No CLI equivalent yet." },
 ];
 
 // One definition per column, used to build the header AND the cells. They
@@ -103,7 +108,16 @@ function buildNav() {
   const nav = document.getElementById("views");
   for (const view of VIEWS) {
     const b = document.createElement("button");
-    b.textContent = view.label;
+    // Both spellings, and CSS picks. The full one carries the title so
+    // the short form is never the only thing a person can read.
+    const full = document.createElement("span");
+    full.className = "wide-only";
+    full.textContent = view.label;
+    const brief = document.createElement("span");
+    brief.className = "narrow-only";
+    brief.textContent = view.short || view.label;
+    b.append(full, brief);
+    b.title = view.label;
     if (view.soon) b.classList.add("soon");
     b.onclick = () => show(view.id);
     b.dataset.view = view.id;
@@ -141,8 +155,15 @@ function show(id) {
 // ------------------------------------------------------------- overview --
 
 function renderOverview(summary) {
-  document.getElementById("course-name").textContent =
-    `${summary.name} — ${summary.active} active of ${summary.students}`;
+  // The count is dropped at a narrow window: it is the Overview's own
+  // first card, so losing it from the banner costs nothing, and the
+  // banner is competing with the canvas for the same pixels.
+  const where = document.getElementById("course-name");
+  where.textContent = "";
+  where.append(summary.name, Object.assign(
+    document.createElement("span"),
+    { className: "wide-only",
+      textContent: ` — ${summary.active} active of ${summary.students}` }));
 
   const cards = document.getElementById("overview");
   cards.textContent = "";
@@ -829,19 +850,44 @@ let seatingMode = "view";        // view | people | desks
    room coordinates. */
 let drawn = { shapes: {}, cards: {}, seats: [], labels: [] };
 
+/* The name currently in hand, for click-then-click: `{ who, seat }`,
+   with `seat` null when it came off the tray. Cleared by any drag, by
+   Escape, and by clicking it a second time. */
+let picked = null;
+
 const GRID = 20;        // what a dragged desk snaps to, in room units
 const REACH = 90;       // how near a chair you must point to drop into it
+const CARD_W = 104;     // a name card, in room units. Matches `.seatcard`
+const CARD_H = 54;      //   in style.css, and `room.SHAPES` is spaced for it
+const PAD = 26;         // breathing room around the drawn room, same units
+
+/* How large a first name may be drawn, largest first. The card picks
+   the first one that fits its width.
+
+   Measured, not counted. Counting characters was the first attempt and
+   it was wrong twice over: it put the ceiling at 20 when a five-letter
+   name fits at 32, and it cannot tell "Bartholomew" from
+   "Christopher" -- same eleven letters, 13px and 17px. Letters are not
+   all one width and a rule that pretends they are is wrong in both
+   directions at once. */
+const NAME_SIZES = [32, 29, 26, 23, 20, 17, 15, 13];
+const NAME_SMALLEST = 11;
 
 const MODES = [
   { value: "view", label: "View",
     hint: "Nothing moves. This is the view for the projector." },
   { value: "people", label: "People",
-    hint: "Drag a name to another chair; dropping it on somebody swaps "
-      + "the two. Letters stay with the chairs, so neighbours still "
-      + "differ. The strip below stands someone up." },
+    hint: "Click a name then a chair, or drag it. The strip below "
+      + "stands someone up.",
+    /* The rest goes on the button's own tooltip rather than into the
+       hint line. At 530px every line of explanation is about 18px off
+       the room, and this part answers a question nobody asks until
+       they have already swapped two people. */
+    why: "Landing on somebody swaps the two. The version letters stay "
+      + "with the chairs, so neighbours still differ afterwards." },
   { value: "desks", label: "Desks",
-    hint: "Drag a desk and its people come too. Click one and the arrows "
-      + "nudge it by " + GRID + " — hold shift for 1." },
+    hint: "Drag a desk and its people come too. Arrows nudge the one you "
+      + "click by " + GRID + ", shift+arrows by 1." },
 ];
 
 function seatingCanvas() {
@@ -861,6 +907,86 @@ function cardPosition(shape, seat) {
   return [shape.at[0] + seat.at[0], shape.at[1] + seat.at[1]];
 }
 
+function contentBox(section) {
+  /* The smallest box holding everything drawn, in room units.
+
+     **Not the declared canvas,** which is what "fit" used to mean and
+     was the single biggest reason nothing was legible. A section
+     declares 1290 by 1220 while its furniture occupies about 932 by
+     648: fitting the declaration rather than the furniture threw away
+     a third of the scale across and nearly half of it down, and left
+     the empty remainder on screen looking like part of the room.
+
+     The declared size still says where a desk may be dragged to. It is
+     just not the same question as how big to draw what is there. */
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const grow = (l, t, r, b) => {
+    x0 = Math.min(x0, l); y0 = Math.min(y0, t);
+    x1 = Math.max(x1, r); y1 = Math.max(y1, b);
+  };
+  for (const shape of section.shapes || []) {
+    const spec = seatingState.shapes[shape.kind];
+    if (!spec) continue;
+    grow(shape.at[0] - spec.w / 2, shape.at[1] - spec.h / 2,
+         shape.at[0] + spec.w / 2, shape.at[1] + spec.h / 2);
+    for (const seat of shape.seats || []) {
+      const [x, y] = cardPosition(shape, seat);
+      grow(x - CARD_W / 2, y - CARD_H / 2, x + CARD_W / 2, y + CARD_H / 2);
+    }
+  }
+  for (const note of section.notes || [])
+    grow(note.at[0] - 70, note.at[1] - 14, note.at[0] + 70, note.at[1] + 14);
+
+  if (x0 === Infinity) {                    // a room with nothing in it yet
+    const size = section.canvas || { width: 1000, height: 700 };
+    return { x: 0, y: 0, w: size.width, h: size.height };
+  }
+  return { x: x0 - PAD, y: y0 - PAD,
+           w: x1 - x0 + PAD * 2, h: y1 - y0 + PAD * 2 };
+}
+
+/* name -> the size it fits at. Measuring costs a layout, so each
+   distinct name is measured once and a class has about as many names as
+   students; every re-draw after the first is cache hits. */
+const nameFits = new Map();
+let nameProbe = null;
+
+function nameSize(text) {
+  if (!text) return NAME_SIZES[0];
+  if (nameFits.has(text)) return nameFits.get(text);
+  if (!nameProbe) {
+    /* A real card, off screen, so it is measured under the rules that
+       will draw it. A bare div with a hand-copied font would be a
+       second copy of `.seatcard .top`, and the two would drift the
+       first time that rule changed. */
+    nameProbe = document.createElement("div");
+    nameProbe.className = "seatcard measuring";
+    nameProbe.innerHTML = '<div class="top"></div>';
+    document.body.appendChild(nameProbe);
+  }
+  const line = nameProbe.firstChild;
+  line.textContent = text;
+  let picked = NAME_SMALLEST;
+  for (const size of NAME_SIZES) {
+    line.style.fontSize = size + "px";
+    if (line.getBoundingClientRect().width <= CARD_W - 10) { picked = size; break; }
+  }
+  nameFits.set(text, picked);
+  return picked;
+}
+
+function presenting() {
+  /* One class, set whichever way we got here.
+
+     Real fullscreen is the goal, but it is a permission a host can
+     refuse -- an embedded browser pane does, with "Permissions check
+     failed" -- and a Present button that does nothing is worse than one
+     that does most of it. So the styling hangs off `body.presenting`
+     rather than off `:fullscreen`, and the fallback is the same mode
+     without the extra pixels rather than a second mode to explain. */
+  return document.body.classList.contains("presenting");
+}
+
 function seatingDirty() {
   return seatingRoom !== null && seatingState !== null
     && JSON.stringify(seatingRoom) !== JSON.stringify(seatingState.room);
@@ -878,9 +1004,14 @@ function refreshSeatingDirty() {
   // room, so "saved" on its own is not an answer.
   const news = document.getElementById("seat-news");
   news.hidden = !(d && seatingState && !seatingState.chartIsOurs);
+  // One line. Two lines of it cost 60px of canvas, and the long version
+  // answers a follow-up question rather than the first one.
   news.textContent = seatingState
-    ? seatingState.chartName + " was not written here, so Save will leave "
-      + "it alone and the build will keep reading it."
+    ? "Save will leave " + seatingState.chartName + " alone" : "";
+  news.title = seatingState
+    ? seatingState.chartName + " was not written by this tab — it was "
+      + "imported or typed — so saving the room will not touch it, and "
+      + "the build goes on reading that file rather than this room."
     : "";
 }
 
@@ -890,6 +1021,7 @@ function segmented(host, items, active, pick) {
     const b = document.createElement("button");
     b.type = "button";
     b.textContent = item.label;
+    if (item.why) b.title = item.why;
     b.setAttribute("aria-pressed", String(item.value === active));
     b.onclick = () => pick(item.value);
     host.appendChild(b);
@@ -928,6 +1060,13 @@ function renderSeating() {
   drawTray(section);
   drawRoom(section);
   refreshSeatingDirty();
+
+  const stage = document.getElementById("seat-stage");
+  stage.hidden = !presenting();
+  document.getElementById("stage-section").textContent = section.name || "";
+  document.getElementById("stage-keys").textContent =
+    sections.length > 1 ? "← → to change section · esc to leave"
+                        : "esc to leave";
 }
 
 function drawRoom(section) {
@@ -937,11 +1076,18 @@ function drawRoom(section) {
   // The mode is on the canvas rather than on each element, so the CSS can
   // say "cards are not targets while desks are being moved" once.
   canvas.className = "canvas mode-" + seatingMode;
-  drawn = { shapes: {}, cards: {}, seats: [], labels: [] };
 
-  const size = section.canvas || { width: 1000, height: 700 };
-  canvas.style.width = size.width + "px";
-  canvas.style.height = size.height + "px";
+  /* Everything is drawn relative to the content box, not to (0, 0) of
+     the declared canvas, so the empty margin a room happens to have
+     around it is not real estate anybody has to look at. The model
+     stays in room coordinates throughout -- only the drawing subtracts
+     the origin, and `roomPoint` adds it back. */
+  const area = contentBox(section);
+  drawn = { shapes: {}, cards: {}, seats: [], labels: [], box: area };
+  const ox = area.x, oy = area.y;
+
+  canvas.style.width = area.w + "px";
+  canvas.style.height = area.h + "px";
 
   const showVersions = document.getElementById("seat-versions").checked;
   const showLabels = document.getElementById("seat-labels").checked;
@@ -952,8 +1098,8 @@ function drawRoom(section) {
     if (!spec) continue;                       // a shape this build cannot draw
     const box = document.createElement("div");
     box.className = "shape " + spec.css;
-    box.style.left = (shape.at[0] - spec.w / 2) + "px";
-    box.style.top = (shape.at[1] - spec.h / 2) + "px";
+    box.style.left = (shape.at[0] - spec.w / 2 - ox) + "px";
+    box.style.top = (shape.at[1] - spec.h / 2 - oy) + "px";
     box.style.width = spec.w + "px";
     box.style.height = spec.h + "px";
     if (seatingMode === "desks") {
@@ -972,17 +1118,26 @@ function drawRoom(section) {
       const card = document.createElement("div");
       const who = s.names[seat.student];
       card.className = "seatcard" + (who ? "" : " empty");
-      card.style.left = (x - 52) + "px";
-      card.style.top = (y - 27) + "px";
+      card.style.left = (x - CARD_W / 2 - ox) + "px";
+      card.style.top = (y - CARD_H / 2 - oy) + "px";
       if (who) {
         const top = document.createElement("div");
         top.className = "top";
         top.textContent = who.top;
+        // The first name is what is read from the back of the room, so
+        // it takes whatever size it can have rather than a size chosen
+        // for the longest name anybody in the class happens to have.
+        const size = nameSize(who.top);
+        top.style.fontSize = size + "px";
         card.appendChild(top);
         if (who.bottom) {
           const bottom = document.createElement("div");
           bottom.className = "bottom";
           bottom.textContent = who.bottom;
+          // Always clearly the lesser of the two. A long first name
+          // shrinks to 13, and a surname also at 13 beside it stops
+          // reading as "first name, then surname" at all.
+          bottom.style.fontSize = Math.min(13, size - 3) + "px";
           card.appendChild(bottom);
         }
         card.title = who.full;
@@ -995,10 +1150,11 @@ function drawRoom(section) {
         v.textContent = seat.version;
         card.appendChild(v);
       }
-      // An empty chair is a target but not a source: there is nobody on
-      // it to pick up.
-      if (seatingMode === "people" && who) {
-        card.classList.add("movable");
+      if (seatingMode === "people") {
+        // Every chair takes a click, because an empty one is somewhere
+        // a held name can go. Only an occupied one can be dragged.
+        if (who) card.classList.add("movable");
+        if (picked && picked.seat === seat) card.classList.add("picked");
         card.onpointerdown = e => dragName(e, card, { seat: seat });
       }
       canvas.appendChild(card);
@@ -1018,8 +1174,8 @@ function drawRoom(section) {
       const tag = document.createElement("div");
       tag.className = "glabel";
       tag.textContent = group.label;
-      tag.style.left = x + "px";
-      tag.style.top = y + "px";
+      tag.style.left = (x - ox) + "px";
+      tag.style.top = (y - oy) + "px";
       canvas.appendChild(tag);
       drawn.labels.push({ el: tag, seats: ids });
     }
@@ -1029,8 +1185,8 @@ function drawRoom(section) {
     const tag = document.createElement("div");
     tag.className = "glabel";
     tag.textContent = note.text || "";
-    tag.style.left = note.at[0] + "px";
-    tag.style.top = note.at[1] + "px";
+    tag.style.left = (note.at[0] - ox) + "px";
+    tag.style.top = (note.at[1] - oy) + "px";
     canvas.appendChild(tag);
   }
 
@@ -1066,6 +1222,17 @@ function drawTray(section) {
     .sort((a, b) => seatingState.names[a].full
                       .localeCompare(seatingState.names[b].full));
 
+  // Clicking the strip itself, rather than a card on it, stands the
+  // held name up. The cards have their own handler and stop the event
+  // reaching here, so the two cannot both fire.
+  tray.onclick = event => {
+    if (!picked || event.target.closest(".seatcard")) return;
+    const held = picked;
+    picked = null;
+    movePerson(held.who, held.seat, null);
+    renderSeating();
+  };
+
   const label = document.createElement("span");
   label.className = "traylabel";
   label.textContent = standing.length
@@ -1088,6 +1255,8 @@ function drawTray(section) {
       bottom.textContent = who.bottom;
       card.appendChild(bottom);
     }
+    if (picked && !picked.seat && picked.who === key)
+      card.classList.add("picked");
     card.onpointerdown = e => dragName(e, card, { key: key });
     tray.appendChild(card);
   }
@@ -1105,10 +1274,15 @@ function canvasScale() {
 }
 
 function roomPoint(event) {
+  /* Screen to room. The canvas is drawn from the content box's corner
+     rather than from (0, 0), so the origin goes back on here -- the
+     model never left room coordinates and nothing downstream should
+     have to know the drawing shifted. */
   const box = seatingCanvas().getBoundingClientRect();
   const scale = canvasScale();
-  return [(event.clientX - box.left) / scale,
-          (event.clientY - box.top) / scale];
+  const area = drawn.box || { x: 0, y: 0 };
+  return [(event.clientX - box.left) / scale + area.x,
+          (event.clientY - box.top) / scale + area.y];
 }
 
 function liftGhost(element, event) {
@@ -1165,6 +1339,53 @@ function markTarget(target, on) {
     drawn.cards[target.chair.id].classList.toggle("over", on);
 }
 
+function movePerson(who, fromSeat, toSeat) {
+  /* The whole of what a move is, in one place, so the drag and the
+     click cannot drift into meaning different things.
+
+     `toSeat` null is the tray: stand them up. Otherwise whoever was
+     there takes the vacated chair, which is a swap from a chair and a
+     plain displacement from the tray, where `fromSeat` is null and
+     the sitter simply joins the standing.
+
+     The letters are untouched on purpose. A version belongs to the
+     chair, because the colouring is of the room; if letters travelled
+     with people a swap could seat the same paper next to itself. */
+  if (!toSeat) {
+    if (fromSeat) fromSeat.student = "";
+    return;
+  }
+  const sat = toSeat.student;
+  toSeat.student = who;
+  if (fromSeat) fromSeat.student = sat;
+}
+
+function clickOn(from) {
+  /* Click a name, then click a chair.
+
+     Not a fallback for dragging -- the classroom tools lead with it,
+     and on a trackpad or an interactive whiteboard it is the easier of
+     the two. It shares `movePerson` with the drag, so the two cannot
+     come to mean different things.
+
+     Clicking the held name again puts it down, which is the undo
+     anybody tries first. */
+  const seat = from.seat || null;
+  const who = seat ? seat.student : from.key;
+
+  if (picked) {
+    const held = picked;
+    picked = null;
+    const sameAgain = seat ? held.seat === seat : held.who === from.key;
+    if (!sameAgain) movePerson(held.who, held.seat, seat);
+    renderSeating();
+    return;
+  }
+  if (!who) return;              // an empty chair, with nothing in hand
+  picked = { who: who, seat: seat };
+  renderSeating();
+}
+
 function dragName(event, element, from) {
   /* Move a person. `from` is either `{ seat }` -- a chair in the room --
      or `{ key }` -- a card in the tray. One function, because the two
@@ -1197,7 +1418,9 @@ function dragName(event, element, from) {
 
   const finish = commit => {
     element.onpointermove = element.onpointerup = element.onpointercancel = null;
-    if (!lift) return;                      // a click, not a drag
+    // Never travelled, so it was a click. The two gestures share this
+    // handler because the pointer cannot tell them apart until it moves.
+    if (!lift) { if (commit) clickOn(from); return; }
     lift.ghost.remove();
     element.classList.remove("lifted");
     markTarget(target, false);
@@ -1207,25 +1430,15 @@ function dragName(event, element, from) {
     // was a few pixels short is not a trade worth making, and standing
     // them up has the tray for a target.
     if (!commit || !target) { renderSeating(); return; }
-
-    if (target.kind === "tray") {
-      if (from.seat) from.seat.student = "";
-    } else {
-      const chair = target.chair.seat;
-      const sat = chair.student;
-      chair.student = who;
-      // Swap the people, not the letters. A version belongs to the chair
-      // -- the colouring is of the room -- so two people trading places
-      // must not trade letters, or a swap could seat the same paper next
-      // to itself. From the tray there is nothing to swap into: whoever
-      // was sitting there stands up, and the tray redraws with them in it.
-      if (from.seat) from.seat.student = sat;
-    }
+    picked = null;                          // a drag settles any held name
+    movePerson(who, from.seat || null,
+               target.kind === "tray" ? null : target.chair.seat);
     renderSeating();
   };
 
   element.setPointerCapture(event.pointerId);
-  element.onpointermove = place;
+  // An empty chair is a click target but has nobody on it to drag.
+  element.onpointermove = who ? place : null;
   element.onpointerup = () => finish(true);
   // A cancel is the gesture being taken away -- the browser starting a
   // scroll, a context menu, the pen leaving range. It is not a quiet
@@ -1277,12 +1490,13 @@ function dragShape(event, section, shape) {
 
   box.classList.add("dragging");
 
+  const ox = drawn.box ? drawn.box.x : 0, oy = drawn.box ? drawn.box.y : 0;
   const place = e => {
     const to = clampShape(section, spec,
                           home[0] + (e.clientX - start[0]) / scale,
                           home[1] + (e.clientY - start[1]) / scale);
-    box.style.left = (to[0] - spec.w / 2) + "px";
-    box.style.top = (to[1] - spec.h / 2) + "px";
+    box.style.left = (to[0] - spec.w / 2 - ox) + "px";
+    box.style.top = (to[1] - spec.h / 2 - oy) + "px";
     for (const [el, left, top] of held) {
       el.style.left = (left + to[0] - home[0]) + "px";
       el.style.top = (top + to[1] - home[1]) + "px";
@@ -1330,15 +1544,23 @@ function nudgeShape(event, section, shape) {
 
 // ---------------------------------------------------------------- zoom --
 
+function fitZoom(wrap, area) {
+  /* Both axes, not just the width.
+
+     Fitting the width alone meant a tall room still scrolled, which is
+     not what "Fit" offers to do. And the cap is 4 rather than 1: on a
+     projector the room *should* be blown up past life size, and
+     refusing to go over 100% was most of why a small class filled a
+     quarter of the screen. */
+  return Math.min(4, (wrap.clientWidth - 2) / area.w,
+                  (wrap.clientHeight - 2) / area.h);
+}
+
 function applyZoom(section) {
   const canvas = seatingCanvas();
-  const wrap = canvas.parentElement;
-  const size = section.canvas || { width: 1000, height: 700 };
-  // "Fit" is the default because a drawn room is wider than the pane and
-  // the first thing anyone wants is the whole room.
-  const fit = Math.min(1, (wrap.clientWidth - 2) / size.width);
-  const zoom = seatingZoom === null ? fit : seatingZoom;
-  canvas.style.transform = `scale(${zoom})`;
+  const box = document.getElementById("canvasbox");
+  const wrap = box.parentElement;
+  const area = (drawn.box && drawn.box.w) ? drawn.box : contentBox(section);
 
   /* How tall the box may be: the window, less everything around it.
 
@@ -1351,12 +1573,26 @@ function applyZoom(section) {
      bottom together. Sizing the canvas around them is what keeps the
      page from needing to scroll at all; that the two cannot cover each
      other when it does is the dock's job, not this sum's. */
-  const dock = document.querySelector("#view-seating .dock");
-  const above = wrap.getBoundingClientRect().top + window.scrollY;
-  const below = (dock ? dock.offsetHeight : 0) + 10;
-  const room_for_it = Math.max(200, window.innerHeight - above - below);
-  wrap.style.height =
-    Math.min(size.height * zoom + 2, room_for_it) + "px";
+  if (presenting()) {
+    // Nothing else is on screen, so the room gets all of it.
+    wrap.style.height = window.innerHeight + "px";
+  } else {
+    const dock = document.querySelector("#view-seating .dock");
+    const above = wrap.getBoundingClientRect().top + window.scrollY;
+    const below = (dock ? dock.offsetHeight : 0) + 10;
+    wrap.style.height =
+      Math.max(200, window.innerHeight - above - below) + "px";
+  }
+
+  const zoom = seatingZoom === null ? fitZoom(wrap, area) : seatingZoom;
+  canvas.style.transform = `scale(${zoom})`;
+  // The box carries the scaled size, so the scroller measures what is
+  // actually drawn and `margin: auto` can centre it. A room rarely has
+  // its box's shape, so one axis always has slack; as margin it reads
+  // as deliberate, where at the top corner it read as a void below the
+  // room -- the "empty space in weird places".
+  box.style.width = Math.round(area.w * zoom) + "px";
+  box.style.height = Math.round(area.h * zoom) + "px";
   document.getElementById("seat-zoom").textContent =
     Math.round(zoom * 100) + "%";
 }
@@ -1364,12 +1600,82 @@ function applyZoom(section) {
 function zoomBy(step) {
   const section = currentSection();
   if (!section) return;
-  const wrap = seatingCanvas().parentElement;
-  const size = section.canvas || { width: 1000, height: 700 };
-  const now = seatingZoom === null
-    ? Math.min(1, (wrap.clientWidth - 2) / size.width) : seatingZoom;
-  seatingZoom = Math.min(2, Math.max(0.2, now + step));
+  const wrap = document.querySelector("#view-seating .canvaswrap");
+  const area = (drawn.box && drawn.box.w) ? drawn.box : contentBox(section);
+  // Proportional, not additive. A tenth of a point is a third of the
+  // picture at 30% and a fortieth of it at 400%, so a fixed step is two
+  // different controls depending on where you already are.
+  const now = seatingZoom === null ? fitZoom(wrap, area) : seatingZoom;
+  seatingZoom = Math.min(4, Math.max(0.15, now * (step > 0 ? 1.25 : 0.8)));
   applyZoom(section);
+}
+
+// ------------------------------------------------------------ projector --
+
+async function present() {
+  /* The room on the whole screen, with nothing else on it.
+
+     Real fullscreen is asked for first, because the limit on how large
+     a name can be is pixels of screen and the chrome is a third of
+     them. Every tool that does this -- Figma, Miro, the classroom
+     boards -- works the same way, and the browser's own Escape is one
+     fewer thing to explain than a button of mine.
+
+     If the host refuses it we still present, just inside the window.
+     That is the case to get right rather than to report: somebody is
+     standing in front of a class. */
+  const view = document.getElementById("view-seating");
+  seatingMode = "view";                   // nothing moves on the projector
+  document.body.classList.add("presenting");
+  renderSeating();
+  try {
+    if (view.requestFullscreen)
+      await view.requestFullscreen({ navigationUI: "hide" });
+  } catch (err) {
+    toast("Showing it in the window — this browser would not go "
+          + "fullscreen. Use the window's own full screen for the rest.");
+  }
+  renderSeating();                        // the screen just changed size
+}
+
+function leavePresenting() {
+  document.body.classList.remove("presenting");
+  if (document.fullscreenElement) document.exitFullscreen();
+  seatingZoom = null;
+  renderSeating();
+}
+
+function presentKeys(event) {
+  /* Only while presenting, and only keys a person has a free hand for
+     while talking. Escape leaves -- the browser does it for real
+     fullscreen, and this does it for the in-window fallback, so the
+     same key works either way. */
+  if (event.key === "Escape" && picked && !presenting()) {
+    picked = null;                        // put the held name back down
+    renderSeating();
+    return;
+  }
+  if (!presenting()) return;
+  if (event.key === "Escape") { leavePresenting(); return; }
+  const sections = (seatingRoom && seatingRoom.sections) || [];
+  const step = { ArrowRight: 1, ArrowDown: 1, PageDown: 1, " ": 1,
+                 ArrowLeft: -1, ArrowUp: -1, PageUp: -1 }[event.key];
+  if (!step || sections.length < 2) return;
+  event.preventDefault();
+  seatingSection =
+    (seatingSection + step + sections.length) % sections.length;
+  seatingZoom = null;                     // each room fits on its own terms
+  renderSeating();
+}
+
+function onFullscreenChange() {
+  // Leaving fullscreen by the browser's own Escape has to leave the
+  // mode too, or the chrome stays hidden with no way back.
+  if (!document.fullscreenElement && presenting()) { leavePresenting(); return; }
+  // The room is a different size on a projector than in the pane, so
+  // whatever zoom suited one is the wrong one for the other.
+  seatingZoom = null;
+  if (seatingRoom) renderSeating();
 }
 
 // -------------------------------------------------------- load and save --
@@ -2464,6 +2770,9 @@ async function boot() {
     const section = currentSection();
     if (section) applyZoom(section);
   };
+  document.getElementById("seat-present").onclick = present;
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+  document.addEventListener("keydown", presentKeys);
   document.getElementById("seat-save").onclick = saveSeating;
   document.getElementById("seat-revert").onclick = () => {
     seatingRoom = JSON.parse(JSON.stringify(seatingState.room));
