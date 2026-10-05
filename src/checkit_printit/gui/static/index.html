@@ -219,17 +219,28 @@
     <p id="seat-hint" class="muted hint"></p>
     <p id="seating-empty" class="muted" hidden></p>
     <div class="canvaswrap"><div id="canvas" class="canvas"></div></div>
-    <!-- Everyone on the roster with no chair. Also the place to drop
-         someone to stand them up again, so that gesture is a visible
-         target rather than "drag it far enough away". -->
-    <div id="seat-tray" class="tray" hidden></div>
+    <!-- The tray and the save bar stick to the bottom together.
 
-    <div class="savebar">
-      <span id="seat-news" class="news" hidden></span>
-      <span class="spacer"></span>
-      <span id="seat-dirty" class="dirty" hidden></span>
-      <button id="seat-save" class="primary" disabled>Save</button>
-      <button id="seat-revert" disabled>Discard</button>
+         Separately, the sticky save bar lifted out of the flow and
+         covered the tray the moment the page outgrew the window, which
+         made the standing students impossible to pick up while leaving
+         them perfectly visible. Sizing the canvas around both fixed it
+         down to a point and then it came back at a short window, because
+         the canvas has a floor. Stacked in one sticky box they cannot
+         cover each other at any height. -->
+    <div class="dock">
+      <!-- Everyone on the roster with no chair. Also where you drop
+           someone to stand them up again, so that gesture has a visible
+           target rather than being "drag it far enough away". -->
+      <div id="seat-tray" class="tray" hidden></div>
+
+      <div class="savebar">
+        <span id="seat-news" class="news" hidden></span>
+        <span class="spacer"></span>
+        <span id="seat-dirty" class="dirty" hidden></span>
+        <button id="seat-save" class="primary" disabled>Save</button>
+        <button id="seat-revert" disabled>Discard</button>
+      </div>
     </div>
   </section>
 
