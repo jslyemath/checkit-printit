@@ -201,6 +201,8 @@
       <div id="seat-sections" class="segmented"></div>
     </div>
     <div class="toolbar">
+      <div id="seat-modes" class="segmented"></div>
+      <span class="spacer"></span>
       <label class="tickline"><input type="checkbox" id="seat-versions"
         checked> version letters</label>
       <label class="tickline"><input type="checkbox" id="seat-labels"
@@ -211,8 +213,24 @@
       <button id="seat-in" title="Zoom in">+</button>
       <span id="seat-zoom" class="muted"></span>
     </div>
+    <!-- What this mode lets you do. A canvas offers no affordance of its
+         own: without a line of text, which thing is draggable is a
+         guess. -->
+    <p id="seat-hint" class="muted hint"></p>
     <p id="seating-empty" class="muted" hidden></p>
     <div class="canvaswrap"><div id="canvas" class="canvas"></div></div>
+    <!-- Everyone on the roster with no chair. Also the place to drop
+         someone to stand them up again, so that gesture is a visible
+         target rather than "drag it far enough away". -->
+    <div id="seat-tray" class="tray" hidden></div>
+
+    <div class="savebar">
+      <span id="seat-news" class="news" hidden></span>
+      <span class="spacer"></span>
+      <span id="seat-dirty" class="dirty" hidden></span>
+      <button id="seat-save" class="primary" disabled>Save</button>
+      <button id="seat-revert" disabled>Discard</button>
+    </div>
   </section>
 
   <section id="view-setup" class="view" hidden>

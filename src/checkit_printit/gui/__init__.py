@@ -246,10 +246,12 @@ def api_roster_drop(course, body):
     if not who:
         raise GuiError("no student was named.")
     seating_path = course.file("seating")
+    room_path = course.file("room")
     try:
         done = roster_mod.set_dropped(
             course.file("roster"), who, dropped,
-            seating_path if os.path.isfile(seating_path) else None)
+            seating_path if os.path.isfile(seating_path) else None,
+            room_path if os.path.isfile(room_path) else None)
     except roster_mod.RosterError as exc:
         raise GuiError(str(exc)) from None
 
@@ -261,6 +263,8 @@ def api_roster_drop(course, body):
         if done.seating_checked:
             note += (f", emptied {done.seats_emptied} seat(s)"
                      if done.seats_emptied else ", no seat to empty")
+        if done.room_emptied:
+            note += " and their chair in the room"
     else:
         note = (f"restored {done.student.name} -- they have no seat until you "
                 f"give them one")
@@ -645,7 +649,7 @@ def api_setup_finish(course, body):
         title=title)
 
 
-def api_seating(course, _body):
+def _seating_json(course):
     """Everything the canvas draws.
 
     The room holds student ids; the names are sent beside it rather than
@@ -653,27 +657,118 @@ def api_seating(course, _body):
     being touched. Split into two lines here because the card is two lines
     -- squarer than one long one, and legible from the back of a room when
     this is on the projector.
+
+    `seated` is which section each student belongs to and whether they
+    already have a chair, so the tab can offer the people who are still
+    standing without a second request.
     """
     people = course.roster()
-    names = {}
+    names, sections = {}, {}
     if people is not None:
         for student in people:
+            if student.dropped:
+                # A dropped student keeps their place in the record and
+                # loses their chair; offering them one here would put them
+                # back on the paper.
+                continue
             shown = student.display
             cut = shown.find(" ")
-            names[roster_mod.key_of(student)] = {
+            key = roster_mod.key_of(student)
+            names[key] = {
                 "full": shown,
                 "top": shown[:cut] if cut > 0 else shown,
                 "bottom": shown[cut + 1:] if cut > 0 else "",
             }
+            sections[key] = student.section or ""
     room = room_mod.load(course.file("room"))
+    chart = course.file("seating")
     return {
         "room": room,
         "names": names,
+        "sections": sections,
         "shapes": {kind: {"label": spec["label"], "w": spec["w"],
                           "h": spec["h"], "css": spec["css"]}
                    for kind, spec in room_mod.SHAPES.items()},
         "hasRoster": people is not None,
+        # Whether saving here will also rewrite the chart the build reads.
+        # Sent so the save bar can say what the button does before it is
+        # pressed, rather than reporting it afterwards.
+        "chartIsOurs": (not os.path.isfile(chart)
+                        or seating_mod.was_generated(chart)),
+        "chartName": os.path.basename(chart),
     }
+
+
+def api_seating(course, _body):
+    return _seating_json(course)
+
+
+def api_seating_save(course, body):
+    """Write the room the canvas is showing, and the chart if it is ours.
+
+    The whole document rather than a diff. A room is one small file read
+    whole and written whole -- that is the reason it is JSON -- and a diff
+    would need a conflict story that a single-user local app has no use
+    for.
+
+    **Checked, not trusted.** See `room.check`. This is the only door a
+    room arrives by that printit did not write itself, and every rule
+    there guards a failure that is silent further down.
+
+    **The chart as well, when that is safe.** A room nothing reads is a
+    toy: the file the build opens is `seating.toml`, so saving here
+    rewrites it. Two conditions, because overwriting a chart is how a
+    term's seating disappears:
+
+    * somebody has to be seated, so an untouched course cannot replace a
+      real chart with an empty one; and
+    * the chart on disk has to be one this tab wrote, or absent. A chart
+      that came from an import or a text editor is left exactly alone and
+      the answer says so. That is the 10-02 mistake in different clothes:
+      a file that carries an instruction is not a file to reach past.
+    """
+    incoming = body.get("room")
+    if not isinstance(incoming, dict):
+        raise GuiError("that request carried no room.")
+
+    # Every key the roster answers to, not just the preferred one, so a
+    # room written before a student gained an SID still loads.
+    people = course.roster()
+    known, name_of = None, {}
+    if people is not None:
+        known = set()
+        for student in people:
+            for key in roster_mod.keys_of(student):
+                known.add(key)
+                name_of.setdefault(key, student.name)
+
+    try:
+        room_mod.check(incoming, known)
+    except room_mod.RoomError as exc:
+        raise GuiError(str(exc)) from None
+
+    room_mod.save(course.file("room"), incoming)
+
+    seated = sum(1 for section in incoming.get("sections") or []
+                 for seat in room_mod.seats_of(section) if seat["student"])
+    chart = course.file("seating")
+    name = os.path.basename(chart)
+    if not seated:
+        note = (f"Room saved. Nobody is sitting anywhere yet, so {name} is "
+                f"left as it is.")
+    elif os.path.isfile(chart) and not seating_mod.was_generated(chart):
+        note = (f"Room saved. {name} was not written by this tab -- it was "
+                f"imported or typed -- so it has been left alone, and the "
+                f"build still reads it rather than this room.")
+    else:
+        with open(chart, "w", encoding="utf-8") as f:
+            f.write(seating_mod.to_toml(
+                incoming, lambda key: name_of.get(key, "")))
+        note = f"Room saved, and {name} rewritten from it."
+
+    out = _seating_json(course)
+    out["note"] = note
+    return out
 
 
 def api_print(course, _body):
@@ -953,6 +1048,7 @@ ROUTES = {
     "/api/setup/authorize": api_setup_authorize,
     "/api/setup/finish": api_setup_finish,
     "/api/seating": api_seating,
+    "/api/seating/save": api_seating_save,
     "/api/print": api_print,
     "/api/print/save": api_print_save,
     "/api/print/pull": api_print_pull,

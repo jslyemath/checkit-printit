@@ -817,12 +817,42 @@ async function refreshGoogle(force) {
 
 // -------------------------------------------------------------- seating --
 
-let seatingState = null;
+let seatingState = null;         // what the server last sent
+let seatingRoom = null;          // the copy being edited, saved on Save
 let seatingSection = 0;
 let seatingZoom = null;          // null means "fit"
+let seatingMode = "view";        // view | people | desks
+
+/* What a drag needs that the model does not hold: where every chair ended
+   up on the canvas, and which element is drawing what. Rebuilt by
+   `drawRoom`, because a drag starts from an element and has to reason in
+   room coordinates. */
+let drawn = { shapes: {}, cards: {}, seats: [], labels: [] };
+
+const GRID = 20;        // what a dragged desk snaps to, in room units
+const REACH = 90;       // how near a chair you must point to drop into it
+
+const MODES = [
+  { value: "view", label: "View",
+    hint: "Nothing moves. This is the view for the projector." },
+  { value: "people", label: "People",
+    hint: "Drag a name to another chair. Dropping it on somebody swaps "
+      + "the two, and the version letters stay with the chairs, so "
+      + "neighbours still differ. Drop a name on the strip below the room "
+      + "to stand them up again." },
+  { value: "desks", label: "Desks",
+    hint: "Drag a desk and everyone sitting at it comes with it. Click one "
+      + "and the arrow keys nudge it by " + GRID + " — hold shift for 1." },
+];
 
 function seatingCanvas() {
   return document.getElementById("canvas");
+}
+
+function currentSection() {
+  const sections = (seatingRoom && seatingRoom.sections) || [];
+  if (!sections.length) return null;
+  return sections[Math.min(seatingSection, sections.length - 1)];
 }
 
 function cardPosition(shape, seat) {
@@ -832,39 +862,83 @@ function cardPosition(shape, seat) {
   return [shape.at[0] + seat.at[0], shape.at[1] + seat.at[1]];
 }
 
+function seatingDirty() {
+  return seatingRoom !== null && seatingState !== null
+    && JSON.stringify(seatingRoom) !== JSON.stringify(seatingState.room);
+}
+
+function refreshSeatingDirty() {
+  const d = seatingDirty();
+  const dirty = document.getElementById("seat-dirty");
+  dirty.hidden = !d;
+  dirty.textContent = "unsaved changes";
+  document.getElementById("seat-save").disabled = !d;
+  document.getElementById("seat-revert").disabled = !d;
+  // What Save will do to the chart, said before the button is pressed
+  // rather than reported after. The build reads that file and not this
+  // room, so "saved" on its own is not an answer.
+  const news = document.getElementById("seat-news");
+  news.hidden = !(d && seatingState && !seatingState.chartIsOurs);
+  news.textContent = seatingState
+    ? seatingState.chartName + " was not written here, so Save will leave "
+      + "it alone and the build will keep reading it."
+    : "";
+}
+
+function segmented(host, items, active, pick) {
+  host.textContent = "";
+  for (const item of items) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = item.label;
+    b.setAttribute("aria-pressed", String(item.value === active));
+    b.onclick = () => pick(item.value);
+    host.appendChild(b);
+  }
+}
+
 function renderSeating() {
-  const s = seatingState;
+  const sections = (seatingRoom.sections || []);
   const empty = document.getElementById("seating-empty");
-  const sections = (s.room.sections || []);
-  const picker = document.getElementById("seat-sections");
-  picker.textContent = "";
+
+  segmented(document.getElementById("seat-modes"), MODES, seatingMode,
+            v => { seatingMode = v; renderSeating(); });
+  document.getElementById("seat-hint").textContent =
+    MODES.find(m => m.value === seatingMode).hint;
+
+  segmented(
+    document.getElementById("seat-sections"),
+    sections.map((s, i) => ({ value: i, label: s.name || `section ${i + 1}` })),
+    Math.min(seatingSection, sections.length - 1),
+    i => { seatingSection = i; renderSeating(); });
 
   if (!sections.length) {
     empty.textContent = "No room drawn for this course yet. The canvas is "
       + "where you lay the desks out; adding shapes comes next.";
     empty.hidden = false;
     seatingCanvas().textContent = "";
+    document.getElementById("seat-tray").hidden = true;
+    refreshSeatingDirty();
     return;
   }
   empty.hidden = true;
 
-  sections.forEach((section, i) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.textContent = section.name || `section ${i + 1}`;
-    b.setAttribute("aria-pressed", String(i === seatingSection));
-    b.onclick = () => { seatingSection = i; renderSeating(); };
-    picker.appendChild(b);
-  });
-
-  const section = sections[Math.min(seatingSection, sections.length - 1)];
+  const section = currentSection();
+  // The tray first, because the canvas is sized against what is left
+  // under it and `drawRoom` ends by applying the zoom.
+  drawTray(section);
   drawRoom(section);
+  refreshSeatingDirty();
 }
 
 function drawRoom(section) {
   const s = seatingState;
   const canvas = seatingCanvas();
   canvas.textContent = "";
+  // The mode is on the canvas rather than on each element, so the CSS can
+  // say "cards are not targets while desks are being moved" once.
+  canvas.className = "canvas mode-" + seatingMode;
+  drawn = { shapes: {}, cards: {}, seats: [], labels: [] };
 
   const size = section.canvas || { width: 1000, height: 700 };
   canvas.style.width = size.width + "px";
@@ -883,7 +957,15 @@ function drawRoom(section) {
     box.style.top = (shape.at[1] - spec.h / 2) + "px";
     box.style.width = spec.w + "px";
     box.style.height = spec.h + "px";
+    if (seatingMode === "desks") {
+      box.classList.add("movable");
+      box.tabIndex = 0;
+      box.title = spec.label;
+      box.onpointerdown = e => dragShape(e, section, shape);
+      box.onkeydown = e => nudgeShape(e, section, shape);
+    }
     canvas.appendChild(box);
+    drawn.shapes[shape.id] = box;
 
     for (const seat of shape.seats || []) {
       const [x, y] = cardPosition(shape, seat);
@@ -914,24 +996,33 @@ function drawRoom(section) {
         v.textContent = seat.version;
         card.appendChild(v);
       }
+      // An empty chair is a target but not a source: there is nobody on
+      // it to pick up.
+      if (seatingMode === "people" && who) {
+        card.classList.add("movable");
+        card.onpointerdown = e => dragName(e, card, { seat: seat });
+      }
       canvas.appendChild(card);
+      drawn.cards[seat.id] = card;
+      drawn.seats.push({ id: seat.id, x: x, y: y, seat: seat, shape: shape });
     }
   }
 
   if (showLabels) {
     for (const group of section.groups || []) {
-      const points = (group.seats || []).map(id => where[id]).filter(Boolean);
-      if (!points.length || !group.label) continue;
+      const ids = (group.seats || []).filter(id => where[id]);
+      if (!ids.length || !group.label) continue;
       // The middle of its seats: the centre of a table, or the gap
       // between desks that belong together.
-      const x = points.reduce((a, p) => a + p[0], 0) / points.length;
-      const y = points.reduce((a, p) => a + p[1], 0) / points.length;
+      const x = ids.reduce((a, id) => a + where[id][0], 0) / ids.length;
+      const y = ids.reduce((a, id) => a + where[id][1], 0) / ids.length;
       const tag = document.createElement("div");
       tag.className = "glabel";
       tag.textContent = group.label;
       tag.style.left = x + "px";
       tag.style.top = y + "px";
       canvas.appendChild(tag);
+      drawn.labels.push({ el: tag, seats: ids });
     }
   }
 
@@ -947,6 +1038,299 @@ function drawRoom(section) {
   applyZoom(section);
 }
 
+function drawTray(section) {
+  /* Everyone with no chair. Without this, People mode can only shuffle a
+     class that is already seated -- a new student could never be put in
+     the room at all -- and standing somebody up would have no gesture
+     except dragging them somewhere empty and hoping. */
+  const tray = document.getElementById("seat-tray");
+  tray.textContent = "";
+  tray.classList.remove("over");
+  if (seatingMode !== "people") { tray.hidden = true; return; }
+  tray.hidden = false;
+
+  const sitting = new Set();
+  for (const sec of seatingRoom.sections || [])
+    for (const shape of sec.shapes || [])
+      for (const seat of shape.seats || [])
+        if (seat.student) sitting.add(seat.student);
+
+  // Filter to this section when the roster actually uses that name. When
+  // it does not -- the room's sections and the roster's are written
+  // differently -- show everybody, because hiding people behind a name
+  // mismatch is the worse of the two failures.
+  const name = section.name || "";
+  const known = Object.values(seatingState.sections).includes(name);
+  const standing = Object.keys(seatingState.names)
+    .filter(k => !sitting.has(k)
+                 && (!known || seatingState.sections[k] === name))
+    .sort((a, b) => seatingState.names[a].full
+                      .localeCompare(seatingState.names[b].full));
+
+  const label = document.createElement("span");
+  label.className = "traylabel";
+  label.textContent = standing.length
+    ? `${standing.length} without a chair`
+    : "everyone has a chair — drop a name here to stand them up";
+  tray.appendChild(label);
+
+  for (const key of standing) {
+    const who = seatingState.names[key];
+    const card = document.createElement("div");
+    card.className = "seatcard movable";
+    card.title = who.full;
+    const top = document.createElement("div");
+    top.className = "top";
+    top.textContent = who.top;
+    card.appendChild(top);
+    if (who.bottom) {
+      const bottom = document.createElement("div");
+      bottom.className = "bottom";
+      bottom.textContent = who.bottom;
+      card.appendChild(bottom);
+    }
+    card.onpointerdown = e => dragName(e, card, { key: key });
+    tray.appendChild(card);
+  }
+}
+
+// ------------------------------------------------------------- dragging --
+
+function canvasScale() {
+  /* The canvas is laid out at room size and CSS-scaled to fit, so a
+     pointer that moved N screen pixels moved N/scale room units. Measured
+     off the DOM rather than read from `seatingZoom`, which is null while
+     the zoom is "fit" -- one source of truth, and it cannot drift. */
+  const canvas = seatingCanvas();
+  return canvas.getBoundingClientRect().width / (canvas.offsetWidth || 1);
+}
+
+function roomPoint(event) {
+  const box = seatingCanvas().getBoundingClientRect();
+  const scale = canvasScale();
+  return [(event.clientX - box.left) / scale,
+          (event.clientY - box.top) / scale];
+}
+
+function liftGhost(element, event) {
+  /* A copy that follows the pointer, in `document.body` rather than in
+     the canvas.
+
+     Two reasons it is a copy and not the element itself. A transformed
+     ancestor makes `position: fixed` behave like `absolute`, so anything
+     left inside the scaled canvas cannot simply be pinned to the cursor;
+     and leaving the original in place means a drag that ends nowhere has
+     nothing to undo. The transform matches what was grabbed, so the ghost
+     is exactly the size of the card under the cursor. */
+  const box = element.getBoundingClientRect();
+  const ghost = element.cloneNode(true);
+  ghost.className = element.className.replace("movable", "") + " ghost";
+  ghost.style.width = element.offsetWidth + "px";
+  ghost.style.height = element.offsetHeight + "px";
+  ghost.style.transform = `scale(${box.width / (element.offsetWidth || 1)})`;
+  document.body.appendChild(ghost);
+  element.classList.add("lifted");
+  return { ghost: ghost, hold: [event.clientX - box.left,
+                                event.clientY - box.top] };
+}
+
+function dropTarget(event, fromId) {
+  /* Where a release would put this name: a chair, the tray, or nowhere.
+
+     Nearest chair to the *pointer*, not to the dragged card, so the chair
+     you are pointing at is the chair you get however you grabbed the
+     card. Geometry rather than `elementFromPoint`, because the cards
+     overhang each other and the ghost is under the cursor. */
+  const tray = document.getElementById("seat-tray");
+  if (!tray.hidden) {
+    const box = tray.getBoundingClientRect();
+    if (event.clientX >= box.left && event.clientX <= box.right
+        && event.clientY >= box.top && event.clientY <= box.bottom)
+      return { kind: "tray" };
+  }
+  const [cx, cy] = roomPoint(event);
+  let best = null, near = REACH;
+  for (const chair of drawn.seats) {
+    if (chair.id === fromId) continue;
+    const d = Math.hypot(chair.x - cx, chair.y - cy);
+    if (d < near) { near = d; best = chair; }
+  }
+  return best ? { kind: "seat", chair: best } : null;
+}
+
+function markTarget(target, on) {
+  if (!target) return;
+  if (target.kind === "tray")
+    document.getElementById("seat-tray").classList.toggle("over", on);
+  else
+    drawn.cards[target.chair.id].classList.toggle("over", on);
+}
+
+function dragName(event, element, from) {
+  /* Move a person. `from` is either `{ seat }` -- a chair in the room --
+     or `{ key }` -- a card in the tray. One function, because the two
+     differ only at the ends: a second copy of this is exactly how a fix
+     lands in one of them and not the other. */
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  event.preventDefault();
+
+  const who = from.seat ? from.seat.student : from.key;
+  const fromId = from.seat ? from.seat.id : null;
+  const start = [event.clientX, event.clientY];
+  let target = null, lift = null;
+
+  const place = e => {
+    // Nothing happens until the pointer has actually travelled. Without
+    // this a plain *click* on a card is a drop: the chair below it in a
+    // 2x2 table is within reach of the pointer that never moved, so
+    // clicking somebody would quietly swap them with the person behind.
+    if (!lift) {
+      if (Math.hypot(e.clientX - start[0], e.clientY - start[1]) < 4) return;
+      lift = liftGhost(element, event);
+    }
+    lift.ghost.style.left = (e.clientX - lift.hold[0]) + "px";
+    lift.ghost.style.top = (e.clientY - lift.hold[1]) + "px";
+    const next = dropTarget(e, fromId);
+    const same = next && target && next.kind === target.kind
+      && (next.kind === "tray" || next.chair.id === target.chair.id);
+    if (!same) { markTarget(target, false); target = next; markTarget(target, true); }
+  };
+
+  const finish = commit => {
+    element.onpointermove = element.onpointerup = element.onpointercancel = null;
+    if (!lift) return;                      // a click, not a drag
+    lift.ghost.remove();
+    element.classList.remove("lifted");
+    markTarget(target, false);
+
+    // Nowhere is a cancel, not an eviction. A name dropped in a gap goes
+    // back to its chair: losing somebody out of the chart because a drop
+    // was a few pixels short is not a trade worth making, and standing
+    // them up has the tray for a target.
+    if (!commit || !target) { renderSeating(); return; }
+
+    if (target.kind === "tray") {
+      if (from.seat) from.seat.student = "";
+    } else {
+      const chair = target.chair.seat;
+      const sat = chair.student;
+      chair.student = who;
+      // Swap the people, not the letters. A version belongs to the chair
+      // -- the colouring is of the room -- so two people trading places
+      // must not trade letters, or a swap could seat the same paper next
+      // to itself. From the tray there is nothing to swap into: whoever
+      // was sitting there stands up, and the tray redraws with them in it.
+      if (from.seat) from.seat.student = sat;
+    }
+    renderSeating();
+  };
+
+  element.setPointerCapture(event.pointerId);
+  element.onpointermove = place;
+  element.onpointerup = () => finish(true);
+  // A cancel is the gesture being taken away -- the browser starting a
+  // scroll, a context menu, the pen leaving range. It is not a quiet
+  // yes, so it must not seat anybody.
+  element.onpointercancel = () => finish(false);
+}
+
+function clampShape(section, spec, x, y) {
+  /* Inside the canvas, snapped to the grid. `hi` is floored at `lo` for
+     the case of a table wider than the room it is in, where the two
+     bounds cross and a plain min/max would fling it off the left edge. */
+  const size = section.canvas || { width: 1000, height: 700 };
+  const fit = (v, extent, span) => {
+    const lo = span / 2, hi = Math.max(lo, extent - span / 2);
+    return Math.min(Math.max(Math.round(v / GRID) * GRID, lo), hi);
+  };
+  return [fit(x, size.width, spec.w), fit(y, size.height, spec.h)];
+}
+
+function dragShape(event, section, shape) {
+  /* Move a desk, and everyone at it.
+
+     The desk itself moves, rather than a ghost: a card is being
+     transferred from one place to another and wants a ghost, but a desk
+     is being positioned, and watching it go is the whole point.
+
+     The cards move with it because a seat anchor is an offset from the
+     shape's centre -- the model already says they belong to it, so this
+     is only the drawing catching up until the re-draw on release. */
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  event.preventDefault();
+  const spec = seatingState.shapes[shape.kind];
+  if (!spec) return;
+
+  const box = drawn.shapes[shape.id];
+  box.focus();
+  const scale = canvasScale();
+  const start = [event.clientX, event.clientY];
+  const home = shape.at.slice();
+  const mine = (shape.seats || []).map(seat => seat.id);
+  const riding = mine.map(id => drawn.cards[id]).filter(Boolean);
+  // A label whose group sits entirely at this desk travels with it. One
+  // spanning two desks is left where it is and snaps on release, because
+  // half of it is not moving and there is no honest place to put it.
+  const tags = drawn.labels
+    .filter(l => l.seats.every(id => mine.includes(id)))
+    .map(l => l.el);
+  const held = [...riding, ...tags].map(el => [el, el.offsetLeft, el.offsetTop]);
+
+  box.classList.add("dragging");
+
+  const place = e => {
+    const to = clampShape(section, spec,
+                          home[0] + (e.clientX - start[0]) / scale,
+                          home[1] + (e.clientY - start[1]) / scale);
+    box.style.left = (to[0] - spec.w / 2) + "px";
+    box.style.top = (to[1] - spec.h / 2) + "px";
+    for (const [el, left, top] of held) {
+      el.style.left = (left + to[0] - home[0]) + "px";
+      el.style.top = (top + to[1] - home[1]) + "px";
+    }
+    shape.at = to;
+  };
+
+  const finish = commit => {
+    box.onpointermove = box.onpointerup = box.onpointercancel = null;
+    box.classList.remove("dragging");
+    // `place` has been writing straight to the model as the desk moves,
+    // so putting it back is the undo. Same reasoning as a dropped name:
+    // a gesture taken away is not a quiet yes.
+    if (!commit) shape.at = home;
+    renderSeating();
+    const again = drawn.shapes[shape.id];
+    if (again) again.focus();          // the re-draw threw the focus away
+  };
+
+  box.setPointerCapture(event.pointerId);
+  box.onpointermove = place;
+  box.onpointerup = () => finish(true);
+  box.onpointercancel = () => finish(false);
+}
+
+function nudgeShape(event, section, shape) {
+  /* Arrow keys, because a mouse is bad at the last few units and lining
+     two desks up is most of drawing a room. Shift is the fine step, not
+     the coarse one: the grid is the default and precision is the ask. */
+  const step = event.shiftKey ? 1 : GRID;
+  const by = { ArrowLeft: [-step, 0], ArrowRight: [step, 0],
+               ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
+  if (!by) return;
+  event.preventDefault();
+  const spec = seatingState.shapes[shape.kind];
+  if (!spec) return;
+  // Off-grid on purpose with shift held: snapping first would eat the
+  // nudge whole, since one unit rounds back to where it started.
+  const to = [shape.at[0] + by[0], shape.at[1] + by[1]];
+  shape.at = event.shiftKey ? to : clampShape(section, spec, to[0], to[1]);
+  renderSeating();
+  const again = drawn.shapes[shape.id];
+  if (again) again.focus();
+}
+
+// ---------------------------------------------------------------- zoom --
+
 function applyZoom(section) {
   const canvas = seatingCanvas();
   const wrap = canvas.parentElement;
@@ -956,9 +1340,26 @@ function applyZoom(section) {
   const fit = Math.min(1, (wrap.clientWidth - 2) / size.width);
   const zoom = seatingZoom === null ? fit : seatingZoom;
   canvas.style.transform = `scale(${zoom})`;
-  // Against the window, not a constant: a 760px box in a 720px pane is
-  // a scrollbar nobody asked for.
-  const room_for_it = Math.max(320, window.innerHeight - 220);
+
+  /* How tall the box may be: the window, less everything around it.
+
+     Both halves are measured rather than guessed, and both had to be.
+     The allowance above used to be a flat 220, which is right at a wide
+     window and wrong by two hundred pixels at 530, where the toolbars
+     wrap and the mode hint runs to three lines.
+
+     The half below is the one that actually broke something. The save
+     bar is sticky to the bottom of the window, so the moment the page is
+     a pixel taller than the window it lifts out of the flow and covers
+     whatever is above it -- which was the tray. The standing students
+     stayed perfectly visible and became impossible to pick up, while
+     dropping *into* the tray went on working, because that test is
+     geometry and not a hit test. Nothing on screen said why. */
+  const bar = document.querySelector("#view-seating .savebar");
+  const above = wrap.getBoundingClientRect().top + window.scrollY;
+  const below = document.getElementById("seat-tray").offsetHeight
+    + (bar ? bar.offsetHeight : 0) + 18;     // the gaps around the two
+  const room_for_it = Math.max(200, window.innerHeight - above - below);
   wrap.style.height =
     Math.min(size.height * zoom + 2, room_for_it) + "px";
   document.getElementById("seat-zoom").textContent =
@@ -966,7 +1367,8 @@ function applyZoom(section) {
 }
 
 function zoomBy(step) {
-  const section = seatingState.room.sections[seatingSection];
+  const section = currentSection();
+  if (!section) return;
   const wrap = seatingCanvas().parentElement;
   const size = section.canvas || { width: 1000, height: 700 };
   const now = seatingZoom === null
@@ -975,11 +1377,27 @@ function zoomBy(step) {
   applyZoom(section);
 }
 
+// -------------------------------------------------------- load and save --
+
 async function loadSeating() {
+  // Unsaved work survives switching tabs and coming back, the way the
+  // print draft does: this runs on every visit, not only the first.
+  const keep = seatingDirty() ? seatingRoom : null;
   try {
     seatingState = await api("/api/seating", {});
   } catch (err) { toast(err.message, true); return; }
+  seatingRoom = keep || JSON.parse(JSON.stringify(seatingState.room));
   renderSeating();
+}
+
+async function saveSeating() {
+  try {
+    const out = await api("/api/seating/save", { room: seatingRoom });
+    seatingState = out;
+    seatingRoom = JSON.parse(JSON.stringify(out.room));
+    renderSeating();
+    toast(out.note);
+  } catch (err) { toast(err.message, true); }
 }
 
 // ---------------------------------------------------------------- setup --
@@ -2048,7 +2466,13 @@ async function boot() {
   document.getElementById("seat-out").onclick = () => zoomBy(-0.1);
   document.getElementById("seat-fit").onclick = () => {
     seatingZoom = null;
-    applyZoom(seatingState.room.sections[seatingSection]);
+    const section = currentSection();
+    if (section) applyZoom(section);
+  };
+  document.getElementById("seat-save").onclick = saveSeating;
+  document.getElementById("seat-revert").onclick = () => {
+    seatingRoom = JSON.parse(JSON.stringify(seatingState.room));
+    renderSeating();
   };
   document.getElementById("setup-signin").onclick = signInToGoogle;
   document.getElementById("setup-create").onclick = () =>

@@ -251,6 +251,34 @@ def _quote(s):
     return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+#: The line `to_toml` stamps on a chart it wrote, and the line
+#: `was_generated` looks for. One string, because the writer and the
+#: reader of a format drifting apart is how a "second copy" bug starts:
+#: reword the sentence and the detector silently stops recognising its
+#: own output, and the app starts refusing to update a chart it owns.
+GENERATED_MARK = "# Generated: the room file is the one to edit"
+
+
+def was_generated(path):
+    """Did this tool write that chart, or did a person or an import?
+
+    Only the first few lines are read: the mark is a header, and a chart
+    is long. Anything unreadable answers no, which is the safe way round
+    -- the question is only ever asked before overwriting.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            for _ in range(8):
+                line = f.readline()
+                if not line:
+                    break
+                if line.startswith(GENERATED_MARK):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
 def to_toml(room, name_of, written_by="the seating chart tab"):
     """Write the chart a room describes.
 
@@ -273,7 +301,7 @@ def to_toml(room, name_of, written_by="the seating chart tab"):
     lines = [
         f"# Written by `{written_by}` from this course's room.",
         "#",
-        "# Generated: the room file is the one to edit, and the next write",
+        GENERATED_MARK + ", and the next write",
         "# will overwrite this. Every seat names its version because the",
         "# room chose it; a hand-written chart may leave them out and have",
         "# them alternate instead.",

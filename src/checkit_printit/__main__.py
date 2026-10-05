@@ -882,7 +882,13 @@ def roster_drop(who, roster_path, seating_path):
     chart is the print list. Their seat is left empty rather than removed, so
     their tablemates keep the version letters they already had.
     """
-    _set_dropped(who, roster_path, seating_path, dropped=True)
+    # The drawn room, when there is one, sits beside the chart it writes.
+    # Named out of the one table of filenames rather than spelled here, so
+    # the two cannot drift apart.
+    room_path = os.path.join(os.path.dirname(seating_path) or ".",
+                             course_mod.FILENAMES["room"])
+    _set_dropped(who, roster_path, seating_path, dropped=True,
+                 room_path=room_path)
 
 
 @roster.command(name="restore")
@@ -895,11 +901,12 @@ def roster_restore(who, roster_path):
     _set_dropped(who, roster_path, None, dropped=False)
 
 
-def _set_dropped(who, roster_path, seating_path, dropped):
+def _set_dropped(who, roster_path, seating_path, dropped, room_path=None):
     """Render what `roster.set_dropped` did. The rule lives there, so the GUI
     can call it without going through click."""
     try:
-        done = roster_mod.set_dropped(roster_path, who, dropped, seating_path)
+        done = roster_mod.set_dropped(roster_path, who, dropped, seating_path,
+                                      room_path)
     except roster_mod.RosterError as exc:
         raise click.ClickException(str(exc))
 
@@ -915,7 +922,10 @@ def _set_dropped(who, roster_path, seating_path, dropped):
             click.echo(f"emptied {done.seats_emptied} seat(s) in {seating_path}")
         else:
             click.echo(f"no seat found in {seating_path}; nothing to empty")
-    elif not dropped:
+    if done.room_emptied:
+        click.echo(f"emptied {done.room_emptied} chair(s) in {room_path}, "
+                   f"so the next write of the chart does not seat them again")
+    if not dropped:
         click.echo("give them a seat in the chart when you are ready.")
 
 
