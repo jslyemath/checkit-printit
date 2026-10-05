@@ -82,6 +82,26 @@ nav button.soon { opacity: .55; }
 
 main { padding: 20px 16px 60px; max-width: 1100px; margin: 0 auto; }
 
+/* Two spellings of a label; the window picks. */
+.narrow-only { display: none; }
+
+/* The banner cost 141px of a 530px window -- more than a quarter of it,
+   above a canvas that needs every pixel. Nothing is hidden behind a
+   menu or a scroll: the words get shorter, the count moves to the
+   Overview card that already shows it, and the padding tightens. That
+   takes the banner to about 70px and puts the nav on one row instead of
+   two. */
+@media (max-width: 820px) {
+  .wide-only { display: none; }
+  .narrow-only { display: inline; }
+  header { padding: 7px 12px; gap: 10px; row-gap: 6px; }
+  h1 { font-size: 14px; }
+  nav { gap: 2px; }
+  nav button { padding: 3px 8px; font-size: 13px; }
+  main { padding: 10px 12px 40px; }
+  h2 { font-size: 16px; margin-bottom: 8px; }
+}
+
 .muted { color: var(--muted); font-size: 13px; }
 
 .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
@@ -554,13 +574,20 @@ tr.warnrow td { color: var(--dirty); }
 /* The room is drawn at its own size and scaled to fit, so one set of
    coordinates serves the editor, the pane and the projector. */
 .canvaswrap {
+  display: flex;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg);
 }
+/* `margin: auto` rather than `justify-content: center`: both centre a
+   small room, but only this one keeps the top left corner reachable
+   when the room is bigger than the box. */
+.canvasbox { position: relative; margin: auto; flex: 0 0 auto; }
 .canvas {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
   transform-origin: top left;
 }
 
@@ -600,24 +627,55 @@ tr.warnrow td { color: var(--dirty); }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
-  padding: 4px 5px;
+  gap: 0;
+  padding: 2px 4px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--bg);
   font-size: 13px;
-  line-height: 1.15;
+  line-height: 1.1;
   text-align: center;
   overflow: hidden;
 }
-.seatcard .top { font-weight: 600; }
-.seatcard .bottom { color: var(--muted); font-size: 12px; }
+/* Most of the card should be ink.
+
+   It used to carry 13px over 12px in a box 54 tall -- under half of it
+   was letters and the rest was air, which on a projector is the whole
+   difference between a name you can read from the back row and one you
+   cannot. The first name is sized per card in `nameSize`, because the
+   longest name in the class should not set the size of every other one.
+
+   The arithmetic this is aiming at: comfortable reading wants about an
+   inch of text height for every fifteen feet of distance, so a back row
+   thirty feet out needs two inches, which on a 100-inch screen at 1920
+   is about 44 pixels. Fitting the room to its contents gets a 20-unit
+   name to roughly that. */
+.seatcard .top { font-weight: 700; font-size: 20px; line-height: 1.05; }
+/* The off-screen card `nameSize` measures against. Same rules as a real
+   one, so what it measures is what gets drawn. */
+.seatcard.measuring {
+  left: -9999px;
+  top: 0;
+  width: auto;
+  min-height: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.seatcard.measuring .top { white-space: nowrap; }
+.seatcard .bottom {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.05;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .seatcard .ver {
   position: absolute;
-  top: 2px;
-  right: 5px;
-  font-size: 11px;
-  font-weight: 700;
+  top: 1px;
+  right: 4px;
+  font-size: 13px;
+  font-weight: 800;
   color: var(--accent);
 }
 .seatcard.empty {
@@ -642,6 +700,9 @@ tr.warnrow td { color: var(--dirty); }
 
 .tickline { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .tickline input { width: 15px; height: 15px; }
+
+/* The zoom buttons wrap as one piece or not at all. */
+.zoomer { display: inline-flex; align-items: center; gap: 6px; }
 
 /* ------------------------------------------------- seating: dragging -- */
 
@@ -697,6 +758,14 @@ tr.warnrow td { color: var(--dirty); }
   box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
 }
 
+/* In hand, waiting for a chair to be clicked. Distinct from `.over`,
+   which is where it would land: one is the name you are holding and the
+   other is the place, and they are on screen at the same time. */
+.seatcard.picked {
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
 /* Where it would land. Solid even on an empty chair, which is otherwise
    dashed, so the target never reads as "nothing here". */
 .seatcard.over {
@@ -723,10 +792,10 @@ tr.warnrow td { color: var(--dirty); }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  min-height: 62px;
+  gap: 7px;
+  min-height: 40px;
   margin-top: 8px;
-  padding: 8px 10px;
+  padding: 6px 9px;
   border: 1px dashed var(--line);
   border-radius: 8px;
 }
@@ -735,9 +804,75 @@ tr.warnrow td { color: var(--dirty); }
   border-style: solid;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
-.tray .seatcard { position: static; flex: 0 0 auto; }
+/* A chip, not a projector card. Nobody reads the tray from the back of
+   the room -- it is an editing control, and at full size two of them
+   took more height than the strip is worth. One line, auto width. */
+.tray .seatcard {
+  position: static;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 5px;
+  width: auto;
+  max-width: 190px;
+  min-height: 0;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+.tray .seatcard .top { font-size: 14px; font-weight: 600; }
+.tray .seatcard .bottom { font-size: 13px; }
 .traylabel {
   font-size: 12px;
   color: var(--muted);
   margin-right: 4px;
 }
+
+/* --------------------------------------------- seating: the projector -- */
+
+/* Everything that is not the room goes away: on a projector a toolbar
+   is not a control anybody can reach, it is just less room.
+
+   Keyed on a class rather than on `:fullscreen`, because fullscreen is
+   a permission a host can refuse and the mode still has to work when it
+   does. The one `:fullscreen` rule below is only the backdrop colour,
+   which nothing else can set. */
+#view-seating:fullscreen { background: var(--bg); }
+
+body.presenting header,
+body.presenting #view-seating .toolbar,
+body.presenting #view-seating .dock,
+body.presenting #seat-hint,
+body.presenting #seating-empty { display: none; }
+
+body.presenting main { padding: 0; max-width: none; }
+body.presenting #view-seating {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+body.presenting .canvaswrap {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+  overflow: hidden;         /* it fits by construction; a bar would be a bug */
+}
+
+/* Which room, and the way out. Small and dim: it is for the person at
+   the front, not for the back row. */
+.stage {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 8px 16px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  pointer-events: none;
+}
+.stage .muted { font-size: 12px; text-transform: none; letter-spacing: 0; }
