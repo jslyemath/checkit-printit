@@ -245,3 +245,73 @@ seats = ["Ada Lovelace", "Alan Turing", "Grace Hopper", "Katherine Johnson"]
 # [[group]]
 # seats = [{name = "Emmy Noether", version = "B"}, "Srinivasa Ramanujan"]
 '''
+
+
+def _quote(s):
+    return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def to_toml(room, name_of, written_by="the seating chart tab"):
+    """Write the chart a room describes.
+
+    `name_of` turns a student id into the name the roster knows them by.
+    The room holds ids; `seating.toml` holds names, because that is what a
+    chart has always held and what `Chart.order` matches on. The roster
+    name rather than the printed one: two students can share a printed
+    name, and this is the file that has to identify them.
+
+    **Every seat is pinned.** The app decides the letters now -- by
+    colouring the room, where `alternate` could only cycle a list -- so
+    the letters are written down rather than recomputed. `alternate`
+    remains for a chart this tool did not write.
+
+    Groups come out in print order, sections in theirs, so the stack comes
+    off the printer in the order it is handed out.
+    """
+    from . import room as room_mod
+
+    lines = [
+        f"# Written by `{written_by}` from this course's room.",
+        "#",
+        "# Generated: the room file is the one to edit, and the next write",
+        "# will overwrite this. Every seat names its version because the",
+        "# room chose it; a hand-written chart may leave them out and have",
+        "# them alternate instead.",
+        "",
+        "versions = [" + ", ".join(_quote(v) for v in room["versions"]) + "]",
+        "",
+    ]
+
+    sections = sorted(
+        room.get("sections") or [],
+        # An unplaced section goes last rather than first, which is what
+        # `None` would sort as.
+        key=lambda s: (s.get("order") is None, s.get("order") or 0,
+                       s.get("name") or ""))
+
+    for section in sections:
+        lines.append(f"# ---- section {section.get('name', '')}")
+        lines.append("")
+        where = {s["id"]: s for s in room_mod.seats_of(section)}
+        for group in room_mod.ordered_groups(section):
+            label = group.get("label") or ""
+            if label:
+                lines.append(f"# {label}")
+            entries = []
+            for seat_id in group.get("seats") or []:
+                seat = where.get(seat_id)
+                if seat is None:
+                    continue
+                name = name_of(seat.get("student") or "")
+                if not name:
+                    entries.append('""')          # an empty chair
+                    continue
+                version = seat.get("version") or ""
+                entries.append(
+                    "{name = " + _quote(name)
+                    + (", version = " + _quote(version) if version else "")
+                    + "}")
+            lines.append("[[group]]")
+            lines.append("seats = [" + ", ".join(entries) + "]")
+            lines.append("")
+    return "\n".join(lines)
