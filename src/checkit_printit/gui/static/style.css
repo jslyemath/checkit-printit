@@ -548,3 +548,97 @@ tr.warnrow td { color: var(--dirty); }
   border-color: var(--warn);
   background: color-mix(in srgb, var(--warn) 10%, transparent);
 }
+
+/* ------------------------------------------------------------ seating -- */
+
+/* The room is drawn at its own size and scaled to fit, so one set of
+   coordinates serves the editor, the pane and the projector. */
+.canvaswrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.canvas {
+  position: relative;
+  transform-origin: top left;
+}
+
+/* A desk. Four outlines rather than four elements: the kind decides the
+   silhouette and nothing else about it changes. */
+.shape {
+  position: absolute;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-sizing: border-box;
+}
+.shape.rect { border-radius: 10px; }
+.shape.circle { border-radius: 50%; }
+.shape.hex {
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+  border: none;
+  background: var(--line);
+}
+.shape.trapezoid {
+  clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
+  border: none;
+  background: var(--line);
+}
+
+/* A person. Two lines so the card is squarish -- a single long line of
+   "Bartholomew Achterberg" sets the whole room's spacing.
+
+   `.seatcard`, not `.card`: the Overview's stat cards already own that
+   name, and a second rule for it does not scope itself to this canvas --
+   it restyles those too, which it did, stacking all eight of them. */
+.seatcard {
+  position: absolute;
+  width: 104px;
+  min-height: 54px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 4px 5px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  font-size: 13px;
+  line-height: 1.15;
+  text-align: center;
+  overflow: hidden;
+}
+.seatcard .top { font-weight: 600; }
+.seatcard .bottom { color: var(--muted); font-size: 12px; }
+.seatcard .ver {
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.seatcard.empty {
+  border-style: dashed;
+  background: none;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* The group's name, floating at the middle of its seats -- which is the
+   centre of a table, or the gap between desks that belong together. */
+.glabel {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.tickline { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.tickline input { width: 15px; height: 15px; }

@@ -12,7 +12,7 @@ const VIEWS = [
   { id: "form", label: "Update form" },
   { id: "print", label: "Print job" },
   { id: "record", label: "Record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
-  { id: "seating", label: "Seating", soon: "Drag students between seats, randomise, swap two. No CLI equivalent exists yet -- this is new code, not a face on something tested." },
+  { id: "seating", label: "Seating" },
   { id: "setup", label: "Setup" },
   { id: "callout", label: "Cold call", soon: "Pick a random student, pick several, refresh the call list. No CLI equivalent yet." },
 ];
@@ -133,6 +133,7 @@ function show(id) {
     // print job itself was saved -- which read as the table being stale.
     if (id === "print") loadPrint();
     if (id === "setup") loadSetup();
+    if (id === "seating") loadSeating();
   }
   location.hash = id;
 }
@@ -813,6 +814,173 @@ async function refreshGoogle(force) {
 
 
 
+
+// -------------------------------------------------------------- seating --
+
+let seatingState = null;
+let seatingSection = 0;
+let seatingZoom = null;          // null means "fit"
+
+function seatingCanvas() {
+  return document.getElementById("canvas");
+}
+
+function cardPosition(shape, seat) {
+  /* A card is placed on the canvas, not inside its shape: a seat anchor is
+     an offset from the shape's centre, and a dragged seat will need to be
+     able to leave the shape it started on. */
+  return [shape.at[0] + seat.at[0], shape.at[1] + seat.at[1]];
+}
+
+function renderSeating() {
+  const s = seatingState;
+  const empty = document.getElementById("seating-empty");
+  const sections = (s.room.sections || []);
+  const picker = document.getElementById("seat-sections");
+  picker.textContent = "";
+
+  if (!sections.length) {
+    empty.textContent = "No room drawn for this course yet. The canvas is "
+      + "where you lay the desks out; adding shapes comes next.";
+    empty.hidden = false;
+    seatingCanvas().textContent = "";
+    return;
+  }
+  empty.hidden = true;
+
+  sections.forEach((section, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = section.name || `section ${i + 1}`;
+    b.setAttribute("aria-pressed", String(i === seatingSection));
+    b.onclick = () => { seatingSection = i; renderSeating(); };
+    picker.appendChild(b);
+  });
+
+  const section = sections[Math.min(seatingSection, sections.length - 1)];
+  drawRoom(section);
+}
+
+function drawRoom(section) {
+  const s = seatingState;
+  const canvas = seatingCanvas();
+  canvas.textContent = "";
+
+  const size = section.canvas || { width: 1000, height: 700 };
+  canvas.style.width = size.width + "px";
+  canvas.style.height = size.height + "px";
+
+  const showVersions = document.getElementById("seat-versions").checked;
+  const showLabels = document.getElementById("seat-labels").checked;
+  const where = {};
+
+  for (const shape of section.shapes || []) {
+    const spec = s.shapes[shape.kind];
+    if (!spec) continue;                       // a shape this build cannot draw
+    const box = document.createElement("div");
+    box.className = "shape " + spec.css;
+    box.style.left = (shape.at[0] - spec.w / 2) + "px";
+    box.style.top = (shape.at[1] - spec.h / 2) + "px";
+    box.style.width = spec.w + "px";
+    box.style.height = spec.h + "px";
+    canvas.appendChild(box);
+
+    for (const seat of shape.seats || []) {
+      const [x, y] = cardPosition(shape, seat);
+      where[seat.id] = [x, y];
+      const card = document.createElement("div");
+      const who = s.names[seat.student];
+      card.className = "seatcard" + (who ? "" : " empty");
+      card.style.left = (x - 52) + "px";
+      card.style.top = (y - 27) + "px";
+      if (who) {
+        const top = document.createElement("div");
+        top.className = "top";
+        top.textContent = who.top;
+        card.appendChild(top);
+        if (who.bottom) {
+          const bottom = document.createElement("div");
+          bottom.className = "bottom";
+          bottom.textContent = who.bottom;
+          card.appendChild(bottom);
+        }
+        card.title = who.full;
+      } else {
+        card.textContent = "empty";
+      }
+      if (showVersions && seat.version) {
+        const v = document.createElement("span");
+        v.className = "ver";
+        v.textContent = seat.version;
+        card.appendChild(v);
+      }
+      canvas.appendChild(card);
+    }
+  }
+
+  if (showLabels) {
+    for (const group of section.groups || []) {
+      const points = (group.seats || []).map(id => where[id]).filter(Boolean);
+      if (!points.length || !group.label) continue;
+      // The middle of its seats: the centre of a table, or the gap
+      // between desks that belong together.
+      const x = points.reduce((a, p) => a + p[0], 0) / points.length;
+      const y = points.reduce((a, p) => a + p[1], 0) / points.length;
+      const tag = document.createElement("div");
+      tag.className = "glabel";
+      tag.textContent = group.label;
+      tag.style.left = x + "px";
+      tag.style.top = y + "px";
+      canvas.appendChild(tag);
+    }
+  }
+
+  for (const note of section.notes || []) {
+    const tag = document.createElement("div");
+    tag.className = "glabel";
+    tag.textContent = note.text || "";
+    tag.style.left = note.at[0] + "px";
+    tag.style.top = note.at[1] + "px";
+    canvas.appendChild(tag);
+  }
+
+  applyZoom(section);
+}
+
+function applyZoom(section) {
+  const canvas = seatingCanvas();
+  const wrap = canvas.parentElement;
+  const size = section.canvas || { width: 1000, height: 700 };
+  // "Fit" is the default because a drawn room is wider than the pane and
+  // the first thing anyone wants is the whole room.
+  const fit = Math.min(1, (wrap.clientWidth - 2) / size.width);
+  const zoom = seatingZoom === null ? fit : seatingZoom;
+  canvas.style.transform = `scale(${zoom})`;
+  // Against the window, not a constant: a 760px box in a 720px pane is
+  // a scrollbar nobody asked for.
+  const room_for_it = Math.max(320, window.innerHeight - 220);
+  wrap.style.height =
+    Math.min(size.height * zoom + 2, room_for_it) + "px";
+  document.getElementById("seat-zoom").textContent =
+    Math.round(zoom * 100) + "%";
+}
+
+function zoomBy(step) {
+  const section = seatingState.room.sections[seatingSection];
+  const wrap = seatingCanvas().parentElement;
+  const size = section.canvas || { width: 1000, height: 700 };
+  const now = seatingZoom === null
+    ? Math.min(1, (wrap.clientWidth - 2) / size.width) : seatingZoom;
+  seatingZoom = Math.min(2, Math.max(0.2, now + step));
+  applyZoom(section);
+}
+
+async function loadSeating() {
+  try {
+    seatingState = await api("/api/seating", {});
+  } catch (err) { toast(err.message, true); return; }
+  renderSeating();
+}
 
 // ---------------------------------------------------------------- setup --
 
@@ -1874,6 +2042,14 @@ async function boot() {
   document.getElementById("print-save").onclick = savePrint;
   document.getElementById("print-revert").onclick = revertPrint;
   document.getElementById("print-reset").onclick = resetPrint;
+  document.getElementById("seat-versions").onchange = renderSeating;
+  document.getElementById("seat-labels").onchange = renderSeating;
+  document.getElementById("seat-in").onclick = () => zoomBy(0.1);
+  document.getElementById("seat-out").onclick = () => zoomBy(-0.1);
+  document.getElementById("seat-fit").onclick = () => {
+    seatingZoom = null;
+    applyZoom(seatingState.room.sections[seatingSection]);
+  };
   document.getElementById("setup-signin").onclick = signInToGoogle;
   document.getElementById("setup-create").onclick = () =>
     runSetup("/api/setup/create", {

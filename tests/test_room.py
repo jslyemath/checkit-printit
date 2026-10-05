@@ -453,3 +453,157 @@ class TestWhenLettersRunShort:
             room_mod.seats_of(s), room_mod.group_of(s), "ABCD",
             rng=random.Random(29))
         assert len(clashes) <= 44
+
+
+class TestTheShapePalette:
+    """Desks a room can be drawn with. The anchors are a starting point --
+    a real room has a table against a wall with nobody on the far side --
+    so they are copied into the shape and dragged from there."""
+
+    @pytest.mark.parametrize("kind", sorted(room_mod.SHAPES))
+    def test_every_shape_can_be_made(self, kind):
+        shape = room_mod.make_shape(kind, (100, 100), "s1")
+        spec = room_mod.SHAPES[kind]
+        assert len(shape["seats"]) == len(spec["seats"])
+        assert shape["kind"] == kind and shape["at"] == [100, 100]
+
+    @pytest.mark.parametrize("kind", sorted(room_mod.SHAPES))
+    def test_the_seats_sit_inside_the_shape(self, kind):
+        """An anchor outside its own desk is a typo in the table, and the
+        card would float off the edge of it on the canvas."""
+        spec = room_mod.SHAPES[kind]
+        for sx, sy in spec["seats"]:
+            assert abs(sx) <= spec["w"] / 2, f"{kind}: {sx} is off the side"
+            assert abs(sy) <= spec["h"] / 2, f"{kind}: {sy} is off the end"
+
+    @pytest.mark.parametrize("kind", sorted(room_mod.SHAPES))
+    def test_the_seats_are_far_enough_apart_to_read(self, kind):
+        """A card is 104 by 54. Two anchors closer than that overlap, and
+        two overlapping names on a projector are worse than none."""
+        import math
+        seats = room_mod.SHAPES[kind]["seats"]
+        for i, a in enumerate(seats):
+            for b in seats[i + 1:]:
+                assert abs(a[0] - b[0]) >= 104 or abs(a[1] - b[1]) >= 54, \
+                    f"{kind}: {a} and {b} overlap"
+
+    def test_seat_ids_are_unique_within_a_shape(self):
+        ids = [s["id"] for s in
+               room_mod.make_shape("table-2x2", (0, 0), "t9")["seats"]]
+        assert len(set(ids)) == len(ids)
+
+    def test_a_shape_that_does_not_exist_says_what_does(self):
+        with pytest.raises(room_mod.RoomError, match="table-2x2"):
+            room_mod.make_shape("banquette", (0, 0), "s1")
+
+
+class TestWhatTheCanvasIsHanded:
+    @pytest.fixture
+    def course(self, tmp_path, monkeypatch, bank_dir):
+        from checkit_printit import course as course_mod
+        from checkit_printit import gui as gui_mod
+        from checkit_printit import roster as roster_mod
+        from checkit_printit.roster import Roster, Student
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(tmp_path))
+        course_mod.init("P", bank=str(bank_dir), adopt=None)
+        people = Roster([
+            Student(name="Ada Lovelace", skills=[], sid="806001"),
+            Student(name="Prince", skills=[], sid="806002"),
+            Student(name="Augusta Lovelace", skills=[], sid="806003",
+                    preferred="Ada B Lovelace"),
+        ])
+        with open(course_mod.file_in("P", "roster"), "w",
+                  encoding="utf-8") as f:
+            f.write(roster_mod.to_toml(people, "test"))
+        return gui_mod.Course("P"), gui_mod
+
+    def test_a_course_with_no_room_drawn_still_loads(self, course):
+        obj, gui_mod = course
+        out = gui_mod.api_seating(obj, {})
+        assert out["room"]["sections"] == []
+        assert out["shapes"], "the palette is what lets you draw the first one"
+
+    def test_names_arrive_split_for_a_two_line_card(self, course):
+        obj, gui_mod = course
+        names = gui_mod.api_seating(obj, {})["names"]
+        assert names["806001"] == {"full": "Ada Lovelace",
+                                   "top": "Ada", "bottom": "Lovelace"}
+
+    def test_one_word_is_one_line(self, course):
+        """Not "Prince" over an empty second line, which reads as a card
+        that failed to load."""
+        obj, gui_mod = course
+        assert gui_mod.api_seating(obj, {})["names"]["806002"] == {
+            "full": "Prince", "top": "Prince", "bottom": ""}
+
+    def test_it_splits_once_not_on_every_space(self, course):
+        """The bottom line is everything after the first name, so a
+        middle name or a compound surname stays together."""
+        obj, gui_mod = course
+        assert gui_mod.api_seating(obj, {})["names"]["806003"]["bottom"] == \
+            "B Lovelace"
+
+    def test_it_is_the_printed_name(self, course):
+        """The card shows what the paper shows, so a student holding one
+        can be found in the room."""
+        obj, gui_mod = course
+        assert gui_mod.api_seating(obj, {})["names"]["806003"]["full"] == \
+            "Ada B Lovelace"
+
+    def test_the_room_comes_through(self, course, tmp_path):
+        from checkit_printit import course as course_mod
+        obj, gui_mod = course
+        r = room_mod.empty("ABCD")
+        section = room_mod.new_section("820", order=1)
+        section["shapes"].append(
+            room_mod.make_shape("table-2x2", (300, 200), "s1"))
+        r["sections"].append(section)
+        room_mod.save(course_mod.file_in("P", "room"), r)
+
+        out = gui_mod.api_seating(obj, {})
+        assert [s["name"] for s in out["room"]["sections"]] == ["820"]
+        assert len(out["room"]["sections"][0]["shapes"][0]["seats"]) == 4
+
+    def test_the_route_is_wired(self):
+        from checkit_printit import gui as gui_mod
+        assert gui_mod.ROUTES["/api/seating"] is gui_mod.api_seating
+
+
+class TestTheRoomIsItsOwnFile:
+    """The room is JSON the app writes; the chart is TOML the build reads.
+    They live in the same folder and nothing said they must differ, so
+    pointing one at the other broke no test -- and saving a room would
+    then have written JSON over a seating chart."""
+
+    def test_the_two_files_are_not_the_same_file(self):
+        from checkit_printit import course as course_mod
+        assert course_mod.FILENAMES["room"] != course_mod.FILENAMES["seating"]
+
+    def test_and_their_paths_differ(self, tmp_path, monkeypatch):
+        from checkit_printit import course as course_mod
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(tmp_path))
+        assert (course_mod.file_in("P", "room")
+                != course_mod.file_in("P", "seating"))
+
+    def test_the_room_is_json_and_the_chart_is_toml(self):
+        from checkit_printit import course as course_mod
+        assert course_mod.FILENAMES["room"].endswith(".json")
+        assert course_mod.FILENAMES["seating"].endswith(".toml")
+
+    def test_saving_a_room_leaves_the_chart_alone(self, tmp_path,
+                                                  monkeypatch, bank_dir):
+        """The one that would actually hurt: a chart is the only record of
+        where a class sits, and the build reads it."""
+        from checkit_printit import course as course_mod
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(tmp_path))
+        course_mod.init("P", bank=str(bank_dir), adopt=None)
+        chart = course_mod.file_in("P", "seating")
+        with open(chart, "w", encoding="utf-8") as f:
+            f.write('versions = ["A", "B"]\n\n[[group]]\nseats = ["X"]\n')
+        before = open(chart, encoding="utf-8").read()
+
+        r = room_mod.empty("ABCD")
+        r["sections"].append(room_mod.new_section("820"))
+        room_mod.save(course_mod.file_in("P", "room"), r)
+
+        assert open(chart, encoding="utf-8").read() == before

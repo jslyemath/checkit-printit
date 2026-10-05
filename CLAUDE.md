@@ -360,7 +360,7 @@ against a real Google account" and "7b against a real response" in
 | 8e | the response pull | done -- Print job's first card |
 | 8h | **Setup** | half done -- a form can be created or attached from the app; the boilerplate editor is still to come |
 | 8e | **Record** | next |
-| 8f | **Seating** | stage 1 done -- `room.py`, the version colouring, and the chart writer. The canvas is next |
+| 8f | **Seating** | stages 1-2 done -- `room.py`, the colouring, the chart writer, and the canvas. Dragging is next |
 | 8g | **Cold call** | not started; genuinely new code |
 | 8h | **Setup** | not started -- create a form from the app, and the boilerplate editor |
 
@@ -418,6 +418,7 @@ rather than widths, and a column hidden by a rule that beat `[hidden]`.
 | connecting a course to a form | `provision.py` |
 | where the desks are, and who sits at them | `room.py` |
 | the chart a room produces | `seating.to_toml` |
+| the desks a room can be drawn with | `room.SHAPES` |
 | which spellings a seat may use | `seating.index_by_name` |
 | dropping a student | `roster.set_dropped` |
 | the open list, the assessment | `availability.set_open`, `set_assessment` |
