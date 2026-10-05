@@ -836,13 +836,12 @@ const MODES = [
   { value: "view", label: "View",
     hint: "Nothing moves. This is the view for the projector." },
   { value: "people", label: "People",
-    hint: "Drag a name to another chair. Dropping it on somebody swaps "
-      + "the two, and the version letters stay with the chairs, so "
-      + "neighbours still differ. Drop a name on the strip below the room "
-      + "to stand them up again." },
+    hint: "Drag a name to another chair; dropping it on somebody swaps "
+      + "the two. Letters stay with the chairs, so neighbours still "
+      + "differ. The strip below stands someone up." },
   { value: "desks", label: "Desks",
-    hint: "Drag a desk and everyone sitting at it comes with it. Click one "
-      + "and the arrow keys nudge it by " + GRID + " — hold shift for 1." },
+    hint: "Drag a desk and its people come too. Click one and the arrows "
+      + "nudge it by " + GRID + " — hold shift for 1." },
 ];
 
 function seatingCanvas() {
@@ -1348,17 +1347,13 @@ function applyZoom(section) {
      window and wrong by two hundred pixels at 530, where the toolbars
      wrap and the mode hint runs to three lines.
 
-     The half below is the one that actually broke something. The save
-     bar is sticky to the bottom of the window, so the moment the page is
-     a pixel taller than the window it lifts out of the flow and covers
-     whatever is above it -- which was the tray. The standing students
-     stayed perfectly visible and became impossible to pick up, while
-     dropping *into* the tray went on working, because that test is
-     geometry and not a hit test. Nothing on screen said why. */
-  const bar = document.querySelector("#view-seating .savebar");
+     The half below is the tray and the save bar, which stick to the
+     bottom together. Sizing the canvas around them is what keeps the
+     page from needing to scroll at all; that the two cannot cover each
+     other when it does is the dock's job, not this sum's. */
+  const dock = document.querySelector("#view-seating .dock");
   const above = wrap.getBoundingClientRect().top + window.scrollY;
-  const below = document.getElementById("seat-tray").offsetHeight
-    + (bar ? bar.offsetHeight : 0) + 18;     // the gaps around the two
+  const below = (dock ? dock.offsetHeight : 0) + 10;
   const room_for_it = Math.max(200, window.innerHeight - above - below);
   wrap.style.height =
     Math.min(size.height * zoom + 2, room_for_it) + "px";

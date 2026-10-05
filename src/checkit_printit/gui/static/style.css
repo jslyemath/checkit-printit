@@ -705,6 +705,18 @@ tr.warnrow td { color: var(--dirty); }
   background: color-mix(in srgb, var(--accent) 18%, var(--bg));
 }
 
+/* The tray and the save bar, stuck to the bottom as one piece. The bar
+   is sticky in its own right for the Print job tab; nested here it has
+   nowhere to travel, which is the point -- it can no longer slide up
+   over the tray. */
+.dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: var(--bg);
+}
+.dock .savebar { margin-top: 8px; }
+
 /* Everyone with no chair, and the place to drop someone to stand them
    up. It keeps its height when empty so it is still a target. */
 .tray {
