@@ -323,11 +323,170 @@ def ordered_groups(section):
     return out
 
 
+def empty_seats_for(room, ids):
+    """Take these students out of their chairs, and leave the chairs.
+
+    Emptied rather than removed, for the reason the chart gives: a seat
+    carries its version letter, so taking the seat away would re-letter
+    everyone else at that table because one person left.
+
+    Returns how many chairs were emptied. Takes several ids for one
+    student because a room may have been written under an older key.
+    """
+    wanted = {i for i in ids if i}
+    count = 0
+    for section in room.get("sections") or []:
+        for shape in section.get("shapes") or []:
+            for seat in shape.get("seats") or []:
+                if seat.get("student") and seat["student"] in wanted:
+                    seat["student"] = ""
+                    count += 1
+    return count
+
+
 def unplaced(section):
     """Groups with no position in the print order, for the warning."""
     return [g.get("label") or g.get("id")
             for g in (section.get("groups") or [])
             if g.get("order") is None]
+
+
+def _number(value):
+    """A real, finite number -- and not a bool.
+
+    `isinstance(True, int)` is true in Python and `json` turns `true` into
+    a bool, so without the second test a seat could sit at `[true, true]`
+    and be drawn, quite legally, at (1, 1).
+    """
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def _point(value, what):
+    if (not isinstance(value, (list, tuple)) or len(value) != 2
+            or not all(_number(n) for n in value)):
+        raise RoomError(
+            f"{what}: {value!r} is not a position. A position is two "
+            f"numbers -- and a NaN among them is worse than a wrong one, "
+            f"because every comparison against NaN is false, so the seat "
+            f"would quietly be nobody's neighbour and clash on paper.")
+
+
+def check(room, known=None):
+    """Refuse a room that would print wrongly, before it is written.
+
+    This is the boundary. A room arriving from the browser is the only one
+    this code did not build itself, and `save` deliberately does **not**
+    call this -- the CLI and the tests build small partial rooms on
+    purpose -- so the guard sits where untrusted data actually arrives
+    rather than at every place a room is written.
+
+    Every rule here is one that fails **quietly** downstream, which is
+    what earns it a refusal rather than a shrug:
+
+    * a shape of a kind this build does not know is skipped by the canvas,
+      so the desk and everyone at it vanish from the drawing while staying
+      in the file;
+    * a student in two seats is printed twice and appears twice in the
+      chart;
+    * a student in a seat the roster has never heard of has nothing
+      printed for them at all.
+
+    `known` is the ids a seat may name -- every key the roster answers to,
+    not only the preferred one, so a room written before a student gained
+    an SID still loads. None means there is no roster to check against.
+    """
+    if not isinstance(room, dict):
+        raise RoomError("a room is a JSON object.")
+    if room.get("schema") != VERSION:
+        raise RoomError(
+            f"that room says schema {room.get('schema')!r}; this printit "
+            f"reads and writes {VERSION}.")
+
+    versions = room.get("versions")
+    if not isinstance(versions, list) or not versions:
+        raise RoomError(
+            "a room needs at least one version letter: they are what it "
+            "has to hand out.")
+    for v in versions:
+        if not isinstance(v, str) or not v.strip():
+            raise RoomError(f"{v!r} is not a version letter.")
+
+    sections = room.get("sections")
+    if not isinstance(sections, list):
+        raise RoomError("a room's sections are a list.")
+
+    everywhere, seated = {}, {}
+    for section in sections:
+        if not isinstance(section, dict):
+            raise RoomError("a section is a JSON object.")
+        where = section.get("name") or "an unnamed section"
+
+        canvas = section.get("canvas") or {}
+        for side in ("width", "height"):
+            if not _number(canvas.get(side)) or canvas[side] <= 0:
+                raise RoomError(
+                    f"{where}: the canvas {side} is {canvas.get(side)!r}, "
+                    f"which is not a size.")
+
+        shapes = section.get("shapes")
+        if not isinstance(shapes, list):
+            raise RoomError(f"{where}: the shapes are a list.")
+
+        here = set()
+        for shape in shapes:
+            if not isinstance(shape, dict):
+                raise RoomError(f"{where}: a shape is a JSON object.")
+            kind = shape.get("kind")
+            if kind not in SHAPES:
+                raise RoomError(
+                    f"{where}: {kind!r} is not a shape. There is "
+                    f"{', '.join(sorted(SHAPES))}.")
+            _point(shape.get("at"), f"{where}: the {kind}")
+
+            for seat in shape.get("seats") or []:
+                if not isinstance(seat, dict):
+                    raise RoomError(f"{where}: a seat is a JSON object.")
+                sid = seat.get("id")
+                if not isinstance(sid, str) or not sid:
+                    raise RoomError(f"{where}: a seat has no id.")
+                if sid in everywhere:
+                    raise RoomError(
+                        f"two seats are both called {sid!r}. A group names "
+                        f"its members by seat id, so a repeat puts the "
+                        f"wrong person in a group.")
+                everywhere[sid] = where
+                here.add(sid)
+                _point(seat.get("at"), f"{where}: seat {sid!r}")
+
+                who = seat.get("student") or ""
+                if not who:
+                    continue
+                if not isinstance(who, str):
+                    raise RoomError(f"{where}: {who!r} is not a student id.")
+                if who in seated:
+                    raise RoomError(
+                        f"{who} is sitting in two seats, {seated[who]} and "
+                        f"{sid}. They would be printed twice.")
+                seated[who] = sid
+                if known is not None and who not in known:
+                    raise RoomError(
+                        f"seat {sid} holds {who}, who is not on the roster. "
+                        f"Nothing would print for them.")
+
+        for group in section.get("groups") or []:
+            named = group.get("label") or group.get("id")
+            for sid in group.get("seats") or []:
+                if sid not in here:
+                    raise RoomError(
+                        f"{where}: group {named!r} names seat {sid!r}, "
+                        f"which is not in that room.")
+            order = group.get("order")
+            if order is not None and not isinstance(order, int):
+                raise RoomError(
+                    f"{where}: group {named!r} is {order!r} in the print "
+                    f"order, which is not a position.")
+    return room
 
 
 def load(path):

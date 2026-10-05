@@ -294,9 +294,12 @@ class DropResult:
     dropped: bool
     seats_emptied: int = 0
     seating_checked: bool = False
+    #: Chairs emptied in `room.json`, counted apart from the chart's so
+    #: one person leaving one chair is not reported as two seats.
+    room_emptied: int = 0
 
 
-def set_dropped(roster_path, who, dropped, seating_path=None):
+def set_dropped(roster_path, who, dropped, seating_path=None, room_path=None):
     """Flag a student dropped, or undo it. Empties their seat on the way out.
 
     The roster keeps them, because the print record refers to them. The
@@ -305,9 +308,17 @@ def set_dropped(roster_path, who, dropped, seating_path=None):
     version letters come from position, so deleting the entry would re-letter
     that student's tablemates.
 
+    **The room as well, when there is one.** The seating tab writes the
+    chart from `room.json`, so a drop that cleared only the chart would be
+    undone the next time anybody saved that tab -- the student would walk
+    back onto the printed list with nothing having gone wrong on screen.
+    The room matches on id, which is why it is passed the whole list of
+    keys rather than a name.
+
     Raises RosterError for a name that matches nothing or several people.
     Returns a DropResult; it never prints, so the CLI and the GUI can share it.
     """
+    from . import room as room_mod
     from . import seating as seating_mod
 
     people = load(roster_path)
@@ -337,6 +348,20 @@ def set_dropped(roster_path, who, dropped, seating_path=None):
         if count:
             with open(seating_path, "w", encoding="utf-8") as f:
                 f.write(new)
+
+    if dropped and room_path and os.path.isfile(room_path):
+        try:
+            room = room_mod.load(room_path)
+        except room_mod.RoomError:
+            # A room this printit cannot read is not one to rewrite. The
+            # chart has already been cleared, which is what stops the
+            # printing; the room is the drawing.
+            pass
+        else:
+            emptied = room_mod.empty_seats_for(room, keys_of(student))
+            if emptied:
+                room_mod.save(room_path, room)
+            result.room_emptied = emptied
     return result
 
 

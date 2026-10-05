@@ -642,3 +642,90 @@ tr.warnrow td { color: var(--dirty); }
 
 .tickline { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .tickline input { width: 15px; height: 15px; }
+
+/* ------------------------------------------------- seating: dragging -- */
+
+.hint { margin: 2px 0 8px; font-size: 12px; }
+
+/* Anything that can be picked up says so before it is touched. `grab`
+   rather than `pointer`: a hand that closes is the one gesture a canvas
+   can teach without a word of text. */
+.movable { cursor: grab; }
+.movable:active, .dragging { cursor: grabbing; }
+
+/* Only while desks are being moved. A grid on the projector view would be
+   noise, and at 20 units it is a texture rather than a ruler -- the
+   heavier line every 100 is the one you actually line a row up against. */
+.canvas.mode-desks {
+  background-image:
+    linear-gradient(to right, var(--line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--line) 1px, transparent 1px),
+    linear-gradient(to right,
+      color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom,
+      color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px);
+  background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
+}
+
+/* Grab the desk anywhere, including through the names on it: in this mode
+   a card is part of the furniture, not a thing of its own. */
+.canvas.mode-desks .seatcard,
+.canvas.mode-desks .glabel { pointer-events: none; }
+
+.shape.movable:hover { border-color: var(--accent); }
+.shape.movable:focus-visible,
+.shape.dragging { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The clipped shapes have no border to colour, so they get the tint. */
+.shape.hex.movable:hover, .shape.trapezoid.movable:hover {
+  background: color-mix(in srgb, var(--accent) 35%, var(--line));
+}
+
+/* The card left behind while its copy is on the cursor -- so a drag reads
+   as "this is going somewhere", not "this has gone". */
+.seatcard.lifted { opacity: .3; }
+
+/* The copy under the cursor. In `document.body`, because a transformed
+   ancestor makes `position: fixed` behave like `absolute` and the canvas
+   is scaled; the matching `scale()` is set on it as it is made, so it is
+   exactly the size of the card that was grabbed. */
+.seatcard.ghost {
+  position: fixed;
+  z-index: 60;
+  transform-origin: top left;
+  pointer-events: none;
+  opacity: .95;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
+}
+
+/* Where it would land. Solid even on an empty chair, which is otherwise
+   dashed, so the target never reads as "nothing here". */
+.seatcard.over {
+  border: 2px solid var(--accent);
+  border-style: solid;
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+}
+
+/* Everyone with no chair, and the place to drop someone to stand them
+   up. It keeps its height when empty so it is still a target. */
+.tray {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 62px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+.tray.over {
+  border-color: var(--accent);
+  border-style: solid;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.tray .seatcard { position: static; flex: 0 0 auto; }
+.traylabel {
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 4px;
+}
