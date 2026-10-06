@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>checkit-printit</title>
 <link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/seating/seating.css">
 </head>
 <body>
 <header>
@@ -194,81 +195,78 @@
     </div>
   </section>
 
-  <!-- No <h2> here, unlike the other views. The nav already says which
-       tab this is and highlights it, and a row that only repeats it cost
-       about 39px of the one view where vertical space is the whole
-       problem. -->
-  <section id="view-seating" class="view" hidden>
-    <div class="toolbar">
-      <div id="seat-sections" class="segmented"></div>
-      <div id="seat-modes" class="segmented"></div>
-      <span class="spacer"></span>
-      <button id="seat-present" class="primary"
-        title="The room on the whole screen, for the projector. Escape comes back.">Present</button>
-    </div>
-    <div class="toolbar">
-      <label class="tickline"><input type="checkbox" id="seat-versions"
-        checked> version letters</label>
-      <label class="tickline"><input type="checkbox" id="seat-labels"
-        checked> group labels</label>
-      <span class="spacer"></span>
-      <!-- One group, so a wrap never leaves the minus on its own row
-           away from the plus. -->
-      <span class="zoomer">
-        <button id="seat-out" title="Zoom out">&minus;</button>
-        <button id="seat-fit">Fit</button>
-        <button id="seat-in" title="Zoom in">+</button>
-        <span id="seat-zoom" class="muted"></span>
-      </span>
-    </div>
-    <!-- What this mode lets you do. A canvas offers no affordance of its
-         own: without a line of text, which thing is draggable is a
-         guess. -->
-    <p id="seat-hint" class="muted hint"></p>
-    <p id="seating-empty" class="muted" hidden></p>
-    <!-- Three elements, not two. `.canvas` is laid out at room size and
-         scaled, so its own layout box stays 984 wide however far it is
-         zoomed out -- and that box, not what you can see, is what the
-         scroller measures, which produced scrollbars for content that
-         was entirely on screen. `.canvasbox` is sized to the room's
-         *scaled* size and is what the scroller actually sees, and
-         `margin: auto` on it centres the room without clipping its top
-         left corner when it really is too big. -->
-    <div class="canvaswrap">
+  <!-- The seating view is an application, not a page with controls
+       around a canvas. Its canvas runs edge to edge and its own
+       controls float over it as islands; Present does exactly one
+       thing, which is hide the host's header. Specified in
+       ../../../../../checkit/PRINT_TOOL_DESIGN.md, section 12.12.
+
+       Five fixed positions, each answering one question. Nothing lands
+       in a position because there was room for it there. -->
+  <section id="view-seating" class="view seatapp" hidden>
+
+    <div class="paper">
       <div id="canvasbox" class="canvasbox">
         <div id="canvas" class="canvas"></div>
       </div>
+      <p id="seating-empty" class="emptyroom" hidden></p>
     </div>
+
+    <!-- top left: which room am I in, and is it saved -->
+    <div class="isle at-tl">
+      <button id="seat-menu" class="ibtn" title="Room menu"
+        aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <span class="isep foldaway"></span>
+      <div id="seat-sections" class="seg foldaway"></div>
+      <!-- Save is absent until there is something to save. Most of the
+           time a Save button is a button with nothing to do. -->
+      <span id="seat-saving" hidden>
+        <span class="isep"></span>
+        <span class="pip" title="unsaved changes"></span>
+        <button id="seat-save" class="ibtn key">Save</button>
+      </span>
+    </div>
+
+    <!-- top right: take this somewhere else. Nothing else, ever. -->
+    <div class="isle at-tr">
+      <button id="seat-present" class="ibtn key"
+        title="The room on the whole screen. Escape comes back.">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+        <span class="foldaway">Present</span>
+      </button>
+    </div>
+
+    <!-- the right edge: who is not seated yet -->
+    <div id="seat-pen" class="pen" hidden></div>
+
+    <!-- bottom left: what am I looking at. Same corner at every width. -->
+    <div class="isle at-bl">
+      <button id="seat-out" class="ibtn" title="Zoom out">&minus;</button>
+      <button id="seat-zoom" class="ibtn zoomnum" title="Fit the room"></button>
+      <button id="seat-in" class="ibtn" title="Zoom in">+</button>
+    </div>
+
+    <!-- what is selected: one thin strip, with no expanded state -->
+    <div id="seat-strip" class="isle strip" hidden></div>
+
+    <!-- bottom centre: what am I doing. Modes only. -->
+    <div id="seat-modes" class="isle at-bc rail"></div>
+
     <!-- Shown only while presenting: which room this is, and the way
-         out. Both are things a person standing at the front has no
-         other way to check. -->
-    <div id="seat-stage" class="stage" hidden>
+         out. Both are things a person at the front cannot otherwise
+         check. -->
+    <div id="seat-stage" class="stagebar" hidden>
       <span id="stage-section"></span>
-      <span id="stage-keys" class="muted"></span>
+      <span id="stage-keys"></span>
     </div>
-    <!-- The tray and the save bar stick to the bottom together.
 
-         Separately, the sticky save bar lifted out of the flow and
-         covered the tray the moment the page outgrew the window, which
-         made the standing students impossible to pick up while leaving
-         them perfectly visible. Sizing the canvas around both fixed it
-         down to a point and then it came back at a short window, because
-         the canvas has a floor. Stacked in one sticky box they cannot
-         cover each other at any height. -->
-    <div class="dock">
-      <!-- Everyone on the roster with no chair. Also where you drop
-           someone to stand them up again, so that gesture has a visible
-           target rather than being "drag it far enough away". -->
-      <div id="seat-tray" class="tray" hidden></div>
-
-      <div class="savebar">
-        <span id="seat-news" class="news" hidden></span>
-        <span class="spacer"></span>
-        <span id="seat-dirty" class="dirty" hidden></span>
-        <button id="seat-save" class="primary" disabled>Save</button>
-        <button id="seat-revert" disabled>Discard</button>
-      </div>
-    </div>
+    <!-- The menu's contents: everything that is neither a mode nor
+         frequent. The rule is the inverse of the rail's -- if it
+         changes what the canvas *is* rather than what a click *does*,
+         it belongs here. -->
+    <div id="seat-sheet" class="sheet" hidden></div>
   </section>
 
   <section id="view-setup" class="view" hidden>
@@ -354,5 +352,6 @@
 
 <script>window.PRINTIT_TOKEN = "__TOKEN__";</script>
 <script src="/app.js"></script>
+<script src="/seating/seating.js"></script>
 </body>
 </html>
