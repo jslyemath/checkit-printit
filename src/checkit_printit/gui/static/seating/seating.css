@@ -153,6 +153,15 @@
 .strip .sord { font-variant-numeric: tabular-nums; color: var(--isle-ink);
                background: var(--isle-2); border-radius: 6px;
                padding: 3px 8px; cursor: pointer; font-size: 12px; }
+.strip .tiny { padding: 4px 7px; min-height: 0; font-size: 13px; }
+.strip .plus {
+  margin-left: 4px; min-width: 32px; padding: 4px 8px;
+  font-size: 17px; font-weight: 600; line-height: 1;
+  background: var(--isle-2); color: var(--isle-ink);
+}
+.strip .plus:hover, .strip .plus.on {
+  background: var(--isle-key); color: var(--isle-key-ink);
+}
 .strip .srename {
   font: inherit; font-weight: 600; width: 150px;
   padding: 3px 7px; border-radius: 6px;
@@ -181,12 +190,43 @@
    the sections. Two more buttons in the row that is already there --
    not a panel, not a menu, and no captions: what they do shows on the
    canvas the moment they are pressed. */
-.shows { display: flex; align-items: center; gap: 3px; }
+/* Slides out rather than appearing. `max-width` is what can be
+   animated here -- `width: auto` cannot -- and 170px is comfortably
+   more than the two buttons need. */
+.shows {
+  display: flex; align-items: center; gap: 3px;
+  overflow: hidden;
+  max-width: 170px;
+  opacity: 1;
+  transition: max-width .18s ease, opacity .18s ease, margin .18s ease;
+}
+.shows.shut { max-width: 0; opacity: 0; margin-left: -4px; }
 .showbtn { padding: 5px 8px; min-width: 32px; }
 .showbtn .glyph { font-weight: 800; font-size: 14px; line-height: 1; }
 
-/* The furniture, its own island directly above the mode that uses it. */
-.palette { bottom: 84px; left: 50%; transform: translateX(-50%); gap: 2px; }
+/* The furniture, in a column that unrolls upward out of the plus at
+   the end of the strip, and rolls back into it. */
+.palette {
+  bottom: 128px;
+  right: 50%;
+  margin-right: -148px;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  padding: 0;
+  border-color: transparent;
+  max-height: 0;
+  opacity: 0;
+  box-shadow: none;
+  transition: max-height .2s ease, opacity .16s ease, padding .2s ease;
+}
+.palette.open {
+  max-height: 320px;
+  opacity: 1;
+  padding: 5px;
+  border-color: var(--isle-line);
+  box-shadow: var(--isle-shadow);
+}
 .deskopt {
   font: inherit; display: flex; align-items: center; justify-content: center;
   width: 40px; height: 36px; padding: 0;
@@ -234,8 +274,24 @@
    everything that belongs to the desk is inside it, so all of it
    moves and turns together. */
 .deskwrap { position: absolute; }
-.deskwrap.chosen .shape { outline: 2px solid var(--solid);
-                          outline-offset: 2px; }
+.deskwrap.chosen::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border: 1.5px solid var(--solid);
+  border-radius: 7px;
+  pointer-events: none;
+}
+/* While a seat is being dragged over it in Seats mode. */
+.deskwrap.adopting::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border: 2px dashed var(--isle-key);
+  border-radius: 7px;
+  background: oklch(0.82 0.115 165 / .12);
+  pointer-events: none;
+}
 
 /* Pull an edge or a corner. Round, because they are not the square
    anchors the label snaps to -- two kinds of point on one desk need
@@ -357,9 +413,13 @@
   position: absolute; top: 1px; right: 4px;
   font-size: 13px; font-weight: 800; color: var(--solid);
 }
+/* An empty seat has to be as findable as a full one: it is where you
+   are about to put somebody. It used to be a faint dashed outline on
+   a pale table and was effectively invisible -- on a round table the
+   ring of them read as a second outline on the furniture. */
 .seatcard.empty {
-  border-style: dashed;
-  background: none;
+  border: 2px dashed oklch(0.60 calc(0.09 * var(--c, 1)) var(--h, 255));
+  background: oklch(1 0 0 / .45);
   box-shadow: none;
   color: var(--faint);
 }
@@ -384,8 +444,7 @@
   color: white;
   font-size: 13px;
   font-weight: 700;
-  letter-spacing: .07em;
-  text-transform: uppercase;
+  letter-spacing: .03em;
   white-space: nowrap;
   cursor: pointer;
   box-shadow: 0 2px 6px oklch(0.4 0.06 var(--h, 255) / .35);
@@ -399,7 +458,7 @@
 .pillrename {
   position: absolute; transform: translate(-50%, -50%);
   font: inherit; font-size: 13px; font-weight: 700; text-align: center;
-  letter-spacing: .07em; text-transform: uppercase;
+  letter-spacing: .03em;
   padding: 3px 10px; border-radius: 999px;
   background: white; color: oklch(0.25 0.01 260);
   border: 2px solid oklch(0.45 0.02 260);
@@ -467,7 +526,8 @@
 /* Only while desks are being moved. A grid on the projector would be
    noise; at 20 units it is a texture rather than a ruler, and the
    heavier line every 100 is the one you line a row up against. */
-.canvas.mode-desks {
+.canvas.mode-groups,
+.canvas.mode-seats {
   background-image:
     linear-gradient(to right, oklch(0.86 0.006 255) 1px, transparent 1px),
     linear-gradient(to bottom, oklch(0.86 0.006 255) 1px, transparent 1px),
@@ -482,9 +542,9 @@
    so it keeps its pointer -- which costs the one spot it covers as a
    place to grab the desk, and that is a fair trade for not having to
    change mode to move a label. */
-.canvas.mode-desks .seatcard { pointer-events: none; }
-.canvas.mode-chairs .pill,
-.canvas.mode-desks .pill { pointer-events: auto; }
+.canvas.mode-groups .seatcard { pointer-events: none; }
+.canvas.mode-seats .pill,
+.canvas.mode-groups .pill { pointer-events: auto; }
 /* And nothing on the canvas takes a pointer while presenting. */
 .canvas.mode-view .seatcard,
 .canvas.mode-view .pill,
@@ -532,7 +592,7 @@
    dotted edge says "this is the seat, not the sitter" -- in Chairs
    mode you are dragging furniture that happens to have a name on it. */
 .seatcard.chairable { border-style: dotted; }
-.canvas.mode-chairs .deskwrap.chosen ~ .seatcard { border-style: solid; }
+.canvas.mode-seats .deskwrap.chosen ~ .seatcard { border-style: solid; }
 
 /* ---------------------------------------------------------- up next -- */
 
