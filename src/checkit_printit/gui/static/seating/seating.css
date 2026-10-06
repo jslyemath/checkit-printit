@@ -1,0 +1,437 @@
+/* The seating view's own stylesheet.
+
+   Separate from style.css because Seating and Up Next are to become
+   their own application; see PRINT_TOOL_DESIGN.md 12.12. Loaded after
+   style.css, and the only thing it takes from the host is a handful of
+   its custom properties.
+
+   A reminder that has already cost this project once: a stylesheet has
+   one namespace. Every class in here is global, so a name invented for
+   this view restyles anything else using it. `.card` did exactly that
+   to the Overview's stat cards. */
+
+.seatapp {
+  --paper:      oklch(0.971 0.003 255);
+  --paper-dot:  oklch(0.893 0.006 255);
+
+  /* The chrome. Dark over a light document, which is Figma's split and
+     earns itself twice here: it separates the thing being made from
+     the thing making it, and a light room is what a projector wants. */
+  --isle:      oklch(0.255 0.012 260);
+  --isle-2:    oklch(0.320 0.013 260);
+  --isle-line: oklch(0.380 0.015 260);
+  --isle-ink:  oklch(0.955 0.004 260);
+  --isle-dim:  oklch(0.700 0.010 260);
+  --isle-key:  oklch(0.820 0.115 165);
+  --isle-key-ink: oklch(0.230 0.040 165);
+
+  --isle-shadow: 0 6px 22px oklch(0.2 0.02 260 / .30),
+                 0 1px 3px oklch(0.2 0.02 260 / .22);
+
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+
+/* ------------------------------------------------------------- paper -- */
+
+.paper {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  overflow: auto;
+  background:
+    radial-gradient(var(--paper-dot) 1.1px, transparent 1.1px) 0 0 / 26px 26px,
+    var(--paper);
+}
+/* `margin: auto` rather than `justify-content: center`: both centre a
+   small room, but only this one keeps the top left corner reachable
+   when the room is bigger than the box. */
+.canvasbox { position: relative; margin: auto; flex: 0 0 auto; }
+.canvas { position: absolute; top: 0; left: 0; transform-origin: top left; }
+
+.emptyroom {
+  position: absolute; left: 50%; top: 45%;
+  transform: translate(-50%, -50%);
+  max-width: 320px; text-align: center;
+  color: oklch(0.52 0.012 260); font-size: 13px;
+}
+
+/* ----------------------------------------------------------- islands -- */
+
+.isle {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  background: var(--isle);
+  border: 1px solid var(--isle-line);
+  border-radius: 12px;
+  box-shadow: var(--isle-shadow);
+  color: var(--isle-ink);
+}
+.ibtn {
+  font: inherit;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--isle-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ibtn:hover { background: var(--isle-2); color: var(--isle-ink); }
+.ibtn.on,
+.ibtn.key { background: var(--isle-key); color: var(--isle-key-ink);
+            font-weight: 600; }
+.ibtn.soonish { opacity: .5; }
+.ibtn svg { width: 17px; height: 17px; fill: none; stroke: currentColor;
+            stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.isep { width: 1px; align-self: stretch; background: var(--isle-line);
+        margin: 2px 1px; }
+.pip { width: 8px; height: 8px; border-radius: 50%;
+       background: var(--isle-key); margin: 0 3px 0 5px; }
+.zoomnum { min-width: 52px; justify-content: center;
+           font-variant-numeric: tabular-nums; }
+#seat-sections { display: flex; gap: 3px; }
+
+.at-tl { top: 12px; left: 12px; }
+.at-tr { top: 12px; right: 12px; }
+.at-bl { bottom: 12px; left: 12px; }
+/* Centred, but `layoutBottom` re-centres it in the space the zoom
+   island leaves once the window is narrow enough for the two to meet. */
+.at-bc { bottom: 12px; left: 50%; transform: translateX(-50%);
+         justify-content: center; }
+
+/* The mode rail: the primary verb, where a hand rests. */
+.rail .ibtn { flex-direction: column; gap: 3px; padding: 6px 11px;
+              font-size: 11px; }
+.rail .ibtn svg { width: 19px; height: 19px; }
+
+/* The selection strip: thin, above the rail, with no expanded state.
+   Everything it needs is one row, which is what makes it work at 515px
+   where a panel did not. */
+.strip {
+  bottom: 84px; left: 50%; transform: translateX(-50%);
+  padding: 4px 6px; gap: 2px; font-size: 13px; max-width: calc(100% - 24px);
+}
+.strip .swatch {
+  width: 17px; height: 17px; border-radius: 50%; margin: 0 6px 0 4px;
+  border: 2px solid var(--isle-2); cursor: pointer; padding: 0;
+  background: oklch(0.585 calc(0.155 * var(--c, 1)) var(--h, 255));
+}
+.strip .sname { padding: 3px 7px; border-radius: 6px; cursor: text;
+                color: var(--isle-ink); font-weight: 600;
+                max-width: 190px; overflow: hidden;
+                text-overflow: ellipsis; white-space: nowrap; }
+.strip .sname:hover { background: var(--isle-2); }
+.strip .smeta { color: var(--isle-dim); font-size: 12px; padding: 0 6px; }
+.strip .sord { font-variant-numeric: tabular-nums; color: var(--isle-ink);
+               background: var(--isle-2); border-radius: 6px;
+               padding: 3px 8px; cursor: pointer; font-size: 12px; }
+
+/* The menu. Everything that is neither a mode nor frequent: if it
+   changes what the canvas *is* rather than what a click *does*, and it
+   is not done every few minutes, it is in here. */
+.sheet {
+  position: absolute; z-index: 6; top: 56px; left: 12px;
+  min-width: 200px; max-height: calc(100% - 120px); overflow: auto;
+  padding: 6px;
+  background: var(--isle); border: 1px solid var(--isle-line);
+  border-radius: 12px; box-shadow: var(--isle-shadow); color: var(--isle-ink);
+}
+.mgroup + .mgroup { border-top: 1px solid var(--isle-line); margin-top: 5px;
+                    padding-top: 5px; }
+.mhead { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+         color: var(--isle-dim); padding: 5px 9px 3px; }
+.mitem {
+  font: inherit; display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 9px; border: 0; border-radius: 7px; background: none;
+  color: var(--isle-ink); cursor: pointer; text-align: left;
+}
+.mitem:hover:not(:disabled) { background: var(--isle-2); }
+.mitem:disabled { color: var(--isle-dim); cursor: default; }
+.mitem::before {
+  content: ""; width: 14px; height: 14px; flex: 0 0 auto;
+  border-radius: 4px; border: 1px solid var(--isle-line);
+}
+.mitem.ticked::before {
+  background: var(--isle-key); border-color: var(--isle-key);
+}
+
+/* ---------------------------------------------------------- the room -- */
+
+/* A group owns a hue, and three shades come off it with three jobs.
+   `--c` scales the chroma, so an ungrouped student is the same three
+   roles at zero: being grey IS the status, and needs no caption. The
+   steps are Radix's -- 3 for a surface, 6 and 7 for borders, 9 for the
+   one solid thing, 12 for text on the pale shades. */
+.shape, .seatcard, .pill {
+  --surface:   oklch(0.935 calc(0.048 * var(--c, 1)) var(--h, 255));
+  --edge:      oklch(0.845 calc(0.075 * var(--c, 1)) var(--h, 255));
+  --facecard:  oklch(0.993 calc(0.011 * var(--c, 1)) var(--h, 255));
+  --face-edge: oklch(0.880 calc(0.055 * var(--c, 1)) var(--h, 255));
+  --solid:     oklch(0.585 calc(0.155 * var(--c, 1)) var(--h, 255));
+  --deep:      oklch(0.330 calc(0.085 * var(--c, 1)) var(--h, 255));
+  --faint:     oklch(0.520 calc(0.045 * var(--c, 1)) var(--h, 255));
+}
+
+/* A desk. The silhouette is the kind and nothing else changes. */
+.shape {
+  position: absolute;
+  background: var(--surface);
+  border: 1.5px solid var(--edge);
+  box-sizing: border-box;
+}
+.shape.rect { border-radius: 14px; }
+.shape.circle { border-radius: 50%; }
+.shape.hex {
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+  border: none;
+}
+.shape.trapezoid {
+  clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
+  border: none;
+}
+.shape.chosen { outline: 2px solid var(--solid); outline-offset: 2px; }
+
+/* A person. Two lines so the card is squarish -- a single long line of
+   "Bartholomew Achterberg" sets the whole room's spacing.
+
+   `.seatcard`, not `.card`: the Overview's stat cards already own that
+   name, and a second rule for it does not scope itself to this canvas.
+   It restyled those too, stacking all eight of them. */
+.seatcard {
+  position: absolute;
+  width: 104px;
+  min-height: 54px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 2px 4px;
+  border: 1.5px solid var(--face-edge);
+  border-radius: 8px;
+  background: var(--facecard);
+  line-height: 1.1;
+  text-align: center;
+  overflow: hidden;
+  box-shadow: 0 1px 2px oklch(0.4 0.02 var(--h, 255) / .18);
+}
+
+/* Most of the card should be ink. It used to carry 13px over 12px in a
+   box 54 tall -- under half of it letters -- which on a projector is
+   the whole difference between a name you can read from the back row
+   and one you cannot. The first name is sized per card by `nameSize`,
+   because the longest name in the class should not set the size of
+   every other one. */
+.seatcard .top { font-weight: 700; font-size: 20px; line-height: 1.05;
+                 color: var(--deep); }
+.seatcard .bottom {
+  font-size: 13px; line-height: 1.05; color: var(--faint);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+.seatcard .ver {
+  position: absolute; top: 1px; right: 4px;
+  font-size: 13px; font-weight: 800; color: var(--solid);
+}
+.seatcard.empty {
+  border-style: dashed;
+  background: none;
+  box-shadow: none;
+  color: var(--faint);
+}
+
+/* The off-screen card `nameSize` measures against: the same rules as a
+   real one, so what is measured is what gets drawn. */
+.seatcard.measuring {
+  left: -9999px; top: 0; width: auto; min-height: 0;
+  visibility: hidden; pointer-events: none;
+}
+.seatcard.measuring .top { white-space: nowrap; }
+
+/* The group's label. Its silhouette is the point: everything else in
+   the room is a rounded rectangle, so the one thing that is not reads
+   as a label rather than as another object. */
+.pill {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--solid);
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 2px 6px oklch(0.4 0.06 var(--h, 255) / .35);
+}
+.pill.chosen { outline: 2px solid white; outline-offset: 2px; }
+
+.roomnote {
+  position: absolute; transform: translate(-50%, -50%);
+  font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
+  color: oklch(0.55 0.01 260); pointer-events: none; white-space: nowrap;
+}
+
+/* ------------------------------------------------------- the unseated -- */
+
+/* The same card as a seated student, grey because it has no group.
+   Being grey is the status; an earlier "2 standing" said in words what
+   the design should carry. No container, because the cards are the
+   content and a box round them is a wall for no reason -- the well
+   appears only while a name is in the air. */
+.pen {
+  position: absolute;
+  z-index: 4;
+  top: 60px;
+  bottom: 74px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 7px;
+  overflow: auto;
+  border: 1px dashed transparent;
+  border-radius: 12px;
+}
+.pen.over {
+  border-color: var(--isle-key);
+  background: oklch(0.255 0.012 260 / .35);
+}
+.pen .seatcard {
+  position: static;
+  flex: 0 0 auto;
+  box-shadow: 0 3px 10px oklch(0.2 0.02 260 / .28);
+}
+
+/* ------------------------------------------------------------- moving -- */
+
+.movable { cursor: grab; }
+.movable:active, .dragging { cursor: grabbing; }
+
+/* Only while desks are being moved. A grid on the projector would be
+   noise; at 20 units it is a texture rather than a ruler, and the
+   heavier line every 100 is the one you line a row up against. */
+.canvas.mode-desks {
+  background-image:
+    linear-gradient(to right, oklch(0.86 0.006 255) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0.86 0.006 255) 1px, transparent 1px),
+    linear-gradient(to right, oklch(0.93 0.004 255) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0.93 0.004 255) 1px, transparent 1px);
+  background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
+}
+/* Grab the desk anywhere, including through the names on it: in this
+   mode a card is part of the furniture, not a thing of its own. */
+.canvas.mode-desks .seatcard,
+.canvas.mode-desks .pill { pointer-events: none; }
+/* And nothing on the canvas takes a pointer while presenting. */
+.canvas.mode-view .seatcard,
+.canvas.mode-view .pill,
+.canvas.mode-view .shape { pointer-events: none; }
+
+.shape.movable:hover { border-color: var(--solid); }
+.shape.movable:focus-visible,
+.shape.dragging { outline: 2px solid var(--solid); outline-offset: 1px; }
+
+/* The card left behind while its copy is on the cursor -- so a drag
+   reads as "this is going somewhere", not "this has gone". */
+.seatcard.lifted { opacity: .3; }
+
+/* The copy under the cursor. In `document.body`, because a transformed
+   ancestor makes `position: fixed` behave like `absolute` and the
+   canvas is scaled; the matching `scale()` is set as it is made, so it
+   is exactly the size of the card that was grabbed. */
+.seatcard.ghost {
+  position: fixed;
+  z-index: 60;
+  transform-origin: top left;
+  pointer-events: none;
+  opacity: .95;
+  box-shadow: 0 8px 22px oklch(0.2 0.02 260 / .45);
+}
+
+/* In hand, waiting for a chair. Distinct from `.over`, which is where
+   it would land: one is the name you are holding and the other is the
+   place, and both are on screen at once. */
+.seatcard.picked {
+  border: 2px solid var(--solid);
+  box-shadow: 0 0 0 3px oklch(0.585 0.155 var(--h, 255) / .30);
+}
+/* Where it would land. Solid even on an empty chair, which is
+   otherwise dashed, so the target never reads as "nothing here". */
+.seatcard.over {
+  border: 2px solid var(--solid);
+  border-style: solid;
+  background: oklch(0.585 0.155 var(--h, 255) / .16);
+}
+
+/* --------------------------------------------------------- presenting -- */
+
+/* Everything that is not the room goes away: on a projector a toolbar
+   is not a control anybody can reach, it is just less room.
+
+   Keyed on a class rather than `:fullscreen`, because fullscreen is a
+   permission a host can refuse and the mode still has to work when it
+   does. The one `:fullscreen` rule is the backdrop colour, which
+   nothing else can set. */
+#view-seating:fullscreen { background: var(--paper); }
+
+body.presenting header,
+body.presenting .isle,
+body.presenting .pen,
+body.presenting .sheet { display: none; }
+
+body.presenting main { padding: 0; max-width: none; }
+body.presenting .seatapp { border: 0; border-radius: 0; }
+
+/* Which room, and the way out. Small and dim: it is for the person at
+   the front, not for the back row. */
+.stagebar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 8px 16px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: oklch(0.58 0.012 260);
+  pointer-events: none;
+}
+.stagebar #stage-keys { font-size: 12px; text-transform: none;
+                        letter-spacing: 0; color: oklch(0.68 0.01 260); }
+
+/* ------------------------------------------------------------- narrow -- */
+
+/* One breakpoint. The rail drops its words, the sections fold into the
+   menu, the rail of unseated narrows. Nothing moves to a different
+   corner -- that was the fault in the first draft, where zoom was
+   bottom left when wide and top right when narrow. */
+@media (max-width: 760px) {
+  .foldaway { display: none; }
+  .rail .ibtn { padding: 6px 7px; }
+  .rail .ilabel { display: none; }
+  .rail .ibtn svg { width: 20px; height: 20px; }
+  .at-bl .ibtn { padding: 6px 8px; }
+  .zoomnum { min-width: 44px; }
+  .pen { top: 54px; bottom: 132px; padding: 5px; gap: 6px; }
+  .pen .seatcard { width: 86px; min-height: 46px; }
+  .pen .seatcard .top { font-size: 18px !important; }
+  .pen .seatcard .bottom { font-size: 11px !important; }
+  .strip { bottom: 78px; }
+  .sheet { top: 50px; }
+}
