@@ -186,6 +186,61 @@ class TestTheRoomComingBackIsChecked:
         with pytest.raises(room_mod.RoomError, match="print order"):
             room_mod.check(r)
 
+    def test_a_colour_is_an_angle_on_the_wheel(self):
+        """One number, because the three shades the canvas draws are
+        derived from it rather than stored."""
+        r = a_room()
+        group = r["sections"][0]["groups"][0]
+        group["hue"] = 150
+        assert room_mod.check(r) is not None
+        # No hue at all is the normal state: a group that has never
+        # been coloured takes one off the palette by position.
+        group["hue"] = None
+        assert room_mod.check(r) is not None
+        for bad in (-1, 360, 400, "blue", True, float("nan")):
+            group["hue"] = bad
+            with pytest.raises(room_mod.RoomError, match="colour wheel"):
+                room_mod.check(r)
+
+    def test_a_label_may_only_hang_on_a_desk_that_is_there(self):
+        """It would silently fall back to the middle of the group's
+        seats, and look like the anchor had been forgotten."""
+        r = a_room()
+        r["sections"][0]["groups"][0]["label_at"] = {"shape": "s1",
+                                                     "anchor": "s"}
+        assert room_mod.check(r) is not None
+        r["sections"][0]["groups"][0]["label_at"] = {"shape": "s9",
+                                                     "anchor": "s"}
+        with pytest.raises(room_mod.RoomError, match="not a desk"):
+            room_mod.check(r)
+
+    def test_a_label_sits_in_one_of_the_nine_places(self):
+        r = a_room()
+        for anchor in room_mod.ANCHORS:
+            r["sections"][0]["groups"][0]["label_at"] = {"shape": "s1",
+                                                         "anchor": anchor}
+            assert room_mod.check(r) is not None
+        r["sections"][0]["groups"][0]["label_at"] = {"shape": "s1",
+                                                     "anchor": "middle-ish"}
+        with pytest.raises(room_mod.RoomError) as caught:
+            room_mod.check(r)
+        assert "nw" in str(caught.value), "say what the nine are"
+
+    def test_the_canvas_draws_the_nine_the_model_allows(self):
+        """Two copies of the same list, in two languages: the model
+        checks the names and the canvas draws the positions. They have
+        to agree, and nothing but a test can make them."""
+        import pathlib
+        js = (pathlib.Path(__file__).parent.parent / "src" / "checkit_printit"
+              / "gui" / "static" / "seating" / "seating.js"
+              ).read_text(encoding="utf-8")
+        block = js.split("const ANCHORS = {", 1)[1].split("};", 1)[0]
+        drawn = {part.split(":")[0].strip()
+                 for part in block.split(",") if ":" in part}
+        assert drawn == set(room_mod.ANCHORS), (
+            f"the canvas draws {sorted(drawn)}, the model allows "
+            f"{sorted(room_mod.ANCHORS)}")
+
     def test_an_empty_chair_is_fine(self):
         """The commonest state in a real room, and an over-strict check
         is as much a bug as a missing one."""

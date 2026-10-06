@@ -41,6 +41,18 @@ class RoomError(Exception):
     pass
 
 
+#: The nine places a group's label may sit on a desk: eight around the
+#: perimeter and the middle, as fractions of the shape's own box. The
+#: same nine for every shape, because a hexagon's corners are not where
+#: a label wants to be and a rule that holds everywhere is one a person
+#: learns once.
+#:
+#: The canvas has its own copy of these fractions, since it is the one
+#: that draws them. This copy exists so the names can be *checked* on
+#: the way in -- see `check`.
+ANCHORS = ("nw", "n", "ne", "w", "c", "e", "sw", "s", "se")
+
+
 #: The desks and tables a room can be drawn with, and where people sit at
 #: them. Sizes are canvas units, which are CSS pixels at 100% zoom; a name
 #: card is 104 by 54, so a seat needs about that much room around its
@@ -474,6 +486,7 @@ def check(room, known=None):
                         f"seat {sid} holds {who}, who is not on the roster. "
                         f"Nothing would print for them.")
 
+        shape_ids = {s.get("id") for s in shapes}
         for group in section.get("groups") or []:
             named = group.get("label") or group.get("id")
             for sid in group.get("seats") or []:
@@ -486,6 +499,38 @@ def check(room, known=None):
                 raise RoomError(
                     f"{where}: group {named!r} is {order!r} in the print "
                     f"order, which is not a position.")
+
+            # A group's colour. One number, because the three shades
+            # the canvas draws are derived from it rather than stored,
+            # which is what keeps every group the same design.
+            hue = group.get("hue")
+            if hue is not None:
+                if not _number(hue) or not 0 <= hue < 360:
+                    raise RoomError(
+                        f"{where}: group {named!r} has hue {hue!r}, which "
+                        f"is not an angle on the colour wheel.")
+
+            # Where its label sits: a desk, and one of the nine places
+            # on that desk. Checked because a label pinned to a desk
+            # that is not there would silently fall back to the middle
+            # of the group's seats, and look like the anchor had simply
+            # been forgotten.
+            at = group.get("label_at")
+            if at is not None:
+                if not isinstance(at, dict):
+                    raise RoomError(
+                        f"{where}: group {named!r} has label_at {at!r}, "
+                        f"which is not a place.")
+                if at.get("shape") not in shape_ids:
+                    raise RoomError(
+                        f"{where}: group {named!r} hangs its label on "
+                        f"{at.get('shape')!r}, which is not a desk in "
+                        f"that room.")
+                if at.get("anchor") not in ANCHORS:
+                    raise RoomError(
+                        f"{where}: group {named!r} hangs its label at "
+                        f"{at.get('anchor')!r}. It is one of "
+                        f"{', '.join(sorted(ANCHORS))}.")
     return room
 
 
