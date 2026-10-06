@@ -42,6 +42,14 @@ let drawn = { shapes: {}, cards: {}, seats: [], labels: [], box: null };
 let showVersions = true;
 let showLabels = true;
 
+/* Up Next. `called` is everybody who has had a turn, so nobody is
+   asked twice before everybody has been asked once -- which is the
+   difference between picking at random and being fair. In memory
+   only: a call list is about this lesson, and one that survived a
+   reload would quietly be about last week. */
+let called = new Set();
+let calling = null;
+
 // ------------------------------------------------------------ constants --
 
 const GRID = 20;        // what a dragged desk snaps to, in room units
@@ -107,9 +115,10 @@ const MODES = [
   { value: "order", label: "Order", icon: "order",
     why: "The order papers are handed out in. Not built yet." },
   { value: "upnext", label: "Up Next", icon: "upnext",
-    why: "Pick somebody: the room with one chair lit up. Not built yet." },
+    why: "Pick somebody: the room, with one chair lit up. Space picks "
+      + "the next; nobody comes up twice until everybody has." },
 ];
-const BUILT = new Set(["view", "people", "desks"]);
+const BUILT = new Set(["view", "people", "desks", "upnext"]);
 
 // --------------------------------------------------------------- helpers --
 
@@ -329,6 +338,10 @@ function goToSection(i) {
   seatingSection = i;
   selected = null;
   picked = null;
+  // The turn belongs to the room that is on screen. Carried across,
+  // the count would be measured against a roomful of different people.
+  calling = null;
+  called = new Set();
   seatingZoom = null;              // each room fits on its own terms
   renderSeating();
 }
@@ -337,7 +350,8 @@ function drawRoom(section) {
   const s = seatingState;
   const canvas = seatingCanvas();
   canvas.textContent = "";
-  canvas.className = "canvas mode-" + seatingMode;
+  canvas.className = "canvas mode-" + seatingMode
+    + (seatingMode === "upnext" && calling ? " hushed" : "");
 
   /* Everything is drawn relative to the content box, not to (0, 0) of
      the declared canvas. The model stays in room coordinates; only the
@@ -390,6 +404,11 @@ function drawRoom(section) {
         if (who) card.classList.add("movable");
         if (picked && picked.seat === seat) card.classList.add("picked");
         card.onpointerdown = e => dragName(e, card, { seat: seat });
+      } else if (seatingMode === "upnext") {
+        if (seat.student && seat.student === calling)
+          card.classList.add("calling");
+        else if (seat.student && called.has(seat.student))
+          card.classList.add("been");
       } else if (seatingMode !== "desks") {
         card.onpointerdown = e => { e.preventDefault(); choose(group, shape); };
       }
@@ -603,9 +622,14 @@ function drawStrip(section) {
   /* One thin strip, with no expanded state. An earlier draft was a tall
      panel with a label field, a swatch row, a nine-cell anchor picker
      and "Prints 2nd of 7"; most of it was a second way to say what the
-     canvas already says. */
+     canvas already says.
+
+     It holds whatever is in focus. Usually that is the selection; in
+     Up Next it is the turn. Same slot, because at any moment there is
+     one thing the room is about. */
   const strip = document.getElementById("seat-strip");
   strip.textContent = "";
+  if (seatingMode === "upnext") { drawUpNext(strip, section); return; }
   const group = selected && selected.kind === "group"
     ? groupsOf(section).find(g => g.id === selected.id) : null;
   const shape = selected && selected.kind === "shape"
@@ -650,6 +674,65 @@ function drawStrip(section) {
   ord.title = at < 0 ? "No place in the print order yet"
                      : `Prints ${at + 1} of ${total}`;
   strip.appendChild(ord);
+}
+
+// --------------------------------------------------------- up next --
+
+function whoCanBeCalled() {
+  // Only people in the room on screen: a chart on the projector is one
+  // section, and calling on somebody from the other one is a mistake
+  // nobody would understand.
+  return drawn.seats.filter(s => s.seat.student);
+}
+
+function pickNext() {
+  const here = whoCanBeCalled();
+  if (!here.length) { toast("Nobody is seated in this room yet."); return; }
+  let pool = here.filter(s => !called.has(s.seat.student));
+  if (!pool.length) {
+    // Round over. Start another rather than refusing, and say so,
+    // because "everyone has had a turn" is worth hearing.
+    called = new Set();
+    pool = here;
+    toast("Everybody has had a turn — starting again.");
+  }
+  const chair = pool[Math.floor(Math.random() * pool.length)];
+  calling = chair.seat.student;
+  called.add(calling);
+  renderSeating();
+}
+
+function drawUpNext(strip, section) {
+  strip.hidden = false;
+  const here = whoCanBeCalled();
+  const who = calling ? seatingState.names[calling] : null;
+
+  if (who) {
+    const dot = el("span", "swatch");
+    tint(dot, null);
+    dot.style.background = "var(--isle-key)";
+    strip.appendChild(dot);
+    strip.appendChild(el("span", "sname", who.full));
+  } else {
+    strip.appendChild(el("span", "smeta",
+      here.length ? "Nobody up yet" : "Nobody is seated here"));
+  }
+
+  const next = el("button", "ibtn key", calling ? "Next" : "Pick someone");
+  next.type = "button";
+  next.title = "Space picks the next one";
+  next.onclick = pickNext;
+  strip.appendChild(next);
+
+  if (called.size) {
+    strip.appendChild(el("span", "smeta",
+                         called.size + "/" + here.length));
+    const again = el("button", "ibtn", "Start over");
+    again.type = "button";
+    again.title = "Everybody back in the hat";
+    again.onclick = () => { called = new Set(); calling = null; renderSeating(); };
+    strip.appendChild(again);
+  }
 }
 
 function openHues(near, section, group) {
@@ -751,8 +834,15 @@ function drawStageBar(section, count) {
   const stage = document.getElementById("seat-stage");
   stage.hidden = !presenting();
   document.getElementById("stage-section").textContent = section.name || "";
-  document.getElementById("stage-keys").textContent =
-    count > 1 ? "← → section · esc to leave" : "esc to leave";
+  /* While picking, the bar carries the count -- the islands are gone
+     and the lit chair says who, but how far through the class has been
+     is the one thing the room cannot show. */
+  const keys = seatingMode === "upnext"
+    ? (called.size ? called.size + " of " + whoCanBeCalled().length
+                     + " · space for the next · esc to leave"
+                   : "space to pick somebody · esc to leave")
+    : (count > 1 ? "← → section · esc to leave" : "esc to leave");
+  document.getElementById("stage-keys").textContent = keys;
 }
 
 // ------------------------------------------------------------------ menu --
@@ -1160,7 +1250,10 @@ async function present() {
      still present, inside the window. That is the case to get right
      rather than to report: somebody is standing in front of a class. */
   const view = document.getElementById("view-seating");
-  seatingMode = "view";
+  // Up Next survives: it is a mode for presenting, not one for
+  // editing, and the whole reason Cold call stopped being a tab was
+  // that it belongs on the projector with the room.
+  if (seatingMode !== "upnext") seatingMode = "view";
   selected = null;
   picked = null;
   toggleMenu(false);
@@ -1196,6 +1289,21 @@ function presentKeys(event) {
       return;
     }
     if (selected) { selected = null; renderSeating(); }
+    return;
+  }
+  // Space picks the next one. The one key a person has a free hand for
+  // while standing at the front, and it works whether or not the room
+  // is on the projector.
+  /* `event.target` is the document itself when nothing has focus, and
+     a document has no `closest` -- which threw, and silently took the
+     whole handler with it. Guarded rather than assumed: a keydown's
+     target is not always an element. */
+  const onControl = event.target instanceof Element
+    && event.target.closest("input, button");
+  if (seatingMode === "upnext" && (event.key === " " || event.key === "Enter")
+      && !onControl) {
+    event.preventDefault();
+    pickNext();
     return;
   }
   if (!presenting()) return;

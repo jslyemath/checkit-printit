@@ -416,6 +416,28 @@
   background: oklch(0.585 0.155 var(--h, 255) / .16);
 }
 
+/* ---------------------------------------------------------- up next -- */
+
+/* The room, with one chair lit up. This is why Cold call stopped being
+   a tab: the chart is already on the projector, so picking somebody
+   should light a chair rather than replace the screen with a list. */
+.canvas.hushed .shape,
+.canvas.hushed .pill,
+.canvas.hushed .seatcard:not(.calling) { opacity: .34; }
+
+.seatcard.calling {
+  z-index: 3;
+  opacity: 1;
+  transform: scale(1.45);
+  border-color: var(--solid);
+  border-width: 2.5px;
+  box-shadow: 0 0 0 5px oklch(0.585 0.155 var(--h, 255) / .22),
+              0 10px 26px oklch(0.2 0.02 260 / .30);
+}
+/* Already had a turn. Dim rather than hidden: the point of the list is
+   that you can see it has been fair. */
+.canvas:not(.hushed) .seatcard.been { opacity: .5; }
+
 /* --------------------------------------------------------- presenting -- */
 
 /* Everything that is not the room goes away: on a projector a toolbar
