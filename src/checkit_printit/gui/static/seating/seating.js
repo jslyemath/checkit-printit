@@ -50,6 +50,19 @@ let showLabels = true;
 let called = new Set();
 let calling = null;
 
+/* Whether the controls are out of the way. Separate from presenting,
+   because the two are different wishes: Present is "put this on the
+   wall", bare is "stop covering the room". Presenting turns it on, and
+   turning it back off while still presenting is how every mode stays
+   reachable on the projector. */
+let bare = false;
+let stillSince = null;           // for fading the one island that stays
+
+/* Which chair is in hand in Chairs mode. Its own thing rather than
+   part of `selected`, because a chair is always a chair *of* a desk:
+   the desk stays selected while one of its chairs is being moved. */
+let selectedChair = null;
+
 // ------------------------------------------------------------ constants --
 
 const GRID = 20;        // what a dragged desk snaps to, in room units
@@ -95,6 +108,11 @@ const ICON = {
   order: "M4 6h3M4 12h3M4 18h3M11 6h9M11 12h9M11 18h9",
   upnext: "M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4z"
     + "|M18 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z",
+  grow: "M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5",
+  shrink: "M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5",
+  hide: "M4 4l16 16|M10.6 6.3A8.6 8.6 0 0 1 12 6c6.5 0 10 6 10 6a17 17 0"
+    + " 0 1-3 3.6M6.5 7.6A17 17 0 0 0 2 12s3.5 6 10 6a9 9 0 0 0 3.6-.7",
+  show: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z|O12,12,3",
 };
 
 /* Modes only. Shuffle is an action and lives in the menu: an action
@@ -111,14 +129,15 @@ const MODES = [
     why: "Drag a desk and its people come with it. Click one and the "
       + "arrows nudge it by " + GRID + ", shift+arrows by 1." },
   { value: "chairs", label: "Chairs", icon: "chairs",
-    why: "Where the chairs sit on a desk. Not built yet." },
+    why: "Where the chairs sit on a desk. Click a desk, drag its chairs "
+      + "to where they really are, and add or take one away." },
   { value: "order", label: "Order", icon: "order",
     why: "The order papers are handed out in. Not built yet." },
   { value: "upnext", label: "Up Next", icon: "upnext",
     why: "Pick somebody: the room, with one chair lit up. Space picks "
       + "the next; nobody comes up twice until everybody has." },
 ];
-const BUILT = new Set(["view", "people", "desks", "upnext"]);
+const BUILT = new Set(["view", "people", "desks", "chairs", "upnext"]);
 
 // --------------------------------------------------------------- helpers --
 
@@ -265,6 +284,48 @@ function nameSize(text) {
 
 function presenting() { return document.body.classList.contains("presenting"); }
 
+function setBare(on) {
+  bare = on;
+  document.body.classList.toggle("bare", on);
+  const b = document.getElementById("seat-bare");
+  b.textContent = "";
+  b.appendChild(svgIcon(ICON[on ? "show" : "hide"]));
+  b.title = on ? "Bring the controls back" : "Hide the controls";
+  b.setAttribute("aria-pressed", String(on));
+
+  const p = document.getElementById("seat-present");
+  p.textContent = "";
+  p.appendChild(svgIcon(ICON[presenting() ? "shrink" : "grow"]));
+  const word = el("span", "foldaway", presenting() ? "Leave" : "Present");
+  p.appendChild(word);
+  p.title = presenting()
+    ? "Back to the rest of checkit-printit. Escape does it too."
+    : "The room on the whole screen. Escape comes back.";
+
+  stir();
+  // A full re-draw, not just a re-fit: what is on screen changes with
+  // this, not only how big it is. The stage bar in particular is shown
+  // exactly when the islands are not.
+  if (seatingRoom) { sizeSeating(); renderSeating(); }
+}
+
+/* The one island that stays while presenting fades when nothing is
+   happening and comes back on any movement -- a video player's
+   controls, for the same reason: somebody is looking at the room, not
+   at the buttons, but the buttons have to be findable without
+   remembering a key. */
+function stir() {
+  const isle = document.querySelector("#view-seating .at-tr");
+  if (!isle) return;
+  isle.classList.remove("resting");
+  stillSince = Date.now();
+  clearTimeout(stir.timer);
+  if (!presenting() && !bare) return;
+  stir.timer = setTimeout(() => {
+    if (Date.now() - stillSince >= 2400) isle.classList.add("resting");
+  }, 2500);
+}
+
 function seatingDirty() {
   return seatingRoom !== null && seatingState !== null
     && JSON.stringify(seatingRoom) !== JSON.stringify(seatingState.room);
@@ -313,6 +374,7 @@ function drawRail() {
       if (!BUILT.has(mode.value)) { toast(mode.why); return; }
       seatingMode = mode.value;
       picked = null;
+      selectedChair = null;
       renderSeating();
     };
     rail.appendChild(b);
@@ -384,6 +446,17 @@ function drawRoom(section) {
       box.tabIndex = 0;
       box.onkeydown = e => nudgeShape(e, section, shape);
       box.onpointerdown = e => dragShape(e, section, shape);
+    } else if (seatingMode === "chairs") {
+      // The desk itself, not its group: this mode is about the
+      // furniture, and a group spanning two desks would otherwise
+      // leave it ambiguous which one's chairs were being moved.
+      box.classList.add("movable");
+      if (isSelected(null, shape)) box.classList.add("chosen");
+      box.onpointerdown = e => {
+        e.preventDefault();
+        selectedChair = null;
+        choose(null, shape);
+      };
     } else {
       box.onpointerdown = e => { e.preventDefault(); choose(group, shape); };
     }
@@ -409,6 +482,10 @@ function drawRoom(section) {
           card.classList.add("calling");
         else if (seat.student && called.has(seat.student))
           card.classList.add("been");
+      } else if (seatingMode === "chairs") {
+        card.classList.add("movable", "chairable");
+        if (seat.id === selectedChair) card.classList.add("picked");
+        card.onpointerdown = e => dragChair(e, card, section, shape, seat);
       } else if (seatingMode !== "desks") {
         card.onpointerdown = e => { e.preventDefault(); choose(group, shape); };
       }
@@ -611,10 +688,14 @@ function choose(group, shape) {
      cares about is the group, and the shape is how it is drawn. A desk
      in no group selects itself, which is the rule the print order
      already uses -- a seat in no group is a group of one. */
-  const next = group ? { kind: "group", id: group.id }
-             : shape ? { kind: "shape", id: shape.id } : null;
-  selected = (selected && next && selected.kind === next.kind
-              && selected.id === next.id) ? null : next;
+  /* Clicking a thing selects it, and clicking it again does nothing.
+     It used to toggle, which read as "I clicked a desk and nothing
+     happened" the moment that desk was already chosen -- most often
+     straight after switching mode, when the last mode had left it
+     selected. Clearing is the paper, or Escape; that is one gesture
+     for one job, and the way every canvas editor does it. */
+  selected = group ? { kind: "group", id: group.id }
+           : shape ? { kind: "shape", id: shape.id } : null;
   renderSeating();
 }
 
@@ -630,12 +711,70 @@ function drawStrip(section) {
   const strip = document.getElementById("seat-strip");
   strip.textContent = "";
   if (seatingMode === "upnext") { drawUpNext(strip, section); return; }
+
   const group = selected && selected.kind === "group"
     ? groupsOf(section).find(g => g.id === selected.id) : null;
-  const shape = selected && selected.kind === "shape"
+  let shape = selected && selected.kind === "shape"
     ? (section.shapes || []).find(s => s.id === selected.id) : null;
+  // In Desks and Chairs the desk is the subject even when it has a
+  // group: those modes are about furniture, not about who sits at it.
+  if (!shape && group && (seatingMode === "desks" || seatingMode === "chairs"))
+    shape = shapesHolding(section, group)[0] || null;
+
+  // Desks mode with nothing chosen is where a room gets its furniture.
+  if (seatingMode === "desks" && !shape) {
+    strip.hidden = false;
+    const add = el("button", "ibtn key", "Add a desk");
+    add.type = "button";
+    add.onclick = e => { e.stopPropagation(); openShapes(add, section); };
+    strip.appendChild(add);
+    strip.appendChild(el("span", "smeta",
+      (section.shapes || []).length + " in this room"));
+    return;
+  }
+  if (seatingMode === "chairs" && !shape) {
+    strip.hidden = false;
+    strip.appendChild(el("span", "smeta",
+      "Drag a chair to where it really is. Touch one to add or "
+      + "take one away."));
+    return;
+  }
+
   if (!group && !shape) { strip.hidden = true; return; }
   strip.hidden = false;
+
+  if (shape && (seatingMode === "desks" || seatingMode === "chairs")) {
+    const spec = seatingState.shapes[shape.kind];
+    strip.appendChild(el("span", "sname", (spec && spec.label) || shape.kind));
+    const n = (shape.seats || []).length;
+    strip.appendChild(el("span", "smeta",
+                         n + (n === 1 ? " chair" : " chairs")));
+    if (seatingMode === "chairs") {
+      const more = el("button", "ibtn", "+ chair");
+      more.type = "button";
+      more.onclick = () => addChair(section, shape);
+      strip.appendChild(more);
+      const seat = (shape.seats || []).find(s => s.id === selectedChair);
+      if (seat) {
+        const less = el("button", "ibtn", "Remove chair");
+        less.type = "button";
+        less.title = seat.student
+          ? "They go back on the unseated list" : "";
+        less.onclick = () => removeChair(section, shape, seat);
+        strip.appendChild(less);
+      }
+    } else {
+      const kill = el("button", "ibtn", "Remove desk");
+      kill.type = "button";
+      kill.onclick = () => removeShape(section, shape);
+      strip.appendChild(kill);
+      const add = el("button", "ibtn key", "Add a desk");
+      add.type = "button";
+      add.onclick = e => { e.stopPropagation(); openShapes(add, section); };
+      strip.appendChild(add);
+    }
+    return;
+  }
 
   if (!group) {
     const spec = seatingState.shapes[shape.kind];
@@ -674,6 +813,174 @@ function drawStrip(section) {
   ord.title = at < 0 ? "No place in the print order yet"
                      : `Prints ${at + 1} of ${total}`;
   strip.appendChild(ord);
+}
+
+// ------------------------------------------------- desks and chairs --
+
+function freshId(prefix, taken) {
+  let n = 1;
+  while (taken.has(prefix + n)) n += 1;
+  return prefix + n;
+}
+
+function addShape(section, kind) {
+  /* A new desk, built from the palette the server sent rather than
+     from a copy of the anchors kept here. `room.SHAPES` stays the one
+     definition of where chairs go on a table. */
+  const spec = seatingState.shapes[kind];
+  if (!spec) return;
+  const shapes = section.shapes || (section.shapes = []);
+  const usedShapes = new Set();
+  const usedSeats = new Set();
+  for (const sec of seatingRoom.sections || [])
+    for (const s of sec.shapes || []) {
+      usedShapes.add(s.id);
+      for (const seat of s.seats || []) usedSeats.add(seat.id);
+    }
+  const id = freshId("d", usedShapes);
+
+  // Dropped in the middle of what is on screen, so it arrives where
+  // you are looking rather than at the room's origin.
+  const area = drawn.box || { x: 0, y: 0, w: 800, h: 600 };
+  const at = clampShape(section, spec, area.x + area.w / 2,
+                        area.y + area.h / 2);
+  const shape = { id: id, kind: kind, at: at, seats: [] };
+  (spec.seats || []).forEach((offset, i) => {
+    const sid = freshId(id + "-", usedSeats) + "";
+    usedSeats.add(sid);
+    shape.seats.push({ id: sid, at: offset.slice(), student: "",
+                       version: "" });
+  });
+  shapes.push(shape);
+  selected = { kind: "shape", id: id };
+  renderSeating();
+}
+
+function removeShape(section, shape) {
+  /* Standing people up rather than refusing. A desk you cannot delete
+     because somebody is at it makes you go and move four people
+     first, and they all end up back on the rail anyway. */
+  const sitting = (shape.seats || []).filter(s => s.student).length;
+  section.shapes = (section.shapes || []).filter(s => s !== shape);
+  const gone = new Set((shape.seats || []).map(s => s.id));
+  for (const group of groupsOf(section))
+    group.seats = (group.seats || []).filter(id => !gone.has(id));
+  // A group with nothing left in it is not a group.
+  section.groups = groupsOf(section).filter(g => (g.seats || []).length);
+  selected = null;
+  renderSeating();
+  if (sitting) toast(sitting + (sitting === 1 ? " person is" : " people are")
+                     + " back on the unseated list.");
+}
+
+function addChair(section, shape) {
+  const used = new Set();
+  for (const sec of seatingRoom.sections || [])
+    for (const s of sec.shapes || [])
+      for (const seat of s.seats || []) used.add(seat.id);
+  const spec = seatingState.shapes[shape.kind];
+  // Below the lowest chair it already has, which is somewhere a person
+  // could sit and never on top of another card.
+  const low = (shape.seats || []).reduce((m, s) => Math.max(m, s.at[1]),
+                                         -(spec ? spec.h / 2 : 40));
+  shape.seats.push({ id: freshId(shape.id + "-", used),
+                     at: [0, Math.round(low + CARD_H + 10)],
+                     student: "", version: "" });
+  renderSeating();
+}
+
+function removeChair(section, shape, seat) {
+  shape.seats = (shape.seats || []).filter(s => s !== seat);
+  for (const group of groupsOf(section))
+    group.seats = (group.seats || []).filter(id => id !== seat.id);
+  section.groups = groupsOf(section).filter(g => (g.seats || []).length);
+  if (selectedChair === seat.id) selectedChair = null;
+  renderSeating();
+}
+
+function dragChair(event, card, section, shape, seat) {
+  /* Where a chair sits on its desk. The anchor is an offset from the
+     shape's centre, so this writes `seat.at` and the desk can still be
+     moved afterwards without the chairs coming loose.
+
+     No grid. A real table has chairs at whatever spacing the room
+     allows, and snapping a chair to twenty units is a tidiness nobody
+     asked for -- the desk snaps because desks line up with walls. */
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  event.preventDefault();
+  // Touching a chair chooses its desk too, so the strip's add and
+  // remove are about the thing just touched rather than about
+  // whatever was chosen before.
+  selectedChair = seat.id;
+  selected = { kind: "shape", id: shape.id };
+  const scale = canvasScale();
+  const start = [event.clientX, event.clientY];
+  const home = seat.at.slice();
+  const spec = seatingState.shapes[shape.kind];
+  const ox = drawn.box ? drawn.box.x : 0, oy = drawn.box ? drawn.box.y : 0;
+  let moved = false;
+
+  const place = e => {
+    if (Math.hypot(e.clientX - start[0], e.clientY - start[1]) < 3) return;
+    moved = true;
+    // Kept within arm's reach of its own desk: a chair three metres
+    // away belongs to another table, and dragging one there by
+    // accident would be a quiet way to lose it.
+    const reach = 1.1;
+    const lim = (v, span) => Math.max(-span * reach,
+                                      Math.min(span * reach, Math.round(v)));
+    seat.at = [lim(home[0] + (e.clientX - start[0]) / scale,
+                   spec ? spec.w / 2 + CARD_W : 200),
+               lim(home[1] + (e.clientY - start[1]) / scale,
+                   spec ? spec.h / 2 + CARD_H : 160)];
+    card.style.left = (shape.at[0] + seat.at[0] - CARD_W / 2 - ox) + "px";
+    card.style.top = (shape.at[1] + seat.at[1] - CARD_H / 2 - oy) + "px";
+  };
+
+  const finish = commit => {
+    card.onpointermove = card.onpointerup = card.onpointercancel = null;
+    if (!commit) seat.at = home;
+    if (!moved) { renderSeating(); return; }   // a click, which selects it
+    renderSeating();
+  };
+
+  card.setPointerCapture(event.pointerId);
+  card.onpointermove = place;
+  card.onpointerup = () => finish(true);
+  card.onpointercancel = () => finish(false);
+}
+
+function openShapes(near, section) {
+  document.querySelectorAll(".hues, .palette").forEach(n => n.remove());
+  const pop = el("div", "palette");
+  for (const kind of Object.keys(seatingState.shapes)) {
+    const spec = seatingState.shapes[kind];
+    const b = el("button", "deskopt");
+    b.type = "button";
+    b.title = spec.label;
+    // A little picture of the desk, at the proportions it really has,
+    // so the palette is the shapes rather than a list of their names.
+    const tile = el("span", "desktile " + spec.css);
+    const k = 34 / Math.max(spec.w, spec.h);
+    tile.style.width = Math.round(spec.w * k) + "px";
+    tile.style.height = Math.round(spec.h * k) + "px";
+    b.appendChild(tile);
+    b.appendChild(el("span", "deskname", spec.label));
+    b.onclick = () => { pop.remove(); addShape(section, kind); };
+    pop.appendChild(b);
+  }
+  document.getElementById("view-seating").appendChild(pop);
+  const box = near.getBoundingClientRect();
+  const app = document.getElementById("view-seating").getBoundingClientRect();
+  pop.style.left = Math.round(
+    Math.min(box.left - app.left - 6, app.width - pop.offsetWidth - 12)) + "px";
+  pop.style.bottom = Math.round(app.bottom - box.top + 8) + "px";
+  const shut = e => {
+    if (pop.contains(e.target)) return;
+    pop.remove();
+    document.removeEventListener("pointerdown", shut, true);
+  };
+  setTimeout(() => document.addEventListener("pointerdown", shut, true), 0);
 }
 
 // --------------------------------------------------------- up next --
@@ -832,7 +1139,12 @@ function drawPen(section) {
 
 function drawStageBar(section, count) {
   const stage = document.getElementById("seat-stage");
-  stage.hidden = !presenting();
+  /* Only when the controls are away. It exists to say what the islands
+     would have said; with them back it is a second answer to the same
+     question, printed underneath the first. */
+  const stage_wanted = presenting() && bare;
+  stage.hidden = !stage_wanted;
+  if (!stage_wanted) return;
   document.getElementById("stage-section").textContent = section.name || "";
   /* While picking, the bar carries the count -- the islands are gone
      and the lit chair says who, but how far through the class has been
@@ -1198,11 +1510,15 @@ function fitZoom(paper, area) {
 
      The right edge is given up to the unseated rail, so fitting never
      parks a table underneath it. */
-  const pen = seatingPen();
-  const gutter = pen.hidden ? 44 : pen.offsetWidth + 38;
+  /* `offsetWidth` rather than `.hidden`, because bare hides the rail
+     with CSS and leaves the attribute alone -- asking the attribute
+     would have reserved a gutter for something not on screen. */
+  const gutter = seatingPen().offsetWidth
+    ? seatingPen().offsetWidth + 38 : 44;
+  const below = bare ? 56 : 140;      // no rail and no strip when bare
   return Math.min(4, Math.max(0.05,
     Math.min((paper.clientWidth - gutter) / area.w,
-             (paper.clientHeight - 140) / area.h)));
+             (paper.clientHeight - below) / area.h)));
 }
 
 function applyZoom(section) {
@@ -1221,7 +1537,7 @@ function applyZoom(section) {
   box.style.height = Math.round(area.h * zoom) + "px";
   // Centred in the space the rail leaves, rather than in the whole
   // paper, so Fit never puts a table under it.
-  box.style.marginRight = (pen.hidden ? 0 : pen.offsetWidth + 22) + "px";
+  box.style.marginRight = (pen.offsetWidth ? pen.offsetWidth + 22 : 0) + "px";
   document.getElementById("seat-zoom").textContent =
     Math.round(zoom * 100) + "%";
   layoutBottom();                 // the zoom island just changed width
@@ -1253,11 +1569,13 @@ async function present() {
   // Up Next survives: it is a mode for presenting, not one for
   // editing, and the whole reason Cold call stopped being a tab was
   // that it belongs on the projector with the room.
+  if (presenting()) { leavePresenting(); return; }
   if (seatingMode !== "upnext") seatingMode = "view";
   selected = null;
   picked = null;
   toggleMenu(false);
   document.body.classList.add("presenting");
+  setBare(true);                   // starts clean; the eye brings it back
   sizeSeating();
   seatingZoom = null;
   renderSeating();
@@ -1275,6 +1593,7 @@ async function present() {
 function leavePresenting() {
   document.body.classList.remove("presenting");
   if (document.fullscreenElement) document.exitFullscreen();
+  setBare(false);
   sizeSeating();
   seatingZoom = null;
   renderSeating();
@@ -1406,7 +1725,12 @@ function wireSeating() {
     if (section) applyZoom(section);
   };
   document.getElementById("seat-present").onclick = present;
+  document.getElementById("seat-bare").onclick = () => setBare(!bare);
+  setBare(false);                  // draws both icons for the first time
   document.getElementById("seat-save").onclick = saveSeating;
+  // Any movement brings the resting island back.
+  for (const kind of ["pointermove", "pointerdown", "keydown"])
+    document.addEventListener(kind, stir, true);
   document.getElementById("seat-menu").onclick = e => {
     e.stopPropagation();
     toggleMenu();
