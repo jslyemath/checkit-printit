@@ -86,11 +86,36 @@ async function api(path, body) {
     headers: { "X-Printit-Token": TOKEN, "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  /* A restarted server has a new token, and this page is holding the
+     old one. Every call then fails, the page goes on showing whatever
+     it last drew, and the toast saying so fades after nine seconds --
+     which is how an afternoon gets spent wondering why a new button is
+     missing when the answer is that the script is yesterday's.
+
+     So this one does not fade, and it offers the fix rather than
+     describing it. */
+  if (res.status === 403) { staleToken(); throw new Error("reload needed"); }
   let payload;
   try { payload = await res.json(); }
   catch { throw new Error(`the server answered ${res.status} with no JSON`); }
   if (!res.ok || payload.error) throw new Error(payload.error || `HTTP ${res.status}`);
   return payload.data;
+}
+
+function staleToken() {
+  if (document.getElementById("stale")) return;
+  const bar = document.createElement("div");
+  bar.id = "stale";
+  bar.className = "stale";
+  bar.append("printit restarted, so this page is out of date — "
+             + "nothing here will save until it is reloaded. ");
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "primary";
+  go.textContent = "Reload";
+  go.onclick = () => location.reload();
+  bar.appendChild(go);
+  document.body.appendChild(bar);
 }
 
 let toastTimer = null;
