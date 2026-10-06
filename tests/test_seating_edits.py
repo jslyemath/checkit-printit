@@ -186,6 +186,42 @@ class TestTheRoomComingBackIsChecked:
         with pytest.raises(room_mod.RoomError, match="print order"):
             room_mod.check(r)
 
+    def test_a_desk_may_carry_its_own_size(self):
+        r = a_room()
+        shape = r["sections"][0]["shapes"][0]
+        shape["w"], shape["h"] = 400, 90
+        assert room_mod.check(r) is not None
+        for bad in (0, -10, "wide", True):
+            shape["w"] = bad
+            with pytest.raises(room_mod.RoomError, match="not a size"):
+                room_mod.check(r)
+
+    def test_a_desk_may_be_turned(self):
+        r = a_room()
+        shape = r["sections"][0]["shapes"][0]
+        for ok in (0, 45, -90, 359):
+            shape["angle"] = ok
+            assert room_mod.check(r) is not None
+        for bad in (360, -400, "sideways", True):
+            shape["angle"] = bad
+            with pytest.raises(room_mod.RoomError, match="degrees"):
+                room_mod.check(r)
+
+    def test_turning_a_desk_does_not_reach_the_chart(self):
+        """Rotating rewrites the seats' own offsets, so a seat is
+        always simply where it says it is. Nothing downstream -- the
+        neighbour distances, the colouring, `seating.toml` -- has to
+        learn about angles, which is the whole reason it is stored
+        that way round."""
+        r = a_room()
+        shape = r["sections"][0]["shapes"][0]
+        before = room_mod.seats_of(r["sections"][0])
+        shape["angle"] = 90
+        after = room_mod.seats_of(r["sections"][0])
+        assert [(s["x"], s["y"]) for s in before] == \
+               [(s["x"], s["y"]) for s in after], \
+            "seats_of must read the offsets and not the angle"
+
     def test_a_colour_is_an_angle_on_the_wheel(self):
         """One number, because the three shades the canvas draws are
         derived from it rather than stored."""

@@ -198,6 +198,39 @@ function cardPosition(shape, seat) {
   return [shape.at[0] + seat.at[0], shape.at[1] + seat.at[1]];
 }
 
+function shapeSize(shape) {
+  /* A desk's own size if it has been dragged to one, otherwise the
+     kind's. Stored on the shape rather than invented as a new kind,
+     so "table, 3 across" and a widened 2x2 are the same thing in the
+     file as they are on screen. */
+  const spec = seatingState.shapes[shape.kind] || { w: 120, h: 80 };
+  return [Math.round(shape.w || spec.w), Math.round(shape.h || spec.h)];
+}
+
+function spin(dx, dy, deg) {
+  if (!deg) return [dx, dy];
+  const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+  return [dx * c - dy * s, dx * s + dy * c];
+}
+
+/* Rotating a desk turns its chairs with it, and the way that is stored
+   is by turning the offsets themselves rather than by remembering an
+   angle and applying it everywhere afterwards.
+
+   It means `room.seats_of`, the neighbour distances, the version
+   colouring and `seating.toml` need to know nothing about rotation: a
+   chair is where its offset says, as it always was. `angle` is kept
+   only so the silhouette stays turned, and so a second rotation knows
+   where it started. The cost is a rounding each time, which is why
+   the offsets are rounded to whole units and not left to drift. */
+function turnShape(shape, deg) {
+  for (const seat of shape.seats || []) {
+    const [x, y] = spin(seat.at[0], seat.at[1], deg);
+    seat.at = [Math.round(x), Math.round(y)];
+  }
+  shape.angle = Math.round((((shape.angle || 0) + deg) % 360 + 360) % 360);
+}
+
 function groupsOf(section) { return (section && section.groups) || []; }
 
 function groupOfSeat(section) {
@@ -233,8 +266,14 @@ function contentBox(section) {
   for (const shape of (section && section.shapes) || []) {
     const spec = seatingState.shapes[shape.kind];
     if (!spec) continue;
-    grow(shape.at[0] - spec.w / 2, shape.at[1] - spec.h / 2,
-         shape.at[0] + spec.w / 2, shape.at[1] + spec.h / 2);
+    // A turned rectangle needs a bigger box than an upright one: the
+    // bounding box of a w by h at angle t is w|cos t| + h|sin t| wide.
+    const [w, h] = shapeSize(shape);
+    const r = (shape.angle || 0) * Math.PI / 180;
+    const bw = Math.abs(w * Math.cos(r)) + Math.abs(h * Math.sin(r));
+    const bh = Math.abs(w * Math.sin(r)) + Math.abs(h * Math.cos(r));
+    grow(shape.at[0] - bw / 2, shape.at[1] - bh / 2,
+         shape.at[0] + bw / 2, shape.at[1] + bh / 2);
     for (const seat of shape.seats || []) {
       const [x, y] = cardPosition(shape, seat);
       grow(x - CARD_W / 2, y - CARD_H / 2, x + CARD_W / 2, y + CARD_H / 2);
@@ -434,24 +473,45 @@ function drawRoom(section) {
     const group = (shape.seats || []).map(x => bySeat[x.id]).find(Boolean);
     const hue = hueOf(section, group);
 
+    /* Two elements, not one. `.deskwrap` carries the position, the
+       size and the rotation; `.shape` is only the silhouette inside
+       it. Everything that belongs to the desk -- the resize handles,
+       the rotation handle, the nine label anchors -- goes in the wrap,
+       so it moves and turns with the desk for free.
+
+       That is also the fix for the anchors that stayed behind when a
+       desk was dragged: they were separate elements being tracked by
+       hand, and the hand missed them. */
+    const [sw, sh] = shapeSize(shape);
+    const wrap = el("div", "deskwrap");
+    wrap.style.left = (shape.at[0] - sw / 2 - ox) + "px";
+    wrap.style.top = (shape.at[1] - sh / 2 - oy) + "px";
+    wrap.style.width = sw + "px";
+    wrap.style.height = sh + "px";
+    if (shape.angle) wrap.style.transform = `rotate(${shape.angle}deg)`;
+    // The hue goes on the wrap, not on the silhouette: the grips and
+    // the rotation handle are the silhouette's *siblings*, so a
+    // custom property set on it reaches none of them, and they came
+    // out invisible -- white dots on white paper.
+    tint(wrap, hue);
+    canvas.appendChild(wrap);
+
     const box = el("div", "shape " + spec.css);
-    tint(box, hue);
-    box.style.left = (shape.at[0] - spec.w / 2 - ox) + "px";
-    box.style.top = (shape.at[1] - spec.h / 2 - oy) + "px";
-    box.style.width = spec.w + "px";
-    box.style.height = spec.h + "px";
-    if (isSelected(group, shape)) box.classList.add("chosen");
+    wrap.appendChild(box);
+    if (isSelected(group, shape)) wrap.classList.add("chosen");
     if (seatingMode === "desks") {
       box.classList.add("movable");
       box.tabIndex = 0;
       box.onkeydown = e => nudgeShape(e, section, shape);
       box.onpointerdown = e => dragShape(e, section, shape);
+      if (isSelected(group, shape) || isSelected(null, shape))
+        addHandles(wrap, section, shape);
     } else if (seatingMode === "chairs") {
       // The desk itself, not its group: this mode is about the
       // furniture, and a group spanning two desks would otherwise
       // leave it ambiguous which one's chairs were being moved.
       box.classList.add("movable");
-      if (isSelected(null, shape)) box.classList.add("chosen");
+      if (isSelected(null, shape)) wrap.classList.add("chosen");
       box.onpointerdown = e => {
         e.preventDefault();
         selectedChair = null;
@@ -460,8 +520,7 @@ function drawRoom(section) {
     } else {
       box.onpointerdown = e => { e.preventDefault(); choose(group, shape); };
     }
-    canvas.appendChild(box);
-    drawn.shapes[shape.id] = box;
+    drawn.shapes[shape.id] = wrap;
 
     for (const seat of shape.seats || []) {
       const [x, y] = cardPosition(shape, seat);
@@ -505,20 +564,42 @@ function drawRoom(section) {
       if (isSelected(group, null)) tag.classList.add("chosen");
       tag.style.left = (x - ox) + "px";
       tag.style.top = (y - oy) + "px";
+      tag.title = "Double-click to rename";
       tag.onpointerdown = e => dragLabel(e, tag, section, group, ids, where);
+      /* Renaming where the name is, in any mode. The strip can rename
+         too, but the label is the thing you are looking at when you
+         decide it is called the wrong thing. */
+      tag.ondblclick = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        renameOnCanvas(tag, group);
+      };
       canvas.appendChild(tag);
       drawn.labels.push({ el: tag, seats: ids, group: group });
     }
   }
 
-  // The nine places this group's label may sit, shown only while it is
-  // selected. There is no picker control: these *are* the control.
+  /* The nine places this group's label may sit, shown only while it
+     is selected. There is no picker control: these *are* the control.
+
+     Drawn inside each desk's own wrap, as percentages of it, so they
+     move and turn with the desk. Tracked separately they were the
+     elements that stayed behind when a desk was dragged. */
   if (showLabels && selected && selected.kind === "group") {
-    for (const spot of anchorsFor(section, selected.id)) {
-      const dot = el("div", "anchor" + (spot.on ? " on" : ""));
-      dot.style.left = (spot.x - ox) + "px";
-      dot.style.top = (spot.y - oy) + "px";
-      canvas.appendChild(dot);
+    const group = groupsOf(section).find(g => g.id === selected.id);
+    const at = group && group.label_at;
+    for (const shape of group ? shapesHolding(section, group) : []) {
+      const wrap = drawn.shapes[shape.id];
+      if (!wrap) continue;
+      for (const key of Object.keys(ANCHORS)) {
+        const [fx, fy] = ANCHORS[key];
+        const on = at && at.shape === shape.id && at.anchor === key;
+        const dot = el("div", "anchor" + (on ? " on" : ""));
+        dot.dataset.spot = shape.id + ":" + key;
+        dot.style.left = (50 + fx * 100) + "%";
+        dot.style.top = (50 + fy * 100) + "%";
+        wrap.appendChild(dot);
+      }
     }
   }
 
@@ -576,14 +657,17 @@ function anchorsFor(section, groupId) {
   const at = group.label_at;
   const out = [];
   for (const shape of shapesHolding(section, group)) {
-    const spec = seatingState.shapes[shape.kind];
-    if (!spec) continue;
+    if (!seatingState.shapes[shape.kind]) continue;
+    const [w, h] = shapeSize(shape);
     for (const key of Object.keys(ANCHORS)) {
       const [fx, fy] = ANCHORS[key];
+      // Turned and sized with the desk, so an anchor stays on the
+      // corner it names however the desk is standing.
+      const [dx, dy] = spin(fx * w, fy * h, shape.angle || 0);
       out.push({
         shape: shape.id, anchor: key,
-        x: shape.at[0] + fx * spec.w,
-        y: shape.at[1] + fy * spec.h,
+        x: shape.at[0] + dx,
+        y: shape.at[1] + dy,
         on: Boolean(at) && at.shape === shape.id && at.anchor === key,
       });
     }
@@ -653,9 +737,11 @@ function dragLabel(event, tag, section, group, ids, where) {
     for (const dot of document.querySelectorAll("#canvas .anchor"))
       dot.classList.remove("near");
     if (snap) {
-      const i = spots.indexOf(best);
-      const dots = document.querySelectorAll("#canvas .anchor");
-      if (dots[i]) dots[i].classList.add("near");
+      // By name, not by index: the dots live inside their own desks
+      // now, so document order is desk order and not spot order.
+      const dot = document.querySelector(
+        `#canvas .anchor[data-spot="${best.shape}:${best.anchor}"]`);
+      if (dot) dot.classList.add("near");
     }
   };
 
@@ -726,7 +812,7 @@ function drawStrip(section) {
     strip.hidden = false;
     const add = el("button", "ibtn key", "Add a desk");
     add.type = "button";
-    add.onclick = e => { e.stopPropagation(); openShapes(add, section); };
+    add.onclick = e => { e.stopPropagation(); toggleDrawer(true); };
     strip.appendChild(add);
     strip.appendChild(el("span", "smeta",
       (section.shapes || []).length + " in this room"));
@@ -770,7 +856,7 @@ function drawStrip(section) {
       strip.appendChild(kill);
       const add = el("button", "ibtn key", "Add a desk");
       add.type = "button";
-      add.onclick = e => { e.stopPropagation(); openShapes(add, section); };
+      add.onclick = e => { e.stopPropagation(); toggleDrawer(true); };
       strip.appendChild(add);
     }
     return;
@@ -854,6 +940,128 @@ function addShape(section, kind) {
   shapes.push(shape);
   selected = { kind: "shape", id: id };
   renderSeating();
+}
+
+/* The eight edges and corners you can pull, as fractions of the box.
+   The same nine places the label can sit, less the middle -- one set
+   of positions for both, so a desk has one vocabulary of points on it
+   rather than two that nearly agree. */
+const GRIPS = ["nw", "n", "ne", "w", "e", "sw", "s", "se"];
+const SPAN = { nw: [-1, -1], n: [0, -1], ne: [1, -1], w: [-1, 0],
+               e: [1, 0], sw: [-1, 1], s: [0, 1], se: [1, 1] };
+const MIN_DESK = 60;
+
+function addHandles(wrap, section, shape) {
+  for (const key of GRIPS) {
+    const [fx, fy] = SPAN[key];
+    const grip = el("div", "grip grip-" + key);
+    grip.style.left = (50 + fx * 50) + "%";
+    grip.style.top = (50 + fy * 50) + "%";
+    grip.onpointerdown = e => resizeShape(e, section, shape, key);
+    wrap.appendChild(grip);
+  }
+  const spin_ = el("div", "spinner");
+  spin_.title = "Turn the desk. Hold shift for 15° steps";
+  spin_.onpointerdown = e => rotateShape(e, section, shape);
+  wrap.appendChild(spin_);
+}
+
+function resizeShape(event, section, shape, key) {
+  /* Pull an edge or a corner. The chairs keep their places *relative*
+     to the desk -- their offsets are scaled by the same factor -- so
+     widening a table of four spreads the four out rather than leaving
+     them huddled at the old spacing.
+
+     The pointer's travel is un-rotated before it is used, so dragging
+     the right edge of a desk turned forty degrees still widens it
+     along its own length rather than along the screen's. */
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const scale = canvasScale();
+  const start = [event.clientX, event.clientY];
+  const [fx, fy] = SPAN[key];
+  const [w0, h0] = shapeSize(shape);
+  const at0 = shape.at.slice();
+  const seats0 = (shape.seats || []).map(s => s.at.slice());
+  const node = event.currentTarget;
+
+  const place = e => {
+    const [dx, dy] = spin((e.clientX - start[0]) / scale,
+                          (e.clientY - start[1]) / scale,
+                          -(shape.angle || 0));
+    const w = Math.max(MIN_DESK, Math.round(w0 + fx * dx));
+    const h = Math.max(MIN_DESK, Math.round(h0 + fy * dy));
+    // The far edge stays put, so the desk grows from the side you
+    // pulled rather than from its middle.
+    const shift = spin(fx * (w - w0) / 2, fy * (h - h0) / 2,
+                       shape.angle || 0);
+    shape.w = w;
+    shape.h = h;
+    shape.at = [Math.round(at0[0] + shift[0]), Math.round(at0[1] + shift[1])];
+    const kx = w / w0, ky = h / h0;
+    (shape.seats || []).forEach((seat, i) => {
+      seat.at = [Math.round(seats0[i][0] * kx), Math.round(seats0[i][1] * ky)];
+    });
+    renderSeating();
+  };
+
+  const finish = commit => {
+    node.onpointermove = node.onpointerup = node.onpointercancel = null;
+    if (!commit) {
+      shape.w = w0; shape.h = h0; shape.at = at0;
+      (shape.seats || []).forEach((s, i) => { s.at = seats0[i]; });
+    }
+    renderSeating();
+  };
+  node.setPointerCapture(event.pointerId);
+  node.onpointermove = place;
+  node.onpointerup = () => finish(true);
+  node.onpointercancel = () => finish(false);
+}
+
+function rotateShape(event, section, shape) {
+  /* Turn the desk about its own centre. The chairs turn with it --
+     `turnShape` rewrites their offsets -- but the name cards do not:
+     a card is read by a person standing up, not by the desk. */
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const node = event.currentTarget;
+  const was = shape.angle || 0;
+  const seats0 = (shape.seats || []).map(s => s.at.slice());
+  const box = seatingCanvas().getBoundingClientRect();
+  const k = canvasScale();
+  const ox = drawn.box ? drawn.box.x : 0, oy = drawn.box ? drawn.box.y : 0;
+  const centre = [box.left + (shape.at[0] - ox) * k,
+                  box.top + (shape.at[1] - oy) * k];
+  const angleTo = e => Math.atan2(e.clientY - centre[1],
+                                  e.clientX - centre[0]) * 180 / Math.PI;
+  const from = angleTo(event);
+
+  const place = e => {
+    let to = was + (angleTo(e) - from);
+    if (e.shiftKey) to = Math.round(to / 15) * 15;
+    // From the original offsets every time, so dragging back and
+    // forth does not grind them down by rounding at each step.
+    (shape.seats || []).forEach((s, i) => { s.at = seats0[i].slice(); });
+    shape.angle = was;
+    turnShape(shape, Math.round(to) - was);
+    renderSeating();
+  };
+
+  const finish = commit => {
+    node.onpointermove = node.onpointerup = node.onpointercancel = null;
+    if (!commit) {
+      (shape.seats || []).forEach((s, i) => { s.at = seats0[i]; });
+      shape.angle = was;
+    }
+    renderSeating();
+  };
+  node.setPointerCapture(event.pointerId);
+  node.onpointermove = place;
+  node.onpointerup = () => finish(true);
+  node.onpointercancel = () => finish(false);
 }
 
 function removeShape(section, shape) {
@@ -950,46 +1158,6 @@ function dragChair(event, card, section, shape, seat) {
   card.onpointercancel = () => finish(false);
 }
 
-function openShapes(near, section) {
-  document.querySelectorAll(".hues, .palette").forEach(n => n.remove());
-  const pop = el("div", "palette");
-  for (const kind of Object.keys(seatingState.shapes)) {
-    const spec = seatingState.shapes[kind];
-    const b = el("button", "deskopt");
-    b.type = "button";
-    b.title = spec.label;
-    // A little picture of the desk, at the proportions it really has,
-    // so the palette is the shapes rather than a list of their names.
-    const tile = el("span", "desktile " + spec.css);
-    const k = 34 / Math.max(spec.w, spec.h);
-    tile.style.width = Math.round(spec.w * k) + "px";
-    tile.style.height = Math.round(spec.h * k) + "px";
-    b.appendChild(tile);
-    b.appendChild(el("span", "deskname", spec.label));
-    b.onclick = () => { pop.remove(); addShape(section, kind); };
-    pop.appendChild(b);
-  }
-  document.getElementById("view-seating").appendChild(pop);
-  // Below the button when it is near the top, above it otherwise --
-  // it opens from the strip at the bottom and from the menu at the
-  // top, and a popover that always hangs upwards goes off screen from
-  // one of them.
-  const box = near.getBoundingClientRect();
-  const app = document.getElementById("view-seating").getBoundingClientRect();
-  pop.style.left = Math.round(Math.max(10,
-    Math.min(box.left - app.left - 6,
-             app.width - pop.offsetWidth - 12))) + "px";
-  if (box.top - app.top < app.height / 2)
-    pop.style.top = Math.round(box.bottom - app.top + 8) + "px";
-  else
-    pop.style.bottom = Math.round(app.bottom - box.top + 8) + "px";
-  const shut = e => {
-    if (pop.contains(e.target)) return;
-    pop.remove();
-    document.removeEventListener("pointerdown", shut, true);
-  };
-  setTimeout(() => document.addEventListener("pointerdown", shut, true), 0);
-}
 
 // --------------------------------------------------------- up next --
 
@@ -1076,6 +1244,33 @@ function openHues(near, section, group) {
     document.removeEventListener("pointerdown", shut, true);
   };
   setTimeout(() => document.addEventListener("pointerdown", shut, true), 0);
+}
+
+function renameOnCanvas(tag, group) {
+  /* Edit the pill in place, at its size and in its position, so the
+     name is retyped where it lives rather than in a box somewhere
+     else that happens to hold the same string. */
+  const input = el("input", "pillrename");
+  input.type = "text";
+  input.value = group.label || "";
+  input.style.cssText = tag.style.cssText;
+  input.style.width = Math.max(90, tag.offsetWidth + 24) + "px";
+  tag.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const settle = keep => {
+    if (done) return;
+    done = true;
+    if (keep) group.label = input.value.trim();
+    renderSeating();
+  };
+  input.onblur = () => settle(true);
+  input.onkeydown = e => {
+    e.stopPropagation();          // Escape here is "stop editing"
+    if (e.key === "Enter") { e.preventDefault(); settle(true); }
+    if (e.key === "Escape") { e.preventDefault(); settle(false); }
+  };
 }
 
 function renameGroup(span, group) {
@@ -1165,83 +1360,88 @@ function drawStageBar(section, count) {
   document.getElementById("stage-keys").textContent = keys;
 }
 
-// ------------------------------------------------------------------ menu --
+// ---------------------------------------------------------------- drawer --
 
-/* The inverse of the rail's rule: if it changes what the canvas *is*
-   rather than what a click *does*, and it is not done every few
-   minutes, it is in here. */
-function toggleMenu(force) {
-  const sheet = document.getElementById("seat-sheet");
-  const open = force !== undefined ? force : sheet.hidden;
-  sheet.hidden = !open;
+/* The hamburger unfolds the island it sits in rather than opening a
+   menu over the room. What was in that menu was the furniture and two
+   display toggles, which is a drawer with one useful thing in it and a
+   lid on top; unfolded in place they are next to the room's identity,
+   where they belong. */
+function toggleDrawer(force) {
+  const drawer = document.getElementById("seat-drawer");
+  const open = force !== undefined ? force : drawer.hidden;
+  drawer.hidden = !open;
   document.getElementById("seat-menu")
     .setAttribute("aria-expanded", String(open));
-  if (open) drawMenu();
+  document.getElementById("seat-menu").classList.toggle("on", open);
+  if (open) drawDrawer();
+  if (seatingRoom) applyZoom(currentSection());
 }
 
-function drawMenu() {
-  const sheet = document.getElementById("seat-sheet");
-  sheet.textContent = "";
-  const sections = (seatingRoom && seatingRoom.sections) || [];
+function drawDrawer() {
+  const pal = document.getElementById("seat-palette");
+  const shows = document.getElementById("seat-shows");
+  pal.textContent = "";
+  shows.textContent = "";
+  const section = currentSection();
 
-  if (sections.length > 1) {
-    const box = el("div", "mgroup");
-    box.appendChild(el("div", "mhead", "Section"));
-    sections.forEach((s, i) => {
-      const b = el("button",
-                   "mitem toggle" + (i === seatingSection ? " ticked" : ""),
-                   s.name || `section ${i + 1}`);
-      b.type = "button";
-      b.onclick = () => { toggleMenu(false); goToSection(i); };
-      box.appendChild(b);
-    });
-    sheet.appendChild(box);
-  }
-
-  const show = el("div", "mgroup");
-  show.appendChild(el("div", "mhead", "Show"));
-  const toggles = [
-    ["Version letters", () => showVersions, v => { showVersions = v; }],
-    ["Group labels", () => showLabels, v => { showLabels = v; }],
-  ];
-  for (const [label, get, set] of toggles) {
-    const b = el("button", "mitem toggle" + (get() ? " ticked" : ""), label);
+  /* Silhouettes, not captions. The names under them were saying what
+     the pictures already say, except for the rectangles, which
+     differed only in size -- and a size is something you drag, not
+     something you pick off a list. So one table, one single desk, and
+     the shapes that are genuinely different shapes. */
+  for (const kind of paletteKinds()) {
+    const spec = seatingState.shapes[kind];
+    if (!spec) continue;
+    const b = el("button", "deskopt");
     b.type = "button";
-    b.onclick = () => { set(!get()); drawMenu(); renderSeating(); };
-    show.appendChild(b);
+    b.title = "Add a " + spec.label;
+    const tile = el("span", "desktile " + spec.css);
+    const k = 26 / Math.max(spec.w, spec.h);
+    tile.style.width = Math.max(9, Math.round(spec.w * k)) + "px";
+    tile.style.height = Math.max(9, Math.round(spec.h * k)) + "px";
+    b.appendChild(tile);
+    b.onclick = () => {
+      if (!section) return;
+      if (seatingMode !== "desks") seatingMode = "desks";
+      addShape(section, kind);
+    };
+    pal.appendChild(b);
   }
-  sheet.appendChild(show);
 
-  const acts = el("div", "mgroup");
-  acts.appendChild(el("div", "mhead", "Room"));
+  const toggles = [
+    ["Aa", "Version letters", () => showVersions, v => { showVersions = v; }],
+    ["▭", "Group labels", () => showLabels, v => { showLabels = v; }],
+  ];
+  for (const [glyph, label, get, set] of toggles) {
+    const b = el("button", "ibtn showbtn" + (get() ? " on" : ""));
+    b.type = "button";
+    b.title = label;
+    b.appendChild(el("span", "glyph", glyph));
+    b.appendChild(el("span", "ilabel", label));
+    b.onclick = () => { set(!get()); drawDrawer(); renderSeating(); };
+    shows.appendChild(b);
+  }
+}
 
-  /* Also here, not only in the strip. Adding furniture changes what
-     the canvas *is*, which is this menu's whole rule -- and it is the
-     first thing a new room needs, so it should not depend on noticing
-     a thin bar above the rail and reading it as a place with buttons
-     in it. */
-  const furniture = el("button", "mitem", "Add a desk…");
-  furniture.type = "button";
-  furniture.onclick = e => {
-    e.stopPropagation();
-    toggleMenu(false);
-    if (seatingMode !== "desks") { seatingMode = "desks"; renderSeating(); }
-    openShapes(document.getElementById("seat-menu"), currentSection());
-  };
-  acts.appendChild(furniture);
+function paletteKinds() {
+  /* One rectangle rather than four. `desk`, `table-1x2`, `table-2x2`
+     and `table-1x3` are the same silhouette at four sizes; rooms that
+     already use them still load, but there is no reason to choose
+     between them in a palette when the thing you want is a rectangle
+     of a particular size. `desk` stays because one chair and four is
+     a difference in kind, not in size. */
+  const all = Object.keys(seatingState.shapes);
+  const drop = new Set(["table-1x2", "table-1x3"]);
+  return all.filter(k => !drop.has(k));
+}
 
-  const revert = el("button", "mitem", "Discard changes");
-  revert.type = "button";
-  revert.disabled = !seatingDirty();
-  revert.onclick = () => {
-    seatingRoom = JSON.parse(JSON.stringify(seatingState.room));
-    selected = null;
-    picked = null;
-    toggleMenu(false);
-    renderSeating();
-  };
-  acts.appendChild(revert);
-  sheet.appendChild(acts);
+function discardRoom() {
+  seatingRoom = JSON.parse(JSON.stringify(seatingState.room));
+  selected = null;
+  picked = null;
+  selectedChair = null;
+  renderSeating();
 }
 
 // -------------------------------------------------------------- dragging --
@@ -1443,8 +1643,9 @@ function dragShape(event, section, shape) {
   const spec = seatingState.shapes[shape.kind];
   if (!spec) return;
 
-  const box = drawn.shapes[shape.id];
+  const box = drawn.shapes[shape.id];       // the wrap, not the silhouette
   box.focus();
+  const [sw, sh] = shapeSize(shape);
   const scale = canvasScale();
   const start = [event.clientX, event.clientY];
   const home = shape.at.slice();
@@ -1465,11 +1666,11 @@ function dragShape(event, section, shape) {
   const place = e => {
     if (Math.hypot(e.clientX - start[0], e.clientY - start[1]) < 4) return;
     moved = true;
-    const to = clampShape(section, spec,
+    const to = clampShape(section, { w: sw, h: sh },
                           home[0] + (e.clientX - start[0]) / scale,
                           home[1] + (e.clientY - start[1]) / scale);
-    box.style.left = (to[0] - spec.w / 2 - ox) + "px";
-    box.style.top = (to[1] - spec.h / 2 - oy) + "px";
+    box.style.left = (to[0] - sw / 2 - ox) + "px";
+    box.style.top = (to[1] - sh / 2 - oy) + "px";
     for (const [node, left, top] of held) {
       node.style.left = (left + to[0] - home[0]) + "px";
       node.style.top = (top + to[1] - home[1]) + "px";
@@ -1513,12 +1714,13 @@ function nudgeShape(event, section, shape) {
                ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
   if (!by) return;
   event.preventDefault();
-  const spec = seatingState.shapes[shape.kind];
-  if (!spec) return;
+  if (!seatingState.shapes[shape.kind]) return;
+  const [w, h] = shapeSize(shape);
   // Off-grid on purpose with shift held: snapping first would eat the
   // nudge whole, since one unit rounds back to where it started.
   const to = [shape.at[0] + by[0], shape.at[1] + by[1]];
-  shape.at = event.shiftKey ? to : clampShape(section, spec, to[0], to[1]);
+  shape.at = event.shiftKey
+    ? to : clampShape(section, { w: w, h: h }, to[0], to[1]);
   renderSeating();
   const again = drawn.shapes[shape.id];
   if (again) again.focus();
@@ -1598,7 +1800,7 @@ async function present() {
   if (seatingMode !== "upnext") seatingMode = "view";
   selected = null;
   picked = null;
-  toggleMenu(false);
+  toggleDrawer(false);
   document.body.classList.add("presenting");
   setBare(true);                   // starts clean; the eye brings it back
   sizeSeating();
@@ -1628,8 +1830,8 @@ function presentKeys(event) {
   if (document.getElementById("view-seating").hidden) return;
   if (event.key === "Escape" && !presenting()) {
     if (picked) { picked = null; renderSeating(); return; }
-    if (!document.getElementById("seat-sheet").hidden) {
-      toggleMenu(false);
+    if (!document.getElementById("seat-drawer").hidden) {
+      toggleDrawer(false);
       return;
     }
     if (selected) { selected = null; renderSeating(); }
@@ -1756,16 +1958,19 @@ function wireSeating() {
   // Any movement brings the resting island back.
   for (const kind of ["pointermove", "pointerdown", "keydown"])
     document.addEventListener(kind, stir, true);
-  document.getElementById("seat-menu").onclick = e => {
-    e.stopPropagation();
-    toggleMenu();
-  };
-  // Clicking the paper, rather than a thing on it, clears the selection
-  // and shuts the menu: the gesture everybody tries.
+  document.getElementById("seat-menu").onclick = () => toggleDrawer();
+  document.getElementById("seat-discard").onclick = discardRoom;
+  /* Clicking the paper, rather than a thing on it, clears the
+     selection. It does *not* fold the drawer: the drawer is a tool
+     panel you left open on purpose, not a popover you dismissed by
+     looking away. */
   seatingPaper().addEventListener("pointerdown", e => {
     if (e.target.closest(".shape, .seatcard, .pill")) return;
-    toggleMenu(false);
-    if (selected) { selected = null; renderSeating(); }
+    if (selected || selectedChair) {
+      selected = null;
+      selectedChair = null;
+      renderSeating();
+    }
   });
   document.addEventListener("fullscreenchange", onFullscreenChange);
   document.addEventListener("keydown", presentKeys);

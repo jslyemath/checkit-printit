@@ -456,6 +456,29 @@ def check(room, known=None):
                     f"{', '.join(sorted(SHAPES))}.")
             _point(shape.get("at"), f"{where}: the {kind}")
 
+            # A desk dragged to its own size, rather than the kind's.
+            # Stored on the shape so a widened 2x2 and a "3 across"
+            # are the same thing in the file as on screen.
+            for side in ("w", "h"):
+                span = shape.get(side)
+                if span is None:
+                    continue
+                if not _number(span) or span <= 0:
+                    raise RoomError(
+                        f"{where}: the {kind} is {span!r} {side}, which is "
+                        f"not a size.")
+
+            # Which way it is standing. The chairs do not need it --
+            # rotating a desk rewrites their offsets, so a seat is
+            # always simply where it says it is -- but the silhouette
+            # does, and so does a second rotation.
+            angle = shape.get("angle")
+            if angle is not None:
+                if not _number(angle) or not -360 < angle < 360:
+                    raise RoomError(
+                        f"{where}: the {kind} is turned {angle!r}, which is "
+                        f"not a number of degrees.")
+
             for seat in shape.get("seats") or []:
                 if not isinstance(seat, dict):
                     raise RoomError(f"{where}: a seat is a JSON object.")
