@@ -364,7 +364,7 @@ built rather than alphabetically, because several are part-done:
 | 8d | **Print job** | done -- modes, variants, extras, per-student override and version, preview, build |
 | 8e | the response pull | done -- it is Print job's first card, not a tab |
 | 8e | **Record** | **not started.** The only view still entirely untouched |
-| 8f | **Seating** | its own module under `gui/static/seating/`, with the island shell, selection, group colour, label anchors, the unseated rail and **Up Next**. Six modes; Chairs and Order are the two not built. Specified in `../checkit/PRINT_TOOL_DESIGN.md` 12.11 and 12.12 |
+| 8f | **Seating** | its own module under `gui/static/seating/`, with the island shell, selection, group colour, label anchors, the unseated rail and **Up Next**. Six modes; **Order** is the only one not built. A room can be built from nothing: Desks adds and removes furniture, Chairs moves and counts the seats on it. Specified in `../checkit/PRINT_TOOL_DESIGN.md` 12.11 and 12.12 |
 | 8g | ~~Cold call~~ | **folded into Seating as the Up Next mode**, and renamed: the students see it. No tab of its own. See `../checkit/PRINT_TOOL_DESIGN.md` 12.12 |
 | 8h | **Setup** | half done -- a form can be created or attached from the app. The boilerplate editor is still to come |
 
