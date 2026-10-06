@@ -19,7 +19,9 @@ const VIEWS = [
   { id: "record", label: "Record", short: "Record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
   { id: "seating", label: "Seating", short: "Seats" },
   { id: "setup", label: "Setup", short: "Setup" },
-  { id: "callout", label: "Cold call", short: "Call", soon: "Pick a random student, pick several, refresh the call list. No CLI equivalent yet." },
+  // No Cold call tab. It is Seating's Up Next mode: the chart is
+  // already on the projector, so picking somebody should light a chair
+  // rather than replace the screen with a list of names.
 ];
 
 // One definition per column, used to build the header AND the cells. They
