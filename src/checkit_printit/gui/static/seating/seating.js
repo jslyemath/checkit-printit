@@ -970,11 +970,19 @@ function openShapes(near, section) {
     pop.appendChild(b);
   }
   document.getElementById("view-seating").appendChild(pop);
+  // Below the button when it is near the top, above it otherwise --
+  // it opens from the strip at the bottom and from the menu at the
+  // top, and a popover that always hangs upwards goes off screen from
+  // one of them.
   const box = near.getBoundingClientRect();
   const app = document.getElementById("view-seating").getBoundingClientRect();
-  pop.style.left = Math.round(
-    Math.min(box.left - app.left - 6, app.width - pop.offsetWidth - 12)) + "px";
-  pop.style.bottom = Math.round(app.bottom - box.top + 8) + "px";
+  pop.style.left = Math.round(Math.max(10,
+    Math.min(box.left - app.left - 6,
+             app.width - pop.offsetWidth - 12))) + "px";
+  if (box.top - app.top < app.height / 2)
+    pop.style.top = Math.round(box.bottom - app.top + 8) + "px";
+  else
+    pop.style.bottom = Math.round(app.bottom - box.top + 8) + "px";
   const shut = e => {
     if (pop.contains(e.target)) return;
     pop.remove();
@@ -1180,7 +1188,8 @@ function drawMenu() {
     const box = el("div", "mgroup");
     box.appendChild(el("div", "mhead", "Section"));
     sections.forEach((s, i) => {
-      const b = el("button", "mitem" + (i === seatingSection ? " ticked" : ""),
+      const b = el("button",
+                   "mitem toggle" + (i === seatingSection ? " ticked" : ""),
                    s.name || `section ${i + 1}`);
       b.type = "button";
       b.onclick = () => { toggleMenu(false); goToSection(i); };
@@ -1196,7 +1205,7 @@ function drawMenu() {
     ["Group labels", () => showLabels, v => { showLabels = v; }],
   ];
   for (const [label, get, set] of toggles) {
-    const b = el("button", "mitem" + (get() ? " ticked" : ""), label);
+    const b = el("button", "mitem toggle" + (get() ? " ticked" : ""), label);
     b.type = "button";
     b.onclick = () => { set(!get()); drawMenu(); renderSeating(); };
     show.appendChild(b);
@@ -1205,6 +1214,22 @@ function drawMenu() {
 
   const acts = el("div", "mgroup");
   acts.appendChild(el("div", "mhead", "Room"));
+
+  /* Also here, not only in the strip. Adding furniture changes what
+     the canvas *is*, which is this menu's whole rule -- and it is the
+     first thing a new room needs, so it should not depend on noticing
+     a thin bar above the rail and reading it as a place with buttons
+     in it. */
+  const furniture = el("button", "mitem", "Add a desk…");
+  furniture.type = "button";
+  furniture.onclick = e => {
+    e.stopPropagation();
+    toggleMenu(false);
+    if (seatingMode !== "desks") { seatingMode = "desks"; renderSeating(); }
+    openShapes(document.getElementById("seat-menu"), currentSection());
+  };
+  acts.appendChild(furniture);
+
   const revert = el("button", "mitem", "Discard changes");
   revert.type = "button";
   revert.disabled = !seatingDirty();

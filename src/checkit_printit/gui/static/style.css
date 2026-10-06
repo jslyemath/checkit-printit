@@ -82,6 +82,27 @@ nav button.soon { opacity: .55; }
 
 main { padding: 20px 16px 60px; max-width: 1100px; margin: 0 auto; }
 
+/* The page is older than the server. Not a toast: a toast fades, and
+   this is a condition rather than an event -- nothing will work until
+   it is dealt with. */
+.stale {
+  position: fixed;
+  z-index: 90;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 11px 14px;
+  border-radius: 10px;
+  background: var(--warn, oklch(0.62 0.16 40));
+  color: oklch(0.15 0.02 40);
+  font-size: 13px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .45);
+}
+
 /* Two spellings of a label; the window picks. */
 .narrow-only { display: none; }
 

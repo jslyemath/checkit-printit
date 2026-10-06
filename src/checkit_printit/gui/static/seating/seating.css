@@ -198,11 +198,14 @@
 }
 .mitem:hover:not(:disabled) { background: var(--isle-2); }
 .mitem:disabled { color: var(--isle-dim); cursor: default; }
-.mitem::before {
+/* Only the things that are on or off get a box. An action with an
+   empty checkbox beside it reads as a setting nobody has switched on
+   yet, which is not what "Discard changes" is. */
+.mitem.toggle::before {
   content: ""; width: 14px; height: 14px; flex: 0 0 auto;
   border-radius: 4px; border: 1px solid var(--isle-line);
 }
-.mitem.ticked::before {
+.mitem.toggle.ticked::before {
   background: var(--isle-key); border-color: var(--isle-key);
 }
 
