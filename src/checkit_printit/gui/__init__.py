@@ -686,8 +686,12 @@ def _seating_json(course):
         "room": room,
         "names": names,
         "sections": sections,
+        # `seats` goes too, so the canvas can build a new desk from the
+        # palette without carrying its own copy of where the chairs go.
+        # The definition stays in `room.SHAPES`; the browser reads it.
         "shapes": {kind: {"label": spec["label"], "w": spec["w"],
-                          "h": spec["h"], "css": spec["css"]}
+                          "h": spec["h"], "css": spec["css"],
+                          "seats": [list(s) for s in spec["seats"]]}
                    for kind, spec in room_mod.SHAPES.items()},
         "hasRoster": people is not None,
         # Whether saving here will also rewrite the chart the build reads.

@@ -75,10 +75,16 @@
 }
 .ibtn {
   font: inherit;
+  /* One height for every button in an island, whether it holds words
+     or a 17px icon. Without it an icon-only button came out 30 against
+     a text button's 36 and the row looked ragged. */
+  min-height: 34px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 6px 10px;
+  padding: 5px 10px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: none;
@@ -97,6 +103,18 @@
         margin: 2px 1px; }
 .pip { width: 8px; height: 8px; border-radius: 50%;
        background: var(--isle-key); margin: 0 3px 0 5px; }
+
+/* The Save group is a wrapper for showing and hiding, not a box. Left
+   as a plain span it was a flex *item*, so its three children laid out
+   inline inside it and its line box came out 58px against siblings of
+   30 -- which is what made Save look misaligned: it was not, the
+   wrapper around it was taller than the island. `display: contents`
+   puts the children in the island's own row where they belong.
+
+   Qualified with `:not([hidden])`, because `display` set here would
+   otherwise beat the browser's own rule for `hidden` and the group
+   would never hide. */
+#seat-saving:not([hidden]) { display: contents; }
 .zoomnum { min-width: 52px; justify-content: center;
            font-variant-numeric: tabular-nums; }
 #seat-sections { display: flex; gap: 3px; }
@@ -416,6 +434,49 @@
   background: oklch(0.585 0.155 var(--h, 255) / .16);
 }
 
+/* ------------------------------------------------- desks and chairs -- */
+
+/* A chair being positioned, as opposed to a person being moved. The
+   dotted edge says "this is the seat, not the sitter" -- in Chairs
+   mode you are dragging furniture that happens to have a name on it. */
+.canvas.mode-chairs .pill { pointer-events: none; }
+.seatcard.chairable { border-style: dotted; }
+.canvas.mode-chairs .shape.chosen .seatcard { border-style: solid; }
+
+/* The palette: the shapes themselves at the proportions they really
+   have, because a list of their names is a list of words about
+   furniture rather than a choice of furniture. */
+.palette {
+  position: absolute; z-index: 7;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
+  padding: 7px; max-width: 320px;
+  background: var(--isle); border: 1px solid var(--isle-line);
+  border-radius: 10px; box-shadow: var(--isle-shadow);
+}
+.deskopt {
+  font: inherit; display: flex; flex-direction: column;
+  align-items: center; justify-content: flex-end; gap: 5px;
+  width: 68px; padding: 8px 4px 6px;
+  border: 1px solid transparent; border-radius: 8px;
+  background: none; color: var(--isle-dim); cursor: pointer;
+}
+.deskopt:hover { background: var(--isle-2); color: var(--isle-ink); }
+.desktile {
+  background: oklch(0.70 0.02 260);
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+.desktile.circle { border-radius: 50%; }
+.desktile.hex {
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+  border-radius: 0;
+}
+.desktile.trapezoid {
+  clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
+  border-radius: 0;
+}
+.deskname { font-size: 10px; line-height: 1.15; text-align: center; }
+
 /* ---------------------------------------------------------- up next -- */
 
 /* The room, with one chair lit up. This is why Cold call stopped being
@@ -449,13 +510,24 @@
    nothing else can set. */
 #view-seating:fullscreen { background: var(--paper); }
 
-body.presenting header,
-body.presenting .isle,
-body.presenting .pen,
-body.presenting .sheet { display: none; }
-
+body.presenting header { display: none; }
 body.presenting main { padding: 0; max-width: none; }
 body.presenting .seatapp { border: 0; border-radius: 0; }
+
+/* Bare: the controls out of the way. Everything goes except the one
+   island that can bring them back -- a mode with no way out is a
+   trap, and on a projector the way out has to be visible, not
+   remembered. */
+body.bare .isle:not(.at-tr),
+body.bare .pen,
+body.bare .sheet,
+body.bare .strip { display: none; }
+
+/* And that island rests when nothing is happening. Still clickable
+   while faded, so it is a dimming rather than a disappearance. */
+.at-tr { transition: opacity .5s ease; }
+.at-tr.resting { opacity: .16; }
+.at-tr.resting:hover { opacity: 1; }
 
 /* Which room, and the way out. Small and dim: it is for the person at
    the front, not for the back row. */
