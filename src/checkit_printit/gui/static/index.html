@@ -219,28 +219,28 @@
          thing in it and a lid on top; the furniture, the two display
          toggles and the room's identity all belong in one place that
          grows when you want it and folds away when you do not. -->
-    <div class="isle at-tl tools">
-      <div class="isle-row">
-        <button id="seat-menu" class="ibtn" title="More room tools"
-          aria-expanded="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-        </button>
+    <!-- The hamburger slides the display toggles out sideways, between
+         itself and the section numbers. Icons only: what they do is
+         visible on the canvas the moment they are pressed, and a
+         caption on each would make the island wider than the thing it
+         is a control for. -->
+    <div class="isle at-tl">
+      <button id="seat-menu" class="ibtn" title="Show and hide"
+        aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <span id="seat-shows" class="shows" hidden></span>
+      <span class="isep"></span>
+      <div id="seat-sections" class="seg"></div>
+      <!-- Save is absent until there is something to save. Most of
+           the time a Save button is a button with nothing to do, and
+           Discard beside it is a button with nothing to undo. -->
+      <span id="seat-saving" hidden>
         <span class="isep"></span>
-        <div id="seat-sections" class="seg"></div>
-        <!-- Save is absent until there is something to save. Most of
-             the time a Save button is a button with nothing to do, and
-             Discard beside it is a button with nothing to undo. -->
-        <span id="seat-saving" hidden>
-          <span class="isep"></span>
-          <span class="pip" title="unsaved changes"></span>
-          <button id="seat-save" class="ibtn key">Save</button>
-          <button id="seat-discard" class="ibtn">Discard</button>
-        </span>
-      </div>
-      <div id="seat-drawer" class="drawer" hidden>
-        <div id="seat-palette" class="palrow"></div>
-        <div id="seat-shows" class="showrow"></div>
-      </div>
+        <span class="pip" title="unsaved changes"></span>
+        <button id="seat-save" class="ibtn key">Save</button>
+        <button id="seat-discard" class="ibtn">Discard</button>
+      </span>
     </div>
 
     <!-- top right: how the room is being shown, as opposed to what is
@@ -270,6 +270,11 @@
 
     <!-- what is selected: one thin strip, with no expanded state -->
     <div id="seat-strip" class="isle strip" hidden></div>
+
+    <!-- The furniture, right above the mode that uses it. It belongs
+         on the canvas beside the room it adds to, not folded into a
+         menu in the far corner. -->
+    <div id="seat-palette" class="isle palette" hidden></div>
 
     <!-- bottom centre: what am I doing. Modes only. -->
     <div id="seat-modes" class="isle at-bc rail"></div>
