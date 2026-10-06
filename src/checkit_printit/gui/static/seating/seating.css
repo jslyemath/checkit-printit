@@ -177,37 +177,40 @@
 .hue:hover { border-color: var(--isle-dim); }
 .hue.on { border-color: var(--isle-ink); }
 
-/* The menu. Everything that is neither a mode nor frequent: if it
-   changes what the canvas *is* rather than what a click *does*, and it
-   is not done every few minutes, it is in here. */
-.sheet {
-  position: absolute; z-index: 6; top: 56px; left: 12px;
-  min-width: 200px; max-height: calc(100% - 120px); overflow: auto;
-  padding: 6px;
-  background: var(--isle); border: 1px solid var(--isle-line);
-  border-radius: 12px; box-shadow: var(--isle-shadow); color: var(--isle-ink);
+/* The island unfolds rather than opening a menu over the room. Same
+   box, more of it: the furniture and the display toggles sit under the
+   room's identity, where the hamburger that reveals them already is. */
+.isle.tools { flex-direction: column; align-items: stretch; gap: 0; }
+.isle-row { display: flex; align-items: center; gap: 4px; }
+.drawer {
+  display: flex; flex-direction: column; gap: 7px;
+  margin-top: 6px; padding-top: 7px;
+  border-top: 1px solid var(--isle-line);
 }
-.mgroup + .mgroup { border-top: 1px solid var(--isle-line); margin-top: 5px;
-                    padding-top: 5px; }
-.mhead { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
-         color: var(--isle-dim); padding: 5px 9px 3px; }
-.mitem {
-  font: inherit; display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 7px 9px; border: 0; border-radius: 7px; background: none;
-  color: var(--isle-ink); cursor: pointer; text-align: left;
+.palrow, .showrow { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.deskopt {
+  font: inherit; display: flex; align-items: center; justify-content: center;
+  width: 38px; height: 34px; padding: 0;
+  border: 1px solid transparent; border-radius: 8px;
+  background: none; cursor: pointer;
 }
-.mitem:hover:not(:disabled) { background: var(--isle-2); }
-.mitem:disabled { color: var(--isle-dim); cursor: default; }
-/* Only the things that are on or off get a box. An action with an
-   empty checkbox beside it reads as a setting nobody has switched on
-   yet, which is not what "Discard changes" is. */
-.mitem.toggle::before {
-  content: ""; width: 14px; height: 14px; flex: 0 0 auto;
-  border-radius: 4px; border: 1px solid var(--isle-line);
+.deskopt:hover { background: var(--isle-2); }
+.desktile { background: oklch(0.74 0.015 260); border-radius: 2px;
+            flex: 0 0 auto; }
+.deskopt:hover .desktile { background: var(--isle-ink); }
+.desktile.circle { border-radius: 50%; }
+.desktile.hex {
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+  border-radius: 0;
 }
-.mitem.toggle.ticked::before {
-  background: var(--isle-key); border-color: var(--isle-key);
+.desktile.trapezoid {
+  clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
+  border-radius: 0;
 }
+.showbtn { font-size: 12px; padding: 5px 9px; }
+.showbtn .glyph { font-weight: 800; font-size: 13px; width: 15px;
+                  text-align: center; }
 
 /* ---------------------------------------------------------- the room -- */
 
@@ -216,9 +219,12 @@
    roles at zero: being grey IS the status, and needs no caption. The
    steps are Radix's -- 3 for a surface, 6 and 7 for borders, 9 for the
    one solid thing, 12 for text on the pale shades. */
-.shape, .seatcard, .pill {
+.deskwrap, .shape, .seatcard, .pill {
   --surface:   oklch(0.935 calc(0.048 * var(--c, 1)) var(--h, 255));
-  --edge:      oklch(0.845 calc(0.075 * var(--c, 1)) var(--h, 255));
+  /* Dark enough to find on the paper. At 0.845 an ungrouped desk --
+     zero chroma, so pure grey -- had almost no edge against a 0.971
+     background, and you could not see where it began. */
+  --edge:      oklch(0.760 calc(0.095 * var(--c, 1)) var(--h, 255));
   --facecard:  oklch(0.993 calc(0.011 * var(--c, 1)) var(--h, 255));
   --face-edge: oklch(0.880 calc(0.055 * var(--c, 1)) var(--h, 255));
   --solid:     oklch(0.585 calc(0.155 * var(--c, 1)) var(--h, 255));
@@ -226,24 +232,75 @@
   --faint:     oklch(0.520 calc(0.045 * var(--c, 1)) var(--h, 255));
 }
 
+/* The desk's own frame: position, size and rotation live here, and
+   everything that belongs to the desk is inside it, so all of it
+   moves and turns together. */
+.deskwrap { position: absolute; }
+.deskwrap.chosen .shape { outline: 2px solid var(--solid);
+                          outline-offset: 2px; }
+
+/* Pull an edge or a corner. Round, because they are not the square
+   anchors the label snaps to -- two kinds of point on one desk need
+   to look like two kinds of point. */
+.grip {
+  position: absolute;
+  width: 11px; height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid var(--solid);
+  z-index: 4;
+}
+.grip-n, .grip-s { cursor: ns-resize; }
+.grip-e, .grip-w { cursor: ew-resize; }
+.grip-nw, .grip-se { cursor: nwse-resize; }
+.grip-ne, .grip-sw { cursor: nesw-resize; }
+
+/* Above the desk, on a stalk, which is where every tool that rotates
+   anything puts it. */
+.spinner {
+  position: absolute;
+  left: 50%; top: -30px;
+  width: 15px; height: 15px;
+  margin-left: -7.5px;
+  border-radius: 50%;
+  background: var(--solid);
+  border: 2px solid white;
+  cursor: grab;
+  z-index: 4;
+}
+.spinner::before {
+  content: "";
+  position: absolute;
+  left: 50%; top: 100%;
+  width: 2px; height: 18px;
+  margin-left: -1px;
+  background: var(--solid);
+}
+.spinner:active { cursor: grabbing; }
+
 /* A desk. The silhouette is the kind and nothing else changes. */
 .shape {
   position: absolute;
+  inset: 0;
   background: var(--surface);
-  border: 1.5px solid var(--edge);
+  border: 2.5px solid var(--edge);
   box-sizing: border-box;
 }
 .shape.rect { border-radius: 14px; }
 .shape.circle { border-radius: 50%; }
+/* A clipped shape cannot carry a border -- the clip cuts it off -- so
+   the outline is drawn as an inset shadow, which the clip keeps. */
+.shape.hex, .shape.trapezoid {
+  border: none;
+  box-shadow: inset 0 0 0 2.5px var(--edge);
+}
 .shape.hex {
   clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
-  border: none;
 }
 .shape.trapezoid {
   clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
-  border: none;
 }
-.shape.chosen { outline: 2px solid var(--solid); outline-offset: 2px; }
 
 /* A person. Two lines so the card is squarish -- a single long line of
    "Bartholomew Achterberg" sets the whole room's spacing.
@@ -321,6 +378,15 @@
   box-shadow: 0 2px 6px oklch(0.4 0.06 var(--h, 255) / .35);
 }
 .pill.chosen { outline: 2px solid white; outline-offset: 2px; }
+.pillrename {
+  position: absolute; transform: translate(-50%, -50%);
+  font: inherit; font-size: 13px; font-weight: 700; text-align: center;
+  letter-spacing: .07em; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 999px;
+  background: white; color: oklch(0.25 0.01 260);
+  border: 2px solid oklch(0.45 0.02 260);
+  z-index: 9;
+}
 
 /* The nine places a label may sit, shown while its group is selected.
    These are the control: there is no picker, you drag the pill onto
@@ -444,41 +510,7 @@
    mode you are dragging furniture that happens to have a name on it. */
 .canvas.mode-chairs .pill { pointer-events: none; }
 .seatcard.chairable { border-style: dotted; }
-.canvas.mode-chairs .shape.chosen .seatcard { border-style: solid; }
-
-/* The palette: the shapes themselves at the proportions they really
-   have, because a list of their names is a list of words about
-   furniture rather than a choice of furniture. */
-.palette {
-  position: absolute; z-index: 7;
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
-  padding: 7px; max-width: 320px;
-  background: var(--isle); border: 1px solid var(--isle-line);
-  border-radius: 10px; box-shadow: var(--isle-shadow);
-}
-.deskopt {
-  font: inherit; display: flex; flex-direction: column;
-  align-items: center; justify-content: flex-end; gap: 5px;
-  width: 68px; padding: 8px 4px 6px;
-  border: 1px solid transparent; border-radius: 8px;
-  background: none; color: var(--isle-dim); cursor: pointer;
-}
-.deskopt:hover { background: var(--isle-2); color: var(--isle-ink); }
-.desktile {
-  background: oklch(0.70 0.02 260);
-  border-radius: 3px;
-  flex: 0 0 auto;
-}
-.desktile.circle { border-radius: 50%; }
-.desktile.hex {
-  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
-  border-radius: 0;
-}
-.desktile.trapezoid {
-  clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
-  border-radius: 0;
-}
-.deskname { font-size: 10px; line-height: 1.15; text-align: center; }
+.canvas.mode-chairs .deskwrap.chosen ~ .seatcard { border-style: solid; }
 
 /* ---------------------------------------------------------- up next -- */
 

@@ -212,21 +212,35 @@
       <p id="seating-empty" class="emptyroom" hidden></p>
     </div>
 
-    <!-- top left: which room am I in, and is it saved -->
-    <div class="isle at-tl">
-      <button id="seat-menu" class="ibtn" title="Room menu"
-        aria-haspopup="true" aria-expanded="false">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-      </button>
-      <span class="isep foldaway"></span>
-      <div id="seat-sections" class="seg foldaway"></div>
-      <!-- Save is absent until there is something to save. Most of the
-           time a Save button is a button with nothing to do. -->
-      <span id="seat-saving" hidden>
+    <!-- top left: which room am I in, and is it saved.
+
+         The hamburger does not open a menu -- it unfolds this island.
+         A menu whose only entry was "Add a desk" was a drawer with one
+         thing in it and a lid on top; the furniture, the two display
+         toggles and the room's identity all belong in one place that
+         grows when you want it and folds away when you do not. -->
+    <div class="isle at-tl tools">
+      <div class="isle-row">
+        <button id="seat-menu" class="ibtn" title="More room tools"
+          aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
         <span class="isep"></span>
-        <span class="pip" title="unsaved changes"></span>
-        <button id="seat-save" class="ibtn key">Save</button>
-      </span>
+        <div id="seat-sections" class="seg"></div>
+        <!-- Save is absent until there is something to save. Most of
+             the time a Save button is a button with nothing to do, and
+             Discard beside it is a button with nothing to undo. -->
+        <span id="seat-saving" hidden>
+          <span class="isep"></span>
+          <span class="pip" title="unsaved changes"></span>
+          <button id="seat-save" class="ibtn key">Save</button>
+          <button id="seat-discard" class="ibtn">Discard</button>
+        </span>
+      </div>
+      <div id="seat-drawer" class="drawer" hidden>
+        <div id="seat-palette" class="palrow"></div>
+        <div id="seat-shows" class="showrow"></div>
+      </div>
     </div>
 
     <!-- top right: how the room is being shown, as opposed to what is
@@ -268,11 +282,6 @@
       <span id="stage-keys"></span>
     </div>
 
-    <!-- The menu's contents: everything that is neither a mode nor
-         frequent. The rule is the inverse of the rail's -- if it
-         changes what the canvas *is* rather than what a click *does*,
-         it belongs here. -->
-    <div id="seat-sheet" class="sheet" hidden></div>
   </section>
 
   <section id="view-setup" class="view" hidden>
