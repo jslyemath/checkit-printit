@@ -34,6 +34,14 @@ let picked = null;
    element and has to reason in room coordinates. */
 let drawn = { shapes: {}, cards: {}, seats: [], labels: [], box: null };
 
+/* What is drawn, as opposed to what is true. These are the viewer's
+   preferences, not the room's, so they live here and not in
+   `seatingRoom` -- put in the document they would make "hide the
+   version letters for a minute" an unsaved change, and the Save button
+   would appear for having looked at something differently. */
+let showVersions = true;
+let showLabels = true;
+
 // ------------------------------------------------------------ constants --
 
 const GRID = 20;        // what a dragged desk snaps to, in room units
@@ -55,6 +63,21 @@ const NAME_SMALLEST = 11;
    to tell at a glance, and never the only carrier of meaning, because
    the pill still says which table it is. */
 const HUES = [255, 150, 35, 330, 285, 95, 195, 15];
+
+/* The nine places a label can sit on a desk, as fractions of the
+   shape's own box. Eight around the perimeter and the middle, the same
+   nine for every shape -- a hexagon's corners are not where a label
+   wants to be, and a rule that is the same everywhere is one a person
+   can learn once.
+
+   The pill's centre goes exactly on the point, so a perimeter anchor
+   straddles the edge. That reads as deliberate, where fully outside
+   reads as adrift and fully inside covers the furniture. */
+const ANCHORS = {
+  nw: [-0.5, -0.5], n: [0, -0.5], ne: [0.5, -0.5],
+  w: [-0.5, 0], c: [0, 0], e: [0.5, 0],
+  sw: [-0.5, 0.5], s: [0, 0.5], se: [0.5, 0.5],
+};
 
 const ICON = {
   view: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z|O12,12,3",
@@ -326,8 +349,6 @@ function drawRoom(section) {
   canvas.style.width = area.w + "px";
   canvas.style.height = area.h + "px";
 
-  const showVersions = seatingRoom.showVersions !== false;
-  const showLabels = seatingRoom.showLabels !== false;
   const bySeat = groupOfSeat(section);
   const where = {};
 
@@ -382,31 +403,26 @@ function drawRoom(section) {
     for (const group of groupsOf(section)) {
       const ids = (group.seats || []).filter(id => where[id]);
       if (!ids.length || !group.label) continue;
-      const xs = ids.map(id => where[id][0]);
-      const ys = ids.map(id => where[id][1]);
-      /* The middle of its seats -- the centre of a table, or the gap
-         between desks that belong together.
-
-         Unless the middle is where somebody is sitting. A table of one
-         puts its centre exactly on the one card, and a row of three
-         puts it on the middle one, so the label covered a name. When
-         that happens it drops below the group instead. A placeholder
-         until labels can be dragged onto an anchor, but the right
-         default either way: a label should never hide a student. */
-      const x = (Math.min(...xs) + Math.max(...xs)) / 2;
-      let y = (Math.min(...ys) + Math.max(...ys)) / 2;
-      const onSomebody = ids.some(id =>
-        Math.abs(where[id][0] - x) < CARD_W * 0.55
-        && Math.abs(where[id][1] - y) < CARD_H * 0.55);
-      if (onSomebody) y = Math.max(...ys) + CARD_H / 2 + 15;
+      const [x, y] = labelPoint(section, group, ids, where);
       const tag = el("div", "pill", group.label);
       tint(tag, hueOf(section, group));
       if (isSelected(group, null)) tag.classList.add("chosen");
       tag.style.left = (x - ox) + "px";
       tag.style.top = (y - oy) + "px";
-      tag.onpointerdown = e => { e.preventDefault(); choose(group, null); };
+      tag.onpointerdown = e => dragLabel(e, tag, section, group, ids, where);
       canvas.appendChild(tag);
       drawn.labels.push({ el: tag, seats: ids, group: group });
+    }
+  }
+
+  // The nine places this group's label may sit, shown only while it is
+  // selected. There is no picker control: these *are* the control.
+  if (showLabels && selected && selected.kind === "group") {
+    for (const spot of anchorsFor(section, selected.id)) {
+      const dot = el("div", "anchor" + (spot.on ? " on" : ""));
+      dot.style.left = (spot.x - ox) + "px";
+      dot.style.top = (spot.y - oy) + "px";
+      canvas.appendChild(dot);
     }
   }
 
@@ -445,6 +461,121 @@ function fillCard(card, who, version) {
     card.title = who.full;
   }
   if (version) card.appendChild(el("span", "ver", version));
+}
+
+// --------------------------------------------------------- group labels --
+
+function shapesHolding(section, group) {
+  const mine = new Set(group.seats || []);
+  return (section.shapes || []).filter(
+    s => (s.seats || []).some(seat => mine.has(seat.id)));
+}
+
+function anchorsFor(section, groupId) {
+  /* Every anchor on every desk this group sits at, with the one
+     currently in use marked. A group spanning two desks gets both
+     sets, because either is an honest place for its label. */
+  const group = groupsOf(section).find(g => g.id === groupId);
+  if (!group) return [];
+  const at = group.label_at;
+  const out = [];
+  for (const shape of shapesHolding(section, group)) {
+    const spec = seatingState.shapes[shape.kind];
+    if (!spec) continue;
+    for (const key of Object.keys(ANCHORS)) {
+      const [fx, fy] = ANCHORS[key];
+      out.push({
+        shape: shape.id, anchor: key,
+        x: shape.at[0] + fx * spec.w,
+        y: shape.at[1] + fy * spec.h,
+        on: Boolean(at) && at.shape === shape.id && at.anchor === key,
+      });
+    }
+  }
+  return out;
+}
+
+function labelPoint(section, group, ids, where) {
+  /* Where the label goes. An anchor if one has been set and the desk
+     it names is still there; otherwise the middle of the group's
+     seats, which is the centre of a table or the gap between desks
+     that belong together.
+
+     Unless the middle is where somebody is sitting. A table of one
+     puts its centre exactly on the one card and a row of three puts it
+     on the middle one, so the label covered a name. When that happens
+     it drops below the group instead -- a default, not a rule, and
+     overridden the moment an anchor is chosen. */
+  if (group.label_at) {
+    const spot = anchorsFor(section, group.id).find(
+      a => a.shape === group.label_at.shape
+        && a.anchor === group.label_at.anchor);
+    if (spot) return [spot.x, spot.y];
+  }
+  const xs = ids.map(id => where[id][0]);
+  const ys = ids.map(id => where[id][1]);
+  const x = (Math.min(...xs) + Math.max(...xs)) / 2;
+  let y = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const onSomebody = ids.some(id =>
+    Math.abs(where[id][0] - x) < CARD_W * 0.55
+    && Math.abs(where[id][1] - y) < CARD_H * 0.55);
+  if (onSomebody) y = Math.max(...ys) + CARD_H / 2 + 15;
+  return [x, y];
+}
+
+function dragLabel(event, tag, section, group, ids, where) {
+  /* Click selects; dragging moves the label to an anchor. The anchors
+     are already on screen by the time a drag is possible, because
+     selecting is what put them there -- which is the whole reason
+     there is no anchor picker in the strip. */
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  event.preventDefault();
+  if (seatingMode === "view") return;
+  if (!isSelected(group, null)) { choose(group, null); return; }
+
+  const spots = anchorsFor(section, group.id);
+  const ox = drawn.box ? drawn.box.x : 0, oy = drawn.box ? drawn.box.y : 0;
+  const start = [event.clientX, event.clientY];
+  let moved = false, best = null;
+
+  const place = e => {
+    if (Math.hypot(e.clientX - start[0], e.clientY - start[1]) < 4) return;
+    moved = true;
+    tag.classList.add("dragging");
+    const [cx, cy] = roomPoint(e);
+    let near = Infinity;
+    best = null;
+    for (const spot of spots) {
+      const d = Math.hypot(spot.x - cx, spot.y - cy);
+      if (d < near) { near = d; best = spot; }
+    }
+    // Follows the pointer, and snaps to the nearest anchor once it is
+    // close enough to be meant.
+    const snap = best && near <= 110;
+    tag.style.left = ((snap ? best.x : cx) - ox) + "px";
+    tag.style.top = ((snap ? best.y : cy) - oy) + "px";
+    for (const dot of document.querySelectorAll("#canvas .anchor"))
+      dot.classList.remove("near");
+    if (snap) {
+      const i = spots.indexOf(best);
+      const dots = document.querySelectorAll("#canvas .anchor");
+      if (dots[i]) dots[i].classList.add("near");
+    }
+  };
+
+  const finish = commit => {
+    tag.onpointermove = tag.onpointerup = tag.onpointercancel = null;
+    tag.classList.remove("dragging");
+    if (!moved) { renderSeating(); return; }   // a click on a chosen label
+    if (commit && best) group.label_at = { shape: best.shape,
+                                           anchor: best.anchor };
+    renderSeating();
+  };
+
+  tag.setPointerCapture(event.pointerId);
+  tag.onpointermove = place;
+  tag.onpointerup = () => finish(true);
+  tag.onpointercancel = () => finish(false);
 }
 
 // ------------------------------------------------------------ selection --
@@ -491,13 +622,21 @@ function drawStrip(section) {
     return;
   }
 
+  // One dot that opens the swatches, rather than six swatches always
+  // on show: the strip has to stay one row at 515px.
   const dot = el("button", "swatch");
   dot.type = "button";
   dot.title = "Colour";
   tint(dot, hueOf(section, group));
+  dot.onclick = e => { e.stopPropagation(); openHues(dot, section, group); };
   strip.appendChild(dot);
 
-  strip.appendChild(el("span", "sname", group.label || "(no label)"));
+  // The heading is the label; clicking it renames. A separate text
+  // field below a heading saying the same thing was the first draft.
+  const name = el("span", "sname", group.label || "(no label)");
+  name.title = "Click to rename";
+  name.onclick = () => renameGroup(name, group);
+  strip.appendChild(name);
 
   const n = (group.seats || []).length;
   strip.appendChild(el("span", "smeta", n + (n === 1 ? " seat" : " seats")));
@@ -511,6 +650,59 @@ function drawStrip(section) {
   ord.title = at < 0 ? "No place in the print order yet"
                      : `Prints ${at + 1} of ${total}`;
   strip.appendChild(ord);
+}
+
+function openHues(near, section, group) {
+  document.querySelectorAll(".hues").forEach(n => n.remove());
+  const pop = el("div", "hues");
+  for (const hue of HUES) {
+    const b = el("button", "hue" + (hueOf(section, group) === hue
+                                    ? " on" : ""));
+    b.type = "button";
+    b.style.setProperty("--h", hue);
+    b.onclick = () => {
+      group.hue = hue;
+      pop.remove();
+      renderSeating();
+    };
+    pop.appendChild(b);
+  }
+  document.getElementById("view-seating").appendChild(pop);
+  const box = near.getBoundingClientRect();
+  const app = document.getElementById("view-seating").getBoundingClientRect();
+  pop.style.left = Math.round(box.left - app.left - 6) + "px";
+  pop.style.bottom = Math.round(app.bottom - box.top + 8) + "px";
+  const shut = e => {
+    if (pop.contains(e.target)) return;
+    pop.remove();
+    document.removeEventListener("pointerdown", shut, true);
+  };
+  setTimeout(() => document.addEventListener("pointerdown", shut, true), 0);
+}
+
+function renameGroup(span, group) {
+  /* Edit in place. The label is already on screen in the strip and on
+     the pill, so a dialog would be a third copy of it. */
+  const input = el("input", "srename");
+  input.type = "text";
+  input.value = group.label || "";
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const settle = keep => {
+    if (done) return;
+    done = true;
+    if (keep) group.label = input.value.trim();
+    renderSeating();
+  };
+  input.onblur = () => settle(true);
+  input.onkeydown = e => {
+    if (e.key === "Enter") { e.preventDefault(); settle(true); }
+    // Escape has to stop here, or the view's own handler takes it as
+    // "clear the selection" and the strip vanishes mid-edit.
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); settle(false); }
+  };
 }
 
 function drawPen(section) {
@@ -597,12 +789,14 @@ function drawMenu() {
 
   const show = el("div", "mgroup");
   show.appendChild(el("div", "mhead", "Show"));
-  for (const [key, label] of [["showVersions", "Version letters"],
-                              ["showLabels", "Group labels"]]) {
-    const on = seatingRoom[key] !== false;
-    const b = el("button", "mitem" + (on ? " ticked" : ""), label);
+  const toggles = [
+    ["Version letters", () => showVersions, v => { showVersions = v; }],
+    ["Group labels", () => showLabels, v => { showLabels = v; }],
+  ];
+  for (const [label, get, set] of toggles) {
+    const b = el("button", "mitem" + (get() ? " ticked" : ""), label);
     b.type = "button";
-    b.onclick = () => { seatingRoom[key] = !on; drawMenu(); renderSeating(); };
+    b.onclick = () => { set(!get()); drawMenu(); renderSeating(); };
     show.appendChild(b);
   }
   sheet.appendChild(show);
