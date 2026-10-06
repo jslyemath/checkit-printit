@@ -364,8 +364,8 @@ built rather than alphabetically, because several are part-done:
 | 8d | **Print job** | done -- modes, variants, extras, per-student override and version, preview, build |
 | 8e | the response pull | done -- it is Print job's first card, not a tab |
 | 8e | **Record** | **not started.** The only view still entirely untouched |
-| 8f | **Seating** | stages 1-3 of 6 done -- the model, the colouring, the chart writer, the canvas, and dragging in three modes (View / People / Desks). Saving writes the chart too, but only one this tab wrote. **The shape palette is next.** Specified in `../checkit/PRINT_TOOL_DESIGN.md` 12.11 |
-| 8g | **Cold call** | not started; genuinely new code |
+| 8f | **Seating** | stages 1-3 of 6 done -- the model, the colouring, the chart writer, the canvas, and dragging in three modes (View / People / Desks). Saving writes the chart too, but only one this tab wrote. **The shape palette is next.** Specified in `../checkit/PRINT_TOOL_DESIGN.md` 12.11, and the shell it is being rebuilt into in 12.12 |
+| 8g | ~~Cold call~~ | **folded into Seating as the Up Next mode**, and renamed: the students see it. No tab of its own. See `../checkit/PRINT_TOOL_DESIGN.md` 12.12 |
 | 8h | **Setup** | half done -- a form can be created or attached from the app. The boilerplate editor is still to come |
 
 **All three decisions that were blocking 8e are settled**, on
