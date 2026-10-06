@@ -394,6 +394,7 @@ function renderSeating() {
   const section = currentSection();
   drawPen(section);
   drawRoom(section);
+  drawPalette(section);
   drawStrip(section);
   drawStageBar(section, sections.length);
 }
@@ -564,16 +565,8 @@ function drawRoom(section) {
       if (isSelected(group, null)) tag.classList.add("chosen");
       tag.style.left = (x - ox) + "px";
       tag.style.top = (y - oy) + "px";
-      tag.title = "Double-click to rename";
+      tag.title = "Drag to move it; click twice to rename";
       tag.onpointerdown = e => dragLabel(e, tag, section, group, ids, where);
-      /* Renaming where the name is, in any mode. The strip can rename
-         too, but the label is the thing you are looking at when you
-         decide it is called the wrong thing. */
-      tag.ondblclick = e => {
-        e.preventDefault();
-        e.stopPropagation();
-        renameOnCanvas(tag, group);
-      };
       canvas.appendChild(tag);
       drawn.labels.push({ el: tag, seats: ids, group: group });
     }
@@ -703,42 +696,67 @@ function labelPoint(section, group, ids, where) {
   return [x, y];
 }
 
+/* When a label was last pressed, and which one. A double click cannot
+   be read off the `dblclick` event here: the first click selects the
+   group, the group's pill is redrawn as a new element, and the second
+   click lands on something the browser has never seen before -- so
+   `dblclick` never fires. Two timestamps are what is left. */
+let lastLabelTap = { id: null, at: 0 };
+
 function dragLabel(event, tag, section, group, ids, where) {
-  /* Click selects; dragging moves the label to an anchor. The anchors
-     are already on screen by the time a drag is possible, because
-     selecting is what put them there -- which is the whole reason
-     there is no anchor picker in the strip. */
+  /* Click selects; a second click renames; dragging moves the label to
+     an anchor. The anchors are on screen by the time a drag is
+     possible, because selecting is what put them there -- which is
+     why there is no anchor picker in the strip. */
   if (event.pointerType === "mouse" && event.button !== 0) return;
   event.preventDefault();
-  if (seatingMode === "view") return;
-  if (!isSelected(group, null)) { choose(group, null); return; }
+  event.stopPropagation();
+  if (seatingMode === "view" || seatingMode === "upnext") return;
 
+  const now = Date.now();
+  if (lastLabelTap.id === group.id && now - lastLabelTap.at < 450) {
+    lastLabelTap = { id: null, at: 0 };
+    renameOnCanvas(tag, group);
+    return;
+  }
+  lastLabelTap = { id: group.id, at: now };
+
+  if (!isSelected(group, null)) choose(group, null);
+
+  // `choose` re-drew, so the element under the pointer is a new one.
+  const live = (drawn.labels.find(l => l.group.id === group.id) || {}).el || tag;
   const spots = anchorsFor(section, group.id);
   const ox = drawn.box ? drawn.box.x : 0, oy = drawn.box ? drawn.box.y : 0;
   const start = [event.clientX, event.clientY];
   let moved = false, best = null;
 
-  const place = e => {
-    if (Math.hypot(e.clientX - start[0], e.clientY - start[1]) < 4) return;
-    moved = true;
-    tag.classList.add("dragging");
-    const [cx, cy] = roomPoint(e);
-    let near = Infinity;
-    best = null;
+  const nearest = (cx, cy) => {
+    let near = Infinity, found = null;
     for (const spot of spots) {
       const d = Math.hypot(spot.x - cx, spot.y - cy);
-      if (d < near) { near = d; best = spot; }
+      if (d < near) { near = d; found = spot; }
     }
-    // Follows the pointer, and snaps to the nearest anchor once it is
-    // close enough to be meant.
-    const snap = best && near <= 110;
-    tag.style.left = ((snap ? best.x : cx) - ox) + "px";
-    tag.style.top = ((snap ? best.y : cy) - oy) + "px";
+    return found;
+  };
+
+  const place = e => {
+    if (!moved
+        && Math.hypot(e.clientX - start[0], e.clientY - start[1]) < 4) return;
+    moved = true;
+    live.classList.add("dragging");
+    /* Under the cursor, exactly, the whole way. It used to jump to
+       the nearest anchor as soon as it was near one, which made the
+       label feel like it was being taken off you. It goes to the
+       anchor when you let go, not before. */
+    const [cx, cy] = roomPoint(e);
+    live.style.left = (cx - ox) + "px";
+    live.style.top = (cy - oy) + "px";
+    best = nearest(cx, cy);
     for (const dot of document.querySelectorAll("#canvas .anchor"))
       dot.classList.remove("near");
-    if (snap) {
-      // By name, not by index: the dots live inside their own desks
-      // now, so document order is desk order and not spot order.
+    if (best) {
+      // By name, not by index: the dots live inside their own desks,
+      // so document order is desk order and not spot order.
       const dot = document.querySelector(
         `#canvas .anchor[data-spot="${best.shape}:${best.anchor}"]`);
       if (dot) dot.classList.add("near");
@@ -746,18 +764,32 @@ function dragLabel(event, tag, section, group, ids, where) {
   };
 
   const finish = commit => {
-    tag.onpointermove = tag.onpointerup = tag.onpointercancel = null;
-    tag.classList.remove("dragging");
-    if (!moved) { renderSeating(); return; }   // a click on a chosen label
-    if (commit && best) group.label_at = { shape: best.shape,
-                                           anchor: best.anchor };
-    renderSeating();
+    live.onpointermove = live.onpointerup = live.onpointercancel = null;
+    if (!moved) { live.classList.remove("dragging"); return; }
+    if (!commit || !best) { live.classList.remove("dragging"); renderSeating(); return; }
+
+    /* Fly home rather than appear there. The anchor it chose is a
+       guess about what was meant, and watching the label travel the
+       last few pixels is what tells you which guess it made. */
+    group.label_at = { shape: best.shape, anchor: best.anchor };
+    live.classList.remove("dragging");
+    live.classList.add("homing");
+    live.style.left = (best.x - ox) + "px";
+    live.style.top = (best.y - oy) + "px";
+    let done = false;
+    const land = () => {
+      if (done) return;
+      done = true;
+      renderSeating();
+    };
+    live.addEventListener("transitionend", land, { once: true });
+    setTimeout(land, 260);      // in case the move was zero and nothing ran
   };
 
-  tag.setPointerCapture(event.pointerId);
-  tag.onpointermove = place;
-  tag.onpointerup = () => finish(true);
-  tag.onpointercancel = () => finish(false);
+  live.setPointerCapture(event.pointerId);
+  live.onpointermove = place;
+  live.onpointerup = () => finish(true);
+  live.onpointercancel = () => finish(false);
 }
 
 // ------------------------------------------------------------ selection --
@@ -807,17 +839,9 @@ function drawStrip(section) {
   if (!shape && group && (seatingMode === "desks" || seatingMode === "chairs"))
     shape = shapesHolding(section, group)[0] || null;
 
-  // Desks mode with nothing chosen is where a room gets its furniture.
-  if (seatingMode === "desks" && !shape) {
-    strip.hidden = false;
-    const add = el("button", "ibtn key", "Add a desk");
-    add.type = "button";
-    add.onclick = e => { e.stopPropagation(); toggleDrawer(true); };
-    strip.appendChild(add);
-    strip.appendChild(el("span", "smeta",
-      (section.shapes || []).length + " in this room"));
-    return;
-  }
+  // Nothing chosen in Desks mode: the palette island below is the
+  // whole offer, so the strip has nothing to add.
+  if (seatingMode === "desks" && !shape) { strip.hidden = true; return; }
   if (seatingMode === "chairs" && !shape) {
     strip.hidden = false;
     strip.appendChild(el("span", "smeta",
@@ -854,10 +878,6 @@ function drawStrip(section) {
       kill.type = "button";
       kill.onclick = () => removeShape(section, shape);
       strip.appendChild(kill);
-      const add = el("button", "ibtn key", "Add a desk");
-      add.type = "button";
-      add.onclick = e => { e.stopPropagation(); toggleDrawer(true); };
-      strip.appendChild(add);
     }
     return;
   }
@@ -951,6 +971,31 @@ const SPAN = { nw: [-1, -1], n: [0, -1], ne: [1, -1], w: [-1, 0],
                e: [1, 0], sw: [-1, 1], s: [0, 1], se: [1, 1] };
 const MIN_DESK = 60;
 
+function paintShape(shape) {
+  /* Move a desk and its people on screen without redrawing anything.
+
+     A drag cannot re-render: the handle under the pointer is one of
+     the elements a re-render replaces, and the replacement does not
+     hold the pointer capture. The symptom was a grip that moved a
+     millimetre and then went dead, because the first pointermove
+     destroyed the thing receiving the rest of them. */
+  const wrap = drawn.shapes[shape.id];
+  if (!wrap) return;
+  const [w, h] = shapeSize(shape);
+  const ox = drawn.box ? drawn.box.x : 0, oy = drawn.box ? drawn.box.y : 0;
+  wrap.style.left = (shape.at[0] - w / 2 - ox) + "px";
+  wrap.style.top = (shape.at[1] - h / 2 - oy) + "px";
+  wrap.style.width = w + "px";
+  wrap.style.height = h + "px";
+  wrap.style.transform = shape.angle ? `rotate(${shape.angle}deg)` : "";
+  for (const seat of shape.seats || []) {
+    const card = drawn.cards[seat.id];
+    if (!card) continue;
+    card.style.left = (shape.at[0] + seat.at[0] - CARD_W / 2 - ox) + "px";
+    card.style.top = (shape.at[1] + seat.at[1] - CARD_H / 2 - oy) + "px";
+  }
+}
+
 function addHandles(wrap, section, shape) {
   for (const key of GRIPS) {
     const [fx, fy] = SPAN[key];
@@ -1003,7 +1048,7 @@ function resizeShape(event, section, shape, key) {
     (shape.seats || []).forEach((seat, i) => {
       seat.at = [Math.round(seats0[i][0] * kx), Math.round(seats0[i][1] * ky)];
     });
-    renderSeating();
+    paintShape(shape);
   };
 
   const finish = commit => {
@@ -1047,7 +1092,7 @@ function rotateShape(event, section, shape) {
     (shape.seats || []).forEach((s, i) => { s.at = seats0[i].slice(); });
     shape.angle = was;
     turnShape(shape, Math.round(to) - was);
-    renderSeating();
+    paintShape(shape);
   };
 
   const finish = commit => {
@@ -1368,47 +1413,21 @@ function drawStageBar(section, count) {
    lid on top; unfolded in place they are next to the room's identity,
    where they belong. */
 function toggleDrawer(force) {
-  const drawer = document.getElementById("seat-drawer");
-  const open = force !== undefined ? force : drawer.hidden;
-  drawer.hidden = !open;
-  document.getElementById("seat-menu")
-    .setAttribute("aria-expanded", String(open));
-  document.getElementById("seat-menu").classList.toggle("on", open);
-  if (open) drawDrawer();
-  if (seatingRoom) applyZoom(currentSection());
+  /* Slides the display toggles out sideways, between the hamburger
+     and the section numbers. Not a panel and not a menu: two more
+     buttons in the row that is already there. */
+  const shows = document.getElementById("seat-shows");
+  const open = force !== undefined ? force : shows.hidden;
+  shows.hidden = !open;
+  const b = document.getElementById("seat-menu");
+  b.setAttribute("aria-expanded", String(open));
+  b.classList.toggle("on", open);
+  if (open) drawShows();
 }
 
-function drawDrawer() {
-  const pal = document.getElementById("seat-palette");
+function drawShows() {
   const shows = document.getElementById("seat-shows");
-  pal.textContent = "";
   shows.textContent = "";
-  const section = currentSection();
-
-  /* Silhouettes, not captions. The names under them were saying what
-     the pictures already say, except for the rectangles, which
-     differed only in size -- and a size is something you drag, not
-     something you pick off a list. So one table, one single desk, and
-     the shapes that are genuinely different shapes. */
-  for (const kind of paletteKinds()) {
-    const spec = seatingState.shapes[kind];
-    if (!spec) continue;
-    const b = el("button", "deskopt");
-    b.type = "button";
-    b.title = "Add a " + spec.label;
-    const tile = el("span", "desktile " + spec.css);
-    const k = 26 / Math.max(spec.w, spec.h);
-    tile.style.width = Math.max(9, Math.round(spec.w * k)) + "px";
-    tile.style.height = Math.max(9, Math.round(spec.h * k)) + "px";
-    b.appendChild(tile);
-    b.onclick = () => {
-      if (!section) return;
-      if (seatingMode !== "desks") seatingMode = "desks";
-      addShape(section, kind);
-    };
-    pal.appendChild(b);
-  }
-
   const toggles = [
     ["Aa", "Version letters", () => showVersions, v => { showVersions = v; }],
     ["▭", "Group labels", () => showLabels, v => { showLabels = v; }],
@@ -1418,9 +1437,38 @@ function drawDrawer() {
     b.type = "button";
     b.title = label;
     b.appendChild(el("span", "glyph", glyph));
-    b.appendChild(el("span", "ilabel", label));
-    b.onclick = () => { set(!get()); drawDrawer(); renderSeating(); };
+    b.onclick = () => { set(!get()); drawShows(); renderSeating(); };
     shows.appendChild(b);
+  }
+}
+
+function drawPalette(section) {
+  /* The furniture, as its own island directly above the mode that
+     uses it. Shown in Desks mode and nowhere else, because that is
+     the only mode where adding a desk means anything. */
+  const pal = document.getElementById("seat-palette");
+  pal.textContent = "";
+  if (seatingMode !== "desks" || !section) { pal.hidden = true; return; }
+  pal.hidden = false;
+
+  for (const kind of paletteKinds()) {
+    const spec = seatingState.shapes[kind];
+    if (!spec) continue;
+    const b = el("button", "deskopt");
+    b.type = "button";
+    b.title = "Add a " + spec.label;
+    const tile = el("span", "desktile " + spec.css);
+    const k = 26 / Math.max(spec.w, spec.h);
+    tile.style.width = Math.max(11, Math.round(spec.w * k)) + "px";
+    tile.style.height = Math.max(11, Math.round(spec.h * k)) + "px";
+    /* A single desk and a 2x2 are the same silhouette, so the one
+       that holds one person says so. The 2x2 says nothing, because
+       it is not "a 2x2" so much as "a table", and it stretches to
+       whatever size the room wants. */
+    if (spec.seats && spec.seats.length === 1) tile.textContent = "1";
+    b.appendChild(tile);
+    b.onclick = () => addShape(section, kind);
+    pal.appendChild(b);
   }
 }
 

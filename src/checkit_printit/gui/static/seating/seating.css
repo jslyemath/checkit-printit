@@ -177,27 +177,28 @@
 .hue:hover { border-color: var(--isle-dim); }
 .hue.on { border-color: var(--isle-ink); }
 
-/* The island unfolds rather than opening a menu over the room. Same
-   box, more of it: the furniture and the display toggles sit under the
-   room's identity, where the hamburger that reveals them already is. */
-.isle.tools { flex-direction: column; align-items: stretch; gap: 0; }
-.isle-row { display: flex; align-items: center; gap: 4px; }
-.drawer {
-  display: flex; flex-direction: column; gap: 7px;
-  margin-top: 6px; padding-top: 7px;
-  border-top: 1px solid var(--isle-line);
-}
-.palrow, .showrow { display: flex; flex-wrap: wrap; gap: 4px; }
+/* The display toggles slide out sideways, between the hamburger and
+   the sections. Two more buttons in the row that is already there --
+   not a panel, not a menu, and no captions: what they do shows on the
+   canvas the moment they are pressed. */
+.shows { display: flex; align-items: center; gap: 3px; }
+.showbtn { padding: 5px 8px; min-width: 32px; }
+.showbtn .glyph { font-weight: 800; font-size: 14px; line-height: 1; }
 
+/* The furniture, its own island directly above the mode that uses it. */
+.palette { bottom: 84px; left: 50%; transform: translateX(-50%); gap: 2px; }
 .deskopt {
   font: inherit; display: flex; align-items: center; justify-content: center;
-  width: 38px; height: 34px; padding: 0;
+  width: 40px; height: 36px; padding: 0;
   border: 1px solid transparent; border-radius: 8px;
   background: none; cursor: pointer;
 }
 .deskopt:hover { background: var(--isle-2); }
-.desktile { background: oklch(0.74 0.015 260); border-radius: 2px;
-            flex: 0 0 auto; }
+.desktile {
+  display: flex; align-items: center; justify-content: center;
+  background: oklch(0.74 0.015 260); border-radius: 2px; flex: 0 0 auto;
+  font-size: 9px; font-weight: 800; color: var(--isle);
+}
 .deskopt:hover .desktile { background: var(--isle-ink); }
 .desktile.circle { border-radius: 50%; }
 .desktile.hex {
@@ -208,9 +209,6 @@
   clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
   border-radius: 0;
 }
-.showbtn { font-size: 12px; padding: 5px 9px; }
-.showbtn .glyph { font-weight: 800; font-size: 13px; width: 15px;
-                  text-align: center; }
 
 /* ---------------------------------------------------------- the room -- */
 
@@ -289,16 +287,31 @@
 }
 .shape.rect { border-radius: 14px; }
 .shape.circle { border-radius: 50%; }
-/* A clipped shape cannot carry a border -- the clip cuts it off -- so
-   the outline is drawn as an inset shadow, which the clip keeps. */
+/* A clipped shape cannot carry a border, and an inset shadow is no
+   substitute: a shadow follows the *rectangle*, so clipping it to a
+   hexagon left the ring showing along the flat top and bottom and
+   nowhere else.
+
+   Two clipped layers instead. The element itself is the edge colour,
+   and a slightly smaller copy of the same polygon sits on top in the
+   surface colour; what shows between them is the outline, and it
+   follows every side because both sides are the same shape. */
 .shape.hex, .shape.trapezoid {
   border: none;
-  box-shadow: inset 0 0 0 2.5px var(--edge);
+  background: var(--edge);
+  box-shadow: none;
 }
-.shape.hex {
+.shape.hex::after, .shape.trapezoid::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  background: var(--surface);
+  clip-path: inherit;
+}
+.shape.hex, .shape.hex::after {
   clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
 }
-.shape.trapezoid {
+.shape.trapezoid, .shape.trapezoid::after {
   clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
 }
 
@@ -378,6 +391,11 @@
   box-shadow: 0 2px 6px oklch(0.4 0.06 var(--h, 255) / .35);
 }
 .pill.chosen { outline: 2px solid white; outline-offset: 2px; }
+.pill.dragging { z-index: 9; cursor: grabbing; }
+/* Flies to the anchor on release rather than appearing there: the
+   anchor is a guess about what was meant, and watching the label
+   travel the last few pixels is what tells you which guess it made. */
+.pill.homing { transition: left .16s ease-out, top .16s ease-out; }
 .pillrename {
   position: absolute; transform: translate(-50%, -50%);
   font: inherit; font-size: 13px; font-weight: 700; text-align: center;
@@ -403,7 +421,6 @@
 }
 .anchor.on { background: oklch(0.42 0.02 260); border-color: oklch(0.42 0.02 260); }
 .anchor.near { transform: scale(1.7); border-color: oklch(0.30 0.02 260); }
-.pill.dragging { z-index: 9; opacity: .92; }
 
 .roomnote {
   position: absolute; transform: translate(-50%, -50%);
@@ -459,9 +476,15 @@
   background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
 }
 /* Grab the desk anywhere, including through the names on it: in this
-   mode a card is part of the furniture, not a thing of its own. */
-.canvas.mode-desks .seatcard,
-.canvas.mode-desks .pill { pointer-events: none; }
+   mode a card is part of the furniture, not a thing of its own.
+
+   The label is the exception. It can be moved in every editing mode,
+   so it keeps its pointer -- which costs the one spot it covers as a
+   place to grab the desk, and that is a fair trade for not having to
+   change mode to move a label. */
+.canvas.mode-desks .seatcard { pointer-events: none; }
+.canvas.mode-chairs .pill,
+.canvas.mode-desks .pill { pointer-events: auto; }
 /* And nothing on the canvas takes a pointer while presenting. */
 .canvas.mode-view .seatcard,
 .canvas.mode-view .pill,
@@ -508,7 +531,6 @@
 /* A chair being positioned, as opposed to a person being moved. The
    dotted edge says "this is the seat, not the sitter" -- in Chairs
    mode you are dragging furniture that happens to have a name on it. */
-.canvas.mode-chairs .pill { pointer-events: none; }
 .seatcard.chairable { border-style: dotted; }
 .canvas.mode-chairs .deskwrap.chosen ~ .seatcard { border-style: solid; }
 
