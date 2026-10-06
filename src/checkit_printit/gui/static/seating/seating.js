@@ -58,10 +58,15 @@ let calling = null;
 let bare = false;
 let stillSince = null;           // for fading the one island that stays
 
-/* Which chair is in hand in Chairs mode. Its own thing rather than
-   part of `selected`, because a chair is always a chair *of* a desk:
-   the desk stays selected while one of its chairs is being moved. */
+/* Which seat is in hand in Seats mode. Its own thing rather than part
+   of `selected`, because a seat is always a seat *of* a group: the
+   group stays selected while one of its seats is being moved. */
 let selectedChair = null;
+
+/* Whether the furniture column is unrolled. Shut on every other
+   click, because it is a thing you reach for once and then stop
+   needing. */
+let paletteOpen = false;
 
 // ------------------------------------------------------------ constants --
 
@@ -103,8 +108,8 @@ const ANCHORS = {
 const ICON = {
   view: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z|O12,12,3",
   people: "M5.5 20a6.5 6.5 0 0 1 13 0|O12,8,3.4",
-  desks: "R3,4,18,7,1.5|R3,14,8,6,1.5|R14,14,7,6,1.5",
-  chairs: "R4,8,16,9,2|O8,5,1.8|O16,5,1.8|O8,20,1.8|O16,20,1.8",
+  groups: "R3,4,18,7,1.5|R3,14,8,6,1.5|R14,14,7,6,1.5",
+  seats: "R4,8,16,9,2|O8,5,1.8|O16,5,1.8|O8,20,1.8|O16,20,1.8",
   order: "M4 6h3M4 12h3M4 18h3M11 6h9M11 12h9M11 18h9",
   upnext: "M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4z"
     + "|M18 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z",
@@ -125,19 +130,19 @@ const MODES = [
     why: "Click a name then a chair, or drag it. Landing on somebody "
       + "swaps the two; the version letters stay with the chairs, so "
       + "neighbours still differ afterwards." },
-  { value: "desks", label: "Desks", icon: "desks",
-    why: "Drag a desk and its people come with it. Click one and the "
-      + "arrows nudge it by " + GRID + ", shift+arrows by 1." },
-  { value: "chairs", label: "Chairs", icon: "chairs",
-    why: "Where the chairs sit on a desk. Click a desk, drag its chairs "
-      + "to where they really are, and add or take one away." },
+  { value: "groups", label: "Groups", icon: "groups",
+    why: "Add, move, resize and turn the furniture. Arrows nudge the "
+      + "one you click by " + GRID + ", shift+arrows by 1." },
+  { value: "seats", label: "Seats", icon: "seats",
+    why: "Move the seats on a group, add one, take one away — and drag "
+      + "a seat onto another group to move it there." },
   { value: "order", label: "Order", icon: "order",
     why: "The order papers are handed out in. Not built yet." },
   { value: "upnext", label: "Up Next", icon: "upnext",
     why: "Pick somebody: the room, with one chair lit up. Space picks "
       + "the next; nobody comes up twice until everybody has." },
 ];
-const BUILT = new Set(["view", "people", "desks", "chairs", "upnext"]);
+const BUILT = new Set(["view", "people", "groups", "seats", "upnext"]);
 
 // --------------------------------------------------------------- helpers --
 
@@ -500,14 +505,14 @@ function drawRoom(section) {
     const box = el("div", "shape " + spec.css);
     wrap.appendChild(box);
     if (isSelected(group, shape)) wrap.classList.add("chosen");
-    if (seatingMode === "desks") {
+    if (seatingMode === "groups") {
       box.classList.add("movable");
       box.tabIndex = 0;
       box.onkeydown = e => nudgeShape(e, section, shape);
       box.onpointerdown = e => dragShape(e, section, shape);
       if (isSelected(group, shape) || isSelected(null, shape))
         addHandles(wrap, section, shape);
-    } else if (seatingMode === "chairs") {
+    } else if (seatingMode === "seats") {
       // The desk itself, not its group: this mode is about the
       // furniture, and a group spanning two desks would otherwise
       // leave it ambiguous which one's chairs were being moved.
@@ -542,11 +547,11 @@ function drawRoom(section) {
           card.classList.add("calling");
         else if (seat.student && called.has(seat.student))
           card.classList.add("been");
-      } else if (seatingMode === "chairs") {
+      } else if (seatingMode === "seats") {
         card.classList.add("movable", "chairable");
         if (seat.id === selectedChair) card.classList.add("picked");
         card.onpointerdown = e => dragChair(e, card, section, shape, seat);
-      } else if (seatingMode !== "desks") {
+      } else if (seatingMode !== "groups") {
         card.onpointerdown = e => { e.preventDefault(); choose(group, shape); };
       }
       canvas.appendChild(card);
@@ -817,108 +822,132 @@ function choose(group, shape) {
   renderSeating();
 }
 
-function drawStrip(section) {
-  /* One thin strip, with no expanded state. An earlier draft was a tall
-     panel with a label field, a swatch row, a nine-cell anchor picker
-     and "Prints 2nd of 7"; most of it was a second way to say what the
-     canvas already says.
+function groupFor(section, shape) {
+  /* The group a desk belongs to, whatever the mode was asking about.
+     Selecting in Groups and Seats yields a shape and in People a
+     group, and the strip wants the same thing either way -- it used
+     to show different things depending on which, which read as the
+     island being inconsistent. It was. */
+  if (!shape) return null;
+  const mine = new Set((shape.seats || []).map(s => s.id));
+  return groupsOf(section).find(
+    g => (g.seats || []).some(id => mine.has(id))) || null;
+}
 
-     It holds whatever is in focus. Usually that is the selection; in
-     Up Next it is the turn. Same slot, because at any moment there is
-     one thing the room is about. */
+function drawStrip(section) {
+  /* One thin strip, the same in every mode: whose it is, what it is
+     called, how many seats, where it prints. What changes between
+     modes is one button at the right-hand end, because what changes
+     between modes is what you are about to do, not what you are
+     looking at.
+
+     An earlier draft showed a group's colour and name in People and a
+     desk's kind and chair-count in Desks, so the island rearranged
+     itself when you changed mode and sometimes lost the controls you
+     had just been using. */
   const strip = document.getElementById("seat-strip");
   strip.textContent = "";
+  strip.classList.remove("withplus");
   if (seatingMode === "upnext") { drawUpNext(strip, section); return; }
 
-  const group = selected && selected.kind === "group"
+  let group = selected && selected.kind === "group"
     ? groupsOf(section).find(g => g.id === selected.id) : null;
   let shape = selected && selected.kind === "shape"
     ? (section.shapes || []).find(s => s.id === selected.id) : null;
-  // In Desks and Chairs the desk is the subject even when it has a
-  // group: those modes are about furniture, not about who sits at it.
-  if (!shape && group && (seatingMode === "desks" || seatingMode === "chairs"))
-    shape = shapesHolding(section, group)[0] || null;
+  if (!group) group = groupFor(section, shape);
+  if (!shape && group) shape = shapesHolding(section, group)[0] || null;
 
-  // Nothing chosen in Desks mode: the palette island below is the
-  // whole offer, so the strip has nothing to add.
-  if (seatingMode === "desks" && !shape) { strip.hidden = true; return; }
-  if (seatingMode === "chairs" && !shape) {
-    strip.hidden = false;
-    strip.appendChild(el("span", "smeta",
-      "Drag a chair to where it really is. Touch one to add or "
-      + "take one away."));
+  if (!group && !shape) {
+    // Nothing chosen. Groups mode still offers the furniture, because
+    // an empty room has nothing to select and still needs a desk.
+    if (seatingMode === "groups") {
+      strip.hidden = false;
+      strip.classList.add("withplus");
+      strip.appendChild(el("span", "smeta", "Nothing selected"));
+      strip.appendChild(plusButton(section, null));
+      return;
+    }
+    strip.hidden = true;
     return;
   }
-
-  if (!group && !shape) { strip.hidden = true; return; }
   strip.hidden = false;
 
-  if (shape && (seatingMode === "desks" || seatingMode === "chairs")) {
+  if (group) {
+    // One dot that opens the swatches, rather than six always on
+    // show: the strip has to stay one row at 515px.
+    const dot = el("button", "swatch");
+    dot.type = "button";
+    dot.title = "Colour";
+    tint(dot, hueOf(section, group));
+    dot.onclick = e => { e.stopPropagation(); openHues(dot, section, group); };
+    strip.appendChild(dot);
+
+    // The heading is the label; clicking it renames.
+    const name = el("span", "sname", group.label || "(no label)");
+    name.title = "Click to rename";
+    name.onclick = () => renameGroup(name, group);
+    strip.appendChild(name);
+
+    const n = (group.seats || []).length;
+    strip.appendChild(el("span", "smeta", n + (n === 1 ? " seat" : " seats")));
+
+    const placed = groupsOf(section)
+      .filter(g => g.order !== null && g.order !== undefined)
+      .sort((a, b) => a.order - b.order);
+    const at = placed.indexOf(group);
+    const total = groupsOf(section).length;
+    const ord = el("span", "sord", (at < 0 ? "\u2013" : at + 1) + "/" + total);
+    ord.title = at < 0 ? "No place in the print order yet"
+                       : `Prints ${at + 1} of ${total}`;
+    strip.appendChild(ord);
+  } else {
     const spec = seatingState.shapes[shape.kind];
     strip.appendChild(el("span", "sname", (spec && spec.label) || shape.kind));
     const n = (shape.seats || []).length;
-    strip.appendChild(el("span", "smeta",
-                         n + (n === 1 ? " chair" : " chairs")));
-    if (seatingMode === "chairs") {
-      const more = el("button", "ibtn", "+ chair");
-      more.type = "button";
-      more.onclick = () => addChair(section, shape);
-      strip.appendChild(more);
-      const seat = (shape.seats || []).find(s => s.id === selectedChair);
-      if (seat) {
-        const less = el("button", "ibtn", "Remove chair");
-        less.type = "button";
-        less.title = seat.student
-          ? "They go back on the unseated list" : "";
-        less.onclick = () => removeChair(section, shape, seat);
-        strip.appendChild(less);
-      }
-    } else {
-      const kill = el("button", "ibtn", "Remove desk");
-      kill.type = "button";
-      kill.onclick = () => removeShape(section, shape);
-      strip.appendChild(kill);
+    strip.appendChild(el("span", "smeta", n + (n === 1 ? " seat" : " seats")));
+  }
+
+  if (seatingMode === "groups" && shape) {
+    const kill = el("button", "ibtn tiny", "\u2715");
+    kill.type = "button";
+    kill.title = "Remove this group";
+    kill.onclick = () => removeShape(section, shape);
+    strip.appendChild(kill);
+  }
+  if (seatingMode === "seats" && shape) {
+    const seat = (shape.seats || []).find(s => s.id === selectedChair);
+    if (seat) {
+      const less = el("button", "ibtn tiny", "\u2715");
+      less.type = "button";
+      less.title = seat.student
+        ? "Take this seat away; they go back on the unseated list"
+        : "Take this seat away";
+      less.onclick = () => removeChair(section, shape, seat);
+      strip.appendChild(less);
     }
-    return;
   }
-
-  if (!group) {
-    const spec = seatingState.shapes[shape.kind];
-    strip.appendChild(el("span", "sname", (spec && spec.label) || shape.kind));
-    const n = (shape.seats || []).length;
-    strip.appendChild(el("span", "smeta",
-                         n + (n === 1 ? " chair" : " chairs")));
-    return;
+  if (seatingMode === "groups" || (seatingMode === "seats" && shape)) {
+    strip.classList.add("withplus");
+    strip.appendChild(plusButton(section, shape));
   }
+}
 
-  // One dot that opens the swatches, rather than six swatches always
-  // on show: the strip has to stay one row at 515px.
-  const dot = el("button", "swatch");
-  dot.type = "button";
-  dot.title = "Colour";
-  tint(dot, hueOf(section, group));
-  dot.onclick = e => { e.stopPropagation(); openHues(dot, section, group); };
-  strip.appendChild(dot);
-
-  // The heading is the label; clicking it renames. A separate text
-  // field below a heading saying the same thing was the first draft.
-  const name = el("span", "sname", group.label || "(no label)");
-  name.title = "Click to rename";
-  name.onclick = () => renameGroup(name, group);
-  strip.appendChild(name);
-
-  const n = (group.seats || []).length;
-  strip.appendChild(el("span", "smeta", n + (n === 1 ? " seat" : " seats")));
-
-  const placed = groupsOf(section)
-    .filter(g => g.order !== null && g.order !== undefined)
-    .sort((a, b) => a.order - b.order);
-  const at = placed.indexOf(group);
-  const total = groupsOf(section).length;
-  const ord = el("span", "sord", (at < 0 ? "–" : at + 1) + "/" + total);
-  ord.title = at < 0 ? "No place in the print order yet"
-                     : `Prints ${at + 1} of ${total}`;
-  strip.appendChild(ord);
+function plusButton(section, shape) {
+  /* The same button in the same corner in both modes, because in both
+     it means "one more of the thing this mode is about": a group in
+     Groups, a seat in Seats. */
+  const plus = el("button", "ibtn plus", "+");
+  plus.type = "button";
+  if (seatingMode === "seats") {
+    plus.title = "Add a seat to this group";
+    plus.onclick = () => addChair(section, shape);
+    return plus;
+  }
+  plus.title = "Add a group";
+  plus.setAttribute("aria-expanded", String(paletteOpen));
+  if (paletteOpen) plus.classList.add("on");
+  plus.onclick = e => { e.stopPropagation(); togglePalette(); };
+  return plus;
 }
 
 // ------------------------------------------------- desks and chairs --
@@ -958,6 +987,22 @@ function addShape(section, kind) {
                        version: "" });
   });
   shapes.push(shape);
+
+  /* And a group to go with it. A desk without one has no colour, no
+     label and no place in the print order, so the strip had nothing
+     to show and fell back to "table, 2 by 2 — 4 chairs" — which is
+     why a new desk could not be coloured or named while an old one
+     could. Every desk arrives as a group of its own; merging two is
+     a separate question. */
+  const taken = new Set(groupsOf(section).map(g => g.id));
+  const groups = section.groups || (section.groups = []);
+  groups.push({
+    id: freshId("g", taken),
+    label: "Table " + (groups.length + 1),
+    seats: shape.seats.map(s => s.id),
+    order: null,
+  });
+
   selected = { kind: "shape", id: id };
   renderSeating();
 }
@@ -1151,14 +1196,82 @@ function removeChair(section, shape, seat) {
   renderSeating();
 }
 
-function dragChair(event, card, section, shape, seat) {
-  /* Where a chair sits on its desk. The anchor is an offset from the
-     shape's centre, so this writes `seat.at` and the desk can still be
-     moved afterwards without the chairs coming loose.
+function boxOf(shape) {
+  /* A desk's extent in room units, as an upright rectangle. A turned
+     desk gets its bounding box rather than its true corners: the
+     overlap test below only has to pick a winner, and a rotated
+     polygon intersection would be a lot of arithmetic to decide the
+     same thing in almost every real room. */
+  const [w, h] = shapeSize(shape);
+  const r = (shape.angle || 0) * Math.PI / 180;
+  const bw = Math.abs(w * Math.cos(r)) + Math.abs(h * Math.sin(r));
+  const bh = Math.abs(w * Math.sin(r)) + Math.abs(h * Math.cos(r));
+  return { x0: shape.at[0] - bw / 2, x1: shape.at[0] + bw / 2,
+           y0: shape.at[1] - bh / 2, y1: shape.at[1] + bh / 2 };
+}
 
-     No grid. A real table has chairs at whatever spacing the room
-     allows, and snapping a chair to twenty units is a tidiness nobody
-     asked for -- the desk snaps because desks line up with walls. */
+function newParentFor(section, shape, cx, cy) {
+  /* Which desk a dropped seat now belongs to: whichever covers most
+     of the seat's card.
+
+     Ties and near-ties keep the seat where it is. A seat straddling
+     two desks equally has no right answer, and moving it on a
+     coin-toss is worse than leaving it -- the instructor can drag it
+     a little further and be explicit. */
+  const card = { x0: cx - CARD_W / 2, x1: cx + CARD_W / 2,
+                 y0: cy - CARD_H / 2, y1: cy + CARD_H / 2 };
+  const area = other => {
+    const b = boxOf(other);
+    const w = Math.min(card.x1, b.x1) - Math.max(card.x0, b.x0);
+    const h = Math.min(card.y1, b.y1) - Math.max(card.y0, b.y0);
+    return w > 0 && h > 0 ? w * h : 0;
+  };
+  const scored = (section.shapes || [])
+    .map(s => ({ shape: s, area: area(s) }))
+    .filter(s => s.area > 0)
+    .sort((a, b) => b.area - a.area);
+  if (!scored.length) return null;
+  if (scored[0].shape === shape) return null;          // it stayed home
+  // A clear winner, or nothing happens. Within a twentieth is a tie.
+  const second = scored[1] ? scored[1].area : 0;
+  if (scored[0].area - second < scored[0].area * 0.05) return null;
+  return scored[0].shape;
+}
+
+function reparentSeat(section, from, to, seat, cx, cy) {
+  /* Move the seat between desks, keeping it exactly where it was
+     dropped: its offset is recomputed against its new desk's centre.
+     Offsets are stored already-turned, so there is no angle to undo. */
+  from.seats = (from.seats || []).filter(s => s !== seat);
+  seat.at = [Math.round(cx - to.at[0]), Math.round(cy - to.at[1])];
+  to.seats.push(seat);
+
+  // And it joins the new desk's group, because a group is a set of
+  // seats and the seat has moved to a different set of furniture.
+  const mine = new Set((to.seats || []).map(s => s.id));
+  const host = groupsOf(section).find(
+    g => (g.seats || []).some(id => mine.has(id) && id !== seat.id));
+  for (const g of groupsOf(section))
+    g.seats = (g.seats || []).filter(id => id !== seat.id);
+  if (host) host.seats.push(seat.id);
+  section.groups = groupsOf(section).filter(g => (g.seats || []).length);
+  return host;
+}
+
+function dragChair(event, card, section, shape, seat) {
+  /* Where a seat sits on its group. The anchor is an offset from the
+     shape's centre, so this writes `seat.at` and the desk can still be
+     moved afterwards without the seats coming loose.
+
+     Snapped to the same grid as the furniture: an earlier version left
+     seats free on the grounds that a real chair does not line up with
+     anything, which was true and unhelpful -- what lines up is the
+     drawing, and a chart of seats at arbitrary half-pixels looks
+     like a mistake.
+
+     Dropped over a different desk, the seat changes hands. Only here:
+     shoving two desks together in Groups mode must not quietly
+     rearrange who belongs to whom. */
   if (event.pointerType === "mouse" && event.button !== 0) return;
   event.preventDefault();
   // Touching a chair chooses its desk too, so the strip's add and
@@ -1176,24 +1289,36 @@ function dragChair(event, card, section, shape, seat) {
   const place = e => {
     if (Math.hypot(e.clientX - start[0], e.clientY - start[1]) < 3) return;
     moved = true;
-    // Kept within arm's reach of its own desk: a chair three metres
-    // away belongs to another table, and dragging one there by
-    // accident would be a quiet way to lose it.
-    const reach = 1.1;
-    const lim = (v, span) => Math.max(-span * reach,
-                                      Math.min(span * reach, Math.round(v)));
-    seat.at = [lim(home[0] + (e.clientX - start[0]) / scale,
-                   spec ? spec.w / 2 + CARD_W : 200),
-               lim(home[1] + (e.clientY - start[1]) / scale,
-                   spec ? spec.h / 2 + CARD_H : 160)];
-    card.style.left = (shape.at[0] + seat.at[0] - CARD_W / 2 - ox) + "px";
-    card.style.top = (shape.at[1] + seat.at[1] - CARD_H / 2 - oy) + "px";
+    /* Snapped in *room* coordinates, not relative ones, so a seat
+       lands on the same grid the desks do however far its own desk
+       happens to sit off it. */
+    const snap = v => Math.round(v / GRID) * GRID;
+    const wx = snap(shape.at[0] + home[0] + (e.clientX - start[0]) / scale);
+    const wy = snap(shape.at[1] + home[1] + (e.clientY - start[1]) / scale);
+    seat.at = [wx - shape.at[0], wy - shape.at[1]];
+    card.style.left = (wx - CARD_W / 2 - ox) + "px";
+    card.style.top = (wy - CARD_H / 2 - oy) + "px";
+
+    // Say which desk would take it, before it is let go.
+    const host = newParentFor(section, shape, wx, wy);
+    for (const w of Object.values(drawn.shapes)) w.classList.remove("adopting");
+    if (host && drawn.shapes[host.id])
+      drawn.shapes[host.id].classList.add("adopting");
   };
 
   const finish = commit => {
     card.onpointermove = card.onpointerup = card.onpointercancel = null;
+    for (const w of Object.values(drawn.shapes)) w.classList.remove("adopting");
     if (!commit) seat.at = home;
-    if (!moved) { renderSeating(); return; }   // a click, which selects it
+    if (!moved || !commit) { renderSeating(); return; }
+
+    const wx = shape.at[0] + seat.at[0], wy = shape.at[1] + seat.at[1];
+    const host = newParentFor(section, shape, wx, wy);
+    if (host) {
+      const g = reparentSeat(section, shape, host, seat, wx, wy);
+      selected = { kind: "shape", id: host.id };
+      toast(g && g.label ? "Moved to " + g.label : "Moved to another group");
+    }
     renderSeating();
   };
 
@@ -1417,8 +1542,11 @@ function toggleDrawer(force) {
      and the section numbers. Not a panel and not a menu: two more
      buttons in the row that is already there. */
   const shows = document.getElementById("seat-shows");
-  const open = force !== undefined ? force : shows.hidden;
-  shows.hidden = !open;
+  const open = force !== undefined ? force : shows.classList.contains("shut");
+  // Always in the layout; `shut` collapses it to nothing so the two
+  // buttons slide rather than blink.
+  shows.hidden = false;
+  shows.classList.toggle("shut", !open);
   const b = document.getElementById("seat-menu");
   b.setAttribute("aria-expanded", String(open));
   b.classList.toggle("on", open);
@@ -1442,14 +1570,29 @@ function drawShows() {
   }
 }
 
+function togglePalette(force) {
+  paletteOpen = force !== undefined ? force : !paletteOpen;
+  const section = currentSection();
+  drawPalette(section);
+  drawStrip(section);
+}
+
 function drawPalette(section) {
-  /* The furniture, as its own island directly above the mode that
-     uses it. Shown in Desks mode and nowhere else, because that is
-     the only mode where adding a desk means anything. */
+  /* The furniture, in a column that grows up out of the plus at the
+     end of the strip. Closed by default: an empty room needs it once
+     and then you are arranging people, so it should not sit on the
+     canvas for the rest of the hour. */
   const pal = document.getElementById("seat-palette");
   pal.textContent = "";
-  if (seatingMode !== "desks" || !section) { pal.hidden = true; return; }
+  if (seatingMode !== "groups" || !section) {
+    pal.hidden = true;
+    pal.classList.remove("open");
+    return;
+  }
+  // Kept in the layout while shut, so its height can be animated to
+  // nothing rather than the island blinking out of existence.
   pal.hidden = false;
+  pal.classList.toggle("open", paletteOpen);
 
   for (const kind of paletteKinds()) {
     const spec = seatingState.shapes[kind];
@@ -1467,7 +1610,7 @@ function drawPalette(section) {
        whatever size the room wants. */
     if (spec.seats && spec.seats.length === 1) tile.textContent = "1";
     b.appendChild(tile);
-    b.onclick = () => addShape(section, kind);
+    b.onclick = () => { paletteOpen = false; addShape(section, kind); };
     pal.appendChild(b);
   }
 }
@@ -2007,14 +2150,17 @@ function wireSeating() {
   for (const kind of ["pointermove", "pointerdown", "keydown"])
     document.addEventListener(kind, stir, true);
   document.getElementById("seat-menu").onclick = () => toggleDrawer();
+  drawShows();          // built once so the slide has something to reveal
   document.getElementById("seat-discard").onclick = discardRoom;
   /* Clicking the paper, rather than a thing on it, clears the
      selection. It does *not* fold the drawer: the drawer is a tool
      panel you left open on purpose, not a popover you dismissed by
      looking away. */
   seatingPaper().addEventListener("pointerdown", e => {
-    if (e.target.closest(".shape, .seatcard, .pill")) return;
-    if (selected || selectedChair) {
+    if (e.target.closest(".shape, .seatcard, .pill, .grip, .spinner")) return;
+    const wasOpen = paletteOpen;
+    paletteOpen = false;              // rolls back into the plus
+    if (selected || selectedChair || wasOpen) {
       selected = null;
       selectedChair = null;
       renderSeating();
