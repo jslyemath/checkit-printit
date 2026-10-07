@@ -39,15 +39,28 @@
 .paper {
   position: absolute;
   inset: 0;
-  display: flex;
-  overflow: auto;
+  /* No scrollbars, ever. A canvas is panned by taking hold of it --
+     which is what every tool this one is modelled on does -- and a
+     scrollbar beside that is a second, worse way to do one thing
+     that also eats two strips of the room. */
+  overflow: hidden;
+  cursor: grab;
   background-color: var(--paper);
   background-repeat: repeat;
 }
-/* `margin: auto` rather than `justify-content: center`: both centre a
-   small room, but only this one keeps the top left corner reachable
-   when the room is bigger than the box. */
-.canvasbox { position: relative; margin: auto; flex: 0 0 auto; }
+.paper.panning { cursor: grabbing; }
+
+/* Placed by `placeBox`, not by the layout.
+
+   `margin: auto` used to centre it, and `applyZoom` also set
+   `margin-right` to keep the room clear of the unseated rail. Setting
+   one side of an `auto` margin is not a nudge: it turns centring into
+   alignment against the other side. With `margin-right: 0` the room
+   was pinned to the right edge of the paper at every size, which is
+   what showed up as "the desks all end up on the right" after a
+   resize. A camera decides where the room sits now, so nothing has to
+   be inferred from a margin. */
+.canvasbox { position: absolute; left: 0; top: 0; }
 .canvas { position: absolute; top: 0; left: 0; transform-origin: top left; }
 
 .emptyroom {
@@ -74,16 +87,24 @@
 }
 .ibtn {
   font: inherit;
-  /* One height for every button in an island, whether it holds words
-     or a 17px icon. Without it an icon-only button came out 30 against
-     a text button's 36 and the row looked ragged. */
-  min-height: 34px;
+  /* One *fixed* height for every button in an island, and no vertical
+     padding at all.
+
+     `min-height` was not enough. A button holding "100%" is as tall as
+     a line box -- 22.5px -- plus whatever padding it has, and a button
+     holding a 17px icon is not, so the zoom island came out six pixels
+     taller than its neighbours and the four corners never matched. A
+     fixed height with `line-height: 1` means a character cannot
+     out-grow an icon, and keeping the padding horizontal means a media
+     query that trims it cannot bring the problem back. */
+  height: 34px;
+  line-height: 1;
   box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 0 10px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: none;
@@ -100,9 +121,6 @@
             stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .isep { width: 1px; align-self: stretch; background: var(--isle-line);
         margin: 2px 1px; }
-.pip { width: 8px; height: 8px; border-radius: 50%;
-       background: var(--isle-key); margin: 0 3px 0 5px; }
-
 /* The Save group is a wrapper for showing and hiding, not a box. Left
    as a plain span it was a flex *item*, so its three children laid out
    inline inside it and its line box came out 58px against siblings of
@@ -114,21 +132,38 @@
    otherwise beat the browser's own rule for `hidden` and the group
    would never hide. */
 #seat-saving:not([hidden]) { display: contents; }
-.zoomnum { min-width: 52px; justify-content: center;
+/* A button holding one icon or one glyph is square. Ten pixels of
+   side padding is sized for a word, and five buttons wearing it is
+   most of what the zoom island was carrying.
+
+   `aspect-ratio` rather than a width, so it follows the height set
+   above and keeps following it through the media query at the bottom
+   that makes every button shorter. A width would have to be written
+   twice and would be wrong the first time one of them changed. */
+.at-tr .ibtn, #seat-out, #seat-in, #seat-full {
+  aspect-ratio: 1; padding: 0;
+}
+#seat-out, #seat-in { font-size: 18px; }
+.zoomnum { min-width: 44px; justify-content: center;
            font-variant-numeric: tabular-nums; }
 #seat-sections { display: flex; gap: 3px; }
 
 .at-tl { top: 12px; left: 12px; }
 .at-tr { top: 12px; right: 12px; }
 .at-bl { bottom: 12px; left: 12px; }
-/* Centred, but `layoutBottom` re-centres it in the space the zoom
-   island leaves once the window is narrow enough for the two to meet. */
+/* Centred in the window, full stop. It used to be re-centred by hand
+   in the gap the zoom island left, which meant the rail slid sideways
+   as the zoom readout changed width -- "100%" is wider than "39%" --
+   and that movement was more distracting than the overlap it avoided. */
 .at-bc { bottom: 12px; left: 50%; transform: translateX(-50%);
          justify-content: center; }
 
-/* The mode rail: the primary verb, where a hand rests. */
-.rail .ibtn { flex-direction: column; gap: 3px; padding: 6px 11px;
-              font-size: 11px; }
+/* The mode rail: the primary verb, where a hand rests. The one island
+   allowed to be taller than the others, because it stacks a glyph over
+   a word and because being the tallest thing on the bottom edge is how
+   it reads as the primary one. The other three match each other. */
+.rail .ibtn { flex-direction: column; gap: 3px; padding: 0 11px;
+              height: 52px; font-size: 11px; }
 .rail .ibtn svg { width: 19px; height: 19px; }
 
 /* The selection strip: thin, above the rail, with no expanded state.
@@ -152,7 +187,9 @@
 .strip .sord { font-variant-numeric: tabular-nums; color: var(--isle-ink);
                background: var(--isle-2); border-radius: 6px;
                padding: 3px 8px; cursor: pointer; font-size: 12px; }
-.strip .tiny { padding: 4px 7px; min-height: 0; font-size: 13px; }
+/* Deliberately shorter than an island button: the strip is one thin
+   row, and nothing in it is allowed to set its height. */
+.strip .tiny { height: 26px; padding: 0 7px; font-size: 13px; }
 
 .plusbtn {
   position: absolute;
@@ -274,6 +311,14 @@
    everything that belongs to the desk is inside it, so all of it
    moves and turns together. */
 .deskwrap { position: absolute; z-index: 1; }
+
+/* The paper offers a grabbing hand, because dragging it pans the room.
+   What is drawn on the paper does not inherit that offer: a card in
+   Groups mode neither moves nor pans, and a cursor promising a grab
+   that nothing accepts is the cursor telling a lie. Whatever really is
+   draggable says so for itself further down -- `.movable`, the label
+   pill, the grips and the spinner. */
+.shape, .seatcard { cursor: default; }
 /* Always above the furniture, whichever desk was drawn last. */
 .canvas > .seatcard { z-index: 2; }
 .canvas > .pill { z-index: 3; }
@@ -702,17 +747,19 @@ body.projecting .seatapp:hover .at-tr { opacity: 1; }
 
 /* ------------------------------------------------------------- narrow -- */
 
-/* One breakpoint. The rail drops its words, the sections fold into the
-   menu, the rail of unseated narrows. Nothing moves to a different
-   corner -- that was the fault in the first draft, where zoom was
-   bottom left when wide and top right when narrow. */
+/* One breakpoint, and the mode rail is no longer part of it.
+
+   It used to drop its words and shrink here, so the island you look at
+   most changed shape and height halfway through a resize while the
+   three corner islands did not. One rail, one size: if it turns out to
+   be too wide at 515px the answer will be a narrower rail everywhere,
+   not a second rail that appears when the window is small.
+
+   Nothing moves to a different corner -- that was the fault in the
+   first draft, where zoom was bottom left when wide and top right when
+   narrow. */
 @media (max-width: 760px) {
   .foldaway { display: none; }
-  .rail .ibtn { padding: 6px 7px; }
-  .rail .ilabel { display: none; }
-  .rail .ibtn svg { width: 20px; height: 20px; }
-  .at-bl .ibtn { padding: 6px 8px; }
-  .zoomnum { min-width: 44px; }
   .pen { top: 54px; bottom: 132px; padding: 5px; gap: 6px; }
   .pen .seatcard { width: 86px; min-height: 46px; }
   .pen .seatcard .top { font-size: 18px !important; }
@@ -727,8 +774,11 @@ body.projecting .seatapp:hover .at-tr { opacity: 1; }
    of what is left of the room. */
 @media (max-height: 620px) {
   .isle { padding: 3px; gap: 3px; }
-  .ibtn { min-height: 28px; padding: 3px 7px; }
-  .rail .ibtn { padding: 3px 8px; font-size: 10px; gap: 1px; }
+  /* Heights, not paddings. Trimming padding here left `.at-bl .ibtn`
+     in the width query setting a bigger one, and the zoom island stayed
+     tall while everything around it shrank. */
+  .ibtn { height: 28px; padding: 0 7px; }
+  .rail .ibtn { height: 44px; padding: 0 8px; font-size: 10px; gap: 1px; }
   .rail .ibtn svg { width: 17px; height: 17px; }
   .at-bl, .at-bc, .plusbtn { bottom: 8px; }
   .strip { bottom: 62px; padding: 3px 5px; }
