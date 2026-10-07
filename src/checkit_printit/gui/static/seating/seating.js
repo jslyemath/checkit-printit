@@ -53,13 +53,34 @@ let drawn = { shapes: {}, cards: {}, seats: [], labels: [], box: null };
 let showVersions = true;
 let showLabels = true;
 
-/* Up Next. `called` is everybody who has had a turn, so nobody is
-   asked twice before everybody has been asked once -- which is the
-   difference between picking at random and being fair. In memory
-   only: a call list is about this lesson, and one that survived a
-   reload would quietly be about last week. */
-let called = new Set();
-let calling = null;
+/* Up Next is a way of showing the room, not a way of editing it, so
+   it is a switch that sits across whatever mode you are in rather than
+   a sixth mode. It was in the rail, which made the rail dishonest: the
+   test for belonging there is whether it changes what a click on the
+   canvas means, and this does not.
+
+   Three things to walk through, and the walk is a *line* rather than a
+   draw from a hat. Stepping back has to show who you just had, and the
+   count has to say how far through you are; both of those want an
+   order that exists before you start rather than one made a name at a
+   time. The line is still shuffled for people, so it is not the
+   seating chart read aloud. */
+let upnext = false;
+let upnextKind = "person";          // person | group | rep
+let upnextAt = -1;                  // -1 is "not started"
+let upnextLine = [];
+let upnextFor = "";                 // what the line was built for
+
+const UPNEXT_KINDS = [
+  { value: "person", icon: "people", label: "One at a time",
+    why: "One student at a time, in a shuffled order." },
+  { value: "group", icon: "groups", label: "A group at a time",
+    why: "A whole group at a time, in print order." },
+  { value: "rep", icon: "letters", label: "One from each group",
+    why: "One student from every group at once, by version letter: "
+      + "all the As, then all the Bs. A group with fewer seats than "
+      + "there are letters comes round again from its first." },
+];
 
 
 /* Which seat is in hand in Seats mode. Its own thing rather than part
@@ -97,7 +118,7 @@ const NAME_SMALLEST = 11;
    one saturated thing. These are the hues on offer -- far enough apart
    to tell at a glance, and never the only carrier of meaning, because
    the pill still says which table it is. */
-const HUES = [255, 150, 35, 330, 285, 95, 195, 15];
+const HUES = [255, 150, 35, 330, 285, 95, 195, 15, 70];
 
 /* The nine places a label can sit on a desk, as fractions of the
    shape's own box. Eight around the perimeter and the middle, the same
@@ -122,13 +143,12 @@ const ICON = {
   upnext: "M20.5 4.5h-17A1.5 1.5 0 0 0 2 6v9a1.5 1.5 0 0 0 1.5 1.5H7v4"
     + "l5-4h8.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5z",
   grow: "M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5",
-  // A card with A/B on it, and a label pill: each icon is a small
-  // picture of the thing it turns on.
-  letters: "R2.5,5,19,14,2.5"
-    + "|M5.8 16.3l2.7-7.1 2.7 7.1M6.7 14.1h3.6"
-    + "|M13.6 8.5l-2.8 8.2"
-    + "|M15.2 16.3V9.1h2.1a1.8 1.8 0 0 1 0 3.6h-2.1"
-    + "|M15.2 12.7h2.5a1.8 1.8 0 0 1 0 3.6h-2.5",
+  /* One big A on a card, and a label pill: each icon is a small
+     picture of the thing it turns on. A and B side by side said
+     "these differ" more precisely, and looked like two bugs on a
+     windscreen -- at 22px there is room for one letterform drawn
+     properly or two drawn badly. */
+  letters: "R3,5.5,18,13,2.5|M8.1 15.6l3.9-8.1 3.9 8.1M9.6 12.6h4.8",
   tag: "M2 12a5 5 0 0 1 5-5h10a5 5 0 0 1 0 10H7a5 5 0 0 1-5-5z"
     + "|M7.5 12h9",
   projector: "R2,7,14,10,2|M16 11l5-3v8l-5-3z|O9,12,2.4",
@@ -138,6 +158,8 @@ const ICON = {
     + "|M9.2 7V5.2A1.2 1.2 0 0 1 10.4 4h3.2a1.2 1.2 0 0 1 1.2 1.2V7",
   // Points the way the menu opens.
   chev: "M6 14.5l6-6 6 6",
+  back: "M14.5 5l-6 7 6 7",
+  fwd: "M9.5 5l6 7-6 7",
   // One card in front of another: the picture of making a second one.
   copy: "R8,8,13,13,2.5|M16 5V4.5A2.5 2.5 0 0 0 13.5 2h-9A2.5 2.5 0 0 0 2"
     + " 4.5v9A2.5 2.5 0 0 0 4.5 16H5",
@@ -159,11 +181,8 @@ const MODES = [
       + "a seat onto another group to move it there." },
   { value: "order", label: "Order", icon: "order",
     why: "The order papers are handed out in. Not built yet." },
-  { value: "upnext", label: "Up Next", icon: "upnext",
-    why: "Pick somebody: the room, with one chair lit up. Space picks "
-      + "the next; nobody comes up twice until everybody has." },
 ];
-const BUILT = new Set(["people", "groups", "seats", "upnext"]);
+const BUILT = new Set(["people", "groups", "seats"]);
 
 // --------------------------------------------------------------- helpers --
 
@@ -423,6 +442,10 @@ function paintChrome() {
   };
   set("seat-versions", "letters", showVersions, "Version letters");
   set("seat-labels", "tag", showLabels, "Group labels");
+  set("seat-upnext", "upnext", upnext,
+      upnext ? "Stop showing who is up"
+             : "Up Next: light one student, one group, or one from "
+               + "each group");
   set("seat-project", "projector", projecting(),
       projecting() ? "Back to editing — escape does it too"
                    : "Projector mode: the room and nothing else");
@@ -532,6 +555,36 @@ function drawRail() {
   layoutRail();
 }
 
+function railWidthUnfurled(rail) {
+  /* How wide the rail would be with all five modes across, measured on
+     a copy.
+
+     The first version of this measured the real thing: take `.furled`
+     off, read `offsetWidth`, put it back. I wrote that it could not
+     paint because nothing had yielded -- which is true of painting and
+     beside the point. Reading `offsetWidth` forces a style recalc, and
+     that recalc *commits* the unfurled style, which starts every
+     transition on the way to it. Putting the class back a line later
+     starts them all again in reverse. So the rail jumped open and
+     snapped shut on every render -- every drag, every selection, every
+     resize -- because measuring it was indistinguishable from opening
+     it.
+
+     A detached copy has the same ancestors and the same classes, so
+     every media query that applies to the rail applies to it, and its
+     transitions are turned off and it is never on screen. */
+  const ghost = rail.cloneNode(true);
+  ghost.classList.remove("furled", "open");
+  ghost.style.cssText = "position:absolute;left:-9999px;top:0;"
+    + "visibility:hidden;transform:none;transition:none";
+  for (const node of ghost.querySelectorAll("*"))
+    node.style.transition = "none";
+  rail.parentNode.appendChild(ghost);
+  const wide = ghost.offsetWidth;
+  ghost.remove();
+  return wide;
+}
+
 function layoutRail() {
   /* Furl when the rail, the zoom island and the plus can no longer
      share the bottom edge.
@@ -550,9 +603,7 @@ function layoutRail() {
   if (!rail || !rail.firstChild) return;
   if (projecting()) { rail.classList.remove("furled"); return; }
 
-  const was = rail.classList.contains("furled");
-  rail.classList.remove("furled");
-  const wide = rail.offsetWidth;
+  const wide = railWidthUnfurled(rail);
   const zoom = document.querySelector("#view-seating .at-bl");
   const half = seatingPaper().clientWidth / 2;
   // The rail is centred, so half of it has to clear whichever corner
@@ -564,7 +615,6 @@ function layoutRail() {
     railOpen = false;                // a wide window has no list to close
     rail.classList.remove("open");
   }
-  if (furl !== was) rail.classList.toggle("open", railOpen);
 
   /* Centred in the window, and nudged only when centred would overlap.
 
@@ -623,8 +673,8 @@ function goToSection(i) {
   picked = null;
   // The turn belongs to the room that is on screen. Carried across,
   // the count would be measured against a roomful of different people.
-  calling = null;
-  called = new Set();
+  upnextAt = -1;
+  upnextFor = "";
   refit();                         // each room fits on its own terms
   renderSeating();
 }
@@ -634,7 +684,7 @@ function drawRoom(section) {
   const canvas = seatingCanvas();
   canvas.textContent = "";
   canvas.className = "canvas mode-" + seatingMode
-    + (seatingMode === "upnext" && calling ? " hushed" : "");
+    + (upnext && upnextAt >= 0 ? " hushed" : "");
 
   /* Everything is drawn relative to the content box, not to (0, 0) of
      the declared canvas. The model stays in room coordinates; only the
@@ -654,6 +704,7 @@ function drawRoom(section) {
     if (!spec) continue;                   // a shape this build cannot draw
     const group = (shape.seats || []).map(x => bySeat[x.id]).find(Boolean);
     const hue = hueOf(section, group);
+    const chroma = chromaOf(group);
 
     /* Two elements, not one. `.deskwrap` carries the position, the
        size and the rotation; `.shape` is only the silhouette inside
@@ -675,7 +726,7 @@ function drawRoom(section) {
     // the rotation handle are the silhouette's *siblings*, so a
     // custom property set on it reaches none of them, and they came
     // out invisible -- white dots on white paper.
-    tint(wrap, hue);
+    tint(wrap, hue, chroma);
     canvas.appendChild(wrap);
 
     const box = el("div", "shape " + spec.css);
@@ -709,20 +760,18 @@ function drawRoom(section) {
       where[seat.id] = [x, y];
       const who = s.names[seat.student];
       const card = el("div", "seatcard" + (who ? "" : " empty"));
-      tint(card, hue);
+      tint(card, hue, chroma);
       card.style.left = (x - CARD_W / 2 - ox) + "px";
       card.style.top = (y - CARD_H / 2 - oy) + "px";
       fillCard(card, who, showVersions ? seat.version : "");
 
-      if (seatingMode === "people") {
+      if (upnext) {
+        // Up Next is on, so nothing on the canvas is a control: the
+        // room is being shown, not edited, whatever mode it is in.
+      } else if (seatingMode === "people") {
         if (who) card.classList.add("movable");
         if (picked && picked.seat === seat) card.classList.add("picked");
         card.onpointerdown = e => dragName(e, card, { seat: seat });
-      } else if (seatingMode === "upnext") {
-        if (seat.student && seat.student === calling)
-          card.classList.add("calling");
-        else if (seat.student && called.has(seat.student))
-          card.classList.add("been");
       } else if (seatingMode === "seats") {
         card.classList.add("movable", "chairable");
         if (seat.id === selectedChair) card.classList.add("picked");
@@ -742,16 +791,19 @@ function drawRoom(section) {
       if (!ids.length || !group.label) continue;
       const [x, y] = labelPoint(section, group, ids, where);
       const tag = el("div", "pill", group.label);
-      tint(tag, hueOf(section, group));
+      tint(tag, hueOf(section, group), chromaOf(group));
       if (isSelected(group, null)) tag.classList.add("chosen");
       tag.style.left = (x - ox) + "px";
       tag.style.top = (y - oy) + "px";
       tag.title = "Drag to move it; click twice to rename";
       tag.onpointerdown = e => dragLabel(e, tag, section, group, ids, where);
       canvas.appendChild(tag);
-      drawn.labels.push({ el: tag, seats: ids, group: group });
+      drawn.labels.push({ el: tag, seats: ids, group: group,
+                         at: [x - ox, y - oy] });
     }
   }
+
+  if (upnext) paintUpnext(section, where, ox, oy);
 
   /* The nine places this group's label may sit, shown only while it
      is selected. There is no picker control: these *are* the control.
@@ -787,12 +839,130 @@ function drawRoom(section) {
   applyZoom(section);
 }
 
-function tint(node, hue) {
+function paintUpnext(section, where, ox, oy) {
+  /* Light the current step, dim the ones already done, and -- in group
+     mode -- make the whole group bigger.
+
+     Bigger about the *group's* centre, not about each piece's own
+     centre. A desk and its cards are siblings on the canvas, so
+     scaling each in place would grow them all while leaving the cards
+     sitting where they were, creeping inward as the desk got bigger.
+     Moving each piece out by `(k - 1)` of its distance from the group
+     centre and then scaling it is what makes the whole thing look
+     like one object being brought forward. */
+  const line = upnextOrder(section);
+  const here = upnextAt >= 0 && upnextAt < line.length ? line[upnextAt] : null;
+  for (let i = 0; i < upnextAt; i += 1)
+    for (const id of line[i].seats || [])
+      if (drawn.cards[id]) drawn.cards[id].classList.add("been");
+  if (!here) return;
+
+  for (const id of here.seats || [])
+    if (drawn.cards[id]) drawn.cards[id].classList.add("calling");
+
+  if (upnextKind !== "group" || !here.group) return;
+  const ids = (here.group.seats || []).filter(id => where[id]);
+  if (!ids.length) return;
+  const gx = ids.reduce((n, id) => n + where[id][0], 0) / ids.length - ox;
+  const gy = ids.reduce((n, id) => n + where[id][1], 0) / ids.length - oy;
+  const K = 1.22;
+  const grow = (node, cx, cy, after) => {
+    node.style.transform = `translate(${(K - 1) * (cx - gx)}px, `
+      + `${(K - 1) * (cy - gy)}px) scale(${K})` + (after || "");
+    node.classList.add("lifted-up");
+  };
+  for (const id of ids) {
+    const card = drawn.cards[id];
+    if (card) grow(card, where[id][0] - ox, where[id][1] - oy);
+  }
+  for (const shape of shapesHolding(section, here.group)) {
+    const wrap = drawn.shapes[shape.id];
+    if (!wrap) continue;
+    // After the scale, not before: the desk's own rotation has to stay
+    // the last thing that happens to it or a turned desk shears.
+    grow(wrap, shape.at[0] - ox, shape.at[1] - oy,
+         shape.angle ? ` rotate(${shape.angle}deg)` : "");
+  }
+  // And the label, which is the one part that says *which* group this
+  // is -- left behind at its ordinary size it read as a sticker on
+  // something that had grown around it.
+  const tag = drawn.labels.find(l => l.group === here.group);
+  if (tag) grow(tag.el, tag.at[0], tag.at[1]);
+}
+
+function tint(node, hue, chroma) {
   // One hue in, three shades out -- see `.seatcard` and `.shape` in
   // seating.css. An ungrouped seat is the same three roles at zero
   // chroma, which is what makes the unseated rail consistent for free.
   node.style.setProperty("--h", hue === null ? 255 : hue);
-  node.style.setProperty("--c", hue === null ? 0 : 1);
+  node.style.setProperty("--c", hue === null ? 0
+    : (typeof chroma === "number" ? chroma : 1));
+}
+
+function chromaOf(group) {
+  // Absent means the standard strength. Only a colour chosen from the
+  // picker writes one down, so every group drawn before the picker
+  // existed keeps exactly the colour it had.
+  return group && typeof group.chroma === "number" ? group.chroma : 1;
+}
+
+function oklchOf(hex) {
+  /* sRGB hex to an OKLCH hue and a chroma, because the picker speaks
+     hex and the room speaks hue.
+
+     The lightness that comes back is thrown away on purpose. A group's
+     three shades are built at fixed lightnesses chosen so that a name
+     is readable on the card and the card is visible on the paper; let
+     the instructor set lightness and the first dark colour anybody
+     picks makes a table whose names cannot be read from the back of
+     the room. So the picker chooses *which* colour and *how vivid*,
+     and the design system keeps deciding how light.
+
+     The matrices are Bjorn Ottosson's sRGB-to-Oklab, which is the same
+     conversion the browser does for the `oklch()` the stylesheet
+     already uses -- so a colour picked here and a colour written in
+     the stylesheet mean the same thing. */
+  const n = parseInt(hex.slice(1), 16);
+  const to = v => {
+    v /= 255;
+    return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  const R = to((n >> 16) & 255), G = to((n >> 8) & 255), B = to(n & 255);
+  const l = Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B);
+  const m = Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B);
+  const s = Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+  const a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+  const b = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+  const c = Math.sqrt(a * a + b * b);
+  let h = Math.atan2(b, a) * 180 / Math.PI;
+  if (h < 0) h += 360;
+  /* 0.155 is the chroma of the solid shade in the stylesheet, so a
+     colour as vivid as the built-in ones comes back as 1. A grey comes
+     back near 0 and stays grey, which is honest: the room already uses
+     grey to mean "no group", and a group that chose it will look like
+     one. */
+  return { hue: h, chroma: Math.min(1.4, Math.round(c / 0.155 * 100) / 100) };
+}
+
+function hexOf(hue, chroma) {
+  /* The other way, well enough to seed the picker with the colour the
+     group already has. Oklab to linear sRGB, then gamma and clamp --
+     an out-of-gamut colour clips, which for a seed value is fine. */
+  const L = 0.585, C = 0.155 * chroma, r = hue * Math.PI / 180;
+  const a = C * Math.cos(r), b = C * Math.sin(r);
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+  const out = [
+    +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+  ].map(v => {
+    const g = v <= 0.0031308 ? 12.92 * v
+                             : 1.055 * Math.pow(Math.max(v, 0), 1 / 2.4) - 0.055;
+    return Math.min(255, Math.max(0, Math.round(g * 255)));
+  });
+  return "#" + out.map(v => v.toString(16).padStart(2, "0")).join("");
 }
 
 function fillCard(card, who, version) {
@@ -1023,7 +1193,8 @@ function drawStrip(section) {
      had just been using. */
   const strip = document.getElementById("seat-strip");
   strip.textContent = "";
-  if (seatingMode === "upnext") { drawUpNext(strip, section); return; }
+  strip.classList.remove("upnextstrip");
+  if (upnext) { drawUpNext(strip, section); return; }
 
   let group = selected && selected.kind === "group"
     ? groupsOf(section).find(g => g.id === selected.id) : null;
@@ -1046,7 +1217,7 @@ function drawStrip(section) {
     const dot = el("button", "swatch");
     dot.type = "button";
     dot.title = "Colour";
-    tint(dot, hueOf(section, group));
+    tint(dot, hueOf(section, group), chromaOf(group));
     dot.onclick = e => { e.stopPropagation(); openHues(dot, section, group); };
     strip.appendChild(dot);
 
@@ -1702,78 +1873,201 @@ function dragChair(event, card, section, shape, seat) {
 
 // --------------------------------------------------------- up next --
 
-function whoCanBeCalled() {
-  // Only people in the room on screen: a chart on the projector is one
-  // section, and calling on somebody from the other one is a mistake
-  // nobody would understand.
-  return drawn.seats.filter(s => s.seat.student);
+function upnextOrder(section) {
+  /* The line, built once and kept until the room or the kind changes.
+
+     Kept, because stepping backwards has to show the same person you
+     just saw. A fresh shuffle on every render would make the back
+     arrow a second forward arrow with extra steps. */
+  const made = seatingSection + "/" + upnextKind + "/"
+    + drawn.seats.length + "/" + groupsOf(section).length;
+  if (made === upnextFor) return upnextLine;
+  upnextFor = made;
+  upnextAt = -1;
+  upnextLine = buildUpnext(section);
+  return upnextLine;
 }
 
-function pickNext() {
-  const here = whoCanBeCalled();
-  if (!here.length) { toast("Nobody is seated in this room yet."); return; }
-  let pool = here.filter(s => !called.has(s.seat.student));
-  if (!pool.length) {
-    // Round over. Start another rather than refusing, and say so,
-    // because "everyone has had a turn" is worth hearing.
-    called = new Set();
-    pool = here;
-    toast("Everybody has had a turn — starting again.");
+function buildUpnext(section) {
+  const names = (seatingState && seatingState.names) || {};
+  const seated = drawn.seats.filter(s => s.seat.student);
+
+  if (upnextKind === "person") {
+    /* Shuffled once. Fisher-Yates rather than `sort(() => Math.random()
+       - 0.5)`, which is not a shuffle -- it is a comparison function
+       that lies, and leaves the first few in place more often than
+       chance. In a classroom that is the difference between fair and
+       looking fair. */
+    const line = seated.map(s => ({
+      label: (names[s.seat.student] || {}).full || "\u2014",
+      seats: [s.id],
+    }));
+    for (let i = line.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [line[i], line[j]] = [line[j], line[i]];
+    }
+    return line;
   }
-  const chair = pool[Math.floor(Math.random() * pool.length)];
-  calling = chair.seat.student;
-  called.add(calling);
+
+  if (upnextKind === "group") {
+    // Print order, because that is the order the room already has an
+    // opinion about, and a second arbitrary order would be one more
+    // thing nobody can predict.
+    return printOrder(section)
+      .map(g => ({ label: g.label || "(no label)", group: g,
+                   seats: (g.seats || []).filter(id => drawn.cards[id]) }))
+      .filter(e => e.seats.length);
+  }
+
+  /* One from each group, by version letter.
+
+     Each group's seats are put in the room's own version order, and
+     step i takes the seat at `i % however many it has`. So with
+     letters A-E and a group of three, step D lands on the same seat as
+     step A -- which is the instructor's rule, and is also the only
+     answer that gives every seat in a small group the same number of
+     turns.
+
+     The number of steps is the longer of the two: usually the version
+     list, but a group with more seats than there are letters would
+     otherwise have seats that never come up at all. */
+  const letters = (seatingRoom && seatingRoom.versions) || [];
+  const rank = id => {
+    const at = letters.indexOf(id);
+    return at < 0 ? letters.length : at;
+  };
+  const groups = printOrder(section).map(g => (g.seats || [])
+    .map(id => drawn.seats.find(s => s.id === id))
+    .filter(s => s && s.seat.student)
+    .sort((a, b) => rank(a.seat.version) - rank(b.seat.version)))
+    .filter(seats => seats.length);
+  const widest = groups.reduce((n, g) => Math.max(n, g.length), 0);
+  const steps = Math.max(letters.length, widest);
+  const line = [];
+  for (let i = 0; i < steps; i += 1)
+    line.push({
+      label: letters.length ? letters[i % letters.length] : String(i + 1),
+      seats: groups.map(g => g[i % g.length].id),
+    });
+  return line;
+}
+
+function upnextStep(by) {
+  const section = currentSection();
+  if (!section) return;
+  const line = upnextOrder(section);
+  if (!line.length) { toast("Nobody is seated in this room yet."); return; }
+  if (upnextAt < 0) upnextAt = by > 0 ? 0 : line.length - 1;
+  else upnextAt = (upnextAt + by + line.length) % line.length;
   renderSeating();
 }
 
+function upnextHere(section) {
+  const line = upnextOrder(section);
+  return upnextAt >= 0 && upnextAt < line.length ? line[upnextAt] : null;
+}
+
+
+
 function drawUpNext(strip, section) {
+  /* Who is up: a back arrow, the name, how far through, a forward
+     arrow -- and on the left the one control that says what "who"
+     means here.
+
+     The kind cycles on a click rather than opening a menu. There are
+     three of them, the glyph says which one you are on, and a menu
+     over a strip that is itself over a projected room is two layers of
+     chrome to answer a question with three answers. */
   strip.hidden = false;
-  const here = whoCanBeCalled();
-  const who = calling ? seatingState.names[calling] : null;
+  strip.classList.add("upnextstrip");
 
-  if (who) {
-    const dot = el("span", "swatch");
-    tint(dot, null);
-    dot.style.background = "var(--isle-key)";
-    strip.appendChild(dot);
-    strip.appendChild(el("span", "sname", who.full));
-  } else {
-    strip.appendChild(el("span", "smeta",
-      here.length ? "Nobody up yet" : "Nobody is seated here"));
-  }
+  const spec = UPNEXT_KINDS.find(k => k.value === upnextKind)
+    || UPNEXT_KINDS[0];
+  const next = UPNEXT_KINDS[(UPNEXT_KINDS.indexOf(spec) + 1)
+                            % UPNEXT_KINDS.length];
+  const kind = el("button", "ibtn tiny kindbtn");
+  kind.type = "button";
+  kind.title = spec.why + "  (click for: " + next.label.toLowerCase() + ")";
+  kind.appendChild(svgIcon(ICON[spec.icon]));
+  kind.onclick = () => {
+    upnextKind = next.value;
+    upnextFor = "";                // a different question, a new line
+    renderSeating();
+  };
+  strip.appendChild(kind);
+  strip.appendChild(el("span", "isep"));
 
-  const next = el("button", "ibtn key", calling ? "Next" : "Pick someone");
-  next.type = "button";
-  next.title = "Space picks the next one";
-  next.onclick = pickNext;
-  strip.appendChild(next);
+  const line = upnextOrder(section);
+  const arrow = (dir, why) => {
+    const b = el("button", "ibtn tiny steparrow");
+    b.type = "button";
+    b.title = why;
+    b.appendChild(svgIcon(dir < 0 ? ICON.back : ICON.fwd));
+    b.disabled = !line.length;
+    b.onclick = () => upnextStep(dir);
+    return b;
+  };
+  strip.appendChild(arrow(-1, "The one before"));
 
-  if (called.size) {
-    strip.appendChild(el("span", "smeta",
-                         called.size + "/" + here.length));
-    const again = el("button", "ibtn", "Start over");
-    again.type = "button";
-    again.title = "Everybody back in the hat";
-    again.onclick = () => { called = new Set(); calling = null; renderSeating(); };
-    strip.appendChild(again);
-  }
+  const here = upnextAt >= 0 && upnextAt < line.length ? line[upnextAt] : null;
+  const name = el("span", "sname upname",
+    here ? here.label : (line.length ? "Ready" : "Nobody is seated here"));
+  strip.appendChild(name);
+  if (line.length)
+    strip.appendChild(el("span", "smeta upcount",
+      (upnextAt < 0 ? "\u2013" : upnextAt + 1) + "/" + line.length));
+
+  strip.appendChild(arrow(1, "The next one"));
 }
 
 function openHues(near, section, group) {
   document.querySelectorAll(".hues").forEach(n => n.remove());
   const pop = el("div", "hues");
+  const standard = chromaOf(group) === 1;
   for (const hue of HUES) {
-    const b = el("button", "hue" + (hueOf(section, group) === hue
+    const b = el("button", "hue" + (standard && hueOf(section, group) === hue
                                     ? " on" : ""));
     b.type = "button";
     b.style.setProperty("--h", hue);
+    b.style.setProperty("--c", 1);
     b.onclick = () => {
       group.hue = hue;
+      delete group.chroma;        // back to the standard strength
       pop.remove();
       renderSeating();
     };
     pop.appendChild(b);
   }
+
+  /* One more slot: anything else.
+
+     `input type="color"` rather than a wheel built here. It is the
+     platform's own picker, which means it already has a visual field,
+     a hex box, RGB numbers and -- on every desktop -- an eyedropper,
+     all of it in the conventions of whatever machine the instructor
+     is sitting at, none of it to maintain. Writing a worse one would
+     be the whole point of the exercise lost.
+
+     What comes back is a full colour and what is kept is its hue and
+     its vividness; `oklchOf` says why. */
+  const own = el("button", "hue custom" + (standard ? "" : " on"));
+  own.type = "button";
+  own.title = "Any other colour";
+  const pick = el("input");
+  pick.type = "color";
+  pick.value = hexOf(hueOf(section, group) || 255, chromaOf(group));
+  // `input` rather than `change`: the picker previews live on every
+  // platform that has one, and watching the room follow is most of
+  // how you tell whether a colour works against the paper.
+  pick.oninput = () => {
+    const got = oklchOf(pick.value);
+    group.hue = Math.round(got.hue * 10) / 10;
+    group.chroma = got.chroma;
+    renderSeating();
+  };
+  own.appendChild(pick);
+  own.onclick = () => pick.click();
+  pop.appendChild(own);
   document.getElementById("view-seating").appendChild(pop);
   const box = near.getBoundingClientRect();
   const app = document.getElementById("view-seating").getBoundingClientRect();
@@ -1799,7 +2093,7 @@ function renameOnCanvas(tag, group) {
   const hue = hueOf(section, group);
   const wrap = el("span", "renaming");
   wrap.style.cssText = tag.style.cssText;
-  tint(wrap, hue);
+  tint(wrap, hue, chromaOf(group));
 
   const input = el("input", "pillrename");
   input.type = "text";
@@ -1911,15 +2205,12 @@ function drawStageBar(section, count) {
   stage.hidden = !stage_wanted;
   if (!stage_wanted) return;
   document.getElementById("stage-section").textContent = section.name || "";
-  /* While picking, the bar carries the count -- the islands are gone
-     and the lit chair says who, but how far through the class has been
-     is the one thing the room cannot show. */
-  const keys = seatingMode === "upnext"
-    ? (called.size ? called.size + " of " + whoCanBeCalled().length
-                     + " · space for the next · esc to leave"
-                   : "space to pick somebody · esc to leave")
-    : (count > 1 ? "← → section · esc to leave" : "esc to leave");
-  document.getElementById("stage-keys").textContent = keys;
+  /* One instruction, and only the one you cannot guess. The count and
+     the arrows are in the Up Next strip, which is on screen while they
+     mean anything; the bar used to repeat them underneath, and reading
+     a line of small grey text at the front of a room is work nobody
+     does twice. */
+  document.getElementById("stage-keys").textContent = "esc to leave";
 }
 
 // ---------------------------------------------------------------- drawer --
@@ -2535,22 +2826,24 @@ function presentKeys(event) {
      target is not always an element. */
   const onControl = event.target instanceof Element
     && event.target.closest("input, button");
-  if (seatingMode === "upnext" && (event.key === " " || event.key === "Enter")
-      && !onControl) {
+
+  /* The arrows walk the Up Next line, and space goes forward.
+
+     They used to change section while presenting, which was the wrong
+     thing for the arrow keys to do: a projected chart is one room, and
+     there is no moment at the front of a class where the next thing
+     you want is the other section. Switching rooms is a decision taken
+     before you start, with the controls up. */
+  const step = { ArrowRight: 1, ArrowDown: 1, PageDown: 1,
+                 " ": 1, Enter: 1,
+                 ArrowLeft: -1, ArrowUp: -1, PageUp: -1 }[event.key];
+  if (upnext && step && !onControl) {
     event.preventDefault();
-    pickNext();
+    upnextStep(step);
     return;
   }
   if (!projecting()) return;
   if (event.key === "Escape") { setProjecting(false); return; }
-  const sections = (seatingRoom && seatingRoom.sections) || [];
-  const step = { ArrowRight: 1, ArrowDown: 1, PageDown: 1, " ": 1,
-                 ArrowLeft: -1, ArrowUp: -1, PageUp: -1 }[event.key];
-  if (!step || sections.length < 2) return;
-  event.preventDefault();
-  seatingSection = (seatingSection + step + sections.length) % sections.length;
-  refit();
-  renderSeating();
 }
 
 function onFullscreenChange() {
@@ -2616,6 +2909,15 @@ function wireSeating() {
     refit();
     const section = currentSection();
     if (section) applyZoom(section);
+  };
+  document.getElementById("seat-upnext").onclick = () => {
+    upnext = !upnext;
+    if (!upnext) { upnextAt = -1; upnextFor = ""; }
+    selected = null;
+    picked = null;
+    selectedChair = null;
+    paintChrome();
+    renderSeating();
   };
   document.getElementById("seat-project").onclick =
     () => setProjecting(!projecting());

@@ -28,6 +28,26 @@
   --isle-shadow: 0 6px 22px oklch(0.2 0.02 260 / .30),
                  0 1px 3px oklch(0.2 0.02 260 / .22);
 
+  /* Motion.
+
+     Two curves and two durations, not one of each. Something arriving
+     should take longer and slow into place; something leaving should
+     be quicker and get out of the way. `ease` does neither -- it is
+     symmetrical, so an opening menu decelerates as gently as it
+     accelerated and reads as a jerk at any duration short enough not
+     to feel slow. These are Material 3's emphasized pair, which is
+     also roughly what Apple's and Figma's panels do: a long tail on
+     the way in, a short snap on the way out.
+
+     180ms was also simply too fast for something 220px tall. The
+     rule of thumb is that the bigger the travel, the longer the
+     move; 180ms is right for a button's hover and wrong for a panel
+     unrolling four rows. */
+  --in-curve:  cubic-bezier(0.05, 0.7, 0.1, 1);
+  --out-curve: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --in-time:  .28s;
+  --out-time: .2s;
+
   position: relative;
   overflow: hidden;
   border-radius: 10px;
@@ -158,8 +178,15 @@
    bottom-left island that changes size as you work -- "100%" against
    "39%" -- and the whole island changing width with it is what used to
    walk the mode rail sideways. Wide enough for "100%" at this size,
-   and tabular figures keep the digits from shuffling inside it. */
-.zoomnum { width: 54px; justify-content: center;
+   and tabular figures keep the digits from shuffling inside it.
+
+   No padding of its own, either. A fixed width and 10px of side
+   padding is the width twice: the box already says how much room the
+   number gets, and the padding was adding ten more pixels on each
+   side of a number that was already centred in it. That plus the
+   island's own 4px gap put sixteen pixels between the minus sign and
+   the first digit. */
+.zoomnum { width: 44px; padding: 0; justify-content: center;
            font-variant-numeric: tabular-nums; }
 #seat-sections { display: flex; gap: 3px; }
 
@@ -204,8 +231,13 @@
    nothing is still twelve pixels of nothing. It animates with the
    rows, so the list still unrolls rather than snapping apart. */
 .rail.furled .railmodes { flex-direction: column; align-items: stretch;
-                          gap: 0; transition: gap .18s ease; }
-.rail.furled.open .railmodes { gap: 3px; }
+                          gap: 0;
+                          transition: gap var(--out-time) var(--out-curve)
+                                      var(--shut-wait, 0s); }
+.rail.furled:hover .railmodes,
+.rail.furled.open .railmodes { gap: 3px;
+                               transition: gap var(--in-time) var(--in-curve)
+                                           var(--open-wait, 0s); }
 .rail.furled .ibtn.on .railchev { display: block; margin-left: auto;
                                   opacity: .65; }
 
@@ -227,17 +259,47 @@
      one is still two pixels tall -- times four rows, and the closed
      pill carries eight pixels of rows that are not there. */
   border-width: 0;
-  transition: height .18s ease, opacity .13s ease;
+  /* Leaving: quick, and after a wait. The wait is what makes a hover
+     menu usable -- without it, the pointer crossing the gap between
+     two rows closes the whole thing. */
+  transition: height var(--out-time) var(--out-curve) var(--shut-wait, 0s),
+              opacity calc(var(--out-time) * .7) var(--out-curve)
+                      var(--shut-wait, 0s);
 }
 .rail.furled .railmodes .ibtn.on,
+.rail.furled:hover .railmodes .ibtn,
 .rail.furled.open .railmodes .ibtn {
   height: 40px;
   opacity: 1;
   pointer-events: auto;
   border-width: 1px;
+  transition: height var(--in-time) var(--in-curve) var(--open-wait, 0s),
+              opacity var(--in-time) var(--in-curve) var(--open-wait, 0s);
 }
-.rail.furled .railchev { transition: transform .18s ease; }
-.rail.furled.open .ibtn.on .railchev { transform: rotate(180deg); }
+
+/* Hover opens it, and losing the pointer shuts it again. Asked for,
+   and the usual pairing: a pointer gets the list without a click, a
+   finger still taps for it, and the tap state is remembered in
+   `railOpen` so it survives the re-render a mode change causes.
+
+   The two waits are hover intent. A short one before opening, so
+   sweeping the pointer across the corner on the way somewhere else
+   does not unroll a menu; a longer one before closing, so leaving the
+   pill for a moment -- or crossing a gap between rows -- does not
+   throw the list away mid-reach. A click sets `.open`, which zeroes
+   both: a deliberate press should not be kept waiting. */
+.rail.furled:hover { --open-wait: .1s; --shut-wait: .35s; }
+.rail.furled.open { --open-wait: 0s; --shut-wait: 0s; }
+.rail.furled .railchev {
+  transition: transform var(--out-time) var(--out-curve)
+              var(--shut-wait, 0s);
+}
+.rail.furled:hover .ibtn.on .railchev,
+.rail.furled.open .ibtn.on .railchev {
+  transform: rotate(180deg);
+  transition: transform var(--in-time) var(--in-curve)
+              var(--open-wait, 0s);
+}
 
 /* The selection strip: thin, above the rail, with no expanded state.
    Everything it needs is one row, which is what makes it work at 515px
@@ -256,6 +318,15 @@
                 max-width: 190px; overflow: hidden;
                 text-overflow: ellipsis; white-space: nowrap; }
 .strip .sname:hover { background: var(--isle-2); }
+/* The name is the point of this strip, so it is the one thing in it
+   allowed to be bigger than the row. */
+.strip .upname { font-size: 15px; cursor: default; min-width: 80px;
+                 text-align: center; }
+.strip .upname:hover { background: none; }
+.strip .upcount { font-variant-numeric: tabular-nums; }
+.strip .steparrow:disabled { opacity: .3; cursor: default; }
+.strip .kindbtn { width: 26px; padding: 0; }
+.upnextstrip { gap: 4px; }
 .strip .smeta { color: var(--isle-dim); font-size: 12px; padding: 0 6px; }
 
 /* A fact: a glyph and a number, in that order, at one size. Both
@@ -314,7 +385,7 @@
    because the strip has to stay one row at 515px. */
 .hues {
   position: absolute; z-index: 7;
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
   padding: 7px;
   background: var(--isle); border: 1px solid var(--isle-line);
   border-radius: 10px; box-shadow: var(--isle-shadow);
@@ -322,7 +393,25 @@
 .hue {
   width: 24px; height: 24px; padding: 0; cursor: pointer;
   border-radius: 6px; border: 2px solid transparent;
-  background: oklch(0.585 0.155 var(--h));
+  background: oklch(0.585 calc(0.155 * var(--c, 1)) var(--h));
+}
+/* The tenth slot. A wheel rather than a colour, because it does not
+   stand for one -- it stands for all of them. The real `input` sits
+   inside it at zero size so the platform's picker anchors here
+   instead of in the corner of the window. */
+.hue.custom {
+  position: relative;
+  background:
+    radial-gradient(circle at 50% 50%, var(--isle) 30%, transparent 32%),
+    conic-gradient(
+      oklch(0.62 0.17 20), oklch(0.62 0.17 70), oklch(0.62 0.17 120),
+      oklch(0.62 0.17 170), oklch(0.62 0.17 220), oklch(0.62 0.17 270),
+      oklch(0.62 0.17 320), oklch(0.62 0.17 20));
+}
+.hue.custom input {
+  position: absolute; inset: 50% auto auto 50%;
+  width: 1px; height: 1px; padding: 0; border: 0;
+  opacity: 0; pointer-events: none;
 }
 .hue:hover { border-color: var(--isle-dim); }
 .hue.on { border-color: var(--isle-ink); }
@@ -345,9 +434,14 @@
   max-height: 0;
   opacity: 0;
   box-shadow: none;
-  transition: max-height .2s ease, opacity .16s ease, padding .2s ease;
+  transition: max-height var(--out-time) var(--out-curve),
+              opacity calc(var(--out-time) * .7) var(--out-curve),
+              padding var(--out-time) var(--out-curve);
 }
 .palette.open {
+  transition: max-height var(--in-time) var(--in-curve),
+              opacity var(--in-time) var(--in-curve),
+              padding var(--in-time) var(--in-curve);
   max-height: 320px;
   opacity: 1;
   padding: 5px;
@@ -767,6 +861,12 @@
 .canvas.hushed .pill,
 .canvas.hushed .seatcard:not(.calling) { opacity: .34; }
 
+/* Brought forward with its group. The transform itself is written by
+   `paintUpnext`, because only it knows where the group's centre is;
+   this is the part that is the same for every piece. */
+.lifted-up { z-index: 4; transition: transform var(--in-time) var(--in-curve); }
+.canvas.hushed .lifted-up { opacity: 1; }
+
 .seatcard.calling {
   /* Above the labels, not level with them. At 3 it tied with
      `.canvas > .pill` and lost on DOM order, which put a group's label
@@ -806,10 +906,19 @@
 body.projecting header { display: none; }
 body.projecting main { padding: 0; max-width: none; }
 body.projecting .seatapp { border: 0; border-radius: 0; }
-body.projecting .isle:not(.at-tr),
+body.projecting .isle:not(.at-tr):not(.upnextstrip),
 body.projecting .pen,
-body.projecting .plusbtn,
-body.projecting .strip { display: none; }
+body.projecting .plusbtn { display: none; }
+
+/* The Up Next strip stays while projecting. It is the only chrome that
+   is *for* the projected room rather than left over from editing it:
+   the name, how far through, and the two arrows are the controls the
+   lesson actually uses. It fades with the islands when nothing is
+   happening, for the same reason they do. */
+body.projecting .upnextstrip { bottom: 16px;
+                               transition: opacity .6s ease; opacity: .72; }
+body.projecting .upnextstrip:hover,
+body.projecting .seatapp:hover .upnextstrip { opacity: 1; }
 
 /* And that island fades when nothing is happening, returning on any
    movement. Still clickable while faded: a dimming, not a
