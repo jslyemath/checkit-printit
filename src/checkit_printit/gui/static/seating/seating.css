@@ -250,15 +250,35 @@
 
 /* `height` and `opacity`, because both animate. `display: none` does
    not, and the list would appear rather than unroll. */
+/* No borders anywhere in this column, open or shut.
+
+   There used to be a `border-width: 0` here and a `border-width: 1px`
+   on the open rows, to stop four collapsed rows contributing eight
+   pixels of height they had no business having -- a border cannot
+   shrink below itself, so a `height: 0` button with one is still two
+   pixels tall.
+
+   That toggle is where the hitch at the start of the fan-out came
+   from. `border-width` was not in the transition list, so it snapped
+   from 0 to 1 the instant the class landed, while height, gap and
+   opacity all waited for their delay and then eased. Measured: one
+   frame in, a hidden row was already 2px tall with its border at 1px
+   while its gap was still 0 and its opacity still 0. Eight pixels of
+   empty grey appeared, sat there, and only then did the rows start
+   to grow -- which is exactly what a hitch is.
+
+   The border is the wrong thing to animate anyway. Nothing in the
+   rail ever gives it a colour: `.ibtn` sets `1px solid transparent`
+   and `.ibtn.on` colours the background, not the edge. So it draws
+   nothing here and the honest fix is not to have it, rather than to
+   make its arrival smoother. */
+.rail.furled .ibtn { border-width: 0; }
+
 .rail.furled .railmodes .ibtn {
   height: 0;
   opacity: 0;
   overflow: hidden;
   pointer-events: none;
-  /* A border cannot shrink below itself, so a `height: 0` button with
-     one is still two pixels tall -- times four rows, and the closed
-     pill carries eight pixels of rows that are not there. */
-  border-width: 0;
   /* Leaving: quick, and after a wait. The wait is what makes a hover
      menu usable -- without it, the pointer crossing the gap between
      two rows closes the whole thing. */
@@ -272,7 +292,6 @@
   height: 40px;
   opacity: 1;
   pointer-events: auto;
-  border-width: 1px;
   transition: height var(--in-time) var(--in-curve) var(--open-wait, 0s),
               opacity var(--in-time) var(--in-curve) var(--open-wait, 0s);
 }
@@ -921,6 +940,19 @@
 body.projecting header { display: none; }
 body.projecting main { padding: 0; max-width: none; }
 body.projecting .seatapp { border: 0; border-radius: 0; }
+/* Up Next is a way of looking at the room, not a way of working on
+   it, so it takes the room out of whatever mode it was in for as long
+   as it is on: no mode rail, no plus, no grid. The same reasoning as
+   projector mode, and the same reason the deleted View mode is not
+   missed -- "nothing moves" is a state, not a mode, and two of those
+   states already exist.
+
+   The mode itself is untouched underneath, so switching Up Next off
+   puts you back exactly where you were with nothing to remember. */
+body.upnexting .at-bc,
+body.upnexting .plusbtn,
+body.upnexting .palette { display: none; }
+
 body.projecting .isle:not(.at-tr):not(.upnextstrip),
 body.projecting .pen,
 body.projecting .plusbtn { display: none; }

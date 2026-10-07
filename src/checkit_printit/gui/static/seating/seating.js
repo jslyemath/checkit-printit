@@ -469,7 +469,7 @@ function paintChrome() {
     : (selected && selected.kind === "group" && section
        ? shapesHolding(section,
            groupsOf(section).find(g => g.id === selected.id) || {})[0] : null);
-  const wanted = !projecting() && section
+  const wanted = !projecting() && !upnext && section
     && (seatingMode === "groups" || (seatingMode === "seats" && shape));
   plus.hidden = !wanted;
   plus.classList.toggle("on", seatingMode === "groups" && paletteOpen);
@@ -742,7 +742,9 @@ function drawRoom(section) {
     const box = el("div", "shape " + spec.css);
     wrap.appendChild(box);
     if (isSelected(group, shape)) wrap.classList.add("chosen");
-    if (seatingMode === "groups") {
+    if (upnext) {
+      // Shown, not edited: no drag, no keyboard nudge, no handles.
+    } else if (seatingMode === "groups") {
       box.classList.add("movable");
       box.tabIndex = 0;
       box.onkeydown = e => nudgeShape(e, section, shape);
@@ -2731,7 +2733,8 @@ function paintPaper(zoom) {
   const fine = "oklch(0.905 0.005 255)";
   const bold = "oklch(0.850 0.007 255)";
   const dot = "oklch(0.800 0.008 255)";
-  const gridded = seatingMode === "groups" || seatingMode === "seats";
+  const gridded = !upnext
+    && (seatingMode === "groups" || seatingMode === "seats");
 
   const layers = [], sizes = [], spots = [];
   if (gridded && !projecting()) {
@@ -2947,6 +2950,8 @@ function wireSeating() {
     // and finding the class half-called again is not a fresh start,
     // it is lost work.
     upnext = !upnext;
+    document.body.classList.toggle("upnexting", upnext);
+    paletteOpen = false;
     selected = null;
     picked = null;
     selectedChair = null;
