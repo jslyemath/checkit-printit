@@ -119,6 +119,16 @@
 .ibtn.soonish { opacity: .5; }
 .ibtn svg { width: 17px; height: 17px; fill: none; stroke: currentColor;
             stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+/* The corner islands stand their icons next to text -- "820", "48%" --
+   and 17px of line art reads optically smaller than a 15px capital.
+   22px balances them, and since a button is a fixed 34px tall with no
+   vertical padding, nothing about the island's height moves.
+
+   Applied to both corners, not only the top one that was complained
+   about: the zoom island has exactly the same icon beside exactly the
+   same size of number, so fixing one and not the other would just
+   move the imbalance. */
+.at-tr .ibtn svg, .at-bl .ibtn svg { width: 22px; height: 22px; }
 .isep { width: 1px; align-self: stretch; background: var(--isle-line);
         margin: 2px 1px; }
 /* The Save group is a wrapper for showing and hiding, not a box. Left
@@ -144,7 +154,12 @@
   aspect-ratio: 1; padding: 0;
 }
 #seat-out, #seat-in { font-size: 18px; }
-.zoomnum { min-width: 44px; justify-content: center;
+/* A fixed width, not a minimum. The readout is the only thing in the
+   bottom-left island that changes size as you work -- "100%" against
+   "39%" -- and the whole island changing width with it is what used to
+   walk the mode rail sideways. Wide enough for "100%" at this size,
+   and tabular figures keep the digits from shuffling inside it. */
+.zoomnum { width: 54px; justify-content: center;
            font-variant-numeric: tabular-nums; }
 #seat-sections { display: flex; gap: 3px; }
 
@@ -162,9 +177,67 @@
    allowed to be taller than the others, because it stacks a glyph over
    a word and because being the tallest thing on the bottom edge is how
    it reads as the primary one. The other three match each other. */
+.rail { align-items: flex-end; }
+.railmodes { display: flex; align-items: flex-end; gap: 3px; }
 .rail .ibtn { flex-direction: column; gap: 3px; padding: 0 11px;
               height: 52px; font-size: 11px; }
 .rail .ibtn svg { width: 19px; height: 19px; }
+.railchev { display: none; }
+
+/* ---------------------------------------------------------- furled -- */
+
+/* Too narrow for five across: the rail becomes the current mode and a
+   chevron, and the list unrolls upward out of it.
+
+   The four modes you are not in are still here, in order, at zero
+   height. That is the whole trick. Leaving them out and putting them
+   back would mean deciding where the current mode goes and animating
+   it there; collapsing them means the current mode is the only row
+   left, already at the bottom, and opening the list grows the rows
+   above it and lifts it into its own place. The order is never wrong
+   at any point in between, because it was never rebuilt.
+
+   A side effect worth keeping: the hidden rows still have their own
+   width, so the column is always as wide as "Up Next" and neither the
+   closed pill nor the opening menu changes width as you switch mode. */
+/* `gap: 0` while closed, because four gaps between four rows of
+   nothing is still twelve pixels of nothing. It animates with the
+   rows, so the list still unrolls rather than snapping apart. */
+.rail.furled .railmodes { flex-direction: column; align-items: stretch;
+                          gap: 0; transition: gap .18s ease; }
+.rail.furled.open .railmodes { gap: 3px; }
+.rail.furled .ibtn.on .railchev { display: block; margin-left: auto;
+                                  opacity: .65; }
+
+/* Beside the word rather than over it. A vertical menu of five
+   stacked icon-over-label buttons is 280px of bottom edge; beside it
+   they are 40, and a short wide pill is what a collapsed menu looks
+   like everywhere else. */
+.rail.furled .ibtn { flex-direction: row; height: 40px; gap: 8px;
+                     justify-content: flex-start; }
+
+/* `height` and `opacity`, because both animate. `display: none` does
+   not, and the list would appear rather than unroll. */
+.rail.furled .railmodes .ibtn {
+  height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* A border cannot shrink below itself, so a `height: 0` button with
+     one is still two pixels tall -- times four rows, and the closed
+     pill carries eight pixels of rows that are not there. */
+  border-width: 0;
+  transition: height .18s ease, opacity .13s ease;
+}
+.rail.furled .railmodes .ibtn.on,
+.rail.furled.open .railmodes .ibtn {
+  height: 40px;
+  opacity: 1;
+  pointer-events: auto;
+  border-width: 1px;
+}
+.rail.furled .railchev { transition: transform .18s ease; }
+.rail.furled.open .ibtn.on .railchev { transform: rotate(180deg); }
 
 /* The selection strip: thin, above the rail, with no expanded state.
    Everything it needs is one row, which is what makes it work at 515px
@@ -184,9 +257,26 @@
                 text-overflow: ellipsis; white-space: nowrap; }
 .strip .sname:hover { background: var(--isle-2); }
 .strip .smeta { color: var(--isle-dim); font-size: 12px; padding: 0 6px; }
-.strip .sord { font-variant-numeric: tabular-nums; color: var(--isle-ink);
-               background: var(--isle-2); border-radius: 6px;
-               padding: 3px 8px; cursor: pointer; font-size: 12px; }
+
+/* A fact: a glyph and a number, in that order, at one size. Both
+   facts in the strip take this shape, and both glyphs are borrowed
+   from the mode rail -- the Seats icon for seats, the Order icon for
+   the print order -- so the strip is spelled in a vocabulary the
+   window has already taught rather than one of its own. */
+.strip .scount { display: flex; align-items: center; gap: 5px;
+                 padding: 3px 7px; border-radius: 6px;
+                 color: var(--isle-ink); font-size: 13px;
+                 font-variant-numeric: tabular-nums; }
+.strip .scount svg { width: 15px; height: 15px; flex: 0 0 auto;
+                     fill: none; stroke: var(--isle-dim); stroke-width: 1.8;
+                     stroke-linecap: round; stroke-linejoin: round; }
+/* Typing a position is offered the same way renaming is: a hover
+   shade on the thing itself, not a pencil beside it. */
+.strip .scount.typable { cursor: text; }
+.strip .scount.typable:hover { background: var(--isle-2); }
+.strip .scount.typable:hover svg { stroke: var(--isle-ink); }
+.strip .sorder { width: 54px; text-align: center;
+                 font-variant-numeric: tabular-nums; }
 /* Deliberately shorter than an island button: the strip is one thin
    row, and nothing in it is allowed to set its height. */
 .strip .tiny { height: 26px; padding: 0 7px; font-size: 13px; }
@@ -678,7 +768,10 @@
 .canvas.hushed .seatcard:not(.calling) { opacity: .34; }
 
 .seatcard.calling {
-  z-index: 3;
+  /* Above the labels, not level with them. At 3 it tied with
+     `.canvas > .pill` and lost on DOM order, which put a group's label
+     across the one card the room is being asked to look at. */
+  z-index: 4;
   opacity: 1;
   transform: scale(1.45);
   border-color: var(--solid);
@@ -779,7 +872,12 @@ body.projecting .seatapp:hover .at-tr { opacity: 1; }
      tall while everything around it shrank. */
   .ibtn { height: 28px; padding: 0 7px; }
   .rail .ibtn { height: 44px; padding: 0 8px; font-size: 10px; gap: 1px; }
+  .rail.furled .ibtn { height: 34px; gap: 7px; }
+  .rail.furled .railmodes .ibtn { height: 0; }
+  .rail.furled .railmodes .ibtn.on,
+  .rail.furled.open .railmodes .ibtn { height: 34px; }
   .rail .ibtn svg { width: 17px; height: 17px; }
+  .at-tr .ibtn svg, .at-bl .ibtn svg { width: 19px; height: 19px; }
   .at-bl, .at-bc, .plusbtn { bottom: 8px; }
   .strip { bottom: 62px; padding: 3px 5px; }
   .palette { bottom: 56px; }
