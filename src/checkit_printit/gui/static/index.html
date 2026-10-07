@@ -212,25 +212,11 @@
       <p id="seating-empty" class="emptyroom" hidden></p>
     </div>
 
-    <!-- top left: which room am I in, and is it saved.
-
-         The hamburger does not open a menu -- it unfolds this island.
-         A menu whose only entry was "Add a desk" was a drawer with one
-         thing in it and a lid on top; the furniture, the two display
-         toggles and the room's identity all belong in one place that
-         grows when you want it and folds away when you do not. -->
-    <!-- The hamburger slides the display toggles out sideways, between
-         itself and the section numbers. Icons only: what they do is
-         visible on the canvas the moment they are pressed, and a
-         caption on each would make the island wider than the thing it
-         is a control for. -->
+    <!-- top left: which room am I in, and is it saved. The hamburger
+         that used to live here is gone: it hid two switches, and two
+         switches are cheaper to show than to hide. -->
+    <!-- top left: which room am I in, and is it saved -->
     <div class="isle at-tl">
-      <button id="seat-menu" class="ibtn" title="Show and hide"
-        aria-expanded="false">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-      </button>
-      <span id="seat-shows" class="shows shut"></span>
-      <span class="isep"></span>
       <div id="seat-sections" class="seg"></div>
       <!-- Save is absent until there is something to save. Most of
            the time a Save button is a button with nothing to do, and
@@ -253,28 +239,47 @@
          fades when the pointer is still and returns when it moves,
          the way a video player's controls do. -->
     <div class="isle at-tr">
-      <button id="seat-bare" class="ibtn" title="Hide the controls"></button>
-      <button id="seat-present" class="ibtn key"
-        title="The room on the whole screen. Escape comes back."></button>
+      <!-- The two display switches, no longer behind a hamburger. Each
+           draws the thing it turns on: a card with a letter in its
+           corner, and a label pill. -->
+      <button id="seat-versions" class="ibtn" title="Version letters"></button>
+      <button id="seat-labels" class="ibtn" title="Group labels"></button>
+      <span class="isep"></span>
+      <!-- Projector mode: the room, nothing else, nothing movable. It
+           is not fullscreen -- that is a separate question and lives
+           with the zoom -- and it is accented only while it is on,
+           because the accent means "this is the state you are in"
+           everywhere else in here. -->
+      <button id="seat-project" class="ibtn" title="Projector mode"></button>
     </div>
 
     <!-- the right edge: who is not seated yet -->
     <div id="seat-pen" class="pen" hidden></div>
 
     <!-- bottom left: what am I looking at. Same corner at every width. -->
+    <!-- bottom left: what am I looking at. Fullscreen belongs here
+         rather than beside Present: it is a question about the view,
+         and both tldraw and Miro keep their view controls in one
+         corner cluster like this. -->
     <div class="isle at-bl">
       <button id="seat-out" class="ibtn" title="Zoom out">&minus;</button>
       <button id="seat-zoom" class="ibtn zoomnum" title="Fit the room"></button>
       <button id="seat-in" class="ibtn" title="Zoom in">+</button>
+      <span class="isep"></span>
+      <button id="seat-full" class="ibtn" title="Fill the screen"></button>
     </div>
 
     <!-- what is selected: one thin strip, with no expanded state -->
     <div id="seat-strip" class="isle strip" hidden></div>
 
-    <!-- The furniture, right above the mode that uses it. It belongs
-         on the canvas beside the room it adds to, not folded into a
-         menu in the far corner. -->
+    <!-- The furniture, unrolling upward out of the plus. -->
     <div id="seat-palette" class="isle palette" hidden></div>
+
+    <!-- One more of whatever this mode is about: a group in Groups, a
+         seat in Seats. Its own button in its own corner rather than
+         the end of the strip, because it is an action and the strip
+         is a description. -->
+    <button id="seat-plus" class="plusbtn" hidden>+</button>
 
     <!-- bottom centre: what am I doing. Modes only. -->
     <div id="seat-modes" class="isle at-bc rail"></div>

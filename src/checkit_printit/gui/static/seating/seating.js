@@ -20,6 +20,11 @@ let seatingRoom = null;          // the copy being edited, written on Save
 let seatingSection = 0;
 let seatingZoom = null;          // null means "fit"
 let seatingMode = "people";
+/* What to go back to when projector mode is switched off. There
+   is no View mode any more -- projecting *is* the read-only
+   state, and leaving it should put you back where you were
+   rather than somewhere neutral. */
+let modeBefore = "people";
 
 /* What is selected: `{kind: "group", id}` or `{kind: "shape", id}`, or
    null. Everything in the strip hangs off this -- it is the backbone,
@@ -50,13 +55,6 @@ let showLabels = true;
 let called = new Set();
 let calling = null;
 
-/* Whether the controls are out of the way. Separate from presenting,
-   because the two are different wishes: Present is "put this on the
-   wall", bare is "stop covering the room". Presenting turns it on, and
-   turning it back off while still presenting is how every mode stays
-   reachable on the projector. */
-let bare = false;
-let stillSince = null;           // for fading the one island that stays
 
 /* Which seat is in hand in Seats mode. Its own thing rather than part
    of `selected`, because a seat is always a seat *of* a group: the
@@ -114,6 +112,13 @@ const ICON = {
   upnext: "M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4z"
     + "|M18 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z",
   grow: "M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5",
+  // A card with a letter in its corner, and a label pill: each
+  // icon is a small picture of the thing it turns on.
+  letters: "R3,5,18,14,2.5|M8.2 16l2.6-6.4L13.4 16M9.1 14h3.4"
+    + "|M16.4 16v-3.2M15.2 13.6l1.2-1 1.2 1",
+  tag: "M2 12a5 5 0 0 1 5-5h10a5 5 0 0 1 0 10H7a5 5 0 0 1-5-5z"
+    + "|M7.5 12h9",
+  projector: "R2,7,14,10,2|M16 11l5-3v8l-5-3z|O9,12,2.4",
   shrink: "M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5",
   hide: "M4 4l16 16|M10.6 6.3A8.6 8.6 0 0 1 12 6c6.5 0 10 6 10 6a17 17 0"
     + " 0 1-3 3.6M6.5 7.6A17 17 0 0 0 2 12s3.5 6 10 6a9 9 0 0 0 3.6-.7",
@@ -124,8 +129,6 @@ const ICON = {
    among modes is a category error, and the test that keeps the rail
    honest is whether it changes what a click on the canvas means. */
 const MODES = [
-  { value: "view", label: "View", icon: "view",
-    why: "Nothing moves. This is the projector." },
   { value: "people", label: "People", icon: "people",
     why: "Click a name then a chair, or drag it. Landing on somebody "
       + "swaps the two; the version letters stay with the chairs, so "
@@ -142,7 +145,7 @@ const MODES = [
     why: "Pick somebody: the room, with one chair lit up. Space picks "
       + "the next; nobody comes up twice until everybody has." },
 ];
-const BUILT = new Set(["view", "people", "groups", "seats", "upnext"]);
+const BUILT = new Set(["people", "groups", "seats", "upnext"]);
 
 // --------------------------------------------------------------- helpers --
 
@@ -326,53 +329,97 @@ function nameSize(text) {
   return chosen;
 }
 
-function presenting() { return document.body.classList.contains("presenting"); }
-
-function setBare(on) {
-  bare = on;
-  document.body.classList.toggle("bare", on);
-  const b = document.getElementById("seat-bare");
-  b.textContent = "";
-  b.appendChild(svgIcon(ICON[on ? "show" : "hide"]));
-  b.title = on ? "Bring the controls back" : "Hide the controls";
-  b.setAttribute("aria-pressed", String(on));
-
-  const p = document.getElementById("seat-present");
-  p.textContent = "";
-  p.appendChild(svgIcon(ICON[presenting() ? "shrink" : "grow"]));
-  const word = el("span", "foldaway", presenting() ? "Leave" : "Present");
-  p.appendChild(word);
-  p.title = presenting()
-    ? "Back to the rest of checkit-printit. Escape does it too."
-    : "The room on the whole screen. Escape comes back.";
-
-  stir();
-  // A full re-draw, not just a re-fit: what is on screen changes with
-  // this, not only how big it is. The stage bar in particular is shown
-  // exactly when the islands are not.
-  if (seatingRoom) { sizeSeating(); renderSeating(); }
-}
-
-/* The one island that stays while presenting fades when nothing is
-   happening and comes back on any movement -- a video player's
-   controls, for the same reason: somebody is looking at the room, not
-   at the buttons, but the buttons have to be findable without
-   remembering a key. */
-function stir() {
-  const isle = document.querySelector("#view-seating .at-tr");
-  if (!isle) return;
-  isle.classList.remove("resting");
-  stillSince = Date.now();
-  clearTimeout(stir.timer);
-  if (!presenting() && !bare) return;
-  stir.timer = setTimeout(() => {
-    if (Date.now() - stillSince >= 2400) isle.classList.add("resting");
-  }, 2500);
-}
-
 function seatingDirty() {
   return seatingRoom !== null && seatingState !== null
     && JSON.stringify(seatingRoom) !== JSON.stringify(seatingState.room);
+}
+
+function projecting() {
+  return document.body.classList.contains("projecting");
+}
+
+function fullscreen() { return Boolean(document.fullscreenElement); }
+
+/* Projector mode and fullscreen are two different wishes and used to
+   be one button. Projecting is "show the room and nothing else, and
+   do not let me move anything by accident"; fullscreen is "use the
+   whole screen". Either is useful without the other -- a projector
+   mirroring a window wants the first, and drawing a big room on a
+   second monitor wants the second -- so they are two controls in two
+   places, the first with the display switches and the second with
+   the zoom, which is the question it belongs to. */
+function setProjecting(on) {
+  if (on === projecting()) return;
+  if (on) {
+    modeBefore = seatingMode;
+    selected = null;
+    picked = null;
+    selectedChair = null;
+    paletteOpen = false;
+  } else {
+    seatingMode = modeBefore;      // back where you were, not somewhere neutral
+  }
+  document.body.classList.toggle("projecting", on);
+  paintChrome();
+  if (seatingRoom) { sizeSeating(); seatingZoom = null; renderSeating(); }
+}
+
+async function toggleFullscreen() {
+  const view = document.getElementById("view-seating");
+  try {
+    if (fullscreen()) await document.exitFullscreen();
+    else if (view.requestFullscreen)
+      await view.requestFullscreen({ navigationUI: "hide" });
+    else throw new Error("not offered");
+  } catch (err) {
+    toast("This browser would not go fullscreen — use the window's own.");
+  }
+  paintChrome();
+}
+
+function paintChrome() {
+  /* The buttons whose icon or state depends on something other than
+     the room: the two display switches, projector mode, fullscreen.
+
+     Accent means one thing here -- "this is the state you are in".
+     It used to also mean "look at me", which is why Present was
+     accented while it was off. A switch that is lit when unused has
+     nothing left to say when it is used. */
+  const set = (id, icon, on, title) => {
+    const b = document.getElementById(id);
+    if (!b) return;
+    b.textContent = "";
+    b.appendChild(svgIcon(ICON[icon]));
+    b.classList.toggle("on", Boolean(on));
+    b.setAttribute("aria-pressed", String(Boolean(on)));
+    b.title = title;
+  };
+  set("seat-versions", "letters", showVersions, "Version letters");
+  set("seat-labels", "tag", showLabels, "Group labels");
+  set("seat-project", "projector", projecting(),
+      projecting() ? "Back to editing — escape does it too"
+                   : "Projector mode: the room and nothing else");
+  set("seat-full", fullscreen() ? "shrink" : "grow", fullscreen(),
+      fullscreen() ? "Leave fullscreen" : "Fill the screen");
+
+  const plus = document.getElementById("seat-plus");
+  const section = currentSection();
+  const shape = selected && selected.kind === "shape"
+    ? (section && (section.shapes || []).find(s => s.id === selected.id))
+    : (selected && selected.kind === "group" && section
+       ? shapesHolding(section,
+           groupsOf(section).find(g => g.id === selected.id) || {})[0] : null);
+  const wanted = !projecting() && section
+    && (seatingMode === "groups" || (seatingMode === "seats" && shape));
+  plus.hidden = !wanted;
+  plus.classList.toggle("on", seatingMode === "groups" && paletteOpen);
+  plus.title = seatingMode === "seats"
+    ? "Add a seat to this group" : "Add a group";
+  plus.onclick = e => {
+    e.stopPropagation();
+    if (seatingMode === "seats") addChair(section, shape);
+    else togglePalette();
+  };
 }
 
 // ---------------------------------------------------------------- render --
@@ -402,6 +449,9 @@ function renderSeating() {
   drawPalette(section);
   drawStrip(section);
   drawStageBar(section, sections.length);
+  // The plus belongs to the mode and the selection, so it is redrawn
+  // with them rather than only when a switch is flipped.
+  paintChrome();
 }
 
 function drawRail() {
@@ -716,7 +766,7 @@ function dragLabel(event, tag, section, group, ids, where) {
   if (event.pointerType === "mouse" && event.button !== 0) return;
   event.preventDefault();
   event.stopPropagation();
-  if (seatingMode === "view" || seatingMode === "upnext") return;
+  if (projecting() || seatingMode === "upnext") return;
 
   const now = Date.now();
   if (lastLabelTap.id === group.id && now - lastLabelTap.at < 450) {
@@ -847,7 +897,6 @@ function drawStrip(section) {
      had just been using. */
   const strip = document.getElementById("seat-strip");
   strip.textContent = "";
-  strip.classList.remove("withplus");
   if (seatingMode === "upnext") { drawUpNext(strip, section); return; }
 
   let group = selected && selected.kind === "group"
@@ -860,13 +909,6 @@ function drawStrip(section) {
   if (!group && !shape) {
     // Nothing chosen. Groups mode still offers the furniture, because
     // an empty room has nothing to select and still needs a desk.
-    if (seatingMode === "groups") {
-      strip.hidden = false;
-      strip.classList.add("withplus");
-      strip.appendChild(el("span", "smeta", "Nothing selected"));
-      strip.appendChild(plusButton(section, null));
-      return;
-    }
     strip.hidden = true;
     return;
   }
@@ -926,28 +968,6 @@ function drawStrip(section) {
       strip.appendChild(less);
     }
   }
-  if (seatingMode === "groups" || (seatingMode === "seats" && shape)) {
-    strip.classList.add("withplus");
-    strip.appendChild(plusButton(section, shape));
-  }
-}
-
-function plusButton(section, shape) {
-  /* The same button in the same corner in both modes, because in both
-     it means "one more of the thing this mode is about": a group in
-     Groups, a seat in Seats. */
-  const plus = el("button", "ibtn plus", "+");
-  plus.type = "button";
-  if (seatingMode === "seats") {
-    plus.title = "Add a seat to this group";
-    plus.onclick = () => addChair(section, shape);
-    return plus;
-  }
-  plus.title = "Add a group";
-  plus.setAttribute("aria-expanded", String(paletteOpen));
-  if (paletteOpen) plus.classList.add("on");
-  plus.onclick = e => { e.stopPropagation(); togglePalette(); };
-  return plus;
 }
 
 // ------------------------------------------------- desks and chairs --
@@ -1418,14 +1438,35 @@ function openHues(near, section, group) {
 
 function renameOnCanvas(tag, group) {
   /* Edit the pill in place, at its size and in its position, so the
-     name is retyped where it lives rather than in a box somewhere
-     else that happens to hold the same string. */
+     name is retyped where it lives rather than in a box elsewhere
+     that happens to hold the same string.
+
+     In the group's own colour, not the accent. The accent means "the
+     state you are in"; a yellow-green ring round a purple group's
+     name said nothing about the purple group. */
+  const section = currentSection();
+  const hue = hueOf(section, group);
+  const wrap = el("span", "renaming");
+  wrap.style.cssText = tag.style.cssText;
+  tint(wrap, hue);
+
   const input = el("input", "pillrename");
   input.type = "text";
   input.value = group.label || "";
-  input.style.cssText = tag.style.cssText;
-  input.style.width = Math.max(90, tag.offsetWidth + 24) + "px";
-  tag.replaceWith(input);
+  input.size = Math.max(8, (group.label || "").length + 2);
+  wrap.appendChild(input);
+
+  /* A cross, because clearing the box is not how anybody expects to
+     delete a label -- emptying a field reads as "I have not typed it
+     yet", not as "there should not be one". */
+  const kill = el("button", "unlabel", "×");
+  kill.type = "button";
+  kill.title = "No label on this group";
+  kill.onmousedown = e => e.preventDefault();   // keep focus off the blur
+  kill.onclick = () => { done = true; group.label = ""; renderSeating(); };
+  wrap.appendChild(kill);
+
+  tag.replaceWith(wrap);
   input.focus();
   input.select();
   let done = false;
@@ -1515,7 +1556,7 @@ function drawStageBar(section, count) {
   /* Only when the controls are away. It exists to say what the islands
      would have said; with them back it is a second answer to the same
      question, printed underneath the first. */
-  const stage_wanted = presenting() && bare;
+  const stage_wanted = projecting();
   stage.hidden = !stage_wanted;
   if (!stage_wanted) return;
   document.getElementById("stage-section").textContent = section.name || "";
@@ -1537,44 +1578,11 @@ function drawStageBar(section, count) {
    display toggles, which is a drawer with one useful thing in it and a
    lid on top; unfolded in place they are next to the room's identity,
    where they belong. */
-function toggleDrawer(force) {
-  /* Slides the display toggles out sideways, between the hamburger
-     and the section numbers. Not a panel and not a menu: two more
-     buttons in the row that is already there. */
-  const shows = document.getElementById("seat-shows");
-  const open = force !== undefined ? force : shows.classList.contains("shut");
-  // Always in the layout; `shut` collapses it to nothing so the two
-  // buttons slide rather than blink.
-  shows.hidden = false;
-  shows.classList.toggle("shut", !open);
-  const b = document.getElementById("seat-menu");
-  b.setAttribute("aria-expanded", String(open));
-  b.classList.toggle("on", open);
-  if (open) drawShows();
-}
-
-function drawShows() {
-  const shows = document.getElementById("seat-shows");
-  shows.textContent = "";
-  const toggles = [
-    ["Aa", "Version letters", () => showVersions, v => { showVersions = v; }],
-    ["▭", "Group labels", () => showLabels, v => { showLabels = v; }],
-  ];
-  for (const [glyph, label, get, set] of toggles) {
-    const b = el("button", "ibtn showbtn" + (get() ? " on" : ""));
-    b.type = "button";
-    b.title = label;
-    b.appendChild(el("span", "glyph", glyph));
-    b.onclick = () => { set(!get()); drawShows(); renderSeating(); };
-    shows.appendChild(b);
-  }
-}
-
 function togglePalette(force) {
   paletteOpen = force !== undefined ? force : !paletteOpen;
   const section = currentSection();
   drawPalette(section);
-  drawStrip(section);
+  paintChrome();                  // the plus turns into a cross
 }
 
 function drawPalette(section) {
@@ -1928,12 +1936,13 @@ function fitZoom(paper, area) {
 
      The right edge is given up to the unseated rail, so fitting never
      parks a table underneath it. */
-  /* `offsetWidth` rather than `.hidden`, because bare hides the rail
-     with CSS and leaves the attribute alone -- asking the attribute
-     would have reserved a gutter for something not on screen. */
+  /* `offsetWidth` rather than `.hidden`, because projector mode
+     hides the rail with CSS and leaves the attribute alone -- asking
+     the attribute would reserve a gutter for something not on
+     screen. */
   const gutter = seatingPen().offsetWidth
     ? seatingPen().offsetWidth + 38 : 44;
-  const below = bare ? 56 : 140;      // no rail and no strip when bare
+  const below = projecting() ? 56 : 140;   // no rail, no strip
   return Math.min(4, Math.max(0.05,
     Math.min((paper.clientWidth - gutter) / area.w,
              (paper.clientHeight - below) / area.h)));
@@ -1958,7 +1967,62 @@ function applyZoom(section) {
   box.style.marginRight = (pen.offsetWidth ? pen.offsetWidth + 22 : 0) + "px";
   document.getElementById("seat-zoom").textContent =
     Math.round(zoom * 100) + "%";
+  paintPaper(zoom);
   layoutBottom();                 // the zoom island just changed width
+}
+
+function paintPaper(zoom) {
+  /* The grid and the dots are one pattern on the paper, not two.
+
+     They used to be separate: dots every 26 screen pixels on the
+     paper, grid lines every 20 room units on the canvas. So they
+     never lined up, the dots did not move with the room, and the grid
+     stopped at the edge of the furniture -- which made the room look
+     like it sat on a mat rather than on a floor.
+
+     Both are on the paper now, laid out from the room's own origin at
+     the room's own step, so they tile for ever and the dots land on
+     the intersections because they are measured from the same corner. */
+  const paper = seatingPaper();
+  const canvas = seatingCanvas();
+  const step = GRID * zoom;
+  if (!(step > 1.5)) { paper.style.backgroundImage = "none"; return; }
+
+  // Where room (0, 0) falls on the paper, so the pattern is pinned to
+  // the room and travels with it rather than to the scrolling box.
+  const pb = paper.getBoundingClientRect();
+  const cb = canvas.getBoundingClientRect();
+  const area = drawn.box || { x: 0, y: 0 };
+  const x0 = cb.left - pb.left - area.x * zoom;
+  const y0 = cb.top - pb.top - area.y * zoom;
+  const at = (v, s) => (((v % s) + s) % s);
+  const big = step * 5;
+
+  const fine = "oklch(0.905 0.005 255)";
+  const bold = "oklch(0.850 0.007 255)";
+  const dot = "oklch(0.800 0.008 255)";
+  const gridded = seatingMode === "groups" || seatingMode === "seats";
+
+  const layers = [], sizes = [], spots = [];
+  if (gridded && !projecting()) {
+    layers.push(`linear-gradient(to right, ${fine} 1px, transparent 1px)`,
+                `linear-gradient(to bottom, ${fine} 1px, transparent 1px)`,
+                `linear-gradient(to right, ${bold} 1px, transparent 1px)`,
+                `linear-gradient(to bottom, ${bold} 1px, transparent 1px)`);
+    sizes.push(`${step}px ${step}px`, `${step}px ${step}px`,
+               `${big}px ${big}px`, `${big}px ${big}px`);
+    spots.push(`${at(x0, step)}px 0`, `0 ${at(y0, step)}px`,
+               `${at(x0, big)}px 0`, `0 ${at(y0, big)}px`);
+  }
+  // The dots sit on the heavy intersections, which is what makes them
+  // read as part of the grid rather than as a second pattern beside it.
+  layers.push(`radial-gradient(${dot} 1.4px, transparent 1.5px)`);
+  sizes.push(`${big}px ${big}px`);
+  spots.push(`${at(x0 - 1, big)}px ${at(y0 - 1, big)}px`);
+
+  paper.style.backgroundImage = layers.join(", ");
+  paper.style.backgroundSize = sizes.join(", ");
+  paper.style.backgroundPosition = spots.join(", ");
 }
 
 function zoomBy(step) {
@@ -1975,56 +2039,11 @@ function zoomBy(step) {
 
 // ------------------------------------------------------------- projector --
 
-async function present() {
-  /* The room on the whole screen, with nothing else on it.
-
-     Real fullscreen is asked for first, because the limit on how large
-     a name can be is pixels of screen. If the host refuses it -- an
-     embedded browser pane does, with "Permissions check failed" -- we
-     still present, inside the window. That is the case to get right
-     rather than to report: somebody is standing in front of a class. */
-  const view = document.getElementById("view-seating");
-  // Up Next survives: it is a mode for presenting, not one for
-  // editing, and the whole reason Cold call stopped being a tab was
-  // that it belongs on the projector with the room.
-  if (presenting()) { leavePresenting(); return; }
-  if (seatingMode !== "upnext") seatingMode = "view";
-  selected = null;
-  picked = null;
-  toggleDrawer(false);
-  document.body.classList.add("presenting");
-  setBare(true);                   // starts clean; the eye brings it back
-  sizeSeating();
-  seatingZoom = null;
-  renderSeating();
-  try {
-    if (view.requestFullscreen)
-      await view.requestFullscreen({ navigationUI: "hide" });
-  } catch (err) {
-    toast("Showing it in the window — this browser would not go fullscreen.");
-  }
-  sizeSeating();
-  seatingZoom = null;
-  renderSeating();                     // the screen just changed size
-}
-
-function leavePresenting() {
-  document.body.classList.remove("presenting");
-  if (document.fullscreenElement) document.exitFullscreen();
-  setBare(false);
-  sizeSeating();
-  seatingZoom = null;
-  renderSeating();
-}
-
 function presentKeys(event) {
   if (document.getElementById("view-seating").hidden) return;
-  if (event.key === "Escape" && !presenting()) {
+  if (event.key === "Escape" && !projecting()) {
     if (picked) { picked = null; renderSeating(); return; }
-    if (!document.getElementById("seat-drawer").hidden) {
-      toggleDrawer(false);
-      return;
-    }
+
     if (selected) { selected = null; renderSeating(); }
     return;
   }
@@ -2043,8 +2062,8 @@ function presentKeys(event) {
     pickNext();
     return;
   }
-  if (!presenting()) return;
-  if (event.key === "Escape") { leavePresenting(); return; }
+  if (!projecting()) return;
+  if (event.key === "Escape") { setProjecting(false); return; }
   const sections = (seatingRoom && seatingRoom.sections) || [];
   const step = { ArrowRight: 1, ArrowDown: 1, PageDown: 1, " ": 1,
                  ArrowLeft: -1, ArrowUp: -1, PageUp: -1 }[event.key];
@@ -2058,10 +2077,10 @@ function presentKeys(event) {
 function onFullscreenChange() {
   // Leaving by the browser's own Escape has to leave the mode too, or
   // the chrome stays hidden with no way back.
-  if (!document.fullscreenElement && presenting()) {
-    leavePresenting();
-    return;
-  }
+  // Leaving fullscreen by the browser's own Escape is only about
+  // fullscreen now; projector mode is a separate switch and stays
+  // where it was put.
+  paintChrome();
   sizeSeating();
   seatingZoom = null;
   if (seatingRoom) renderSeating();
@@ -2097,7 +2116,7 @@ function sizeSeating() {
      by two hundred pixels at another, where the host's nav wraps. */
   const view = document.getElementById("view-seating");
   if (view.hidden) return;
-  if (presenting()) { view.style.height = "100vh"; }
+  if (fullscreen()) { view.style.height = "100vh"; }
   else {
     view.style.height = "";
     const top = view.getBoundingClientRect().top + window.scrollY;
@@ -2118,7 +2137,7 @@ function layoutBottom() {
   const rail = document.querySelector("#view-seating .at-bc");
   const zoom = document.querySelector("#view-seating .at-bl");
   if (!rail || !zoom) return;
-  if (window.innerWidth > 760 || presenting()) {
+  if (window.innerWidth > 760 || projecting()) {
     rail.style.left = rail.style.right = rail.style.transform = "";
     return;
   }
@@ -2142,15 +2161,19 @@ function wireSeating() {
     const section = currentSection();
     if (section) applyZoom(section);
   };
-  document.getElementById("seat-present").onclick = present;
-  document.getElementById("seat-bare").onclick = () => setBare(!bare);
-  setBare(false);                  // draws both icons for the first time
+  document.getElementById("seat-project").onclick =
+    () => setProjecting(!projecting());
+  document.getElementById("seat-full").onclick = toggleFullscreen;
+  for (const [id, get, set] of [
+    ["seat-versions", () => showVersions, v => { showVersions = v; }],
+    ["seat-labels", () => showLabels, v => { showLabels = v; }],
+  ]) document.getElementById(id).onclick = () => {
+    set(!get());
+    paintChrome();
+    renderSeating();
+  };
+  paintChrome();                   // draws every icon for the first time
   document.getElementById("seat-save").onclick = saveSeating;
-  // Any movement brings the resting island back.
-  for (const kind of ["pointermove", "pointerdown", "keydown"])
-    document.addEventListener(kind, stir, true);
-  document.getElementById("seat-menu").onclick = () => toggleDrawer();
-  drawShows();          // built once so the slide has something to reveal
   document.getElementById("seat-discard").onclick = discardRoom;
   /* Clicking the paper, rather than a thing on it, clears the
      selection. It does *not* fold the drawer: the drawer is a tool

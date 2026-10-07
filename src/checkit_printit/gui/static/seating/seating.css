@@ -41,9 +41,8 @@
   inset: 0;
   display: flex;
   overflow: auto;
-  background:
-    radial-gradient(var(--paper-dot) 1.1px, transparent 1.1px) 0 0 / 26px 26px,
-    var(--paper);
+  background-color: var(--paper);
+  background-repeat: repeat;
 }
 /* `margin: auto` rather than `justify-content: center`: both centre a
    small room, but only this one keeps the top left corner reachable
@@ -154,14 +153,29 @@
                background: var(--isle-2); border-radius: 6px;
                padding: 3px 8px; cursor: pointer; font-size: 12px; }
 .strip .tiny { padding: 4px 7px; min-height: 0; font-size: 13px; }
-.strip .plus {
-  margin-left: 4px; min-width: 32px; padding: 4px 8px;
-  font-size: 17px; font-weight: 600; line-height: 1;
-  background: var(--isle-2); color: var(--isle-ink);
+
+.plusbtn {
+  position: absolute;
+  z-index: 6;
+  right: 12px;
+  bottom: 12px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  font: inherit;
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 500;
+  border: 0;
+  border-radius: 50%;
+  background: var(--isle-key);
+  color: var(--isle-key-ink);
+  cursor: pointer;
+  box-shadow: var(--isle-shadow);
+  transition: transform .15s ease;
 }
-.strip .plus:hover, .strip .plus.on {
-  background: var(--isle-key); color: var(--isle-key-ink);
-}
+.plusbtn:hover { transform: scale(1.06); }
+.plusbtn.on { transform: rotate(45deg); }
 .strip .srename {
   font: inherit; font-weight: 600; width: 150px;
   padding: 3px 7px; border-radius: 6px;
@@ -190,26 +204,12 @@
    the sections. Two more buttons in the row that is already there --
    not a panel, not a menu, and no captions: what they do shows on the
    canvas the moment they are pressed. */
-/* Slides out rather than appearing. `max-width` is what can be
-   animated here -- `width: auto` cannot -- and 170px is comfortably
-   more than the two buttons need. */
-.shows {
-  display: flex; align-items: center; gap: 3px;
-  overflow: hidden;
-  max-width: 170px;
-  opacity: 1;
-  transition: max-width .18s ease, opacity .18s ease, margin .18s ease;
-}
-.shows.shut { max-width: 0; opacity: 0; margin-left: -4px; }
-.showbtn { padding: 5px 8px; min-width: 32px; }
-.showbtn .glyph { font-weight: 800; font-size: 14px; line-height: 1; }
-
 /* The furniture, in a column that unrolls upward out of the plus at
    the end of the strip, and rolls back into it. */
 .palette {
-  bottom: 128px;
-  right: 50%;
-  margin-right: -148px;
+  bottom: 64px;
+  right: 12px;
+  margin-right: 0;
   flex-direction: column;
   gap: 2px;
   overflow: hidden;
@@ -273,7 +273,10 @@
 /* The desk's own frame: position, size and rotation live here, and
    everything that belongs to the desk is inside it, so all of it
    moves and turns together. */
-.deskwrap { position: absolute; }
+.deskwrap { position: absolute; z-index: 1; }
+/* Always above the furniture, whichever desk was drawn last. */
+.canvas > .seatcard { z-index: 2; }
+.canvas > .pill { z-index: 3; }
 .deskwrap.chosen::before {
   content: "";
   position: absolute;
@@ -455,14 +458,46 @@
    anchor is a guess about what was meant, and watching the label
    travel the last few pixels is what tells you which guess it made. */
 .pill.homing { transition: left .16s ease-out, top .16s ease-out; }
+/* Renaming, in the group's own colour. The accent means "the state
+   you are in" everywhere else in here; a yellow-green ring round a
+   purple group's name said nothing about the purple group. */
+.renaming {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 12;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 3px 2px 5px;
+  border-radius: 999px;
+  background: white;
+  border: 2px solid oklch(0.585 calc(0.155 * var(--c, 1)) var(--h, 255));
+  box-shadow: 0 3px 12px oklch(0.4 0.06 var(--h, 255) / .35);
+}
 .pillrename {
-  position: absolute; transform: translate(-50%, -50%);
-  font: inherit; font-size: 13px; font-weight: 700; text-align: center;
+  font: inherit; font-size: 13px; font-weight: 700;
   letter-spacing: .03em;
-  padding: 3px 10px; border-radius: 999px;
-  background: white; color: oklch(0.25 0.01 260);
-  border: 2px solid oklch(0.45 0.02 260);
-  z-index: 9;
+  min-width: 54px;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: oklch(0.25 0.01 260);
+  outline: none;
+}
+/* Clearing the box is not how anybody expects to delete a label: an
+   empty field reads as "not typed yet", not as "there should not be
+   one". */
+.unlabel {
+  font: inherit; font-size: 16px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0;
+  border: 0; border-radius: 50%; cursor: pointer;
+  background: oklch(0.90 calc(0.05 * var(--c, 1)) var(--h, 255));
+  color: oklch(0.38 calc(0.09 * var(--c, 1)) var(--h, 255));
+}
+.unlabel:hover {
+  background: oklch(0.585 calc(0.155 * var(--c, 1)) var(--h, 255));
+  color: white;
 }
 
 /* The nine places a label may sit, shown while its group is selected.
@@ -526,15 +561,7 @@
 /* Only while desks are being moved. A grid on the projector would be
    noise; at 20 units it is a texture rather than a ruler, and the
    heavier line every 100 is the one you line a row up against. */
-.canvas.mode-groups,
-.canvas.mode-seats {
-  background-image:
-    linear-gradient(to right, oklch(0.86 0.006 255) 1px, transparent 1px),
-    linear-gradient(to bottom, oklch(0.86 0.006 255) 1px, transparent 1px),
-    linear-gradient(to right, oklch(0.93 0.004 255) 1px, transparent 1px),
-    linear-gradient(to bottom, oklch(0.93 0.004 255) 1px, transparent 1px);
-  background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
-}
+
 /* Grab the desk anywhere, including through the names on it: in this
    mode a card is part of the furniture, not a thing of its own.
 
@@ -591,8 +618,10 @@
 /* A chair being positioned, as opposed to a person being moved. The
    dotted edge says "this is the seat, not the sitter" -- in Chairs
    mode you are dragging furniture that happens to have a name on it. */
-.seatcard.chairable { border-style: dotted; }
-.canvas.mode-seats .deskwrap.chosen ~ .seatcard { border-style: solid; }
+.seatcard.empty,
+.seatcard.empty.chairable,
+.seatcard.empty.picked,
+.seatcard.empty.over { border-style: dashed; }
 
 /* ---------------------------------------------------------- up next -- */
 
@@ -627,24 +656,29 @@
    nothing else can set. */
 #view-seating:fullscreen { background: var(--paper); }
 
-body.presenting header { display: none; }
-body.presenting main { padding: 0; max-width: none; }
-body.presenting .seatapp { border: 0; border-radius: 0; }
+/* Fullscreen is only about the window: the host's header goes
+   because there is no host on screen any more. */
+#view-seating:fullscreen .seatapp,
+#view-seating:fullscreen { border: 0; border-radius: 0; }
 
-/* Bare: the controls out of the way. Everything goes except the one
-   island that can bring them back -- a mode with no way out is a
-   trap, and on a projector the way out has to be visible, not
-   remembered. */
-body.bare .isle:not(.at-tr),
-body.bare .pen,
-body.bare .sheet,
-body.bare .strip { display: none; }
+/* Projector mode: the room and nothing else. Everything goes except
+   the island that can bring it back -- a mode with no visible way out
+   is a trap, and on a projector the way out has to be visible rather
+   than remembered. */
+body.projecting header { display: none; }
+body.projecting main { padding: 0; max-width: none; }
+body.projecting .seatapp { border: 0; border-radius: 0; }
+body.projecting .isle:not(.at-tr),
+body.projecting .pen,
+body.projecting .plusbtn,
+body.projecting .strip { display: none; }
 
-/* And that island rests when nothing is happening. Still clickable
-   while faded, so it is a dimming rather than a disappearance. */
-.at-tr { transition: opacity .5s ease; }
-.at-tr.resting { opacity: .16; }
-.at-tr.resting:hover { opacity: 1; }
+/* And that island fades when nothing is happening, returning on any
+   movement. Still clickable while faded: a dimming, not a
+   disappearance. */
+body.projecting .at-tr { transition: opacity .6s ease; opacity: .18; }
+body.projecting .at-tr:hover,
+body.projecting .seatapp:hover .at-tr { opacity: 1; }
 
 /* Which room, and the way out. Small and dim: it is for the person at
    the front, not for the back row. */
@@ -684,5 +718,20 @@ body.bare .strip { display: none; }
   .pen .seatcard .top { font-size: 18px !important; }
   .pen .seatcard .bottom { font-size: 11px !important; }
   .strip { bottom: 78px; }
-  .sheet { top: 50px; }
+}
+
+/* --------------------------------------------------- a short window -- */
+
+/* At 530 the bottom edge carries the rail, the strip and the plus.
+   The default padding is comfortable and, stacked three deep, is most
+   of what is left of the room. */
+@media (max-height: 620px) {
+  .isle { padding: 3px; gap: 3px; }
+  .ibtn { min-height: 28px; padding: 3px 7px; }
+  .rail .ibtn { padding: 3px 8px; font-size: 10px; gap: 1px; }
+  .rail .ibtn svg { width: 17px; height: 17px; }
+  .at-bl, .at-bc, .plusbtn { bottom: 8px; }
+  .strip { bottom: 62px; padding: 3px 5px; }
+  .palette { bottom: 56px; }
+  .plusbtn { width: 38px; height: 38px; font-size: 21px; }
 }
