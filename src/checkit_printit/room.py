@@ -523,15 +523,32 @@ def check(room, known=None):
                     f"{where}: group {named!r} is {order!r} in the print "
                     f"order, which is not a position.")
 
-            # A group's colour. One number, because the three shades
-            # the canvas draws are derived from it rather than stored,
-            # which is what keeps every group the same design.
+            # A group's colour: an angle, and optionally how vivid to
+            # be at that angle. Two numbers, not a palette of six --
+            # the three shades the canvas draws are derived from these
+            # rather than stored, which is what keeps every group the
+            # same design however the colour was chosen.
+            #
+            # Lightness is deliberately NOT stored. It is what decides
+            # whether a name on a card can be read, on a screen and on
+            # a projector and on paper, and it is the one part of a
+            # colour an instructor should not be able to get wrong by
+            # picking something pretty.
             hue = group.get("hue")
             if hue is not None:
                 if not _number(hue) or not 0 <= hue < 360:
                     raise RoomError(
                         f"{where}: group {named!r} has hue {hue!r}, which "
                         f"is not an angle on the colour wheel.")
+
+            chroma = group.get("chroma")
+            if chroma is not None:
+                if not _number(chroma) or not 0 <= chroma <= 1.4:
+                    raise RoomError(
+                        f"{where}: group {named!r} has chroma {chroma!r}. "
+                        f"It scales the standard colour, so 0 is grey, 1 "
+                        f"is the usual strength, and 1.4 is as far as it "
+                        f"goes.")
 
             # Where its label sits: a desk, and one of the nine places
             # on that desk. Checked because a label pinned to a desk

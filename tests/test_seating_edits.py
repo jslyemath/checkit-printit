@@ -238,6 +238,26 @@ class TestTheRoomComingBackIsChecked:
             with pytest.raises(room_mod.RoomError, match="colour wheel"):
                 room_mod.check(r)
 
+    def test_how_vivid_a_colour_is_scales_the_standard_one(self):
+        """Hue says which colour; chroma says how much of it. Lightness
+        is not stored at all -- it is what decides whether a name can
+        be read from the back of the room, so the picker does not get
+        to set it."""
+        r = a_room()
+        group = r["sections"][0]["groups"][0]
+        group["hue"] = 150
+        # Absent is the normal state and means the standard strength,
+        # so every group drawn before the picker existed is unchanged.
+        assert "chroma" not in group
+        assert room_mod.check(r) is not None
+        for ok in (0, 0.4, 1, 1.4, None):
+            group["chroma"] = ok
+            assert room_mod.check(r) is not None, f"{ok!r} should pass"
+        for bad in (-0.1, 1.5, 2, "vivid", True, float("nan")):
+            group["chroma"] = bad
+            with pytest.raises(room_mod.RoomError, match="chroma"):
+                room_mod.check(r)
+
     def test_a_label_may_only_hang_on_a_desk_that_is_there(self):
         """It would silently fall back to the middle of the group's
         seats, and look like the anchor had been forgotten."""
