@@ -72,6 +72,11 @@ let selectedChair = null;
    needing. */
 let paletteOpen = false;
 
+/* Whether the furled rail is showing its list. Module state rather
+   than a class read off the DOM, because every re-render rebuilds the
+   buttons and a menu you opened must not close because a desk moved. */
+let railOpen = false;
+
 // ------------------------------------------------------------ constants --
 
 const GRID = 20;        // what a dragged desk snaps to, in room units
@@ -114,17 +119,25 @@ const ICON = {
   groups: "R3,4,18,7,1.5|R3,14,8,6,1.5|R14,14,7,6,1.5",
   seats: "R4,8,16,9,2|O8,5,1.8|O16,5,1.8|O8,20,1.8|O16,20,1.8",
   order: "M4 6h3M4 12h3M4 18h3M11 6h9M11 12h9M11 18h9",
-  upnext: "M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4z"
-    + "|M18 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z",
+  upnext: "M20.5 4.5h-17A1.5 1.5 0 0 0 2 6v9a1.5 1.5 0 0 0 1.5 1.5H7v4"
+    + "l5-4h8.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5z",
   grow: "M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5",
-  // A card with a letter in its corner, and a label pill: each
-  // icon is a small picture of the thing it turns on.
-  letters: "R3,5,18,14,2.5|M8.2 16l2.6-6.4L13.4 16M9.1 14h3.4"
-    + "|M16.4 16v-3.2M15.2 13.6l1.2-1 1.2 1",
+  // A card with A/B on it, and a label pill: each icon is a small
+  // picture of the thing it turns on.
+  letters: "R2.5,5,19,14,2.5"
+    + "|M5.8 16.3l2.7-7.1 2.7 7.1M6.7 14.1h3.6"
+    + "|M13.6 8.5l-2.8 8.2"
+    + "|M15.2 16.3V9.1h2.1a1.8 1.8 0 0 1 0 3.6h-2.1"
+    + "|M15.2 12.7h2.5a1.8 1.8 0 0 1 0 3.6h-2.5",
   tag: "M2 12a5 5 0 0 1 5-5h10a5 5 0 0 1 0 10H7a5 5 0 0 1-5-5z"
     + "|M7.5 12h9",
   projector: "R2,7,14,10,2|M16 11l5-3v8l-5-3z|O9,12,2.4",
   shrink: "M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5",
+  trash: "M4 7h16|M10 11.5v6M14 11.5v6"
+    + "|M6.2 7l.9 12.1A2 2 0 0 0 9.1 21h5.8a2 2 0 0 0 2-1.9L17.8 7"
+    + "|M9.2 7V5.2A1.2 1.2 0 0 1 10.4 4h3.2a1.2 1.2 0 0 1 1.2 1.2V7",
+  // Points the way the menu opens.
+  chev: "M6 14.5l6-6 6 6",
   // One card in front of another: the picture of making a second one.
   copy: "R8,8,13,13,2.5|M16 5V4.5A2.5 2.5 0 0 0 13.5 2h-9A2.5 2.5 0 0 0 2"
     + " 4.5v9A2.5 2.5 0 0 0 4.5 16H5",
@@ -469,8 +482,16 @@ function renderSeating() {
 }
 
 function drawRail() {
+  /* All five modes, always, in order -- even when only one of them is
+     visible. Furling is done by collapsing the other four to nothing
+     rather than by leaving them out, which is what makes the current
+     mode rise into its own place in the list when the menu opens: the
+     rows above it grow and push it up. Nothing has to move it there,
+     and there is no moment where the list is in the wrong order. */
   const rail = document.getElementById("seat-modes");
+  rail.classList.toggle("open", railOpen);   // before the rows exist
   rail.textContent = "";
+  const column = el("div", "railmodes");
   for (const mode of MODES) {
     const b = el("button", "ibtn" + (mode.value === seatingMode ? " on" : ""));
     b.type = "button";
@@ -478,16 +499,107 @@ function drawRail() {
     b.setAttribute("aria-pressed", String(mode.value === seatingMode));
     b.appendChild(svgIcon(ICON[mode.icon]));
     b.appendChild(el("span", "ilabel", mode.label));
+    /* The chevron rides inside the current mode's own button rather
+       than sitting beside the column as a button of its own. A
+       separate one cost forty pixels of a bottom edge that has none
+       to spare, and it put two targets on screen for one question --
+       "which mode" and "show me the modes" are the same question when
+       only one of them is visible. Hidden unless furled. */
+    if (mode.value === seatingMode) {
+      const chev = svgIcon(ICON.chev);
+      chev.setAttribute("class", "railchev");
+      b.appendChild(chev);
+    }
     if (!BUILT.has(mode.value)) b.classList.add("soonish");
     b.onclick = () => {
       if (!BUILT.has(mode.value)) { toast(mode.why); return; }
+      // Furled, the current mode's button is the handle on the list:
+      // it opens it, and pressing it again puts it away.
+      if (rail.classList.contains("furled") && mode.value === seatingMode) {
+        railOpen = !railOpen;
+        renderSeating();
+        return;
+      }
       seatingMode = mode.value;
       picked = null;
       selectedChair = null;
+      railOpen = false;              // picking one is also closing it
       renderSeating();
     };
-    rail.appendChild(b);
+    column.appendChild(b);
   }
+  rail.appendChild(column);
+  layoutRail();
+}
+
+function layoutRail() {
+  /* Furl when the rail, the zoom island and the plus can no longer
+     share the bottom edge.
+
+     Measured, not a breakpoint. The rail's width is five words in
+     whatever font the system hands us, and the zoom island's width
+     moves with the number in it -- "100%" is wider than "39%" -- so a
+     number written in the stylesheet would be wrong on somebody
+     else's machine and wrong here at some zoom levels.
+
+     Measured *unfurled*, whatever state it is in: the question is
+     whether the open row would fit, not whether the closed one does.
+     Removing the class and reading `offsetWidth` in the same tick
+     forces a layout but cannot paint, so nothing flickers. */
+  const rail = document.getElementById("seat-modes");
+  if (!rail || !rail.firstChild) return;
+  if (projecting()) { rail.classList.remove("furled"); return; }
+
+  const was = rail.classList.contains("furled");
+  rail.classList.remove("furled");
+  const wide = rail.offsetWidth;
+  const zoom = document.querySelector("#view-seating .at-bl");
+  const half = seatingPaper().clientWidth / 2;
+  // The rail is centred, so half of it has to clear whichever corner
+  // is further in: the zoom island on the left, the plus on the right.
+  const need = wide / 2 + Math.max((zoom ? zoom.offsetWidth : 0) + 26, 70);
+  const furl = need > half;
+  rail.classList.toggle("furled", furl);
+  if (!furl && railOpen) {
+    railOpen = false;                // a wide window has no list to close
+    rail.classList.remove("open");
+  }
+  if (furl !== was) rail.classList.toggle("open", railOpen);
+
+  /* Centred in the window, and nudged only when centred would overlap.
+
+     Furling alone does not finish the job: at 530 the two corners take
+     two thirds of the bottom edge between them, so even a 125px pill
+     centred on the window sits eight pixels inside the zoom island.
+     There is room -- 226px of it -- just not in the middle.
+
+     So: want the window's centre, and clamp that into what is free.
+     Above about 545 the clamp never bites and the pill is exactly
+     centred, which is the behaviour to keep; below it the pill slides
+     the smallest distance that clears, rather than being re-centred in
+     the gap and sitting visibly off to one side at every width.
+
+     The old version of this idea was deleted last round because the
+     rail crept sideways as the zoom readout changed width -- "100%" is
+     wider than "39%". That cause is gone: `.zoomnum` has a fixed width
+     now, so the left bound is a constant for a given window and
+     nothing moves while you zoom. The plus is reserved whether or not
+     it is showing, for the same reason: a bound that changes with the
+     mode would walk the pill about as you worked. */
+  if (!furl) {
+    rail.style.left = rail.style.transform = "";
+    return;
+  }
+  const pill = rail.offsetWidth;
+  const lo = (zoom ? zoom.offsetWidth : 0) + 12 + 10;
+  const hi = half * 2 - (12 + 44 + 10) - pill;
+  const mid = half - pill / 2;
+  rail.style.left = Math.round(Math.max(lo, Math.min(mid, hi))) + "px";
+  rail.style.transform = "none";
+  const here = rail.querySelector(".railmodes .ibtn.on");
+  if (here) here.title = !furl ? (MODES.find(m => m.value === seatingMode)
+                                  || {}).why
+    : railOpen ? "Put the list away" : "Every mode";
 }
 
 function drawSections(sections) {
@@ -944,52 +1056,138 @@ function drawStrip(section) {
     name.onclick = () => renameGroup(name, group);
     strip.appendChild(name);
 
-    const n = (group.seats || []).length;
-    strip.appendChild(el("span", "smeta", n + (n === 1 ? " seat" : " seats")));
+    strip.appendChild(el("span", "isep"));
+    strip.appendChild(count("seats", (group.seats || []).length,
+                            "Seats in this group"));
 
-    const placed = groupsOf(section)
-      .filter(g => g.order !== null && g.order !== undefined)
-      .sort((a, b) => a.order - b.order);
-    const at = placed.indexOf(group);
-    const total = groupsOf(section).length;
-    const ord = el("span", "sord", (at < 0 ? "\u2013" : at + 1) + "/" + total);
-    ord.title = at < 0 ? "No place in the print order yet"
-                       : `Prints ${at + 1} of ${total}`;
+    /* Where it prints, and you can type a new one.
+
+       Both numbers are a glyph and a value now, and both glyphs are
+       ones the mode rail already taught: the Seats icon for seats, the
+       Order icon for the print order. "4 seats" beside a "1/7" chip
+       was a sentence beside a badge -- two ways of saying a number
+       sitting next to each other, which is most of what made the strip
+       look assembled rather than designed. */
+    const line = printOrder(section);
+    const at = line.indexOf(group) + 1;
+    const ord = count("order", at + "/" + line.length,
+                      group.order === null || group.order === undefined
+                        ? `Prints ${at} of ${line.length}, after everything `
+                          + "with a chosen place. Click to choose one."
+                        : `Prints ${at} of ${line.length}. Click to change.`);
+    ord.classList.add("typable");
+    ord.onclick = () => editOrder(ord, section, group, at);
     strip.appendChild(ord);
   } else {
     const spec = seatingState.shapes[shape.kind];
     strip.appendChild(el("span", "sname", (spec && spec.label) || shape.kind));
-    const n = (shape.seats || []).length;
-    strip.appendChild(el("span", "smeta", n + (n === 1 ? " seat" : " seats")));
+    strip.appendChild(el("span", "isep"));
+    strip.appendChild(count("seats", (shape.seats || []).length,
+                            "Seats on this desk"));
   }
 
-  if (seatingMode === "groups" && group && shape) {
-    const copy = el("button", "ibtn tiny");
-    copy.type = "button";
-    copy.title = "Another group like this one";
-    copy.appendChild(svgIcon(ICON.copy));
-    copy.onclick = () => duplicateGroup(section, group);
-    strip.appendChild(copy);
-  }
-  if (seatingMode === "groups" && shape) {
-    const kill = el("button", "ibtn tiny", "\u2715");
-    kill.type = "button";
-    kill.title = "Remove this group";
-    kill.onclick = () => removeShape(section, shape);
-    strip.appendChild(kill);
-  }
+  /* The actions, after a divider. Two line-art glyphs in the same
+     weight as each other: duplicate used to sit beside a typographic
+     X, which is "close" from a different vocabulary standing where a
+     verb should be. */
+  const acts = [];
+  if (seatingMode === "groups" && group && shape)
+    acts.push(["copy", "Another group like this one",
+               () => duplicateGroup(section, group)]);
+  if (seatingMode === "groups" && shape)
+    acts.push(["trash", "Remove this group",
+               () => removeShape(section, shape)]);
   if (seatingMode === "seats" && shape) {
     const seat = (shape.seats || []).find(s => s.id === selectedChair);
-    if (seat) {
-      const less = el("button", "ibtn tiny", "\u2715");
-      less.type = "button";
-      less.title = seat.student
-        ? "Take this seat away; they go back on the unseated list"
-        : "Take this seat away";
-      less.onclick = () => removeChair(section, shape, seat);
-      strip.appendChild(less);
-    }
+    if (seat) acts.push(["trash", seat.student
+      ? "Take this seat away; they go back on the unseated list"
+      : "Take this seat away", () => removeChair(section, shape, seat)]);
   }
+  if (acts.length) strip.appendChild(el("span", "isep"));
+  for (const [icon, why, go] of acts) {
+    const b = el("button", "ibtn tiny");
+    b.type = "button";
+    b.title = why;
+    b.appendChild(svgIcon(ICON[icon]));
+    b.onclick = go;
+    strip.appendChild(b);
+  }
+}
+
+function count(icon, value, why) {
+  /* A glyph and a number. The one shape every fact in the strip
+     takes, so two of them side by side read as two facts rather than
+     as a label and a badge. */
+  const box = el("span", "scount");
+  box.title = why;
+  box.appendChild(svgIcon(ICON[icon]));
+  box.appendChild(el("span", "num", String(value)));
+  return box;
+}
+
+function printOrder(section) {
+  /* Every group, in the order the papers come out: the ones with a
+     chosen place first, by place, then anything unplaced in the order
+     it was drawn.
+
+     That is `room.ordered_groups`' rule, written on this side so the
+     strip can show a position for a group that has not chosen one.
+     Such a group still prints somewhere, and saying where is more use
+     than a dash saying it has no opinion. */
+  const all = groupsOf(section);
+  const has = g => g.order !== null && g.order !== undefined;
+  return all.filter(has).sort((a, b) => a.order - b.order)
+            .concat(all.filter(g => !has(g)));
+}
+
+function reorderGroup(section, group, want) {
+  /* Move a group to a position, and number everything 1..N.
+
+     One rule for both directions. Take it out of the line, put it back
+     at the place asked for, renumber: moving 5 to 3 pushes the old 3
+     and 4 down one, and moving 1 to 3 pulls the old 2 and 3 up one,
+     with no second case to write. That is what "drag it there" means,
+     and doing it by remove-and-insert rather than by arithmetic on the
+     numbers is why there is no off-by-one to get wrong.
+
+     Everything comes out numbered, including groups that had no place
+     before -- they were already going to print after the placed ones,
+     so writing that down changes nothing about the paper and leaves
+     the sequence with no gaps for the next edit to reason about. */
+  const rest = printOrder(section).filter(g => g !== group);
+  const at = Math.min(Math.max(1, Math.round(want)), rest.length + 1) - 1;
+  rest.splice(at, 0, group);
+  rest.forEach((g, i) => { g.order = i + 1; });
+  renderSeating();
+}
+
+function editOrder(node, section, group, now) {
+  /* Type a position. Same shape as renaming the label: the value is
+     already on screen, so a dialog would be a second copy of it. */
+  const input = el("input", "srename sorder");
+  input.type = "text";
+  input.inputMode = "numeric";
+  input.value = String(now);
+  node.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const settle = keep => {
+    if (done) return;
+    done = true;
+    const want = parseInt(input.value, 10);
+    if (keep && Number.isFinite(want)) reorderGroup(section, group, want);
+    else renderSeating();
+  };
+  input.onblur = () => settle(true);
+  input.onkeydown = e => {
+    if (e.key === "Enter") { e.preventDefault(); settle(true); }
+    // Escape stops here, or the view reads it as "clear the selection"
+    // and the strip goes away mid-edit.
+    if (e.key === "Escape") {
+      e.preventDefault(); e.stopPropagation(); settle(false);
+    }
+  };
 }
 
 // ------------------------------------------------- desks and chairs --
@@ -2284,8 +2482,9 @@ function panPaper(event) {
     paper.removeEventListener("pointercancel", done);
     paper.classList.remove("panning");
     if (moved) return;                   // it was a drag, not a click
-    const wasOpen = paletteOpen;
+    const wasOpen = paletteOpen || railOpen;
     paletteOpen = false;                 // rolls back into the plus
+    railOpen = false;                    // and the mode list rolls shut
     if (selected || selectedChair || wasOpen) {
       selected = null;
       selectedChair = null;
@@ -2402,6 +2601,7 @@ function sizeSeating() {
     const top = view.getBoundingClientRect().top + window.scrollY;
     view.style.height = Math.max(260, window.innerHeight - top - 14) + "px";
   }
+  layoutRail();
 }
 
 // --------------------------------------------------------------- wiring --
