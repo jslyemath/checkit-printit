@@ -67,19 +67,29 @@ let showLabels = true;
    seating chart read aloud. */
 let upnext = false;
 let upnextKind = "person";          // person | group | rep
-let upnextAt = -1;                  // -1 is "not started"
-let upnextLine = [];
-let upnextFor = "";                 // what the line was built for
+
+/* Where each walk has got to, keyed by section and by kind.
+
+   One position between them would not do. Moving from people to
+   groups and back started the people walk again from the top, and
+   moving between the three during a lesson is the whole point of
+   having three. Each keeps its own line and its own place in it.
+
+   Keyed by section as well, because a position counted against one
+   roomful of people means nothing in the other room -- and because
+   the alternative, throwing the walk away when you switch rooms,
+   loses it for the room you came back to as well. */
+const upnextWalks = new Map();
 
 const UPNEXT_KINDS = [
   { value: "person", icon: "people", label: "One at a time",
     why: "One student at a time, in a shuffled order." },
   { value: "group", icon: "groups", label: "A group at a time",
-    why: "A whole group at a time, in print order." },
+    why: "A whole group at a time, in a shuffled order." },
   { value: "rep", icon: "letters", label: "One from each group",
-    why: "One student from every group at once, by version letter: "
-      + "all the As, then all the Bs. A group with fewer seats than "
-      + "there are letters comes round again from its first." },
+    why: "One student from every group at once, by version letter, "
+      + "the letters in a shuffled order. A group with fewer seats "
+      + "than there are letters comes round again from its first." },
 ];
 
 
@@ -671,10 +681,9 @@ function goToSection(i) {
   seatingSection = i;
   selected = null;
   picked = null;
-  // The turn belongs to the room that is on screen. Carried across,
-  // the count would be measured against a roomful of different people.
-  upnextAt = -1;
-  upnextFor = "";
+  // Up Next is not reset here. Each room keeps its own walk, which is
+  // the same reason the count must not be carried across: a position
+  // counted against one roomful of people means nothing in the other.
   refit();                         // each room fits on its own terms
   renderSeating();
 }
@@ -684,7 +693,8 @@ function drawRoom(section) {
   const canvas = seatingCanvas();
   canvas.textContent = "";
   canvas.className = "canvas mode-" + seatingMode
-    + (upnext && upnextAt >= 0 ? " hushed" : "");
+    + "";       // `paintUpnext` adds `hushed`, once it knows there is
+                //  somebody to hush the room for
 
   /* Everything is drawn relative to the content box, not to (0, 0) of
      the declared canvas. The model stays in room coordinates; only the
@@ -851,8 +861,13 @@ function paintUpnext(section, where, ox, oy) {
      centre and then scaling it is what makes the whole thing look
      like one object being brought forward. */
   const line = upnextOrder(section);
-  const here = upnextAt >= 0 && upnextAt < line.length ? line[upnextAt] : null;
-  for (let i = 0; i < upnextAt; i += 1)
+  const at = upnextWalk().at;
+  const here = at < line.length ? line[at] : null;
+  // Dimming the room when there is nobody to light would be dimming
+  // it for nothing, which is why this is decided here and not at the
+  // top of `drawRoom`, where the line has not been built yet.
+  seatingCanvas().classList.toggle("hushed", Boolean(here));
+  for (let i = 0; i < at; i += 1)
     for (const id of line[i].seats || [])
       if (drawn.cards[id]) drawn.cards[id].classList.add("been");
   if (!here) return;
@@ -1873,51 +1888,70 @@ function dragChair(event, card, section, shape, seat) {
 
 // --------------------------------------------------------- up next --
 
-function upnextOrder(section) {
-  /* The line, built once and kept until the room or the kind changes.
+function upnextWalk() {
+  const key = seatingSection + "|" + upnextKind;
+  let walk = upnextWalks.get(key);
+  if (!walk) {
+    /* Starts *at* the first one, not before it. "Ready" was a state
+       whose only content was that nothing had happened yet, and the
+       only thing anybody ever did from it was press next to leave. */
+    walk = { line: null, at: 0, of: "" };
+    upnextWalks.set(key, walk);
+  }
+  return walk;
+}
 
-     Kept, because stepping backwards has to show the same person you
-     just saw. A fresh shuffle on every render would make the back
-     arrow a second forward arrow with extra steps. */
-  const made = seatingSection + "/" + upnextKind + "/"
-    + drawn.seats.length + "/" + groupsOf(section).length;
-  if (made === upnextFor) return upnextLine;
-  upnextFor = made;
-  upnextAt = -1;
-  upnextLine = buildUpnext(section);
-  return upnextLine;
+function upnextOrder(section) {
+  /* The line, built once per walk and kept until the room changes
+     under it.
+
+     Kept, because stepping backwards has to show the person you just
+     saw. A fresh shuffle on every render would make the back arrow a
+     second forward arrow with extra steps. */
+  const walk = upnextWalk();
+  const of = drawn.seats.length + "/" + groupsOf(section).length;
+  if (walk.line && of === walk.of) return walk.line;
+  walk.of = of;
+  walk.line = buildUpnext(section);
+  // A seat appeared or went away, so the line is new. Keep the place
+  // rather than starting over; only a line that got shorter than the
+  // place forces one.
+  if (walk.at >= walk.line.length) walk.at = 0;
+  return walk.line;
+}
+
+function shuffled(list) {
+  /* Fisher-Yates. `sort(() => Math.random() - 0.5)` is not a shuffle:
+     it is a comparison function that lies, and it leaves the first few
+     in place more often than chance does. In a classroom that is the
+     difference between being fair and looking fair. */
+  for (let i = list.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  return list;
 }
 
 function buildUpnext(section) {
   const names = (seatingState && seatingState.names) || {};
   const seated = drawn.seats.filter(s => s.seat.student);
 
-  if (upnextKind === "person") {
-    /* Shuffled once. Fisher-Yates rather than `sort(() => Math.random()
-       - 0.5)`, which is not a shuffle -- it is a comparison function
-       that lies, and leaves the first few in place more often than
-       chance. In a classroom that is the difference between fair and
-       looking fair. */
-    const line = seated.map(s => ({
+  if (upnextKind === "person")
+    return shuffled(seated.map(s => ({
       label: (names[s.seat.student] || {}).full || "\u2014",
       seats: [s.id],
-    }));
-    for (let i = line.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [line[i], line[j]] = [line[j], line[i]];
-    }
-    return line;
-  }
+    })));
 
-  if (upnextKind === "group") {
-    // Print order, because that is the order the room already has an
-    // opinion about, and a second arbitrary order would be one more
-    // thing nobody can predict.
-    return printOrder(section)
+  /* Shuffled, like the people. Print order was the first draft's
+     answer -- an order the room already had an opinion about -- but an
+     order anybody can predict is an order the back row has worked out
+     by the third table, and then being called on stops being a reason
+     to pay attention. Every walk is shuffled for the same reason. */
+  if (upnextKind === "group")
+    return shuffled(printOrder(section)
       .map(g => ({ label: g.label || "(no label)", group: g,
                    seats: (g.seats || []).filter(id => drawn.cards[id]) }))
-      .filter(e => e.seats.length);
-  }
+      .filter(e => e.seats.length));
 
   /* One from each group, by version letter.
 
@@ -1930,7 +1964,11 @@ function buildUpnext(section) {
 
      The number of steps is the longer of the two: usually the version
      list, but a group with more seats than there are letters would
-     otherwise have seats that never come up at all. */
+     otherwise have seats that never come up at all.
+
+     The steps are shuffled, not the seats inside them. Each step is
+     still "everybody's C", because that is the thing being shown --
+     what moves is which letter comes up when. */
   const letters = (seatingRoom && seatingRoom.versions) || [];
   const rank = id => {
     const at = letters.indexOf(id);
@@ -1949,7 +1987,7 @@ function buildUpnext(section) {
       label: letters.length ? letters[i % letters.length] : String(i + 1),
       seats: groups.map(g => g[i % g.length].id),
     });
-  return line;
+  return shuffled(line);
 }
 
 function upnextStep(by) {
@@ -1957,14 +1995,9 @@ function upnextStep(by) {
   if (!section) return;
   const line = upnextOrder(section);
   if (!line.length) { toast("Nobody is seated in this room yet."); return; }
-  if (upnextAt < 0) upnextAt = by > 0 ? 0 : line.length - 1;
-  else upnextAt = (upnextAt + by + line.length) % line.length;
+  const walk = upnextWalk();
+  walk.at = (walk.at + by + line.length) % line.length;
   renderSeating();
-}
-
-function upnextHere(section) {
-  const line = upnextOrder(section);
-  return upnextAt >= 0 && upnextAt < line.length ? line[upnextAt] : null;
 }
 
 
@@ -1990,8 +2023,7 @@ function drawUpNext(strip, section) {
   kind.title = spec.why + "  (click for: " + next.label.toLowerCase() + ")";
   kind.appendChild(svgIcon(ICON[spec.icon]));
   kind.onclick = () => {
-    upnextKind = next.value;
-    upnextFor = "";                // a different question, a new line
+    upnextKind = next.value;       // a different walk, with its own place
     renderSeating();
   };
   strip.appendChild(kind);
@@ -2009,13 +2041,13 @@ function drawUpNext(strip, section) {
   };
   strip.appendChild(arrow(-1, "The one before"));
 
-  const here = upnextAt >= 0 && upnextAt < line.length ? line[upnextAt] : null;
-  const name = el("span", "sname upname",
-    here ? here.label : (line.length ? "Ready" : "Nobody is seated here"));
-  strip.appendChild(name);
+  const at = upnextWalk().at;
+  const here = at < line.length ? line[at] : null;
+  strip.appendChild(el("span", "sname upname",
+    here ? here.label : "Nobody is seated here"));
   if (line.length)
     strip.appendChild(el("span", "smeta upcount",
-      (upnextAt < 0 ? "\u2013" : upnextAt + 1) + "/" + line.length));
+                         (at + 1) + "/" + line.length));
 
   strip.appendChild(arrow(1, "The next one"));
 }
@@ -2911,8 +2943,10 @@ function wireSeating() {
     if (section) applyZoom(section);
   };
   document.getElementById("seat-upnext").onclick = () => {
+    // Turning it off keeps every walk. Coming back to it mid-lesson
+    // and finding the class half-called again is not a fresh start,
+    // it is lost work.
     upnext = !upnext;
-    if (!upnext) { upnextAt = -1; upnextFor = ""; }
     selected = null;
     picked = null;
     selectedChair = null;
