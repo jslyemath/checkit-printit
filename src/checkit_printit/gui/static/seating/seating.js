@@ -19,6 +19,12 @@ let seatingState = null;         // what the server last sent
 let seatingRoom = null;          // the copy being edited, written on Save
 let seatingSection = 0;
 let seatingZoom = null;          // null means "fit"
+/* How far the room has been dragged from where "fit" would put it, in
+   screen pixels. The other half of the camera: `seatingZoom` is how
+   close you are standing and this is where you are standing. Screen
+   pixels rather than room units so that a drag of 10px moves the room
+   10px whatever the zoom -- the room follows the hand exactly. */
+let pan = { x: 0, y: 0 };
 let seatingMode = "people";
 /* What to go back to when projector mode is switched off. There
    is no View mode any more -- projecting *is* the read-only
@@ -104,7 +110,6 @@ const ANCHORS = {
 };
 
 const ICON = {
-  view: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z|O12,12,3",
   people: "M5.5 20a6.5 6.5 0 0 1 13 0|O12,8,3.4",
   groups: "R3,4,18,7,1.5|R3,14,8,6,1.5|R14,14,7,6,1.5",
   seats: "R4,8,16,9,2|O8,5,1.8|O16,5,1.8|O8,20,1.8|O16,20,1.8",
@@ -120,9 +125,9 @@ const ICON = {
     + "|M7.5 12h9",
   projector: "R2,7,14,10,2|M16 11l5-3v8l-5-3z|O9,12,2.4",
   shrink: "M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5",
-  hide: "M4 4l16 16|M10.6 6.3A8.6 8.6 0 0 1 12 6c6.5 0 10 6 10 6a17 17 0"
-    + " 0 1-3 3.6M6.5 7.6A17 17 0 0 0 2 12s3.5 6 10 6a9 9 0 0 0 3.6-.7",
-  show: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z|O12,12,3",
+  // One card in front of another: the picture of making a second one.
+  copy: "R8,8,13,13,2.5|M16 5V4.5A2.5 2.5 0 0 0 13.5 2h-9A2.5 2.5 0 0 0 2"
+    + " 4.5v9A2.5 2.5 0 0 0 4.5 16H5",
 };
 
 /* Modes only. Shuffle is an action and lives in the menu: an action
@@ -329,6 +334,15 @@ function nameSize(text) {
   return chosen;
 }
 
+function refit() {
+  /* Fit means fit: the zoom goes back to automatic and so does the
+     position. A Fit that left the room dragged half off the window
+     would be answering half the question. */
+  seatingZoom = null;
+  pan.x = 0;
+  pan.y = 0;
+}
+
 function seatingDirty() {
   return seatingRoom !== null && seatingState !== null
     && JSON.stringify(seatingRoom) !== JSON.stringify(seatingState.room);
@@ -361,7 +375,7 @@ function setProjecting(on) {
   }
   document.body.classList.toggle("projecting", on);
   paintChrome();
-  if (seatingRoom) { sizeSeating(); seatingZoom = null; renderSeating(); }
+  if (seatingRoom) { sizeSeating(); refit(); renderSeating(); }
 }
 
 async function toggleFullscreen() {
@@ -499,7 +513,7 @@ function goToSection(i) {
   // the count would be measured against a roomful of different people.
   calling = null;
   called = new Set();
-  seatingZoom = null;              // each room fits on its own terms
+  refit();                         // each room fits on its own terms
   renderSeating();
 }
 
@@ -949,6 +963,14 @@ function drawStrip(section) {
     strip.appendChild(el("span", "smeta", n + (n === 1 ? " seat" : " seats")));
   }
 
+  if (seatingMode === "groups" && group && shape) {
+    const copy = el("button", "ibtn tiny");
+    copy.type = "button";
+    copy.title = "Another group like this one";
+    copy.appendChild(svgIcon(ICON.copy));
+    copy.onclick = () => duplicateGroup(section, group);
+    strip.appendChild(copy);
+  }
   if (seatingMode === "groups" && shape) {
     const kill = el("button", "ibtn tiny", "\u2715");
     kill.type = "button";
@@ -1024,6 +1046,137 @@ function addShape(section, kind) {
   });
 
   selected = { kind: "shape", id: id };
+  renderSeating();
+}
+
+function freeSpotFor(section, shapes) {
+  /* Where to put a copy of these shapes: beside the original if there
+     is room, otherwise the first clear place on a widening ring.
+
+     Bounding rectangles and a short search, not real packing. There
+     are a few dozen desks in a classroom, the answer only has to be
+     "not on top of something", and the instructor can drag it
+     somewhere better in a second. Eight candidates a ring and six
+     rings is forty-eight overlap tests against a few dozen boxes --
+     far too small to be worth being clever about.
+
+     The step is the group's own footprint plus a whole name card,
+     because `boxOf` measures the furniture and the cards hang off its
+     edges. Stepping by the table alone drops the copy's chairs on top
+     of the original's while the tables themselves miss each other. */
+  const mine = new Set(shapes.map(s => s.id));
+  const own = shapes.map(boxOf);
+  const span = {
+    x0: Math.min(...own.map(b => b.x0)), x1: Math.max(...own.map(b => b.x1)),
+    y0: Math.min(...own.map(b => b.y0)), y1: Math.max(...own.map(b => b.y1)),
+  };
+  const round = v => Math.ceil(v / GRID) * GRID;   // lands on the grid
+  const stepX = round(span.x1 - span.x0 + CARD_W + GRID);
+  const stepY = round(span.y1 - span.y0 + CARD_H + GRID);
+
+  const others = (section.shapes || [])
+    .filter(s => !mine.has(s.id)).map(boxOf);
+  const size = section.canvas || { width: 1000, height: 700 };
+  const hits = (a, b) => a.x0 < b.x1 && b.x0 < a.x1
+                      && a.y0 < b.y1 && b.y0 < a.y1;
+  const clear = (dx, dy, bounded) => {
+    const b = { x0: span.x0 + dx, x1: span.x1 + dx,
+                y0: span.y0 + dy, y1: span.y1 + dy };
+    if (bounded && (b.x0 < 0 || b.y0 < 0
+                    || b.x1 > size.width || b.y1 > size.height)) return false;
+    return !others.some(o => hits(b, o)) && !own.some(o => hits(b, o));
+  };
+
+  // Right first, then below, then the diagonal, then back the other
+  // way: reading order, so the copy turns up where the eye looks.
+  const ring = [[1, 0], [0, 1], [1, 1], [-1, 0], [0, -1],
+                [-1, 1], [1, -1], [-1, -1]];
+  /* Twice: once insisting on staying inside the declared canvas, once
+     not. Dragging a desk is clamped to the canvas, so a copy should
+     prefer to respect it -- but a full room would otherwise have
+     nowhere to put a copy at all, and a desk slightly outside the
+     declared bounds is something you can see and drag back. */
+  for (const bounded of [true, false])
+    for (let r = 1; r <= 6; r += 1)
+      for (const [ux, uy] of ring)
+        if (clear(ux * stepX * r, uy * stepY * r, bounded))
+          return [ux * stepX * r, uy * stepY * r];
+  // Nowhere at all. Offset it a little anyway: a copy you can see
+  // sitting on its original beats a button that silently does nothing.
+  return [GRID * 2, GRID * 2];
+}
+
+function duplicateGroup(section, group) {
+  /* Another group laid out exactly like this one: the same furniture
+     at the same size and angle, the same seats at the same offsets,
+     the same version letters, the same label in the same corner.
+
+     Empty of people, and that is not a shortcut. A student sits in one
+     seat -- `room.check` refuses a room where anyone sits in two -- so
+     there is nothing else a copy could do with them.
+
+     The letters, on the other hand, come along deliberately. They are
+     most of the reason to duplicate: a second table arranged like the
+     first wants the same pattern of papers around it, not a fresh
+     colouring that happens to be legal. */
+  const shapes = shapesHolding(section, group);
+  if (!shapes.length) return;
+
+  const usedShapes = new Set(), usedSeats = new Set(), usedGroups = new Set();
+  for (const sec of seatingRoom.sections || []) {
+    for (const s of sec.shapes || []) {
+      usedShapes.add(s.id);
+      for (const seat of s.seats || []) usedSeats.add(seat.id);
+    }
+    for (const g of sec.groups || []) usedGroups.add(g.id);
+  }
+
+  const [dx, dy] = freeSpotFor(section, shapes);
+  const renamed = new Map();            // old shape id -> the copy's id
+  const seats = [];
+  for (const shape of shapes) {
+    const id = freshId("d", usedShapes);
+    usedShapes.add(id);
+    renamed.set(shape.id, id);
+    const made = { id: id, kind: shape.kind,
+                   at: [shape.at[0] + dx, shape.at[1] + dy], seats: [] };
+    // Only if the original carries them: a desk that has never been
+    // resized stores no size, and the copy should not invent one.
+    if (shape.w) made.w = shape.w;
+    if (shape.h) made.h = shape.h;
+    if (shape.angle) made.angle = shape.angle;
+    for (const seat of shape.seats || []) {
+      /* This group's seats only. One desk can hold seats belonging to
+         two groups, and duplicating one of them must not quietly take
+         the other's chairs along. */
+      if (!(group.seats || []).includes(seat.id)) continue;
+      const sid = freshId(id + "-", usedSeats);
+      usedSeats.add(sid);
+      made.seats.push({ id: sid, at: seat.at.slice(),
+                        student: "", version: seat.version || "" });
+      seats.push(sid);
+    }
+    (section.shapes || (section.shapes = [])).push(made);
+  }
+
+  const fresh = {
+    id: freshId("g", usedGroups),
+    label: (group.label || "Table") + " (copy)",
+    seats: seats,
+    order: null,                 // its place in the print order is a choice
+  };
+  // The hue is copied only when the original chose one. A group with no
+  // hue takes its colour from its position in the list, and writing
+  // that colour down here would freeze a copy to a shade the original
+  // would abandon the moment a group before it was deleted.
+  if (typeof group.hue === "number") fresh.hue = group.hue;
+  if (group.label_at && renamed.has(group.label_at.shape))
+    fresh.label_at = { shape: renamed.get(group.label_at.shape),
+                       anchor: group.label_at.anchor };
+  (section.groups || (section.groups = [])).push(fresh);
+
+  selected = { kind: "group", id: fresh.id };
+  selectedChair = null;
   renderSeating();
 }
 
@@ -1927,48 +2080,104 @@ function nudgeShape(event, section, shape) {
 
 // ------------------------------------------------------------------ zoom --
 
+function freeBand(paper) {
+  /* The rectangle the room is fitted into, and the rectangle it is
+     centred in. One function, because those have to be the same
+     rectangle: a room fitted to one and centred in another is a room
+     that is neither fitted nor centred, which is how the first draft
+     ended up tucked under the mode rail.
+
+     The unseated rail is a real column and takes real width. The
+     islands float over the canvas by design, but they float over
+     exactly the corners a fitted room would otherwise use, so the
+     band stops short of them -- a name you cannot read because the
+     section buttons are sitting on it is not a fitted room either.
+
+     `offsetWidth` rather than `.hidden` for the unseated rail: the
+     projector hides it with CSS and leaves the attribute alone, so
+     asking the attribute would reserve a gutter for something that is
+     not on screen. */
+  const pen = seatingPen();
+  const side = pen.offsetWidth ? pen.offsetWidth + 22 : 0;
+  const top = projecting() ? 14 : 62;        // the two top islands
+  const bottom = projecting() ? 46 : 130;    // the rail, and the strip
+  return {
+    x: 14,
+    y: top,
+    w: Math.max(80, paper.clientWidth - side - 28),
+    h: Math.max(80, paper.clientHeight - top - bottom),
+  };
+}
+
 function fitZoom(paper, area) {
   /* Both axes, not just the width -- fitting the width alone left a
      tall room scrolling, which is not what "fit" offers to do. The cap
      is 4 rather than 1: on a projector the room should be blown up past
      life size, and refusing to go over 100% was most of why a small
-     class filled a quarter of the screen.
-
-     The right edge is given up to the unseated rail, so fitting never
-     parks a table underneath it. */
-  /* `offsetWidth` rather than `.hidden`, because projector mode
-     hides the rail with CSS and leaves the attribute alone -- asking
-     the attribute would reserve a gutter for something not on
-     screen. */
-  const gutter = seatingPen().offsetWidth
-    ? seatingPen().offsetWidth + 38 : 44;
-  const below = projecting() ? 56 : 140;   // no rail, no strip
+     class filled a quarter of the screen. */
+  const band = freeBand(paper);
   return Math.min(4, Math.max(0.05,
-    Math.min((paper.clientWidth - gutter) / area.w,
-             (paper.clientHeight - below) / area.h)));
+    Math.min(band.w / area.w, band.h / area.h)));
 }
 
 function applyZoom(section) {
   const canvas = seatingCanvas();
   const box = document.getElementById("canvasbox");
   const paper = seatingPaper();
-  const pen = seatingPen();
   const area = (drawn.box && drawn.box.w) ? drawn.box : contentBox(section);
 
   const zoom = seatingZoom === null ? fitZoom(paper, area) : seatingZoom;
   canvas.style.transform = `scale(${zoom})`;
-  /* The box carries the scaled size, so the scroller measures what is
-     drawn. A scaled element's *layout* box is what overflow is computed
-     from, which produced scrollbars for content wholly on screen. */
+  // The box carries the scaled size, because a scaled element's own
+  // layout box is still its unscaled one and nothing downstream could
+  // tell how big the room had become.
   box.style.width = Math.round(area.w * zoom) + "px";
   box.style.height = Math.round(area.h * zoom) + "px";
-  // Centred in the space the rail leaves, rather than in the whole
-  // paper, so Fit never puts a table under it.
-  box.style.marginRight = (pen.offsetWidth ? pen.offsetWidth + 22 : 0) + "px";
   document.getElementById("seat-zoom").textContent =
     Math.round(zoom * 100) + "%";
+  placeBox(zoom, area);
+}
+
+function placeBox(zoom, area) {
+  /* Where the room sits: the middle of the free band, plus however far
+     it has been dragged.
+
+     The same arithmetic at every window size, which is the point. The
+     old layout centred with `margin: auto` and then overrode one side
+     of that margin to clear the unseated rail, and an `auto` margin
+     with one side pinned is not centring at all -- it is alignment
+     against the pinned side. Resizing the window therefore walked the
+     room to the right edge. Centre is now a number this function
+     computes, so it cannot be turned into an edge by something else. */
+  const paper = seatingPaper();
+  const band = freeBand(paper);
+  const w = area.w * zoom, h = area.h * zoom;
+  clampPan(paper, band, w, h);
+  const box = document.getElementById("canvasbox");
+  box.style.left = Math.round(band.x + (band.w - w) / 2 + pan.x) + "px";
+  box.style.top = Math.round(band.y + (band.h - h) / 2 + pan.y) + "px";
   paintPaper(zoom);
-  layoutBottom();                 // the zoom island just changed width
+}
+
+function clampPan(paper, band, w, h) {
+  /* Pan as far as you like, until the room would leave.
+
+     KEEP pixels of it stay on the paper in every direction. Without a
+     stop there is a flick of the wrist that loses the room entirely
+     and leaves a blank grid with no clue which way to drag back; with
+     one you can still reach any corner, because the limit is computed
+     from the room's own size rather than from a fixed box. Nothing in
+     normal use touches it. */
+  const KEEP = 110;
+  const span = (size, at, bandSize, full) => {
+    const keep = Math.min(KEEP, size);
+    const home = at + (bandSize - size) / 2;
+    return [keep - size - home, full - keep - home];
+  };
+  const [lox, hix] = span(w, band.x, band.w, paper.clientWidth);
+  const [loy, hiy] = span(h, band.y, band.h, paper.clientHeight);
+  pan.x = Math.min(Math.max(pan.x, lox), hix);
+  pan.y = Math.min(Math.max(pan.y, loy), hiy);
 }
 
 function paintPaper(zoom) {
@@ -2014,15 +2223,78 @@ function paintPaper(zoom) {
     spots.push(`${at(x0, step)}px 0`, `0 ${at(y0, step)}px`,
                `${at(x0, big)}px 0`, `0 ${at(y0, big)}px`);
   }
-  // The dots sit on the heavy intersections, which is what makes them
-  // read as part of the grid rather than as a second pattern beside it.
+  /* The dots sit on the heavy intersections, which is what makes them
+     read as part of the grid rather than as a second pattern beside it.
+
+     Half a tile back, and that is the whole fix. A linear gradient
+     starts drawing at its tile's edge, so a 1px line lands on the
+     background position. A radial gradient is centred in its tile, so
+     the same position puts the dot half a cell away from the line it
+     is meant to sit on -- which is exactly what it was doing, at the
+     right spacing, in the middle of every heavy square. The extra half
+     pixel aims at the middle of the 1px line rather than its left
+     edge. */
+  const mid = big / 2 - 0.5;
   layers.push(`radial-gradient(${dot} 1.4px, transparent 1.5px)`);
   sizes.push(`${big}px ${big}px`);
-  spots.push(`${at(x0 - 1, big)}px ${at(y0 - 1, big)}px`);
+  spots.push(`${at(x0 - mid, big)}px ${at(y0 - mid, big)}px`);
 
   paper.style.backgroundImage = layers.join(", ");
   paper.style.backgroundSize = sizes.join(", ");
   paper.style.backgroundPosition = spots.join(", ");
+}
+
+function panPaper(event) {
+  /* Take hold of the room and move it. The only way to see past the
+     edge of the window now that there are no scrollbars -- and the
+     reason there are none, because two ways to do one thing is one
+     too many and the strips cost real room.
+
+     A press that does not travel is still a click, and clicking bare
+     paper still clears the selection. Four pixels of slack, the same
+     threshold the name cards use, because a mouse drifts a little
+     while a button is going down and a click that cleared nothing
+     would feel broken.
+
+     Nothing here re-renders. `applyZoom` moves and repaints, and the
+     element holding the pointer capture is the paper itself, which no
+     redraw replaces -- the lesson from the resize grips, which died
+     after a millimetre because a `pointermove` handler rebuilt the
+     node under the pointer. */
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  const paper = seatingPaper();
+  const from = [event.clientX, event.clientY];
+  const start = { x: pan.x, y: pan.y };
+  let moved = false;
+  try { paper.setPointerCapture(event.pointerId); } catch (err) { /* fine */ }
+
+  const onMove = e => {
+    const dx = e.clientX - from[0], dy = e.clientY - from[1];
+    if (!moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+    moved = true;
+    paper.classList.add("panning");
+    pan.x = start.x + dx;
+    pan.y = start.y + dy;
+    const section = currentSection();
+    if (section) applyZoom(section);
+  };
+  const done = () => {
+    paper.removeEventListener("pointermove", onMove);
+    paper.removeEventListener("pointerup", done);
+    paper.removeEventListener("pointercancel", done);
+    paper.classList.remove("panning");
+    if (moved) return;                   // it was a drag, not a click
+    const wasOpen = paletteOpen;
+    paletteOpen = false;                 // rolls back into the plus
+    if (selected || selectedChair || wasOpen) {
+      selected = null;
+      selectedChair = null;
+      renderSeating();
+    }
+  };
+  paper.addEventListener("pointermove", onMove);
+  paper.addEventListener("pointerup", done);
+  paper.addEventListener("pointercancel", done);
 }
 
 function zoomBy(step) {
@@ -2033,7 +2305,15 @@ function zoomBy(step) {
   // picture at 30% and a fortieth of it at 400%.
   const now = seatingZoom === null
     ? fitZoom(seatingPaper(), area) : seatingZoom;
-  seatingZoom = Math.min(4, Math.max(0.15, now * (step > 0 ? 1.25 : 0.8)));
+  const next = Math.min(4, Math.max(0.15, now * (step > 0 ? 1.25 : 0.8)));
+  /* Zoom about the middle of the window, so whatever you were looking
+     at is still in front of you afterwards. Both the home position and
+     the pan scale with the zoom, so holding the middle fixed works out
+     to scaling the pan by the same ratio -- no screen-to-room
+     conversion needed. */
+  pan.x *= next / now;
+  pan.y *= next / now;
+  seatingZoom = next;
   applyZoom(section);
 }
 
@@ -2070,7 +2350,7 @@ function presentKeys(event) {
   if (!step || sections.length < 2) return;
   event.preventDefault();
   seatingSection = (seatingSection + step + sections.length) % sections.length;
-  seatingZoom = null;
+  refit();
   renderSeating();
 }
 
@@ -2082,7 +2362,7 @@ function onFullscreenChange() {
   // where it was put.
   paintChrome();
   sizeSeating();
-  seatingZoom = null;
+  refit();
   if (seatingRoom) renderSeating();
 }
 
@@ -2122,30 +2402,6 @@ function sizeSeating() {
     const top = view.getBoundingClientRect().top + window.scrollY;
     view.style.height = Math.max(260, window.innerHeight - top - 14) + "px";
   }
-  layoutBottom();
-}
-
-function layoutBottom() {
-  /* The rail is centred in the space the other islands leave, not in
-     the whole width. Centred in the whole width it overlapped the zoom
-     by twenty-one pixels at 515px -- and the answer to that is not to
-     move zoom out of its corner, which was the fault in the first
-     draft, but to centre the rail in what is actually free.
-
-     Measured, because the zoom island is wider at some zoom levels
-     than others -- "100%" is wider than "39%". */
-  const rail = document.querySelector("#view-seating .at-bc");
-  const zoom = document.querySelector("#view-seating .at-bl");
-  if (!rail || !zoom) return;
-  if (window.innerWidth > 760 || projecting()) {
-    rail.style.left = rail.style.right = rail.style.transform = "";
-    return;
-  }
-  const paper = seatingPaper().getBoundingClientRect();
-  rail.style.left =
-    Math.round(zoom.getBoundingClientRect().right - paper.left + 14) + "px";
-  rail.style.right = "12px";
-  rail.style.transform = "none";
 }
 
 // --------------------------------------------------------------- wiring --
@@ -2157,7 +2413,7 @@ function wireSeating() {
   document.getElementById("seat-in").onclick = () => zoomBy(1);
   document.getElementById("seat-out").onclick = () => zoomBy(-1);
   document.getElementById("seat-zoom").onclick = () => {
-    seatingZoom = null;
+    refit();
     const section = currentSection();
     if (section) applyZoom(section);
   };
@@ -2175,19 +2431,12 @@ function wireSeating() {
   paintChrome();                   // draws every icon for the first time
   document.getElementById("seat-save").onclick = saveSeating;
   document.getElementById("seat-discard").onclick = discardRoom;
-  /* Clicking the paper, rather than a thing on it, clears the
-     selection. It does *not* fold the drawer: the drawer is a tool
-     panel you left open on purpose, not a popover you dismissed by
-     looking away. */
+  /* Pressing the paper, rather than a thing on it, either pans the
+     room or -- if the pointer never travels -- clears the selection.
+     `panPaper` decides which on release. */
   seatingPaper().addEventListener("pointerdown", e => {
     if (e.target.closest(".shape, .seatcard, .pill, .grip, .spinner")) return;
-    const wasOpen = paletteOpen;
-    paletteOpen = false;              // rolls back into the plus
-    if (selected || selectedChair || wasOpen) {
-      selected = null;
-      selectedChair = null;
-      renderSeating();
-    }
+    panPaper(e);
   });
   document.addEventListener("fullscreenchange", onFullscreenChange);
   document.addEventListener("keydown", presentKeys);
