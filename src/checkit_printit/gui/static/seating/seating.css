@@ -210,6 +210,8 @@
               height: 52px; font-size: 11px; }
 .rail .ibtn svg { width: 19px; height: 19px; }
 .railchev { display: none; }
+/* Worn for one flush while the rail changes which rail it is. */
+.rail.nomotion, .rail.nomotion * { transition: none !important; }
 
 /* ---------------------------------------------------------- furled -- */
 
@@ -899,6 +901,10 @@
    `paintUpnext`, because only it knows where the group's centre is;
    this is the part that is the same for every piece. */
 .lifted-up { z-index: 4; transition: transform var(--in-time) var(--in-curve); }
+/* With the origin at the corner the transform list is plain
+   multiplication, so the trailing `translate(-50%, -50%)` lands the
+   pill's centre on its point exactly as the untransformed rule does. */
+.pill.lifted-up { transform-origin: 0 0; }
 .canvas.hushed .lifted-up { opacity: 1; }
 
 .seatcard.calling {

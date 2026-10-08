@@ -595,6 +595,27 @@ function railWidthUnfurled(rail) {
   return wide;
 }
 
+function setFurled(rail, furl) {
+  /* Crossing the threshold happens at once, not over a fifth of a
+     second.
+
+     Animated, narrowing the window stood the whole rail up as a
+     column of five full-height rows and then folded it away, which is
+     the opposite of what the fold is for -- you asked for less and
+     briefly got more. Opening and closing the list is a gesture and
+     should be watchable; changing which rail you have is a layout
+     change and should already have happened.
+
+     The flush between the two class changes is the point: it commits
+     the new geometry while motion is off, so removing `nomotion`
+     afterwards has nothing left to animate. */
+  if (rail.classList.contains("furled") === furl) return;
+  rail.classList.add("nomotion");
+  rail.classList.toggle("furled", furl);
+  void rail.offsetHeight;
+  rail.classList.remove("nomotion");
+}
+
 function layoutRail() {
   /* Furl when the rail, the zoom island and the plus can no longer
      share the bottom edge.
@@ -611,7 +632,19 @@ function layoutRail() {
      forces a layout but cannot paint, so nothing flickers. */
   const rail = document.getElementById("seat-modes");
   if (!rail || !rail.firstChild) return;
-  if (projecting()) { rail.classList.remove("furled"); return; }
+
+  /* Nothing is decided while the rail is not on screen.
+
+     Projector mode and Up Next both hide it with `display: none`, and
+     this used to run anyway: the clone measured 0 wide, 0 is narrower
+     than anything, so it concluded the full rail fits and took the
+     `furled` class off. The rail then came back unfurled when you left
+     the mode and folded itself away a moment later, in front of you.
+
+     Taking the class off was never the right answer either. Whether
+     the rail furls is a fact about the window, and a window does not
+     stop having a width because something is covering the rail. */
+  if (rail.offsetParent === null) return;
 
   const wide = railWidthUnfurled(rail);
   const zoom = document.querySelector("#view-seating .at-bl");
@@ -620,7 +653,7 @@ function layoutRail() {
   // is further in: the zoom island on the left, the plus on the right.
   const need = wide / 2 + Math.max((zoom ? zoom.offsetWidth : 0) + 26, 70);
   const furl = need > half;
-  rail.classList.toggle("furled", furl);
+  setFurled(rail, furl);
   if (!furl && railOpen) {
     railOpen = false;                // a wide window has no list to close
     rail.classList.remove("open");
@@ -888,6 +921,19 @@ function paintUpnext(section, where, ox, oy) {
       + `${(K - 1) * (cy - gy)}px) scale(${K})` + (after || "");
     node.classList.add("lifted-up");
   };
+  /* The label is the one piece that was already using `transform` for
+     something: `.pill` centres itself on its point with
+     `translate(-50%, -50%)` rather than by subtracting half its width
+     from `left`, because its width depends on how long the name is.
+     Writing a transform over the top threw that away and dropped the
+     label half its own size down and to the right -- which looked
+     like the highlight moving the label, and was the highlight
+     deleting the thing that put it where it was.
+
+     Re-applied last in the list, so it happens first, with
+     `transform-origin: 0 0` (in the stylesheet) so the chain is plain
+     multiplication and the scale is about the point rather than about
+     a corner that has already moved. */
   for (const id of ids) {
     const card = drawn.cards[id];
     if (card) grow(card, where[id][0] - ox, where[id][1] - oy);
@@ -904,7 +950,7 @@ function paintUpnext(section, where, ox, oy) {
   // is -- left behind at its ordinary size it read as a sticker on
   // something that had grown around it.
   const tag = drawn.labels.find(l => l.group === here.group);
-  if (tag) grow(tag.el, tag.at[0], tag.at[1]);
+  if (tag) grow(tag.el, tag.at[0], tag.at[1], " translate(-50%, -50%)");
 }
 
 function tint(node, hue, chroma) {
