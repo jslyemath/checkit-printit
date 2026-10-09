@@ -258,6 +258,24 @@ class TestTheRoomComingBackIsChecked:
             with pytest.raises(room_mod.RoomError, match="chroma"):
                 room_mod.check(r)
 
+    def test_a_seats_place_in_its_groups_run_is_a_position(self):
+        """`spot` says where a seat comes in its own group's run of
+        the stack. Absent is the normal state and means the clockwise
+        seat order the canvas works out for itself, so a room nobody
+        has reordered stores nothing."""
+        r = a_room()
+        seat = r["sections"][0]["shapes"][0]["seats"][0]
+        assert "spot" not in seat
+        assert room_mod.check(r) is not None
+        for ok in (1, 2, 40, None):
+            seat["spot"] = ok
+            assert room_mod.check(r) is not None, f"{ok!r} should pass"
+        # 0 and below are not positions, and neither is half a place.
+        for bad in (0, -1, 1.5, "first", True, float("nan")):
+            seat["spot"] = bad
+            with pytest.raises(room_mod.RoomError, match="print order"):
+                room_mod.check(r)
+
     def test_a_label_may_only_hang_on_a_desk_that_is_there(self):
         """It would silently fall back to the middle of the group's
         seats, and look like the anchor had been forgotten."""
