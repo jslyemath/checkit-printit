@@ -115,15 +115,24 @@ let paletteOpen = false;
    buttons and a menu you opened must not close because a desk moved. */
 let railOpen = false;
 
-/* Printing's two choices.
+/* How the stack is ordered: group by group, or seat by seat.
 
-   `printJob` is a submode -- it decides what a click on the canvas
-   means, which is the test for being one. `printBy` is not: it is a
-   property of the print plan that outlives the visit and changes what
-   comes out of the printer, so it sits beside Order as a setting
-   rather than above it as a third mode. That is what collapses a
-   two-level tree into one row. */
-let printJob = "order";          // order | versions
+   The only thing Printing needs chosen in advance. Order and Versions
+   were going to be submodes with this underneath them, which wanted a
+   second rail above the first, and a second rail is the one thing no
+   canvas application has: Illustrator changes the contents of its
+   options bar, Figma of its properties panel, Excalidraw and tldraw
+   of their one island. One contextual surface that changes, never a
+   new surface that appears.
+
+   Dropping the submodes went further. Every other mode here decides
+   what a click means by *what you click* -- Groups has no
+   move/resize/rotate selector, the grips are the selector. So
+   Printing draws the order numbers and the version circles together
+   and a click on a number edits a number while a click on a version
+   picks up a version. Nothing is left that needs choosing except
+   this, and this is a property of the plan rather than of the
+   moment. */
 let printBy = "group";           // group | seat
 
 // ------------------------------------------------------------ constants --
@@ -189,6 +198,12 @@ const ICON = {
      they are the same glyph in two different containers rather than
      two unrelated pictures. */
   vletters: "O12,12,9.3|M8.9 16.3l3.1-8 3.1 8M10.1 13.9h3.8",
+  /* One chair, front on. The seat is its own bar rather than a line
+     across the back: drawn as a line the two shapes merge into a box
+     with a stroke through it, which at 15px read as an H. */
+  chair: "R7.5,2.5,9,7,2|R4,11,16,3.2,1.6|M7 21v-6.8M17 21v-6.8",
+  // A printer: the sheet going in, the body, the sheet coming out.
+  printer: "M6.5 9V2.5h11V9|R2,9,20,8,2.5|R6.5,14,11,7.5,1",
   // Points the way the menu opens.
   chev: "M6 14.5l6-6 6 6",
   back: "M14.5 5l-6 7 6 7",
@@ -600,7 +615,6 @@ function renderSeating() {
   drawPen(section);
   drawRoom(section);
   drawPalette(section);
-  drawSubRail(section);
   drawStrip(section);
   drawStageBar(section, sections.length);
   stackBottom();
@@ -732,12 +746,6 @@ function setFurled(rail, furl) {
   rail.classList.remove("nomotion");
 }
 
-const PRINT_JOBS = [
-  { value: "order", label: "Order",
-    why: "The sequence the stack comes out in." },
-  { value: "versions", label: "Versions",
-    why: "Which version of the paper lands on each seat." },
-];
 const PRINT_BYS = [
   { value: "group", label: "By group",
     why: "One number per group, and a position for each seat within "
@@ -747,38 +755,6 @@ const PRINT_BYS = [
     why: "One running number across the whole room, ignoring groups "
       + "-- so the stack comes out in the order you will walk it." },
 ];
-
-function drawSubRail(section) {
-  /* Two segmented pairs, and the second only while the first is on
-     Order. "By group" and "By seat" are a property of the order, so
-     they are beside it and go away with it -- showing them while you
-     are editing versions would be offering a setting that has nothing
-     to do with what is in front of you. */
-  const sub = document.getElementById("seat-sub");
-  sub.textContent = "";
-  const wanted = seatingMode === "printing" && !projecting() && !upnext
-    && Boolean(section);
-  sub.hidden = !wanted;
-  if (!wanted) return;
-
-  const pair = (list, now, pick) => {
-    for (const one of list) {
-      const b = el("button", "ibtn" + (one.value === now ? " on" : ""),
-                   one.label);
-      b.type = "button";
-      b.title = one.why;
-      b.setAttribute("aria-pressed", String(one.value === now));
-      b.onclick = () => { if (one.value !== now) { pick(one.value);
-                                                   renderSeating(); } };
-      sub.appendChild(b);
-    }
-  };
-  pair(PRINT_JOBS, printJob, v => { printJob = v; selectedChair = null; });
-  if (printJob === "order") {
-    sub.appendChild(el("span", "isep"));
-    pair(PRINT_BYS, printBy, v => { printBy = v; selectedChair = null; });
-  }
-}
 
 function layoutRail() {
   /* Furl when the rail, the zoom island and the plus can no longer
@@ -869,7 +845,7 @@ function stackBottom() {
   const at = Number(getComputedStyle(view).getPropertyValue("--edge")) || 12;
   const gap = 8;
   let y = at;
-  for (const id of ["seat-modes", "seat-sub", "seat-strip"]) {
+  for (const id of ["seat-modes", "seat-strip"]) {
     const node = document.getElementById(id);
     if (!node) continue;
     const tall = node.hidden || !node.offsetHeight ? 0 : node.offsetHeight;
@@ -1066,6 +1042,9 @@ function drawRoom(section) {
         card.appendChild(el("span", "vcircle", seat.seat.version));
     }
 
+  if (seatingMode === "printing" && !upnext)
+    paintPrintOrder(section, where, ox, oy);
+
   if (upnext) paintUpnext(section, where, ox, oy);
 
   /* The nine places this group's label may sit, shown only while it
@@ -1100,6 +1079,96 @@ function drawRoom(section) {
   }
 
   applyZoom(section);
+}
+
+function paintPrintOrder(section, where, ox, oy) {
+  /* The numbers: where each group falls in the stack, and where each
+     seat falls inside its group.
+
+     Top left of the card, opposite the version in the top right. A
+     seat in Printing carries exactly two facts and they sit in the
+     two corners, which is as much as a card that already holds a name
+     can be asked to say.
+
+     Clicking a number edits that number and nothing else -- it stops
+     the event, so a click anywhere else on the card still selects the
+     seat. That is the whole reason Printing needs no submode: the
+     thing you touch is the thing you change. */
+  const line = printOrder(section);
+  line.forEach((group, i) => {
+    if (printBy === "group") {
+      const ids = (group.seats || []).filter(id => where[id]);
+      if (ids.length) {
+        const xs = ids.map(id => where[id][0]), ys = ids.map(id => where[id][1]);
+        const tag = el("button", "ordertag group", String(i + 1));
+        tag.type = "button";
+        tag.title = `This group prints ${i + 1} of ${line.length}. `
+          + "Click to change.";
+        tint(tag, hueOf(section, group), chromaOf(group));
+        /* Centred over the group, not tucked into its top left
+           corner -- that is where the first seat's own number lives,
+           and the two landed on top of each other. Centred, the big
+           number is plainly about the table and the small ones are
+           plainly about the chairs. */
+        tag.style.left = ((Math.min(...xs) + Math.max(...xs)) / 2 - ox) + "px";
+        tag.style.top = (Math.min(...ys) - CARD_H / 2 - 24 - oy) + "px";
+        tag.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); };
+        tag.onclick = e => {
+          e.stopPropagation();
+          typeOrder(tag, i + 1, line.length,
+                    n => reorderGroup(section, group, n));
+        };
+        seatingCanvas().appendChild(tag);
+      }
+    }
+    seatRun(section, group).forEach((id, j) => {
+      const card = drawn.cards[id];
+      if (!card) return;
+      const tag = el("span", "ordertag seat", String(j + 1));
+      tag.title = printBy === "group"
+        ? `Prints ${j + 1} of ${group.seats.length} within this group. `
+          + "Click to change."
+        : "Seat order is not built yet; this is the within-group "
+          + "position.";
+      tag.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); };
+      tag.onclick = e => {
+        e.stopPropagation();
+        const seat = seatById(section, id);
+        if (seat) typeOrder(tag, j + 1, group.seats.length,
+                            n => reorderSeat(section, group, seat, n));
+      };
+      card.appendChild(tag);
+    });
+  });
+}
+
+function typeOrder(node, now, total, settle) {
+  /* Type a position, in place. The third thing in this app edited by
+     being replaced with an input rather than by opening a dialog --
+     the value is already on screen, so a dialog would be a second
+     copy of it. */
+  const input = el("input", "ordertype");
+  input.type = "text";
+  input.inputMode = "numeric";
+  input.value = String(now);
+  input.style.cssText = node.style.cssText;
+  node.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = keep => {
+    if (done) return;
+    done = true;
+    const want = parseInt(input.value, 10);
+    if (keep && Number.isFinite(want) && want !== now) settle(want);
+    else renderSeating();
+  };
+  input.onblur = () => finish(true);
+  input.onkeydown = e => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  };
 }
 
 function paintUpnext(section, where, ox, oy) {
@@ -1499,8 +1568,12 @@ function drawStrip(section) {
   if (!shape && group) shape = shapesHolding(section, group)[0] || null;
 
   if (!group && !shape) {
-    // Nothing chosen. Groups mode still offers the furniture, because
-    // an empty room has nothing to select and still needs a desk.
+    /* Nothing chosen. In Printing that is not nothing to say: the
+       print plan is what you are looking at when you are not looking
+       at any one part of it, and this is the surface that answers
+       "what am I looking at". Everywhere else an empty selection
+       really is nothing, and the strip goes away. */
+    if (seatingMode === "printing") { drawPlanStrip(strip, section); return; }
     strip.hidden = true;
     return;
   }
@@ -1574,6 +1647,37 @@ function drawStrip(section) {
   }
 }
 
+function drawPlanStrip(strip, section) {
+  /* The print plan: how the stack is ordered, and the things you can
+     ask the room to do to it.
+
+     Here rather than in an island of its own because it is contextual
+     -- it belongs to Printing and to nothing else -- and this is the
+     contextual surface. An options bar, in the sense Illustrator has
+     meant since 1997. */
+  strip.hidden = false;
+  strip.classList.add("planstrip");
+
+  const head = el("span", "scount");
+  head.appendChild(svgIcon(ICON.printer));
+  head.title = "How the printed stack is ordered";
+  strip.appendChild(head);
+
+  for (const one of PRINT_BYS) {
+    const b = el("button", "ibtn tiny" + (one.value === printBy ? " on" : ""),
+                 one.label);
+    b.type = "button";
+    b.title = one.why;
+    b.setAttribute("aria-pressed", String(one.value === printBy));
+    b.onclick = () => {
+      if (one.value === printBy) return;
+      printBy = one.value;
+      renderSeating();
+    };
+    strip.appendChild(b);
+  }
+}
+
 function drawSeatStrip(strip, section, seat) {
   strip.hidden = false;   // the caller returns before its own line
   /* Which seat this is, and whose table it is on.
@@ -1596,17 +1700,27 @@ function drawSeatStrip(strip, section, seat) {
   if (group)
     strip.appendChild(el("span", "sname flat", group.label || "(no label)"));
 
+  /* A bold D and a bold C side by side say nothing about which is
+     which. A chair before the first and a printer before the second
+     is the whole explanation, and it is the same pairing the canvas
+     uses -- the letter on the card is the seat, the letter in the
+     circle is the paper. */
   strip.appendChild(el("span", "isep"));
-  const letter = el("span", "sname seatletter", drawn.slots[seat.id] || "?");
-  letter.title = "This seat's letter, counted clockwise from the top "
+  const seatBit = el("span", "scount");
+  seatBit.title = "This seat's letter, counted clockwise from the top "
     + "left of its group";
-  strip.appendChild(letter);
+  seatBit.appendChild(svgIcon(ICON.chair));
+  seatBit.appendChild(el("span", "seatletter", drawn.slots[seat.id] || "?"));
+  strip.appendChild(seatBit);
 
   if (seat.version) {
+    const printBit = el("span", "scount");
+    printBit.title = "The version of the paper that prints for this seat";
+    printBit.appendChild(svgIcon(ICON.printer));
     const v = el("span", "vchip", seat.version);
     tint(v, hueOf(section, group), chromaOf(group));
-    v.title = "The version of the paper that prints for this seat";
-    strip.appendChild(v);
+    printBit.appendChild(v);
+    strip.appendChild(printBit);
   }
 
   if (shape) {
@@ -1646,6 +1760,46 @@ function printOrder(section) {
   const has = g => g.order !== null && g.order !== undefined;
   return all.filter(has).sort((a, b) => a.order - b.order)
             .concat(all.filter(g => !has(g)));
+}
+
+function seatRun(section, group) {
+  /* A group's seats in the order its papers come off the stack.
+
+     By `spot` where one has been set, and by seat letter otherwise --
+     so a group nobody has touched prints clockwise from its top left,
+     which is the order somebody handing them out would walk anyway.
+     Deriving the default rather than writing it down is what keeps a
+     room that has never been reordered free of numbers to maintain. */
+  const ids = (group.seats || []).filter(id => drawn.cards[id]);
+  const letter = id => {
+    const at = ALPHABET.indexOf(drawn.slots[id] || "");
+    return at < 0 ? ALPHABET.length : at;
+  };
+  const spot = id => {
+    const seat = seatById(section, id);
+    return seat && typeof seat.spot === "number" ? seat.spot : Infinity;
+  };
+  return ids.sort((a, b) => (spot(a) - spot(b)) || (letter(a) - letter(b)));
+}
+
+function seatById(section, id) {
+  for (const shape of section.shapes || [])
+    for (const seat of shape.seats || []) if (seat.id === id) return seat;
+  return null;
+}
+
+function reorderSeat(section, group, seat, want) {
+  /* Same rule as moving a group: take it out of the run, put it back
+     where asked, number what is left 1..N. One rule for both
+     directions, and no arithmetic on the numbers to get wrong. */
+  const run = seatRun(section, group).filter(id => id !== seat.id);
+  const at = Math.min(Math.max(1, Math.round(want)), run.length + 1) - 1;
+  run.splice(at, 0, seat.id);
+  run.forEach((id, i) => {
+    const s = seatById(section, id);
+    if (s) s.spot = i + 1;
+  });
+  renderSeating();
 }
 
 function reorderGroup(section, group, want) {

@@ -493,6 +493,17 @@ def check(room, known=None):
                 everywhere[sid] = where
                 here.add(sid)
                 _point(seat.get("at"), f"{where}: seat {sid!r}")
+                # Where this seat comes in its group's own run of the
+                # stack. Absent is the normal state and means "in seat
+                # order", which is the clockwise lettering the canvas
+                # works out for itself -- so a room nobody has
+                # reordered stores nothing and reads the same.
+                spot = seat.get("spot") if isinstance(seat, dict) else None
+                if spot is not None and (not _number(spot)
+                                         or int(spot) != spot or spot < 1):
+                    raise RoomError(
+                        f"{where}: a seat is {spot!r} in its group's "
+                        f"print order, which is not a position.")
 
                 who = seat.get("student") or ""
                 if not who:
