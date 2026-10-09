@@ -11,6 +11,11 @@
    to the Overview's stat cards. */
 
 .seatapp {
+  /* How far the bottom islands sit off the floor. Read by
+     `stackBottom`, so the short-window rule below moves all of them
+     by changing one number. */
+  --edge: 12;
+
   --paper:      oklch(0.971 0.003 255);
   --paper-dot:  oklch(0.893 0.006 255);
 
@@ -200,6 +205,12 @@
 .at-bc { bottom: 12px; left: 50%; transform: translateX(-50%);
          justify-content: center; }
 
+/* Printing's own row. Smaller than the mode rail on purpose: it is
+   inside the mode below it, and a child that matched its parent for
+   weight would read as a second rail rather than as part of one. */
+.sub .ibtn { font-size: 12px; height: 28px; padding: 0 11px; }
+.sub { padding: 4px; }
+
 /* The mode rail: the primary verb, where a hand rests. The one island
    allowed to be taller than the others, because it stacks a glyph over
    a word and because being the tallest thing on the bottom edge is how
@@ -327,6 +338,8 @@
    where a panel did not. */
 .strip {
   bottom: 84px; left: 50%; transform: translateX(-50%);
+  /* `bottom` is written by `stackBottom`; this is the value before
+     anything has measured, so a first paint is not at the floor. */
   padding: 4px 6px; gap: 2px; font-size: 13px; max-width: calc(100% - 24px);
 }
 .strip .swatch {
@@ -339,6 +352,26 @@
                 max-width: 190px; overflow: hidden;
                 text-overflow: ellipsis; white-space: nowrap; }
 .strip .sname:hover { background: var(--isle-2); }
+/* A fact, not a control. The same dot and the same name as the group
+   strip with the affordances removed, so the seat strip can say whose
+   table this is without appearing to offer to change it here. */
+.strip .flat { cursor: default; }
+.strip .sname.flat { color: var(--isle-dim); font-weight: 600; }
+.strip .sname.flat:hover { background: none; }
+.strip .swatch.flat { border-color: transparent; }
+/* The seat's own letter: the heading of this strip, the way the
+   group's name is the heading of the other one. */
+.strip .seatletter { font-size: 16px; font-weight: 800; cursor: default;
+                     min-width: 22px; text-align: center; }
+.strip .seatletter:hover { background: none; }
+/* The version, in the circle it wears on the canvas. */
+.strip .vchip {
+  width: 22px; height: 22px; margin-left: 2px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: oklch(0.585 calc(0.155 * var(--c, 1)) var(--h, 255));
+  color: white; font-size: 12px; font-weight: 800;
+}
 /* The name is the point of this strip, so it is the one thing in it
    allowed to be bigger than the row. */
 .strip .upname { font-size: 15px; cursor: default; min-width: 80px;
@@ -680,6 +713,20 @@
 .seatcard .ver {
   position: absolute; top: 1px; right: 4px;
   font-size: 13px; font-weight: 800; color: var(--solid);
+}
+/* The print version: the same letter in the group's solid colour, in
+   a circle. The group labels are pills in that colour and this is the
+   same badge drawn round rather than long, so a version reads as
+   something the room has decided rather than something printed on the
+   card. Bottom right, opposite the seat letter, so a card can carry
+   both without either being the other. */
+.seatcard .vcircle {
+  position: absolute; bottom: 3px; right: 3px;
+  width: 20px; height: 20px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--solid); color: white;
+  font-size: 12px; font-weight: 800; letter-spacing: 0;
 }
 /* An empty seat has to be as findable as a full one: it is where you
    are about to put somebody. It used to be a faint dashed outline on
@@ -1028,6 +1075,7 @@ body.projecting .seatapp:hover .at-tr { opacity: 1; }
    The default padding is comfortable and, stacked three deep, is most
    of what is left of the room. */
 @media (max-height: 620px) {
+  .seatapp { --edge: 8; }
   .isle { padding: 3px; gap: 3px; }
   /* Heights, not paddings. Trimming padding here left `.at-bl .ibtn`
      in the width query setting a bigger one, and the zoom island stayed
@@ -1041,7 +1089,8 @@ body.projecting .seatapp:hover .at-tr { opacity: 1; }
   .rail .ibtn svg { width: 17px; height: 17px; }
   .at-tr .ibtn svg, .at-bl .ibtn svg { width: 19px; height: 19px; }
   .at-bl, .at-bc, .plusbtn { bottom: 8px; }
-  .strip { bottom: 62px; padding: 3px 5px; }
+  .sub .ibtn { height: 24px; font-size: 11px; padding: 0 9px; }
+  .strip { padding: 3px 5px; }
   .palette { bottom: 56px; }
   .plusbtn { width: 38px; height: 38px; font-size: 21px; }
 }

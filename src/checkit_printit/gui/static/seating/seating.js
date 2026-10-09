@@ -50,7 +50,14 @@ let drawn = { shapes: {}, cards: {}, seats: [], labels: [], box: null };
    `seatingRoom` -- put in the document they would make "hide the
    version letters for a minute" an unsaved change, and the Save button
    would appear for having looked at something differently. */
-let showVersions = true;
+let showSlots = true;            // the seat letter, A clockwise from NW
+let showVersions = false;        // the print version, in a circle
+/* What the seat-letter switch was set to before Printing turned it
+   off. Printing is about versions, so seat letters go out of the way
+   on arrival -- but a switch the app flipped is a switch the app has
+   to put back, or leaving the mode quietly changes a setting the
+   instructor chose. */
+let slotsBefore = null;
 let showLabels = true;
 
 /* Up Next is a way of showing the room, not a way of editing it, so
@@ -107,6 +114,17 @@ let paletteOpen = false;
    than a class read off the DOM, because every re-render rebuilds the
    buttons and a menu you opened must not close because a desk moved. */
 let railOpen = false;
+
+/* Printing's two choices.
+
+   `printJob` is a submode -- it decides what a click on the canvas
+   means, which is the test for being one. `printBy` is not: it is a
+   property of the print plan that outlives the visit and changes what
+   comes out of the printer, so it sits beside Order as a setting
+   rather than above it as a third mode. That is what collapses a
+   two-level tree into one row. */
+let printJob = "order";          // order | versions
+let printBy = "group";           // group | seat
 
 // ------------------------------------------------------------ constants --
 
@@ -166,6 +184,11 @@ const ICON = {
   trash: "M4 7h16|M10 11.5v6M14 11.5v6"
     + "|M6.2 7l.9 12.1A2 2 0 0 0 9.1 21h5.8a2 2 0 0 0 2-1.9L17.8 7"
     + "|M9.2 7V5.2A1.2 1.2 0 0 1 10.4 4h3.2a1.2 1.2 0 0 1 1.2 1.2V7",
+  /* A letter on a card is a seat letter; a letter in a circle is a
+     print version. Same letter, two different things about a seat, so
+     they are the same glyph in two different containers rather than
+     two unrelated pictures. */
+  vletters: "O12,12,9.3|M8.9 16.3l3.1-8 3.1 8M10.1 13.9h3.8",
   // Points the way the menu opens.
   chev: "M6 14.5l6-6 6 6",
   back: "M14.5 5l-6 7 6 7",
@@ -189,10 +212,12 @@ const MODES = [
   { value: "seats", label: "Seats", icon: "seats",
     why: "Move the seats on a group, add one, take one away — and drag "
       + "a seat onto another group to move it there." },
-  { value: "order", label: "Order", icon: "order",
-    why: "The order papers are handed out in. Not built yet." },
+  { value: "printing", label: "Printing", icon: "order",
+    why: "What goes on the paper and what order it comes out in: "
+      + "which version each seat gets, and the sequence the stack is "
+      + "printed in." },
 ];
-const BUILT = new Set(["people", "groups", "seats"]);
+const BUILT = new Set(["people", "groups", "seats", "printing"]);
 
 // --------------------------------------------------------------- helpers --
 
@@ -284,6 +309,67 @@ function turnShape(shape, deg) {
     seat.at = [Math.round(x), Math.round(y)];
   }
   shape.angle = Math.round((((shape.angle || 0) + deg) % 360 + 360) % 360);
+}
+
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+function slotsOf(section, group, where) {
+  /* A seat's letter, worked out from where the seat is rather than
+     stored anywhere.
+
+     Clockwise from the top left, A onward. Derived rather than kept,
+     which is the whole reason this is cheap: "recalculate the letters
+     when a seat has finished moving" needs no event and no bookkeeping
+     if the letters were never written down. Every redraw is a
+     recalculation.
+
+     This is NOT the print version. They start out the same and the
+     instructor may well leave them that way, but a seat letter says
+     *which chair at this table* and a version says *which paper*, and
+     wanting six distinct chairs and three papers is a reasonable thing
+     to want. `seat.version` stays in the model; this is on top. */
+  const ids = (group.seats || []).filter(id => where[id]);
+  if (!ids.length) return {};
+  const xs = ids.map(id => where[id][0]);
+  const ys = ids.map(id => where[id][1]);
+  const w = Math.max(...xs) - Math.min(...xs);
+  const h = Math.max(...ys) - Math.min(...ys);
+
+  /* A row, a column, or a ring, and they want different answers.
+     Sorting a row of three by the angle round its own centre is
+     nonsense -- the middle seat is *at* the centre and has no angle --
+     and sorting a 2x2 left to right would letter it in reading order
+     rather than clockwise. So: if the seats are within one card of a
+     single line, order them along it; otherwise sweep. */
+  let order;
+  if (h < CARD_H) order = ids.slice().sort((a, b) => where[a][0] - where[b][0]);
+  else if (w < CARD_W)
+    order = ids.slice().sort((a, b) => where[a][1] - where[b][1]);
+  else {
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    /* Clockwise from the top left seat -- the seat, not the bearing.
+
+       Starting the sweep at a fixed -135 degrees is the obvious thing
+       and it is wrong: the top left corner of a 2x2 sits at about
+       -145, which is ten degrees *before* the start, so it wrapped the
+       whole way round and lettered last. A 2x2 came out D A C B. The
+       top left seat's own angle is the only start that cannot be just
+       past the line, because the line is drawn through it. */
+    const first = ids.reduce((a, b) =>
+      (where[a][0] + where[a][1] <= where[b][0] + where[b][1] ? a : b));
+    const base = Math.atan2(where[first][1] - cy, where[first][0] - cx);
+    const round = id => {
+      const a = Math.atan2(where[id][1] - cy, where[id][0] - cx) - base;
+      return ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    };
+    order = ids.slice().sort((a, b) => round(a) - round(b));
+  }
+  const out = {};
+  order.forEach((id, i) => {
+    out[id] = i < ALPHABET.length ? ALPHABET[i] : String(i + 1);
+  });
+  return out;
 }
 
 function groupsOf(section) { return (section && section.groups) || []; }
@@ -413,7 +499,7 @@ function setProjecting(on) {
     selectedChair = null;
     paletteOpen = false;
   } else {
-    seatingMode = modeBefore;      // back where you were, not somewhere neutral
+    enterMode(modeBefore);         // back where you were, not somewhere neutral
   }
   document.body.classList.toggle("projecting", on);
   paintChrome();
@@ -450,7 +536,14 @@ function paintChrome() {
     b.setAttribute("aria-pressed", String(Boolean(on)));
     b.title = title;
   };
-  set("seat-versions", "letters", showVersions, "Version letters");
+  /* One button, two jobs, because they are the same question asked of
+     two different things: which letter is on this seat. Outside
+     Printing it is the seat's own letter; inside Printing it is the
+     version of the paper that lands there, and the circle says so. */
+  const printing = seatingMode === "printing";
+  set("seat-versions", printing ? "vletters" : "letters",
+      printing ? showVersions : showSlots,
+      printing ? "Version labels" : "Seat letters");
   set("seat-labels", "tag", showLabels, "Group labels");
   set("seat-upnext", "upnext", upnext,
       upnext ? "Stop showing who is up"
@@ -507,10 +600,35 @@ function renderSeating() {
   drawPen(section);
   drawRoom(section);
   drawPalette(section);
+  drawSubRail(section);
   drawStrip(section);
   drawStageBar(section, sections.length);
+  stackBottom();
   // The plus belongs to the mode and the selection, so it is redrawn
   // with them rather than only when a switch is flipped.
+  paintChrome();
+}
+
+function enterMode(value) {
+  /* Printing turns the seat letters off and the version labels on,
+     because the letters it is about are the versions -- two letters on
+     one card is two answers to one question. Leaving puts the seat
+     letters back the way the instructor had them, which is the part
+     that has to be remembered: a switch the app flipped is a switch
+     the app owes back. */
+  const was = seatingMode;
+  seatingMode = value;
+  picked = null;
+  selectedChair = null;
+  if (value === "printing" && was !== "printing") {
+    slotsBefore = showSlots;
+    showSlots = false;
+    showVersions = true;
+  } else if (value !== "printing" && was === "printing") {
+    if (slotsBefore !== null) showSlots = slotsBefore;
+    slotsBefore = null;
+    showVersions = false;
+  }
   paintChrome();
 }
 
@@ -553,9 +671,7 @@ function drawRail() {
         renderSeating();
         return;
       }
-      seatingMode = mode.value;
-      picked = null;
-      selectedChair = null;
+      enterMode(mode.value);
       railOpen = false;              // picking one is also closing it
       renderSeating();
     };
@@ -614,6 +730,54 @@ function setFurled(rail, furl) {
   rail.classList.toggle("furled", furl);
   void rail.offsetHeight;
   rail.classList.remove("nomotion");
+}
+
+const PRINT_JOBS = [
+  { value: "order", label: "Order",
+    why: "The sequence the stack comes out in." },
+  { value: "versions", label: "Versions",
+    why: "Which version of the paper lands on each seat." },
+];
+const PRINT_BYS = [
+  { value: "group", label: "By group",
+    why: "One number per group, and a position for each seat within "
+      + "it -- so the stack comes out in piles you can hand to a "
+      + "table at a time." },
+  { value: "seat", label: "By seat",
+    why: "One running number across the whole room, ignoring groups "
+      + "-- so the stack comes out in the order you will walk it." },
+];
+
+function drawSubRail(section) {
+  /* Two segmented pairs, and the second only while the first is on
+     Order. "By group" and "By seat" are a property of the order, so
+     they are beside it and go away with it -- showing them while you
+     are editing versions would be offering a setting that has nothing
+     to do with what is in front of you. */
+  const sub = document.getElementById("seat-sub");
+  sub.textContent = "";
+  const wanted = seatingMode === "printing" && !projecting() && !upnext
+    && Boolean(section);
+  sub.hidden = !wanted;
+  if (!wanted) return;
+
+  const pair = (list, now, pick) => {
+    for (const one of list) {
+      const b = el("button", "ibtn" + (one.value === now ? " on" : ""),
+                   one.label);
+      b.type = "button";
+      b.title = one.why;
+      b.setAttribute("aria-pressed", String(one.value === now));
+      b.onclick = () => { if (one.value !== now) { pick(one.value);
+                                                   renderSeating(); } };
+      sub.appendChild(b);
+    }
+  };
+  pair(PRINT_JOBS, printJob, v => { printJob = v; selectedChair = null; });
+  if (printJob === "order") {
+    sub.appendChild(el("span", "isep"));
+    pair(PRINT_BYS, printBy, v => { printBy = v; selectedChair = null; });
+  }
 }
 
 function layoutRail() {
@@ -695,6 +859,25 @@ function layoutRail() {
     : railOpen ? "Put the list away" : "Every mode";
 }
 
+function stackBottom() {
+  /* The bottom edge is a stack, not three fixed offsets: the rail is
+     taller unfurled than furled and the sub-rail is only there
+     sometimes, so anything above them has to be told where they
+     ended up rather than assume. */
+  const view = document.getElementById("view-seating");
+  if (!view || view.hidden) return;
+  const at = Number(getComputedStyle(view).getPropertyValue("--edge")) || 12;
+  const gap = 8;
+  let y = at;
+  for (const id of ["seat-modes", "seat-sub", "seat-strip"]) {
+    const node = document.getElementById(id);
+    if (!node) continue;
+    const tall = node.hidden || !node.offsetHeight ? 0 : node.offsetHeight;
+    if (id !== "seat-modes") node.style.bottom = Math.round(y) + "px";
+    if (tall) y += tall + gap;
+  }
+}
+
 function drawSections(sections) {
   const host = document.getElementById("seat-sections");
   host.textContent = "";
@@ -733,7 +916,8 @@ function drawRoom(section) {
      the declared canvas. The model stays in room coordinates; only the
      drawing subtracts the origin, and `roomPoint` adds it back. */
   const area = contentBox(section);
-  drawn = { shapes: {}, cards: {}, seats: [], labels: [], box: area };
+  drawn = { shapes: {}, cards: {}, seats: [], labels: [], box: area,
+            slots: {} };
   const ox = area.x, oy = area.y;
 
   canvas.style.width = area.w + "px";
@@ -808,7 +992,10 @@ function drawRoom(section) {
       tint(card, hue, chroma);
       card.style.left = (x - CARD_W / 2 - ox) + "px";
       card.style.top = (y - CARD_H / 2 - oy) + "px";
-      fillCard(card, who, showVersions ? seat.version : "");
+      // The letter is filled in on the second pass, once every seat's
+      // position is known -- a seat's letter depends on where all the
+      // others are, so none of them can be worked out one at a time.
+      fillCard(card, who, "");
 
       if (upnext) {
         // Up Next is on, so nothing on the canvas is a control: the
@@ -817,6 +1004,18 @@ function drawRoom(section) {
         if (who) card.classList.add("movable");
         if (picked && picked.seat === seat) card.classList.add("picked");
         card.onpointerdown = e => dragName(e, card, { seat: seat });
+      } else if (seatingMode === "printing") {
+        /* Clicking a seat selects it. Printing is about what lands on
+           a seat, so the seat is the thing you point at -- and the
+           strip has a seat state to say what you picked. */
+        if (seat.id === selectedChair) card.classList.add("picked");
+        card.onpointerdown = e => {
+          e.preventDefault();
+          e.stopPropagation();
+          selectedChair = selectedChair === seat.id ? null : seat.id;
+          selected = null;
+          renderSeating();
+        };
       } else if (seatingMode === "seats") {
         card.classList.add("movable", "chairable");
         if (seat.id === selectedChair) card.classList.add("picked");
@@ -847,6 +1046,25 @@ function drawRoom(section) {
                          at: [x - ox, y - oy] });
     }
   }
+
+  /* Seat letters, now that every position is in. One pass per group,
+     because that is the unit a letter is relative to. */
+  for (const group of groupsOf(section))
+    Object.assign(drawn.slots, slotsOf(section, group, where));
+  /* And the seats in no group: each is a group of one in every other
+     rule, so each is its own A. */
+  for (const seat of drawn.seats)
+    if (!(seat.id in drawn.slots)) drawn.slots[seat.id] = "A";
+
+  if (showSlots || showVersions)
+    for (const seat of drawn.seats) {
+      const card = drawn.cards[seat.id];
+      if (!card) continue;
+      if (showSlots)
+        card.appendChild(el("span", "ver", drawn.slots[seat.id] || ""));
+      if (showVersions && seat.seat.version)
+        card.appendChild(el("span", "vcircle", seat.seat.version));
+    }
 
   if (upnext) paintUpnext(section, where, ox, oy);
 
@@ -1259,6 +1477,20 @@ function drawStrip(section) {
   strip.classList.remove("upnextstrip");
   if (upnext) { drawUpNext(strip, section); return; }
 
+  /* A seat is selected, so the strip describes a seat.
+
+     Two states, one shown at a time, rather than one strip carrying
+     both. A seat and a group are different selections, and a strip
+     that described both at once would either be twice as long or
+     rearrange itself -- and rearranging is the thing this strip was
+     built not to do. Which one you get is decided by what you
+     clicked, which is the only thing that could decide it. */
+  const seatPick = selectedChair
+    ? (section.shapes || []).reduce((found, s) => found
+        || (s.seats || []).find(x => x.id === selectedChair), null)
+    : null;
+  if (seatPick) { drawSeatStrip(strip, section, seatPick); return; }
+
   let group = selected && selected.kind === "group"
     ? groupsOf(section).find(g => g.id === selected.id) : null;
   let shape = selected && selected.kind === "shape"
@@ -1331,12 +1563,6 @@ function drawStrip(section) {
   if (seatingMode === "groups" && shape)
     acts.push(["trash", "Remove this group",
                () => removeShape(section, shape)]);
-  if (seatingMode === "seats" && shape) {
-    const seat = (shape.seats || []).find(s => s.id === selectedChair);
-    if (seat) acts.push(["trash", seat.student
-      ? "Take this seat away; they go back on the unseated list"
-      : "Take this seat away", () => removeChair(section, shape, seat)]);
-  }
   if (acts.length) strip.appendChild(el("span", "isep"));
   for (const [icon, why, go] of acts) {
     const b = el("button", "ibtn tiny");
@@ -1345,6 +1571,54 @@ function drawStrip(section) {
     b.appendChild(svgIcon(ICON[icon]));
     b.onclick = go;
     strip.appendChild(b);
+  }
+}
+
+function drawSeatStrip(strip, section, seat) {
+  strip.hidden = false;   // the caller returns before its own line
+  /* Which seat this is, and whose table it is on.
+
+     The group is here because "seat C" means nothing without it, but
+     it is a fact rather than a control: same dot and same name as the
+     group strip, with the hover shade and the cursor taken away. That
+     is the distinction the strip already draws between `scount` and
+     `scount.typable`, so it is one the window has taught once
+     already and does not have to teach again. */
+  const shape = (section.shapes || [])
+    .find(s => (s.seats || []).some(x => x.id === seat.id));
+  const group = groupFor(section, shape);
+
+  const dot = el("span", "swatch flat");
+  tint(dot, hueOf(section, group), chromaOf(group));
+  dot.title = group ? "On " + (group.label || "an unnamed group")
+                    : "Not in any group";
+  strip.appendChild(dot);
+  if (group)
+    strip.appendChild(el("span", "sname flat", group.label || "(no label)"));
+
+  strip.appendChild(el("span", "isep"));
+  const letter = el("span", "sname seatletter", drawn.slots[seat.id] || "?");
+  letter.title = "This seat's letter, counted clockwise from the top "
+    + "left of its group";
+  strip.appendChild(letter);
+
+  if (seat.version) {
+    const v = el("span", "vchip", seat.version);
+    tint(v, hueOf(section, group), chromaOf(group));
+    v.title = "The version of the paper that prints for this seat";
+    strip.appendChild(v);
+  }
+
+  if (shape) {
+    strip.appendChild(el("span", "isep"));
+    const kill = el("button", "ibtn tiny");
+    kill.type = "button";
+    kill.title = seat.student
+      ? "Take this seat away; they go back on the unseated list"
+      : "Take this seat away";
+    kill.appendChild(svgIcon(ICON.trash));
+    kill.onclick = () => removeChair(section, shape, seat);
+    strip.appendChild(kill);
   }
 }
 
@@ -2017,18 +2291,23 @@ function buildUpnext(section) {
      The steps are shuffled, not the seats inside them. Each step is
      still "everybody's C", because that is the thing being shown --
      what moves is which letter comes up when. */
-  const letters = (seatingRoom && seatingRoom.versions) || [];
+  /* Seat letters, not print versions. "All the Cs" means the third
+     chair at every table, which is a thing you can point at from the
+     front of the room; the third *paper* is not, and after the
+     versions have been reshuffled for printing the two have nothing
+     to do with each other. */
   const rank = id => {
-    const at = letters.indexOf(id);
-    return at < 0 ? letters.length : at;
+    const at = ALPHABET.indexOf(drawn.slots[id] || "");
+    return at < 0 ? ALPHABET.length : at;
   };
   const groups = printOrder(section).map(g => (g.seats || [])
     .map(id => drawn.seats.find(s => s.id === id))
     .filter(s => s && s.seat.student)
-    .sort((a, b) => rank(a.seat.version) - rank(b.seat.version)))
+    .sort((a, b) => rank(a.id) - rank(b.id)))
     .filter(seats => seats.length);
   const widest = groups.reduce((n, g) => Math.max(n, g.length), 0);
-  const steps = Math.max(letters.length, widest);
+  const letters = ALPHABET.slice(0, widest).split("");
+  const steps = widest;
   const line = [];
   for (let i = 0; i < steps; i += 1)
     line.push({
@@ -3008,7 +3287,10 @@ function wireSeating() {
     () => setProjecting(!projecting());
   document.getElementById("seat-full").onclick = toggleFullscreen;
   for (const [id, get, set] of [
-    ["seat-versions", () => showVersions, v => { showVersions = v; }],
+    ["seat-versions",
+     () => (seatingMode === "printing" ? showVersions : showSlots),
+     v => { if (seatingMode === "printing") showVersions = v;
+            else showSlots = v; }],
     ["seat-labels", () => showLabels, v => { showLabels = v; }],
   ]) document.getElementById(id).onclick = () => {
     set(!get());
