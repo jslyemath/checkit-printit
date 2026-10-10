@@ -211,8 +211,6 @@ const ICON = {
   // Two ways round: the button says which one is in force and
   // turning it is what the arrows are for.
   swapby: "M4 8h13l-3-3M20 16H7l3 3",
-  // The same idea small, for the right-hand end of a settings row.
-  swap2: "M5 9h14l-3.5-3.5M19 15H5l3.5 3.5",
   /* A floppy. Thirty years after anybody last held one, still the
      only picture of "write this down" that nobody has to be taught.
 
@@ -732,6 +730,7 @@ function renderSeating() {
   drawStrip(section);
   drawStageBar(section, sections.length);
   paintWalk();                 // `drawn.box` may have moved under it
+  showOpen();                  // after the contents, so the height is real
   // The plus belongs to the mode and the selection, so it is redrawn
   // with them rather than only when a switch is flipped.
   paintChrome();
@@ -803,7 +802,7 @@ function drawRail() {
       if (rail.classList.contains("furled") && mode.value === seatingMode) {
         railOpen = !railOpen;
         if (railOpen) { paletteOpen = false; saveOpen = false; }
-        renderSeating();
+        showOpen();               // not a redraw: the rows must survive
         return;
       }
       enterMode(mode.value);
@@ -3192,12 +3191,46 @@ function drawStageBar(section, count) {
    display toggles, which is a drawer with one useful thing in it and a
    lid on top; unfolded in place they are next to the room's identity,
    where they belong. */
+function showOpen() {
+  /* Put the three open-states on the elements, without redrawing.
+
+     This is why the rail snapped open when hover became click: a
+     press called `renderSeating`, which rebuilds the rail's rows, and
+     a brand new element has no previous value to transition *from*,
+     so it is simply born at its open height. Hovering worked only
+     because hovering does not re-render.
+
+     Opening something is not a change to the room. It changes which
+     of two states an element is in, and the element is already there
+     to be told. */
+  const rail = document.getElementById("seat-modes");
+  const pal = document.getElementById("seat-palette");
+  const menu = document.getElementById("seat-savemenu");
+  if (rail) rail.classList.toggle("open", railOpen);
+  for (const [node, open] of [[pal, paletteOpen], [menu, saveOpen]]) {
+    if (!node) continue;
+    /* The exact height, not a guess.
+
+       `max-height: 320px` on a drawer 140px tall means the curve runs
+       out in the first third and the rest of the duration is the box
+       sitting still -- which is the jitter: a fast move, then a
+       stall, then the padding and the fade finishing on their own
+       schedule. Measured, every property lands together. */
+    node.style.setProperty("--full", node.scrollHeight + 10 + "px");
+    node.classList.toggle("open", open);
+  }
+  const plus = document.getElementById("seat-plus");
+  if (plus) {
+    const drawered = seatingMode === "groups" || seatingMode === "printing";
+    plus.classList.toggle("on", drawered && paletteOpen);
+    plus.setAttribute("aria-expanded", String(drawered && paletteOpen));
+  }
+}
+
 function togglePalette(force) {
   paletteOpen = force !== undefined ? force : !paletteOpen;
   if (paletteOpen) saveOpen = false;      // one open at a time
-  const section = currentSection();
-  drawPalette(section);
-  paintChrome();                  // the plus turns into a cross
+  showOpen();
 }
 
 function printActions(section) {
@@ -3221,8 +3254,13 @@ function printActions(section) {
      the actions it governs, labelled, and costs no edge. */
   const now = PRINT_BYS.find(o => o.value === printBy()) || PRINT_BYS[0];
   const next = PRINT_BYS[(PRINT_BYS.indexOf(now) + 1) % PRINT_BYS.length];
+  /* The label *is* the value, the way the display switch's label is
+     ("Seat letters" outside Printing, "Version labels" inside it).
+     It had been "Ordering" in grey with "by seat" in white beside it
+     and a swap glyph at each end -- two text colours and the same
+     arrows twice to say one thing. */
   const ordering = {
-    icon: "swapby", label: "Ordering", value: now.label.toLowerCase(),
+    icon: "swapby", label: now.label, setting: true,
     why: now.why + "  (click for: " + next.label.toLowerCase() + ")",
     go: () => { setPrintBy(next.value); paletteOpen = true; renderSeating(); },
   };
@@ -3478,7 +3516,6 @@ function drawPalette(section) {
   // Kept in the layout while shut, so its height can be animated to
   // nothing rather than the island blinking out of existence.
   pal.hidden = false;
-  pal.classList.toggle("open", paletteOpen);
   pal.classList.toggle("named", seatingMode === "printing");
 
   if (seatingMode === "printing") {
@@ -3498,14 +3535,10 @@ function drawPalette(section) {
          "Ordering by group" sat among four commands looking like a
          fifth one. The rule below it is the other half: the setting
          decides what the commands underneath say. */
-      if (act.value) {
-        b.classList.add("setting");
-        b.appendChild(el("span", "actval", act.value));
-        b.appendChild(svgIcon(ICON.swap2));
-      }
-      b.onclick = () => { if (!act.value) paletteOpen = false; act.go(); };
+      if (act.setting) b.classList.add("setting");
+      b.onclick = () => { if (!act.setting) paletteOpen = false; act.go(); };
       pal.appendChild(b);
-      if (act.value) pal.appendChild(el("div", "actrule"));
+      if (act.setting) pal.appendChild(el("div", "actrule"));
     }
     return;
   }
@@ -4049,6 +4082,7 @@ function panPaper(event) {
     paletteOpen = false;                 // rolls back into the plus
     railOpen = false;                    // and the mode list rolls shut
     saveOpen = false;                    // and so does the save menu
+    if (wasOpen) showOpen();
     if (selected || selectedChair || wasOpen) {
       selected = null;
       selectedChair = null;
@@ -4092,7 +4126,7 @@ function presentKeys(event) {
     if (numbering) { stopNumbering(false); return; }
     if (saveOpen || paletteOpen || railOpen) {
       saveOpen = paletteOpen = railOpen = false;
-      renderSeating();
+      showOpen();
       return;
     }
     if (picked) { picked = null; renderSeating(); return; }
@@ -4204,7 +4238,6 @@ function drawSaveMenu() {
   const dirty = dirtySections();
   const wanted = dirty.length > 0 && !projecting() && !upnext;
   pop.hidden = !wanted;
-  pop.classList.toggle("open", wanted && saveOpen);
   if (!wanted) { saveOpen = false; return; }
   const here = Math.min(seatingSection, sections.length - 1);
   const name = i => (sections[i] || {}).name || `section ${i + 1}`;
@@ -4304,7 +4337,7 @@ function wireSeating() {
     e.stopPropagation();
     saveOpen = !saveOpen;
     paletteOpen = false;         // one open at a time
-    renderSeating();
+    showOpen();
   };
   /* Pressing the paper, rather than a thing on it, either pans the
      room or -- if the pointer never travels -- clears the selection.

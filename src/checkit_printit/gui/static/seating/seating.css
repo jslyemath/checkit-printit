@@ -251,7 +251,11 @@
   transition: max-height var(--in-time) var(--in-curve),
               opacity var(--in-time) var(--in-curve),
               padding var(--in-time) var(--in-curve);
-  max-height: 260px;
+  /* The height it actually is, measured and written by `showOpen`.
+     A guessed ceiling means the curve finishes early and the box
+     then sits still for the rest of the duration, which is the stall
+     that reads as a jitter. */
+  max-height: var(--full, 260px);
   opacity: 1;
   padding: 5px;
   border-color: var(--isle-line);
@@ -605,7 +609,7 @@
   transition: max-height var(--in-time) var(--in-curve),
               opacity var(--in-time) var(--in-curve),
               padding var(--in-time) var(--in-curve);
-  max-height: 320px;
+  max-height: var(--full, 320px);
   opacity: 1;
   padding: 5px;
   border-color: var(--isle-line);
@@ -630,16 +634,14 @@
   color: var(--isle-ink); font: inherit; font-size: 13px;
   white-space: nowrap;
 }
-/* A setting: the value on the right, and a rule under it. The rows
-   below are verbs; this one is a state, and a menu that does not say
-   which is which makes you click to find out. */
-.deskopt.act.setting { color: var(--isle-dim); }
-.deskopt.act.setting .actname { margin-right: 14px; }
-.deskopt.act.setting .actval {
-  margin-left: auto; color: var(--isle-ink); font-weight: 600;
-}
-.deskopt.act.setting svg:last-child { width: 14px; height: 14px; }
-.actrule { height: 1px; margin: 3px 2px; background: var(--isle-line); }
+/* A setting, not a verb: it says a state rather than naming an
+   action, and the rule under it is what separates it from the
+   commands it governs. One text in one colour and one glyph -- the
+   first draft had a grey label beside a white value with the same
+   swap arrows at both ends, which is three marks for one fact. */
+.deskopt.act.setting { font-weight: 600; }
+.deskopt.act.setting svg { stroke: var(--isle-ink); }
+.actrule { height: 1px; margin: 4px 2px; background: var(--isle-line); }
 
 .deskopt.act svg { width: 17px; height: 17px; flex: 0 0 auto;
                    fill: none; stroke: var(--isle-dim); stroke-width: 1.7;
