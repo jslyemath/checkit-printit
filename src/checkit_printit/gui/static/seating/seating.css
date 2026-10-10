@@ -212,6 +212,27 @@
    side of a number that was already centred in it. That plus the
    island's own 4px gap put sixteen pixels between the minus sign and
    the first digit. */
+/* The floppy, with a dot when there is anything to write. The dot is
+   the state; the menu is where the choices are. */
+.savebtn { position: relative; aspect-ratio: 1; padding: 0; }
+.savebtn::after {
+  content: "";
+  position: absolute; top: 3px; right: 3px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--isle-key);
+  border: 2px solid var(--isle);
+}
+/* Hollow when the changes are in a room you are not looking at: there
+   is something to save, but not here. */
+.savebtn.elsewhere::after { background: var(--isle);
+                            border-color: var(--isle-key); }
+.savemenu {
+  position: absolute; z-index: 8;
+  flex-direction: column; align-items: stretch; gap: 2px; padding: 5px;
+}
+.savemenu .deskopt.act:disabled { opacity: .38; cursor: default; }
+.savemenu .deskopt.act:disabled:hover { background: none; }
+
 .zoomnum { width: 44px; padding: 0; justify-content: center;
            font-variant-numeric: tabular-nums; }
 #seat-sections { display: flex; gap: 3px; }
@@ -231,19 +252,32 @@
   bottom: calc(var(--edge) * 1px);
   left: 50%;
   transform: translateX(-50%);
-  display: flex;
-  flex-direction: column-reverse;
-  align-items: center;
-  gap: 8px;
-  max-width: calc(100% - 24px);
+  /* Sized by the rail alone, because the rail is what the stack is
+     anchored by: `layoutRail` nudges this box using the rail's width,
+     and a box sized by the strip instead put the rail 88px off centre
+     the moment anything was selected. The strip hangs off it rather
+     than sitting in it. */
+  width: max-content;
   pointer-events: none;          /* the gaps are canvas, not chrome */
 }
 .bottomstack > * { pointer-events: auto; }
-/* `.isle` is `position: absolute`, which takes an island out of flow
-   and leaves the column with nothing to stack. Inside the stack they
-   are laid out by it. */
-.bottomstack > .isle { position: relative; }
+/* `.isle` is `position: absolute`, which takes an island out of flow.
+   The rail is laid out by the stack; the strip is placed against it. */
+.bottomstack > .rail { position: relative; }
 .rail { justify-content: center; }
+
+/* Above the rail, centred on the rail, 8px clear of whatever height
+   the rail currently is. `bottom: 100%` is measured against the stack,
+   and the stack is exactly the rail -- so the gap tracks the rail
+   through furling, unfurling and its list opening, with nothing
+   computed and nothing to keep in step. */
+.bottomstack > .strip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 92vw;
+}
 
 /* The mode rail: the primary verb, where a hand rests. The one island
    allowed to be taller than the others, because it stacks a glyph over
@@ -370,10 +404,7 @@
 /* The selection strip: thin, above the rail, with no expanded state.
    Everything it needs is one row, which is what makes it work at 515px
    where a panel did not. */
-.strip {
-  position: relative;            /* placed by the stack, not by itself */
-  padding: 4px 6px; gap: 2px; font-size: 13px; max-width: 100%;
-}
+.strip { padding: 4px 6px; gap: 2px; font-size: 13px; }
 .strip .swatch {
   width: 17px; height: 17px; border-radius: 50%; margin: 0 6px 0 4px;
   border: 2px solid var(--isle-2); cursor: pointer; padding: 0;

@@ -441,6 +441,17 @@ def check(room, known=None):
                     f"{where}: the canvas {side} is {canvas.get(side)!r}, "
                     f"which is not a size.")
 
+        # Whether this room's stack comes out group by group or seat
+        # by seat. Per section, because one class may want handing a
+        # pile to each table while the next is handed out one at a
+        # time on a walk round -- that is a fact about how a lesson
+        # runs, and the two lessons are different rooms.
+        plan = section.get("print_by")
+        if plan is not None and plan not in ("group", "seat"):
+            raise RoomError(
+                f"{where}: the printing is ordered {plan!r}. It goes by "
+                f"'group' or by 'seat'.")
+
         shapes = section.get("shapes")
         if not isinstance(shapes, list):
             raise RoomError(f"{where}: the shapes are a list.")

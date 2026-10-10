@@ -280,6 +280,23 @@ class TestTheRoomComingBackIsChecked:
                     room_mod.check(r)
             seat.pop(field, None)
 
+    def test_a_room_says_how_its_own_stack_is_ordered(self):
+        """Per section: one class may want a pile handed to each table
+        while the next is handed out one at a time on a walk round."""
+        r = a_room()
+        section = r["sections"][0]
+        # Absent is the normal state and means by group, which is what
+        # a room drawn before the choice existed was doing.
+        assert "print_by" not in section
+        assert room_mod.check(r) is not None
+        for ok in ("group", "seat", None):
+            section["print_by"] = ok
+            assert room_mod.check(r) is not None, f"{ok!r} should pass"
+        for bad in ("groups", "Seat", "", 1, True):
+            section["print_by"] = bad
+            with pytest.raises(room_mod.RoomError, match="ordered"):
+                room_mod.check(r)
+
     def test_a_label_may_only_hang_on_a_desk_that_is_there(self):
         """It would silently fall back to the middle of the group's
         seats, and look like the anchor had been forgotten."""

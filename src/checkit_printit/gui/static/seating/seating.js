@@ -117,6 +117,12 @@ let railOpen = false;
 
 /* How the stack is ordered: group by group, or seat by seat.
 
+   On the section, not in this file. It changes what comes out of the
+   printer, so it belongs in the room that gets printed -- and one
+   class may want a pile per table while the next is handed out on a
+   walk round, which a single setting across the window could not
+   say. `printBy()` reads it; `setPrintBy` writes it.
+
    The only thing Printing needs chosen in advance. Order and Versions
    were going to be submodes with this underneath them, which wanted a
    second rail above the first, and a second rail is the one thing no
@@ -133,7 +139,17 @@ let railOpen = false;
    picks up a version. Nothing is left that needs choosing except
    this, and this is a property of the plan rather than of the
    moment. */
-let printBy = "group";           // group | seat
+function printBy() {
+  const section = currentSection();
+  return (section && section.print_by) || "group";
+}
+
+function setPrintBy(value) {
+  const section = currentSection();
+  if (!section) return;
+  if (value === "group") delete section.print_by;   // the default
+  else section.print_by = value;
+}
 
 /* Numbering by clicking, while it is happening.
 
@@ -194,6 +210,9 @@ const ICON = {
   // Two ways round: the button says which one is in force and
   // turning it is what the arrows are for.
   swapby: "M4 8h13l-3-3M20 16H7l3 3",
+  // A floppy. Thirty years after anybody last held one, still the
+  // only picture of "write this down" that nobody has to be taught.
+  save: "M4.5 3.5h11l4 4v13h-15z|M7.5 3.5v6h7v-6|M7.5 20v-6h9v6",
   // A route traced across the room.
   path: "M4 19c0-5 4-5 8-5s8 0 8-5|O4,19,2.1|O20,9,2.1",
   // A wand: ask the room to work something out.
@@ -511,6 +530,39 @@ function seatingDirty() {
     && JSON.stringify(seatingRoom) !== JSON.stringify(seatingState.room);
 }
 
+function sectionDirty(at) {
+  /* Whether one room differs from what is on disk.
+
+     Per section, because the rooms are independent: how 820 is laid
+     out and how its papers come off the stack has nothing to do with
+     830, and an instructor who has rearranged one should not have to
+     save -- or discard -- the other to act on it. */
+  if (!seatingRoom || !seatingState) return false;
+  const now = (seatingRoom.sections || [])[at];
+  const was = (seatingState.room.sections || [])[at];
+  return JSON.stringify(now) !== JSON.stringify(was);
+}
+
+function dirtySections() {
+  return ((seatingRoom && seatingRoom.sections) || [])
+    .map((s, i) => i).filter(sectionDirty);
+}
+
+function roomWith(only) {
+  /* The room as it is on disk, with one section replaced by the one
+     being edited. Saving a room means saving that room: the others
+     keep whatever they had, including whatever somebody else's tab
+     wrote.
+
+     `versions` comes along because the letters are room-wide -- there
+     is one alphabet in play, not one per section -- so a spread that
+     changed them changed them for the file. */
+  const out = JSON.parse(JSON.stringify(seatingState.room));
+  out.sections[only] = JSON.parse(JSON.stringify(seatingRoom.sections[only]));
+  out.versions = JSON.parse(JSON.stringify(seatingRoom.versions));
+  return out;
+}
+
 function projecting() {
   return document.body.classList.contains("projecting");
 }
@@ -628,8 +680,16 @@ function renderSeating() {
 
   drawRail();
   drawSections(sections);
-  drawPrintPlan();
-  document.getElementById("seat-saving").hidden = !seatingDirty();
+  const saving = document.getElementById("seat-saving");
+  saving.hidden = !seatingDirty();
+  const btn = document.getElementById("seat-save");
+  if (btn) {
+    const mine = dirtySections();
+    btn.classList.toggle("elsewhere",
+                         mine.length > 0 && !mine.includes(seatingSection));
+    btn.title = mine.length > 1 ? `${mine.length} rooms have unsaved changes`
+      : "Unsaved changes";
+  }
 
   if (!sections.length) {
     empty.textContent = "No room drawn for this course yet. The canvas is "
@@ -665,7 +725,12 @@ function enterMode(value) {
   seatingMode = value;
   picked = null;
   selectedChair = null;
-  numbering = null;              // it belongs to Printing and to a moment
+  /* Both belong to Printing and to a moment. `walking` was left
+     behind on the way out, so every press on the paper in People
+     mode went on drawing a route for a job nobody was doing. */
+  numbering = null;
+  walking = null;
+  paintWalk();
   if (value === "printing" && was !== "printing") {
     slotsBefore = showSlots;
     showSlots = false;
@@ -958,7 +1023,7 @@ function drawRoom(section) {
          the chairs answered at first, which meant aiming at a seat
          to choose a group -- and in Printing the seats are carrying
          numbers and versions you might be trying to hit instead. */
-      if (printBy === "group" && group) {
+      if (printBy() === "group" && group) {
         box.classList.add(numbering.taken.includes(group.id)
                           ? "counted" : "tocount");
         box.onpointerdown = e => {
@@ -1015,7 +1080,7 @@ function drawRoom(section) {
       } else if (numbering) {
         /* Armed: every click is "this one next", and nothing else on
            the canvas does anything until the run is over. */
-        const mine = printBy === "group" ? (group && group.id) : seat.id;
+        const mine = printBy() === "group" ? (group && group.id) : seat.id;
         const at = mine ? numbering.taken.indexOf(mine) : -1;
         if (at >= 0) card.classList.add("counted");
         else card.classList.add("tocount");
@@ -1161,10 +1226,10 @@ function paintNumbering(section, where, ox, oy) {
      answers at once, and the whole point of clicking them in order is
      that you are replacing the old one. */
   numbering.taken.forEach((id, i) => {
-    const seats = printBy === "group"
+    const seats = printBy() === "group"
       ? (groupsOf(section).find(g => g.id === id) || {}).seats || [id]
       : [id];
-    if (printBy === "group") {
+    if (printBy() === "group") {
       const ids = seats.filter(s => where[s]);
       if (!ids.length) return;
       const xs = ids.map(s => where[s][0]), ys = ids.map(s => where[s][1]);
@@ -1194,7 +1259,7 @@ function paintPrintOrder(section, where, ox, oy) {
      the event, so a click anywhere else on the card still selects the
      seat. That is the whole reason Printing needs no submode: the
      thing you touch is the thing you change. */
-  if (printBy === "seat") {
+  if (printBy() === "seat") {
     /* One running number across the whole room and no group badges --
        the stack is a single sequence, so a number saying which group
        it belongs to would be answering a question nobody asked. */
@@ -1221,7 +1286,7 @@ function paintPrintOrder(section, where, ox, oy) {
 
   const line = printOrder(section);
   line.forEach((group, i) => {
-    if (printBy === "group") {
+    if (printBy() === "group") {
       const ids = (group.seats || []).filter(id => where[id]);
       if (ids.length) {
         const xs = ids.map(id => where[id][0]), ys = ids.map(id => where[id][1]);
@@ -1281,7 +1346,7 @@ function swapOrder(section, aId, bId) {
      keeps its place and only these two move. */
   const a = seatById(section, aId), b = seatById(section, bId);
   if (!a || !b) return;
-  if (printBy === "seat") {
+  if (printBy() === "seat") {
     const run = roomRun(section);
     const i = run.indexOf(aId), j = run.indexOf(bId);
     if (i < 0 || j < 0) return;
@@ -1969,44 +2034,6 @@ function drawStrip(section) {
   }
 }
 
-function drawPrintPlan() {
-  /* How the stack is ordered, beside the room's own name.
-
-     This is a property of the document, not of the moment: it decides
-     what comes out of the printer and it is still true tomorrow when
-     nobody is looking at Printing. Properties of the document belong
-     where the document is -- which in this window is the top left,
-     the island that says which room you are in and whether it is
-     saved. It had been in the strip, which is an infobox about
-     whatever was clicked, and a setting is not that. */
-  const host = document.getElementById("seat-plan");
-  host.textContent = "";
-  const wanted = seatingMode === "printing" && !projecting() && !upnext;
-  host.hidden = !wanted;
-  if (!wanted) return;
-  host.appendChild(el("span", "isep"));
-
-  /* One button showing the state, not two showing both states.
-
-     A binary drawn as a pair of mutually exclusive buttons costs
-     twice the width to say the same thing, and this island could not
-     afford it: with Save and Discard up it came to 365px and ran 63px
-     under the top-right island. The pair alone was 139 of that.
-
-     The window already has the right pattern for this -- the display
-     switch is one button that reads "Seat letters" or "Version
-     labels" depending on where you are. Same shape of fact, same
-     shape of control. */
-  const now = PRINT_BYS.find(o => o.value === printBy) || PRINT_BYS[0];
-  const next = PRINT_BYS[(PRINT_BYS.indexOf(now) + 1) % PRINT_BYS.length];
-  const b = el("button", "ibtn", now.label);
-  b.type = "button";
-  b.title = now.why + "  (click for: " + next.label.toLowerCase() + ")";
-  b.appendChild(svgIcon(ICON.swapby));
-  b.onclick = () => { printBy = next.value; renderSeating(); };
-  host.appendChild(b);
-}
-
 function drawPlanStrip(strip, section) {
   /* The print plan: how the stack is ordered, and the things you can
      ask the room to do to it.
@@ -2024,15 +2051,15 @@ function drawPlanStrip(strip, section) {
   strip.hidden = false;
   strip.classList.add("planstrip");
 
-  const total = printBy === "group"
+  const total = printBy() === "group"
     ? groupsOf(section).length : drawn.seats.length;
   const head = el("span", "scount");
   head.appendChild(svgIcon(ICON.printer));
   strip.appendChild(head);
   strip.appendChild(el("span", "sname flat", walking
-    ? (printBy === "group" ? "Draw past the groups in order"
+    ? (printBy() === "group" ? "Draw past the groups in order"
                            : "Draw past the seats in order")
-    : (printBy === "group" ? "Click the groups in order"
+    : (printBy() === "group" ? "Click the groups in order"
                            : "Click the seats in order")));
   strip.appendChild(el("span", "smeta upcount",
                        numbering.taken.length + "/" + total));
@@ -3160,6 +3187,20 @@ function printActions(section) {
      is one ordinary tap, is focusable, and behaves the same under a
      finger. It is also the mechanism this window already has, built
      for the furniture. */
+  /* First, because it decides what the rest of the list means: the
+     two numbering actions below say "groups" or "seats" according to
+     it. It had been in the top-left island with the room's name,
+     which was the right category -- a property of the document --
+     and the wrong size: the island was already running under its
+     neighbour and this was 139px of it. In the drawer it is beside
+     the actions it governs, labelled, and costs no edge. */
+  const now = PRINT_BYS.find(o => o.value === printBy()) || PRINT_BYS[0];
+  const next = PRINT_BYS[(PRINT_BYS.indexOf(now) + 1) % PRINT_BYS.length];
+  const ordering = {
+    icon: "swapby", label: "Ordered " + now.label.toLowerCase(),
+    why: now.why + "  (click for: " + next.label.toLowerCase() + ")",
+    go: () => { setPrintBy(next.value); paletteOpen = true; renderSeating(); },
+  };
   const spread = {
     icon: "vletters", label: "Spread the versions",
     why: "Hand the letters out again, as far apart as the room allows.",
@@ -3172,23 +3213,23 @@ function printActions(section) {
   };
   const byClick = {
     icon: "printer",
-    label: printBy === "group" ? "Number groups by clicking"
+    label: printBy() === "group" ? "Number groups by clicking"
                                : "Number seats by clicking",
-    why: printBy === "group"
+    why: printBy() === "group"
       ? "Click the groups in the order you want them printed."
       : "Click the seats in the order you want them printed.",
     go: () => startNumbering(),
   };
   const byPath = {
     icon: "path",
-    label: printBy === "group" ? "Draw a path past the groups"
+    label: printBy() === "group" ? "Draw a path past the groups"
                                : "Draw a path past the seats",
     why: "Trace the route you will walk. Whatever the line passes "
       + "takes the next place. Lift the pointer to skip a gap and "
       + "carry on; press Done when the route is finished.",
     go: () => startWalking(),
   };
-  return [byClick, byPath, spread, count];
+  return [ordering, byClick, byPath, spread, count];
 }
 
 function startNumbering() {
@@ -3227,7 +3268,7 @@ function walkPast(cx, cy) {
     if (d < gap) { gap = d; best = seat; }
   }
   if (!best) return;
-  const id = printBy === "group"
+  const id = printBy() === "group"
     ? (groupOfSeat(section)[best.id] || {}).id : best.id;
   if (!id || numbering.taken.includes(id)) return;
   numbering.taken.push(id);
@@ -3290,7 +3331,12 @@ function paintWalk() {
 }
 
 function walkPointer(event) {
-  if (!walking) return false;
+  if (!walking || seatingMode !== "printing") return false;
+  /* An open drawer is dismissed by the press, not drawn through. A
+     menu is in front of the canvas and has to behave as though it is:
+     the first press outside it puts it away, and that press does
+     nothing else. */
+  if (paletteOpen) { paletteOpen = false; renderSeating(); return true; }
   if (event.pointerType === "mouse" && event.button !== 0) return true;
   event.preventDefault();
   const paper = seatingPaper();
@@ -3335,7 +3381,7 @@ function stopNumbering(keep) {
   walking = null;
   paintWalk();
   if (keep && section && taken.length) {
-    if (printBy === "group") {
+    if (printBy() === "group") {
       const rest = printOrder(section).filter(g => !taken.includes(g.id));
       taken.map(id => groupsOf(section).find(g => g.id === id))
         .filter(Boolean).concat(rest)
@@ -3365,7 +3411,7 @@ function takeNext(id) {
   }
   numbering.taken.push(id);
   const section = currentSection();
-  const total = printBy === "group"
+  const total = printBy() === "group"
     ? groupsOf(section).length : drawn.seats.length;
   if (numbering.taken.length >= total) { stopNumbering(true); return; }
   renderSeating();
@@ -4064,14 +4110,86 @@ async function loadSeating() {
   renderSeating();
 }
 
-async function saveSeating() {
+async function saveSeating(only) {
+  /* `only` is a section index, or undefined for the lot.
+
+     What goes to the server is a whole room either way -- the file is
+     one document and `room.check` has to see all of it -- but a room
+     built from the saved copy with one section swapped in means only
+     that section's edits land. */
+  const room = only === undefined ? seatingRoom : roomWith(only);
   try {
-    const out = await api("/api/seating/save", { room: seatingRoom });
+    const out = await api("/api/seating/save", { room: room });
+    const keep = seatingRoom;
     seatingState = out;
     seatingRoom = JSON.parse(JSON.stringify(out.room));
+    // Anything not saved stays edited, or saving one room would throw
+    // away the work in progress on the other.
+    if (only !== undefined)
+      (keep.sections || []).forEach((s, i) => {
+        if (i !== only) seatingRoom.sections[i] = s;
+      });
     renderSeating();
     toast(out.note);
   } catch (err) { toast(err.message, true); }
+}
+
+function discardSection(at) {
+  if (!seatingState) return;
+  seatingRoom.sections[at] =
+    JSON.parse(JSON.stringify(seatingState.room.sections[at]));
+  selected = null;
+  selectedChair = null;
+  renderSeating();
+}
+
+function openSaveMenu(near) {
+  /* What to save, as a short list rather than a row of buttons. Two
+     rooms is two of everything; six would be twelve. */
+  document.querySelectorAll(".savemenu").forEach(n => n.remove());
+  const sections = (seatingRoom && seatingRoom.sections) || [];
+  const dirty = dirtySections();
+  const pop = el("div", "isle savemenu");
+  const here = Math.min(seatingSection, sections.length - 1);
+  const name = i => (sections[i] || {}).name || `section ${i + 1}`;
+
+  const item = (label, why, go, off) => {
+    const b = el("button", "deskopt act", null);
+    b.type = "button";
+    b.title = why;
+    b.appendChild(svgIcon(ICON[off ? "trash" : "save"]));
+    b.appendChild(el("span", "actname", label));
+    b.disabled = Boolean(go === null);
+    if (go) b.onclick = () => { pop.remove(); go(); };
+    pop.appendChild(b);
+    return b;
+  };
+
+  item("Save " + name(here),
+       "Write this room. The other rooms keep what is on disk.",
+       sectionDirty(here) ? () => saveSeating(here) : null);
+  if (sections.length > 1)
+    item(dirty.length > 1 ? `Save all ${dirty.length} rooms` : "Save all",
+         "Write every room that has changed.",
+         dirty.length ? () => saveSeating() : null);
+  item("Discard " + name(here),
+       "Put this room back the way it is on disk.",
+       sectionDirty(here) ? () => discardSection(here) : null, true);
+  if (sections.length > 1 && dirty.length > 1)
+    item("Discard all", "Put every room back the way it is on disk.",
+         () => discardRoom(), true);
+
+  document.getElementById("view-seating").appendChild(pop);
+  const box = near.getBoundingClientRect();
+  const app = document.getElementById("view-seating").getBoundingClientRect();
+  pop.style.left = Math.round(box.left - app.left) + "px";
+  pop.style.top = Math.round(box.bottom - app.top + 8) + "px";
+  const shut = e => {
+    if (pop.contains(e.target)) return;
+    pop.remove();
+    document.removeEventListener("pointerdown", shut, true);
+  };
+  setTimeout(() => document.addEventListener("pointerdown", shut, true), 0);
 }
 
 function sizeSeating() {
@@ -4130,8 +4248,9 @@ function wireSeating() {
     renderSeating();
   };
   paintChrome();                   // draws every icon for the first time
-  document.getElementById("seat-save").onclick = saveSeating;
-  document.getElementById("seat-discard").onclick = discardRoom;
+  const saveBtn = document.getElementById("seat-save");
+  saveBtn.appendChild(svgIcon(ICON.save));
+  saveBtn.onclick = e => { e.stopPropagation(); openSaveMenu(saveBtn); };
   /* Pressing the paper, rather than a thing on it, either pans the
      room or -- if the pointer never travels -- clears the selection.
      `panPaper` decides which on release. */

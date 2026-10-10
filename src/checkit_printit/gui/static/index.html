@@ -225,14 +225,17 @@
       <!-- Save is absent until there is something to save. Most of
            the time a Save button is a button with nothing to do, and
            Discard beside it is a button with nothing to undo. -->
-      <!-- How the printed stack is ordered. A property of the room
-           rather than of the moment, so it sits with the room's own
-           name rather than in the infobox about what was clicked. -->
-      <span id="seat-plan" hidden></span>
+      <!-- One button, and a dot when there is anything to save.
+
+           "Save" and "Discard" as words cost 111px of an island that
+           was already running under its neighbour, and they were
+           words for an action whose icon everybody over thirty can
+           read and everybody under thirty has learned anyway. What
+           goes where, and whether it is this room or all of them, is
+           the menu's business. -->
       <span id="seat-saving" hidden>
         <span class="isep"></span>
-        <button id="seat-save" class="ibtn key">Save</button>
-        <button id="seat-discard" class="ibtn">Discard</button>
+        <button id="seat-save" class="ibtn savebtn" title="Save"></button>
       </span>
     </div>
 
