@@ -438,6 +438,14 @@
 }
 .plusbtn:hover { transform: scale(1.06); }
 .plusbtn.on { transform: rotate(45deg); }
+/* A wand does not read as a cross when it is turned, so the button
+   that holds actions says it is open by lighting rather than by
+   spinning. */
+.plusbtn svg { width: 21px; height: 21px; fill: none; stroke: currentColor;
+               stroke-width: 1.8; stroke-linecap: round;
+               stroke-linejoin: round; }
+.plusbtn:has(svg).on { transform: none; background: var(--isle);
+                       color: var(--isle-key); }
 .strip .srename {
   font: inherit; font-weight: 600; width: 150px;
   padding: 3px 7px; border-radius: 6px;
@@ -519,6 +527,23 @@
   background: none; cursor: pointer;
 }
 .deskopt:hover { background: var(--isle-2); }
+/* An action, which has a name. The furniture can be a silhouette
+   because a rectangle is what you are asking for; "spread the
+   versions out" has no picture, and a column of unlabelled glyphs is
+   the hidden menu this is meant not to be. */
+.palette.named { align-items: stretch; }
+.deskopt.act {
+  width: auto; height: 32px; gap: 8px;
+  padding: 0 10px 0 8px;
+  justify-content: flex-start;
+  color: var(--isle-ink); font: inherit; font-size: 13px;
+  white-space: nowrap;
+}
+.deskopt.act svg { width: 17px; height: 17px; flex: 0 0 auto;
+                   fill: none; stroke: var(--isle-dim); stroke-width: 1.7;
+                   stroke-linecap: round; stroke-linejoin: round; }
+.deskopt.act:hover svg { stroke: var(--isle-ink); }
+#seat-plan:not([hidden]) { display: contents; }
 .desktile {
   display: flex; align-items: center; justify-content: center;
   background: oklch(0.74 0.015 260); border-radius: 2px; flex: 0 0 auto;
@@ -623,6 +648,15 @@
   font-size: 14px; height: 23px; min-width: 23px; border-radius: 7px;
   box-shadow: 0 2px 6px oklch(0.4 0.06 var(--h, 255) / .35);
 }
+/* While numbering by clicking: the ones still to be chosen invite a
+   click, and the ones already taken step back. The room says which
+   state it is in rather than a banner saying it. */
+.canvas .seatcard.tocount { cursor: pointer; }
+.canvas .seatcard.tocount:hover {
+  outline: 2.5px solid var(--isle-key); outline-offset: 2px;
+}
+.canvas .seatcard.counted { opacity: .45; }
+
 /* ------------------------------------------------- canvas badges -- */
 
 /* Everything small written on the canvas that can be carried or
