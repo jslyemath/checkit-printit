@@ -603,14 +603,16 @@
 .ordertag {
   position: absolute;
   z-index: 5;
-  min-width: 17px; height: 17px;
+  /* The same 20 by 20 as the version circle opposite it. They are the
+     two things a seat says in Printing and they were 17 against 20,
+     which read as the number mattering less than the letter. */
+  min-width: 20px; height: 20px;
   display: flex; align-items: center; justify-content: center;
   padding: 0 4px;
-  border: 0; border-radius: 5px;
+  border: 0; border-radius: 6px;
   background: var(--solid); color: white;
-  font: inherit; font-size: 11px; font-weight: 800;
+  font: inherit; font-size: 12px; font-weight: 800;
   font-variant-numeric: tabular-nums;
-  cursor: text;
 }
 .ordertag.seat { top: 2px; left: 2px; }
 /* Bigger than a seat's, and centred on its own point, so that the
@@ -621,14 +623,52 @@
   font-size: 14px; height: 23px; min-width: 23px; border-radius: 7px;
   box-shadow: 0 2px 6px oklch(0.4 0.06 var(--h, 255) / .35);
 }
-.ordertag:hover { outline: 2px solid white; outline-offset: -1px; }
-.ordertype {
-  position: absolute; z-index: 6;
-  width: 34px; height: 19px; padding: 0 3px;
-  border: 1px solid var(--isle-key); border-radius: 5px;
-  background: oklch(0.19 0.01 260); color: var(--isle-ink);
-  font: inherit; font-size: 11px; font-weight: 800; text-align: center;
+/* ------------------------------------------------- canvas badges -- */
+
+/* Everything small written on the canvas that can be carried or
+   retyped: the print numbers and the version letters. The group label
+   is the same idea in a different shape, and keeps its own rules
+   because what it drags to is anchors rather than other labels.
+
+   A hand, because it can be picked up. The first draft said `cursor:
+   text`, which promised an edit on one click and was the behaviour
+   it had -- both were wrong. */
+.badge { cursor: grab; }
+.badge:hover { outline: 2px solid white; outline-offset: -1px; }
+.badge.dragging {
+  cursor: grabbing;
+  z-index: 11;
+  transform: translate(-50%, -50%) scale(1.15);
+  box-shadow: 0 6px 16px oklch(0.2 0.02 260 / .35);
+}
+/* The one it would trade with, lit while the pointer is near enough
+   for the release to count. */
+.badge.swapping { outline: 2.5px solid var(--isle-key); outline-offset: 1px; }
+
+/* Being retyped. White with a ring in the group's own colour, which
+   is what the label does -- the dark field this had before was the
+   islands' colour worn by something that is not an island.
+
+   The badge becomes its own editor rather than being replaced by
+   one, so the box, the corner and the card are all unchanged and
+   nothing jumps when the editing starts. */
+.vcircle.badge.editing { border-radius: 6px; width: auto; }
+.badge.editing {
+  background: white;
+  box-shadow: 0 0 0 2px oklch(0.585 calc(0.155 * var(--c, 1))
+                             var(--h, 255));
+  outline: 0;
+  cursor: text;
+  min-width: 34px;
+  padding: 0 2px;
+}
+.badge.editing input {
+  width: 100%; min-width: 0;
+  border: 0; padding: 0; background: none; outline: 0;
+  text-align: center;
+  font: inherit; font-size: 12px; font-weight: 800;
   font-variant-numeric: tabular-nums;
+  color: oklch(0.330 calc(0.085 * var(--c, 1)) var(--h, 255));
 }
 
 /* Pull an edge or a corner. Round, because they are not the square
@@ -765,7 +805,7 @@
    second badge. */
 .seatcard .vcircle {
   position: absolute; top: 2px; right: 2px;
-  width: 20px; height: 20px;
+  width: 20px; height: 20px; min-width: 20px; box-sizing: border-box;
   display: flex; align-items: center; justify-content: center;
   border-radius: 50%;
   background: var(--solid); color: white;
