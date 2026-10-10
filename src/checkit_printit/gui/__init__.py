@@ -707,6 +707,55 @@ def api_seating(course, _body):
     return _seating_json(course)
 
 
+def api_seating_versions(course, body):
+    """Hand out version letters again, by the real colouring.
+
+    `room.assign_versions` -- the same function the CLI uses, with the
+    same graph colouring and the same heuristics about who can see
+    whom. The rule in this project is that a button calls the function
+    the command does, and a second implementation of the colouring
+    living in JavaScript would be exactly the kind of drift that rule
+    exists to stop: the browser's answer and the printed answer would
+    agree until one of them was improved.
+
+    Nothing is written. The room comes back changed and the canvas
+    holds it as an unsaved edit, so an instructor who dislikes the
+    shuffle presses Discard and nothing happened. Reshuffling is not a
+    decision anybody should have to take permanently to look at.
+    """
+    incoming = body.get("room")
+    if not isinstance(incoming, dict):
+        raise GuiError("that request carried no room.")
+    at = body.get("section")
+    sections = incoming.get("sections") or []
+    if not isinstance(at, int) or not 0 <= at < len(sections):
+        raise GuiError("that request did not say which room.")
+
+    letters = body.get("versions") or incoming.get("versions")
+    if not isinstance(letters, list) or not letters:
+        raise GuiError("no version letters to hand out.")
+
+    section = sections[at]
+    try:
+        chosen, clashes = room_mod.assign_versions(
+            room_mod.seats_of(section), room_mod.group_of(section), letters)
+    except room_mod.RoomError as exc:
+        raise GuiError(str(exc)) from None
+    room_mod.apply_versions(section, chosen)
+    incoming["versions"] = list(letters)
+
+    note = f"Versions spread over {len(letters)} letters."
+    if clashes:
+        # Said plainly rather than hidden: with fewer letters than a
+        # table has seats there is no colouring without a repeat, and
+        # the instructor is the one who chose how many letters.
+        note += (f" {len(clashes)} pair"
+                 f"{'s' if len(clashes) != 1 else ''} of neighbours had "
+                 f"to share -- there are not enough letters to keep "
+                 f"every pair apart.")
+    return {"room": incoming, "note": note, "clashes": len(clashes)}
+
+
 def api_seating_save(course, body):
     """Write the room the canvas is showing, and the chart if it is ours.
 
@@ -1053,6 +1102,7 @@ ROUTES = {
     "/api/setup/finish": api_setup_finish,
     "/api/seating": api_seating,
     "/api/seating/save": api_seating_save,
+    "/api/seating/versions": api_seating_versions,
     "/api/print": api_print,
     "/api/print/save": api_print_save,
     "/api/print/pull": api_print_pull,
