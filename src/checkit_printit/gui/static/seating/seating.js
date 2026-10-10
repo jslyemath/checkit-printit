@@ -4270,6 +4270,7 @@ function bandPaper(event) {
      nothing to offer afterwards. */
   const kind = bandKind();
   if (!kind) return false;
+  event.preventDefault();
   const paper = seatingPaper();
   const band = document.getElementById("seat-band");
   const area = drawn.box || { x: 0, y: 0 };
@@ -4363,7 +4364,9 @@ function panPaper(event) {
      redraw replaces -- the lesson from the resize grips, which died
      after a millimetre because a `pointermove` handler rebuilt the
      node under the pointer. */
-  if (event.pointerType === "mouse" && event.button !== 0) return;
+  if (event.pointerType === "mouse" && event.button !== 0
+      && event.button !== 1) return;
+  event.preventDefault();
   const paper = seatingPaper();
   const from = [event.clientX, event.clientY];
   const start = { x: pan.x, y: pan.y };
