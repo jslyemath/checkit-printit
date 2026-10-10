@@ -135,6 +135,14 @@ let railOpen = false;
    moment. */
 let printBy = "group";           // group | seat
 
+/* Numbering by clicking, while it is happening.
+
+   A quasimode in Raskin's sense: a state you are held in only while
+   you are doing the thing, that ends by itself when the thing is
+   done. Not a mode -- nothing here persists, there is no button left
+   lit afterwards, and escaping puts the room back exactly. */
+let numbering = null;            // null, or { taken: [ids...] }
+
 // ------------------------------------------------------------ constants --
 
 const GRID = 20;        // what a dragged desk snaps to, in room units
@@ -178,6 +186,10 @@ const ICON = {
   upnext: "M20.5 4.5h-17A1.5 1.5 0 0 0 2 6v9a1.5 1.5 0 0 0 1.5 1.5H7v4"
     + "l5-4h8.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5z",
   grow: "M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5",
+  // A wand: ask the room to work something out.
+  wand: "M4 20L15 9|M12.5 6.5l5 5|M15.5 3.5l.9 2.1 2.1.9-2.1.9-.9 2.1"
+    + "-.9-2.1-2.1-.9 2.1-.9z|M6 4.5l.6 1.4 1.4.6-1.4.6L6 8.5l-.6-1.4"
+    + "L4 6.5l1.4-.6z",
   /* One big A on a card, and a label pill: each icon is a small
      picture of the thing it turns on. A and B side by side said
      "these differ" more precisely, and looked like two bugs on a
@@ -575,12 +587,22 @@ function paintChrome() {
     : (selected && selected.kind === "group" && section
        ? shapesHolding(section,
            groupsOf(section).find(g => g.id === selected.id) || {})[0] : null);
-  const wanted = !projecting() && !upnext && section
-    && (seatingMode === "groups" || (seatingMode === "seats" && shape));
+  const drawered = seatingMode === "groups" || seatingMode === "printing";
+  const wanted = !projecting() && !upnext && !numbering && section
+    && (drawered || (seatingMode === "seats" && shape));
   plus.hidden = !wanted;
-  plus.classList.toggle("on", seatingMode === "groups" && paletteOpen);
-  plus.title = seatingMode === "seats"
-    ? "Add a seat to this group" : "Add a group";
+  plus.classList.toggle("on", drawered && paletteOpen);
+  /* The glyph says what the corner does in this mode. A plus where
+     the action is adding something; a wand where it is asking the
+     room to work something out. The position is the constant: the
+     one thing this mode can do that is not about a selection. */
+  plus.textContent = "";
+  if (seatingMode === "printing") plus.appendChild(svgIcon(ICON.wand));
+  else plus.textContent = "+";
+  plus.title = seatingMode === "seats" ? "Add a seat to this group"
+    : seatingMode === "printing" ? "What Printing can do to this room"
+    : "Add a group";
+  plus.setAttribute("aria-expanded", String(drawered && paletteOpen));
   plus.onclick = e => {
     e.stopPropagation();
     if (seatingMode === "seats") addChair(section, shape);
@@ -596,6 +618,7 @@ function renderSeating() {
 
   drawRail();
   drawSections(sections);
+  drawPrintPlan();
   document.getElementById("seat-saving").hidden = !seatingDirty();
 
   if (!sections.length) {
@@ -632,6 +655,7 @@ function enterMode(value) {
   seatingMode = value;
   picked = null;
   selectedChair = null;
+  numbering = null;              // it belongs to Printing and to a moment
   if (value === "printing" && was !== "printing") {
     slotsBefore = showSlots;
     showSlots = false;
@@ -978,6 +1002,18 @@ function drawRoom(section) {
         if (who) card.classList.add("movable");
         if (picked && picked.seat === seat) card.classList.add("picked");
         card.onpointerdown = e => dragName(e, card, { seat: seat });
+      } else if (numbering) {
+        /* Armed: every click is "this one next", and nothing else on
+           the canvas does anything until the run is over. */
+        const mine = printBy === "group" ? (group && group.id) : seat.id;
+        const at = mine ? numbering.taken.indexOf(mine) : -1;
+        if (at >= 0) card.classList.add("counted");
+        else card.classList.add("tocount");
+        card.onpointerdown = e => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (mine) takeNext(mine);
+        };
       } else if (seatingMode === "printing") {
         /* Click a seat to pick it, click a second to trade versions.
 
@@ -1069,7 +1105,8 @@ function drawRoom(section) {
       }
     }
 
-  if (seatingMode === "printing" && !upnext)
+  if (numbering) paintNumbering(section, where, ox, oy);
+  else if (seatingMode === "printing" && !upnext)
     paintPrintOrder(section, where, ox, oy);
 
   if (upnext) paintUpnext(section, where, ox, oy);
@@ -1106,6 +1143,32 @@ function drawRoom(section) {
   }
 
   applyZoom(section);
+}
+
+function paintNumbering(section, where, ox, oy) {
+  /* While numbering, the only numbers on screen are the ones already
+     clicked. Showing the old order underneath would be showing two
+     answers at once, and the whole point of clicking them in order is
+     that you are replacing the old one. */
+  numbering.taken.forEach((id, i) => {
+    const seats = printBy === "group"
+      ? (groupsOf(section).find(g => g.id === id) || {}).seats || [id]
+      : [id];
+    if (printBy === "group") {
+      const ids = seats.filter(s => where[s]);
+      if (!ids.length) return;
+      const xs = ids.map(s => where[s][0]), ys = ids.map(s => where[s][1]);
+      const group = groupsOf(section).find(g => g.id === id);
+      const tag = el("span", "ordertag group", String(i + 1));
+      tint(tag, hueOf(section, group), chromaOf(group));
+      tag.style.left = ((Math.min(...xs) + Math.max(...xs)) / 2 - ox) + "px";
+      tag.style.top = (Math.min(...ys) - CARD_H / 2 - 24 - oy) + "px";
+      seatingCanvas().appendChild(tag);
+    } else {
+      const card = drawn.cards[id];
+      if (card) card.appendChild(el("span", "ordertag seat", String(i + 1)));
+    }
+  });
 }
 
 function paintPrintOrder(section, where, ox, oy) {
@@ -1822,6 +1885,7 @@ function drawStrip(section) {
        "what am I looking at". Everywhere else an empty selection
        really is nothing, and the strip goes away. */
     if (seatingMode === "printing") { drawPlanStrip(strip, section); return; }
+
     strip.hidden = true;
     return;
   }
@@ -1895,24 +1959,24 @@ function drawStrip(section) {
   }
 }
 
-function drawPlanStrip(strip, section) {
-  /* The print plan: how the stack is ordered, and the things you can
-     ask the room to do to it.
+function drawPrintPlan() {
+  /* How the stack is ordered, beside the room's own name.
 
-     Here rather than in an island of its own because it is contextual
-     -- it belongs to Printing and to nothing else -- and this is the
-     contextual surface. An options bar, in the sense Illustrator has
-     meant since 1997. */
-  strip.hidden = false;
-  strip.classList.add("planstrip");
-
-  const head = el("span", "scount");
-  head.appendChild(svgIcon(ICON.printer));
-  head.title = "How the printed stack is ordered";
-  strip.appendChild(head);
-
+     This is a property of the document, not of the moment: it decides
+     what comes out of the printer and it is still true tomorrow when
+     nobody is looking at Printing. Properties of the document belong
+     where the document is -- which in this window is the top left,
+     the island that says which room you are in and whether it is
+     saved. It had been in the strip, which is an infobox about
+     whatever was clicked, and a setting is not that. */
+  const host = document.getElementById("seat-plan");
+  host.textContent = "";
+  const wanted = seatingMode === "printing" && !projecting() && !upnext;
+  host.hidden = !wanted;
+  if (!wanted) return;
+  host.appendChild(el("span", "isep"));
   for (const one of PRINT_BYS) {
-    const b = el("button", "ibtn tiny" + (one.value === printBy ? " on" : ""),
+    const b = el("button", "ibtn" + (one.value === printBy ? " on" : ""),
                  one.label);
     b.type = "button";
     b.title = one.why;
@@ -1922,24 +1986,43 @@ function drawPlanStrip(strip, section) {
       printBy = one.value;
       renderSeating();
     };
-    strip.appendChild(b);
+    host.appendChild(b);
   }
+}
 
+function drawPlanStrip(strip, section) {
+  /* The print plan: how the stack is ordered, and the things you can
+     ask the room to do to it.
+
+     Here rather than in an island of its own because it is contextual
+     -- it belongs to Printing and to nothing else -- and this is the
+     contextual surface. An options bar, in the sense Illustrator has
+     meant since 1997. */
+  /* Only while numbering by clicking. The strip is an infobox, and
+     for as long as the quasimode is running the thing worth saying is
+     how far through it is -- which is a fact about what is happening
+     rather than a control. Everything that used to be here was a
+     setting or a command and has gone where those belong. */
+  if (!numbering) { strip.hidden = true; return; }
+  strip.hidden = false;
+  strip.classList.add("planstrip");
+
+  const total = printBy === "group"
+    ? groupsOf(section).length : drawn.seats.length;
+  const head = el("span", "scount");
+  head.appendChild(svgIcon(ICON.printer));
+  strip.appendChild(head);
+  strip.appendChild(el("span", "sname flat",
+    printBy === "group" ? "Click the groups in order"
+                        : "Click the seats in order"));
+  strip.appendChild(el("span", "smeta upcount",
+                       numbering.taken.length + "/" + total));
   strip.appendChild(el("span", "isep"));
-  const letters = (seatingRoom && seatingRoom.versions) || [];
-  const many = el("span", "scount");
-  many.appendChild(svgIcon(ICON.vletters));
-  many.appendChild(el("span", "num", String(letters.length)));
-  many.title = letters.length + " version" + (letters.length === 1 ? "" : "s")
-    + " in play: " + letters.join(" ");
-  strip.appendChild(many);
-
-  const spread = el("button", "ibtn tiny", "Spread out");
-  spread.type = "button";
-  spread.title = "Hand the letters out again, as far apart as the room "
-    + "allows. Neighbours and tablemates get different papers.";
-  spread.onclick = () => spreadVersions(section);
-  strip.appendChild(spread);
+  const stop = el("button", "ibtn tiny", "Cancel");
+  stop.type = "button";
+  stop.title = "Leave the order as it was. Escape does it too.";
+  stop.onclick = () => stopNumbering(false);
+  strip.appendChild(stop);
 }
 
 function drawSeatStrip(strip, section, seat) {
@@ -3035,6 +3118,102 @@ function togglePalette(force) {
   paintChrome();                  // the plus turns into a cross
 }
 
+function printActions(section) {
+  /* What Printing can do to the room, as opposed to what you can do
+     to one seat.
+
+     In the corner button rather than a menu. A right-click menu hides
+     its contents, cannot be reached from a keyboard without knowing
+     it is there, and has no honest answer on a touch screen -- the
+     usual one is a long press, which in this canvas is already the
+     start of a drag. A button that unrolls a labelled list is visible,
+     is one ordinary tap, is focusable, and behaves the same under a
+     finger. It is also the mechanism this window already has, built
+     for the furniture. */
+  const spread = {
+    icon: "vletters", label: "Spread the versions",
+    why: "Hand the letters out again, as far apart as the room allows.",
+    go: () => spreadVersions(section),
+  };
+  const count = {
+    icon: "letters", label: "How many versions…",
+    why: "Change how many different papers are in play.",
+    go: () => askVersionCount(section),
+  };
+  const byClick = {
+    icon: "printer",
+    label: printBy === "group" ? "Number groups by clicking"
+                               : "Number seats by clicking",
+    why: printBy === "group"
+      ? "Click the groups in the order you want them printed."
+      : "Click the seats in the order you want them printed.",
+    go: () => startNumbering(),
+  };
+  return [byClick, spread, count];
+}
+
+function startNumbering() {
+  numbering = { taken: [] };
+  paletteOpen = false;
+  selected = null;
+  selectedChair = null;
+  renderSeating();
+}
+
+function stopNumbering(keep) {
+  /* Nothing is written until the last one is clicked. A half-finished
+     order is not an order, and leaving the room half-renumbered
+     because somebody changed their mind is worse than leaving it
+     alone. */
+  const section = currentSection();
+  const taken = (numbering && numbering.taken) || [];
+  numbering = null;
+  if (keep && section && taken.length) {
+    if (printBy === "group") {
+      const rest = printOrder(section).filter(g => !taken.includes(g.id));
+      taken.map(id => groupsOf(section).find(g => g.id === id))
+        .filter(Boolean).concat(rest)
+        .forEach((g, i) => { g.order = i + 1; });
+    } else {
+      const rest = roomRun(section).filter(id => !taken.includes(id));
+      taken.concat(rest).forEach((id, i) => {
+        const s = seatById(section, id);
+        if (s) s.order = i + 1;
+      });
+    }
+  }
+  renderSeating();
+}
+
+function takeNext(id) {
+  if (!numbering || numbering.taken.includes(id)) return;
+  numbering.taken.push(id);
+  const section = currentSection();
+  const total = printBy === "group"
+    ? groupsOf(section).length : drawn.seats.length;
+  if (numbering.taken.length >= total) { stopNumbering(true); return; }
+  renderSeating();
+}
+
+async function askVersionCount(section) {
+  /* The one place this window asks a question with a prompt. A field
+     in the strip would be a control that is only ever used twice a
+     term sitting on the edge for the rest of it. */
+  const now = ((seatingRoom && seatingRoom.versions) || []).length;
+  const said = window.prompt(
+    "How many different versions of the paper?\n\n"
+    + "A table with more seats than there are versions will have to "
+    + "repeat one.", String(now));
+  if (said === null) return;
+  const want = parseInt(said, 10);
+  if (!Number.isFinite(want) || want < 1 || want > 26) {
+    toast("Between 1 and 26 versions.", true);
+    return;
+  }
+  seatingRoom.versions = ALPHABET.slice(0, want).split("");
+  await spreadVersions(section);
+}
+
 function drawPalette(section) {
   /* The furniture, in a column that grows up out of the plus at the
      end of the strip. Closed by default: an empty room needs it once
@@ -3042,15 +3221,35 @@ function drawPalette(section) {
      canvas for the rest of the hour. */
   const pal = document.getElementById("seat-palette");
   pal.textContent = "";
-  if (seatingMode !== "groups" || !section) {
+  const wanted = Boolean(section) && !projecting() && !upnext
+    && (seatingMode === "groups" || seatingMode === "printing");
+  if (!wanted) {
     pal.hidden = true;
-    pal.classList.remove("open");
+    pal.classList.remove("open", "named");
     return;
   }
   // Kept in the layout while shut, so its height can be animated to
   // nothing rather than the island blinking out of existence.
   pal.hidden = false;
   pal.classList.toggle("open", paletteOpen);
+  pal.classList.toggle("named", seatingMode === "printing");
+
+  if (seatingMode === "printing") {
+    /* Labelled, not silhouettes. The furniture can be a picture
+       because a rectangle is what you are asking for; "spread the
+       versions out" has no picture, and a row of mystery glyphs is
+       the hidden menu this was meant to avoid. */
+    for (const act of printActions(section)) {
+      const b = el("button", "deskopt act");
+      b.type = "button";
+      b.title = act.why;
+      b.appendChild(svgIcon(ICON[act.icon]));
+      b.appendChild(el("span", "actname", act.label));
+      b.onclick = () => { paletteOpen = false; act.go(); };
+      pal.appendChild(b);
+    }
+    return;
+  }
 
   for (const kind of paletteKinds()) {
     const spec = seatingState.shapes[kind];
@@ -3621,6 +3820,9 @@ function zoomBy(step) {
 function presentKeys(event) {
   if (document.getElementById("view-seating").hidden) return;
   if (event.key === "Escape" && !projecting()) {
+    // The quasimode first: it is the most temporary thing on screen,
+    // so it is the thing Escape is most likely to be aimed at.
+    if (numbering) { stopNumbering(false); return; }
     if (picked) { picked = null; renderSeating(); return; }
 
     if (selected) { selected = null; renderSeating(); }
