@@ -116,6 +116,19 @@ let paletteOpen = false;
 let railOpen = false;
 let saveOpen = false;
 
+/* Several things chosen at once. Groups in Groups mode and seats in
+   Seats mode -- never a mix, because a band drawn across two tables
+   has no honest answer to "did you mean six seats or two groups" and
+   guessing is what makes a tool feel unreliable. The mode has
+   already answered it. */
+let banded = [];                 // ids, of whatever the mode selects
+/* Held down, so the canvas pans instead of selecting. The convention
+   everywhere -- Figma, Illustrator, Excalidraw, Miro -- is the space
+   bar, not a modifier: shift means "add to the selection" and
+   ctrl/cmd means "duplicate" in most of the same applications, so
+   either would be saying something else. */
+let spaceDown = false;
+
 /* How the stack is ordered: group by group, or seat by seat.
 
    On the section, not in this file. It changes what comes out of the
@@ -168,7 +181,14 @@ let walking = null;              // null, or { on: bool, strokes: [[[x,y]..]] }
 // ------------------------------------------------------------ constants --
 
 const GRID = 20;        // what a dragged desk snaps to, in room units
-const REACH = 90;       // how near a chair you must point to drop into it
+/* How far outside a card still counts as pointing at it.
+
+   This was 90 -- most of a card's own width -- so a name nudged a few
+   pixels was claimed by the chair at the next desk. A drop should
+   land where the pointer is: inside the card, or a hair outside it so
+   that aiming at the edge is not a miss. 14 is about a finger's worth
+   of slack at full zoom and nothing like a neighbour away. */
+const REACH = 14;
 const CARD_W = 104;     // a name card, in room units. Matches `.seatcard`
 const CARD_H = 54;      //   in seating.css, and room.SHAPES is spaced for it
 const PAD = 26;         // breathing room around the drawn room, same units
@@ -761,6 +781,7 @@ function enterMode(value) {
      mode went on drawing a route for a job nobody was doing. */
   numbering = null;
   walking = null;
+  banded = [];                   // a catch belongs to the mode that made it
   paintWalk();
   if (value === "printing" && was !== "printing") {
     slotsBefore = showSlots;
@@ -1050,6 +1071,7 @@ function drawRoom(section) {
     const box = el("div", "shape " + spec.css);
     wrap.appendChild(box);
     if (isSelected(group, shape)) wrap.classList.add("chosen");
+    if (group && banded.includes(group.id)) wrap.classList.add("banded");
     if (numbering) {
       /* The table is as much "this group" as any chair at it. Only
          the chairs answered at first, which meant aiming at a seat
@@ -1093,7 +1115,8 @@ function drawRoom(section) {
       const [x, y] = cardPosition(shape, seat);
       where[seat.id] = [x, y];
       const who = s.names[seat.student];
-      const card = el("div", "seatcard" + (who ? "" : " empty"));
+      const card = el("div", "seatcard" + (who ? "" : " empty")
+        + (banded.includes(seat.id) ? " banded" : ""));
       tint(card, hue, chroma);
       card.style.left = (x - CARD_W / 2 - ox) + "px";
       card.style.top = (y - CARD_H / 2 - oy) + "px";
@@ -1984,6 +2007,13 @@ function drawStrip(section) {
      rearrange itself -- and rearranging is the thing this strip was
      built not to do. Which one you get is decided by what you
      clicked, which is the only thing that could decide it. */
+  /* Several things at once. Its own state, because what you can say
+     about four groups is not what you can say about one -- there is
+     no name to rename, no colour that is theirs, no single place in
+     the order. What is left is how many, and what can be done to all
+     of them. */
+  if (banded.length > 1) { drawBandStrip(strip, section); return; }
+
   const seatPick = selectedChair
     ? (section.shapes || []).reduce((found, s) => found
         || (s.seats || []).find(x => x.id === selectedChair), null)
@@ -2124,6 +2154,75 @@ function drawPlanStrip(strip, section) {
   stop.title = "Leave the order as it was. Escape does it too.";
   stop.onclick = () => stopNumbering(false);
   strip.appendChild(stop);
+}
+
+function drawBandStrip(strip, section) {
+  strip.hidden = false;
+  const kind = bandKind();
+  const what = kind === "seat" ? "seat" : "group";
+  strip.appendChild(el("span", "scount sname flat",
+                       banded.length + " " + what + "s"));
+  strip.appendChild(el("span", "isep"));
+
+  const go = el("button", "ibtn tiny");
+  go.type = "button";
+  go.title = "Forget this selection";
+  go.textContent = "\u2715";
+  go.onclick = () => { banded = []; renderSeating(); };
+
+  const kill = el("button", "ibtn tiny");
+  kill.type = "button";
+  kill.title = kind === "seat"
+    ? `Take these ${banded.length} seats away; anybody in them goes `
+      + "back on the unseated list"
+    : `Remove these ${banded.length} groups and every seat on them`;
+  kill.appendChild(svgIcon(ICON.trash));
+  kill.onclick = () => removeBanded(section);
+  strip.appendChild(kill);
+  strip.appendChild(go);
+}
+
+function removeBanded(section) {
+  /* The same removal `removeShape` and `removeChair` do, but once
+     for the whole catch: those two each render and each toast, so a
+     loop over them would redraw the room eight times and say
+     "2 people are back on the unseated list" four times over. */
+  const kind = bandKind();
+  const ids = new Set(banded);
+  if (!ids.size) return;
+  let gone = new Set(), standing = 0;
+
+  if (kind === "seat") {
+    for (const shape of section.shapes || [])
+      for (const seat of shape.seats || [])
+        if (ids.has(seat.id)) { gone.add(seat.id);
+                                if (seat.student) standing += 1; }
+    for (const shape of section.shapes || [])
+      shape.seats = (shape.seats || []).filter(s => !gone.has(s.id));
+  } else {
+    const doomed = groupsOf(section).filter(g => ids.has(g.id));
+    const shapes = new Set();
+    for (const group of doomed)
+      for (const shape of shapesHolding(section, group)) shapes.add(shape);
+    for (const shape of shapes)
+      for (const seat of shape.seats || []) {
+        gone.add(seat.id);
+        if (seat.student) standing += 1;
+      }
+    section.shapes = (section.shapes || []).filter(s => !shapes.has(s));
+  }
+
+  for (const group of groupsOf(section))
+    group.seats = (group.seats || []).filter(id => !gone.has(id));
+  // A group with nothing left in it is not a group.
+  section.groups = groupsOf(section).filter(g => (g.seats || []).length);
+  banded = [];
+  selected = null;
+  selectedChair = null;
+  renderSeating();
+  if (standing)
+    toast(standing + (standing === 1 ? " person is" : " people are")
+          + " back on the unseated list.");
 }
 
 function drawSeatStrip(strip, section, seat) {
@@ -3673,12 +3772,21 @@ function dropTarget(event, fromId) {
       && event.clientY <= box.bottom)
     return { kind: "pen" };
 
+  /* The card you are over, not the nearest centre.
+
+     Distance to a centre is the wrong measure for a rectangle: a
+     point just past a card's short edge is nearer that card's centre
+     than a point well inside its long edge is to its own. Measured
+     against the box, with `REACH` of slack all round, the answer is
+     the card under the pointer -- which is the one being aimed at. */
   const [cx, cy] = roomPoint(event);
-  let best = null, near = REACH;
+  let best = null, near = Infinity;
   for (const chair of drawn.seats) {
     if (chair.id === fromId) continue;
-    const d = Math.hypot(chair.x - cx, chair.y - cy);
-    if (d < near) { near = d; best = chair; }
+    const dx = Math.max(Math.abs(cx - chair.x) - CARD_W / 2, 0);
+    const dy = Math.max(Math.abs(cy - chair.y) - CARD_H / 2, 0);
+    const out = Math.hypot(dx, dy);
+    if (out <= REACH && out < near) { near = out; best = chair; }
   }
   return best ? { kind: "seat", chair: best } : null;
 }
@@ -3688,6 +3796,51 @@ function markTarget(target, on) {
   if (target.kind === "pen") seatingPen().classList.toggle("over", on);
   else if (drawn.cards[target.chair.id])
     drawn.cards[target.chair.id].classList.toggle("over", on);
+}
+
+function flipPeople(work) {
+  /* Let a move be seen.
+
+     Where every seated card is now, then the change, then put each
+     card back where it was with a transform and take the transform
+     off again -- the cards slide from the old place to the new under
+     their own transition. FLIP: First, Last, Invert, Play.
+
+     Tracked by **student**, not by seat. The cards are rebuilt by the
+     render, and what the eye is following is a person changing
+     chairs; tracking seats would animate the chairs, which do not
+     move. */
+  const before = new Map();
+  for (const seat of drawn.seats) {
+    const card = drawn.cards[seat.id];
+    if (card && seat.seat.student)
+      before.set(seat.seat.student, card.getBoundingClientRect());
+  }
+
+  work();
+
+  const scale = canvasScale() || 1;
+  for (const seat of drawn.seats) {
+    const who = seat.seat.student;
+    const card = drawn.cards[seat.id];
+    if (!card || !who || !before.has(who)) continue;
+    const was = before.get(who);
+    const now = card.getBoundingClientRect();
+    const dx = (was.left - now.left) / scale;
+    const dy = (was.top - now.top) / scale;
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+    card.classList.add("flipping");
+    card.style.transform = `translate(${dx}px, ${dy}px)`;
+    // Read once so the browser takes the inverted position as the
+    // start; without it the two writes collapse into no change and
+    // nothing animates.
+    void card.offsetWidth;
+    card.classList.add("flipgo");
+    card.style.transform = "";
+    card.addEventListener("transitionend", () => {
+      card.classList.remove("flipping", "flipgo");
+    }, { once: true });
+  }
 }
 
 function movePerson(who, fromSeat, toSeat) {
@@ -3712,6 +3865,12 @@ function movePerson(who, fromSeat, toSeat) {
   if (fromSeat) fromSeat.student = sat;
 }
 
+function moveAndShow(fn) {
+  // One wrapper, so a move made by a click and a move made by a drag
+  // are seen to happen the same way.
+  flipPeople(() => { fn(); renderSeating(); });
+}
+
 function clickOn(from) {
   /* Click a name, then click a chair. Not a fallback for dragging --
      the classroom tools lead with it, and on a trackpad it is the
@@ -3726,8 +3885,8 @@ function clickOn(from) {
     const held = picked;
     picked = null;
     const sameAgain = seat ? held.seat === seat : held.who === from.key;
-    if (!sameAgain) movePerson(held.who, held.seat, seat);
-    renderSeating();
+    if (sameAgain) { renderSeating(); return; }
+    moveAndShow(() => movePerson(held.who, held.seat, seat));
     return;
   }
   if (!who) return;              // an empty chair, with nothing in hand
@@ -3783,9 +3942,9 @@ function dragName(event, element, from) {
     // making; standing them up has the rail for a target.
     if (!commit || !target) { renderSeating(); return; }
     picked = null;
-    movePerson(who, from.seat || null,
-               target.kind === "pen" ? null : target.chair.seat);
-    renderSeating();
+    moveAndShow(() => movePerson(who, from.seat || null,
+                                 target.kind === "pen" ? null
+                                                       : target.chair.seat));
   };
 
   element.setPointerCapture(event.pointerId);
@@ -3953,8 +4112,10 @@ function applyZoom(section) {
   // The drawn route is a sibling of the canvas rather than a child --
   // an SVG cannot live inside it and keep its own coordinates -- so
   // it is given the same scale by hand.
-  const walk = document.getElementById("seat-walk");
-  if (walk) walk.style.transform = `scale(${zoom})`;
+  for (const id of ["seat-walk", "seat-band"]) {
+    const layer = document.getElementById(id);
+    if (layer) layer.style.transform = `scale(${zoom})`;
+  }
   // The box carries the scaled size, because a scaled element's own
   // layout box is still its unscaled one and nothing downstream could
   // tell how big the room had become.
@@ -4072,6 +4233,99 @@ function paintPaper(zoom) {
   paper.style.backgroundPosition = spots.join(", ");
 }
 
+function bandKind() {
+  return seatingMode === "groups" ? "group"
+    : seatingMode === "seats" ? "seat" : null;
+}
+
+function bandPaper(event) {
+  /* Drag a rectangle round things.
+
+     The default for a plain drag on the canvas, which is what every
+     other canvas application does -- and panning, which used to be
+     the default here, moves onto the space bar beside them.
+
+     People mode has no band. Moving one person is the whole of that
+     mode's vocabulary and a rectangle round four of them would have
+     nothing to offer afterwards. */
+  const kind = bandKind();
+  if (!kind) return false;
+  const paper = seatingPaper();
+  const band = document.getElementById("seat-band");
+  const area = drawn.box || { x: 0, y: 0 };
+  const from = roomPoint(event);
+  const add = event.shiftKey ? banded.slice() : [];
+  let moved = false;
+
+  const boxOfKind = id => {
+    if (kind === "seat") {
+      const s = drawn.seats.find(x => x.id === id);
+      return s && { x0: s.x - CARD_W / 2, x1: s.x + CARD_W / 2,
+                    y0: s.y - CARD_H / 2, y1: s.y + CARD_H / 2 };
+    }
+    const section = currentSection();
+    const group = groupsOf(section).find(g => g.id === id);
+    const ids = (group && group.seats || []).filter(i => drawn.cards[i]);
+    if (!ids.length) return null;
+    const pts = ids.map(i => drawn.seats.find(s => s.id === i));
+    return { x0: Math.min(...pts.map(p => p.x)) - CARD_W / 2,
+             x1: Math.max(...pts.map(p => p.x)) + CARD_W / 2,
+             y0: Math.min(...pts.map(p => p.y)) - CARD_H / 2,
+             y1: Math.max(...pts.map(p => p.y)) + CARD_H / 2 };
+  };
+
+  const everything = () => kind === "seat"
+    ? drawn.seats.map(s => s.id)
+    : groupsOf(currentSection()).map(g => g.id);
+
+  const move = e => {
+    const to = roomPoint(e);
+    if (!moved && Math.hypot(to[0] - from[0], to[1] - from[1]) < 4) return;
+    moved = true;
+    const x0 = Math.min(from[0], to[0]), x1 = Math.max(from[0], to[0]);
+    const y0 = Math.min(from[1], to[1]), y1 = Math.max(from[1], to[1]);
+    band.hidden = false;
+    band.style.left = (x0 - area.x) + "px";
+    band.style.top = (y0 - area.y) + "px";
+    band.style.width = (x1 - x0) + "px";
+    band.style.height = (y1 - y0) + "px";
+    /* Touched, not enclosed. A band has to be drawn round a whole
+       table to catch it if enclosure is the rule, and at a zoom where
+       the table is bigger than the window that cannot be done at
+       all. */
+    const hit = everything().filter(id => {
+      const b = boxOfKind(id);
+      return b && b.x0 < x1 && x0 < b.x1 && b.y0 < y1 && y0 < b.y1;
+    });
+    banded = add.concat(hit.filter(id => !add.includes(id)));
+    renderSeating();
+  };
+
+  const done = () => {
+    paper.removeEventListener("pointermove", move);
+    paper.removeEventListener("pointerup", done);
+    paper.removeEventListener("pointercancel", done);
+    band.hidden = true;
+    if (!moved) {
+      // A press that did not travel is a press on bare paper, which
+      // has always meant "nothing is selected now".
+      banded = [];
+      const wasOpen = paletteOpen || railOpen || saveOpen;
+      paletteOpen = railOpen = saveOpen = false;
+      if (wasOpen) showOpen();
+      selected = null;
+      selectedChair = null;
+    }
+    renderSeating();
+  };
+
+  try { paper.setPointerCapture(event.pointerId); } catch (err) { /* fine */ }
+  paper.addEventListener("pointermove", move);
+  paper.addEventListener("pointerup", done);
+  paper.addEventListener("pointercancel", done);
+  return true;
+}
+
 function panPaper(event) {
   /* Take hold of the room and move it. The only way to see past the
      edge of the window now that there are no scrollbars -- and the
@@ -4126,6 +4380,61 @@ function panPaper(event) {
   paper.addEventListener("pointermove", onMove);
   paper.addEventListener("pointerup", done);
   paper.addEventListener("pointercancel", done);
+}
+
+const touching = new Map();      // pointerId -> last client point
+
+function twoFinger(event) {
+  /* Two fingers pan, and spreading them zooms.
+
+     The touch answer to the space bar, and the one every map and
+     photo viewer has taught: one finger does the tool, two move the
+     view. Both at once, because a pinch that did not also pan would
+     zoom about the wrong point and feel like the picture running
+     away. */
+  const paper = seatingPaper();
+  touching.set(event.pointerId, [event.clientX, event.clientY]);
+  if (touching.size !== 2) return false;
+
+  const spread = () => {
+    const [a, b] = [...touching.values()];
+    return { gap: Math.hypot(a[0] - b[0], a[1] - b[1]),
+             mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] };
+  };
+  let last = spread();
+
+  const move = e => {
+    if (!touching.has(e.pointerId)) return;
+    touching.set(e.pointerId, [e.clientX, e.clientY]);
+    if (touching.size !== 2) return;
+    const now = spread();
+    pan.x += now.mid[0] - last.mid[0];
+    pan.y += now.mid[1] - last.mid[1];
+    if (last.gap > 10 && now.gap > 10) {
+      const was = seatingZoom === null
+        ? fitZoom(paper, drawn.box || contentBox(currentSection()))
+        : seatingZoom;
+      const next = Math.min(4, Math.max(0.15, was * (now.gap / last.gap)));
+      pan.x *= next / was;
+      pan.y *= next / was;
+      seatingZoom = next;
+    }
+    last = now;
+    const section = currentSection();
+    if (section) applyZoom(section);
+  };
+  const up = e => {
+    touching.delete(e.pointerId);
+    if (touching.size < 2) {
+      paper.removeEventListener("pointermove", move);
+      paper.removeEventListener("pointerup", up);
+      paper.removeEventListener("pointercancel", up);
+    }
+  };
+  paper.addEventListener("pointermove", move);
+  paper.addEventListener("pointerup", up);
+  paper.addEventListener("pointercancel", up);
+  return true;
 }
 
 function zoomBy(step) {
@@ -4371,16 +4680,50 @@ function wireSeating() {
   /* Pressing the paper, rather than a thing on it, either pans the
      room or -- if the pointer never travels -- clears the selection.
      `panPaper` decides which on release. */
+  /* What a press on bare paper means, in the order the meanings win.
+
+     Drawing a route is a mode you asked for and takes everything.
+     Two fingers, the space bar and the middle button all mean "move
+     the view" -- the first for touch, the others for a pointer.
+     Anything else draws a band, in the modes that have one, and
+     falls back to panning in the modes that do not. */
   seatingPaper().addEventListener("pointerdown", e => {
-    // While a walk is being drawn the paper is the drawing surface,
-    // not something to pan: a pan and a stroke are the same gesture
-    // and only one of them can have it.
+    if (e.pointerType === "touch" && twoFinger(e)) return;
     if (walking && walkPointer(e)) return;
     if (e.target.closest(".shape, .seatcard, .pill, .grip, .spinner")) return;
+    if (spaceDown || e.button === 1) { panPaper(e); return; }
+    if (bandPaper(e)) return;
     panPaper(e);
   });
+  // Touch pointers have to be forgotten even when the gesture never
+  // became two-fingered, or a stale id makes the next one look like a
+  // second finger.
+  for (const kind of ["pointerup", "pointercancel"])
+    seatingPaper().addEventListener(kind,
+                                    e => { touching.delete(e.pointerId); });
   document.addEventListener("fullscreenchange", onFullscreenChange);
   document.addEventListener("keydown", presentKeys);
+  /* Space held is "move the view". Only while an editing mode is on
+     the canvas: Up Next already uses the key to step, and that is a
+     mode in which there is nothing to select anyway. */
+  document.addEventListener("keydown", e => {
+    if (e.key !== " " || upnext || e.repeat) return;
+    if (e.target instanceof Element
+        && e.target.closest("input, textarea, button")) return;
+    if (document.getElementById("view-seating").hidden) return;
+    e.preventDefault();
+    spaceDown = true;
+    seatingPaper().classList.add("panready");
+  });
+  document.addEventListener("keyup", e => {
+    if (e.key !== " ") return;
+    spaceDown = false;
+    seatingPaper().classList.remove("panready");
+  });
+  window.addEventListener("blur", () => {
+    spaceDown = false;
+    seatingPaper().classList.remove("panready");
+  });
   window.addEventListener("resize", () => {
     if (!seatingRoom || document.getElementById("view-seating").hidden) return;
     sizeSeating();
