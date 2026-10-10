@@ -175,8 +175,6 @@ const ANCHORS = {
 const ICON = {
   people: "M5.5 20a6.5 6.5 0 0 1 13 0|O12,8,3.4",
   groups: "R3,4,18,7,1.5|R3,14,8,6,1.5|R14,14,7,6,1.5",
-  seats: "R4,8,16,9,2|O8,5,1.8|O16,5,1.8|O8,20,1.8|O16,20,1.8",
-  order: "M4 6h3M4 12h3M4 18h3M11 6h9M11 12h9M11 18h9",
   upnext: "M20.5 4.5h-17A1.5 1.5 0 0 0 2 6v9a1.5 1.5 0 0 0 1.5 1.5H7v4"
     + "l5-4h8.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5z",
   grow: "M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5",
@@ -224,7 +222,7 @@ const MODES = [
   { value: "groups", label: "Groups", icon: "groups",
     why: "Add, move, resize and turn the furniture. Arrows nudge the "
       + "one you click by " + GRID + ", shift+arrows by 1." },
-  { value: "seats", label: "Seats", icon: "seats",
+  { value: "seats", label: "Seats", icon: "chair",
     why: "Move the seats on a group, add one, take one away — and drag "
       + "a seat onto another group to move it there." },
   { value: "printing", label: "Printing", icon: "printer",
@@ -893,7 +891,7 @@ function drawRoom(section) {
      drawing subtracts the origin, and `roomPoint` adds it back. */
   const area = contentBox(section);
   drawn = { shapes: {}, cards: {}, seats: [], labels: [], box: area,
-            slots: {} };
+            slots: {}, badges: [] };
   const ox = area.x, oy = area.y;
 
   canvas.style.width = area.w + "px";
@@ -1046,8 +1044,29 @@ function drawRoom(section) {
       if (!card) continue;
       if (showSlots)
         card.appendChild(el("span", "ver", drawn.slots[seat.id] || ""));
-      if (showVersions && seat.seat.version)
-        card.appendChild(el("span", "vcircle", seat.seat.version));
+      if (showVersions && seat.seat.version) {
+        const v = el("span", "vcircle", seat.seat.version);
+        card.appendChild(v);
+        if (seatingMode === "printing") {
+          v.title = "Drag onto another seat to trade papers; "
+            + "press twice to type a letter.";
+          holdBadge(v, {
+            id: seat.id, kind: "version",
+            swap: other => swapVersions(section, seat.id, other),
+            type: text => {
+              seat.seat.version = text.slice(0, 2).toUpperCase();
+              renderSeating();
+            },
+            pick: () => {
+              selectedChair = selectedChair === seat.id ? null : seat.id;
+              selected = null;
+              renderSeating();
+            },
+          });
+          drawn.badges.push({ id: seat.id, kind: "version", el: v,
+                              x: seat.x, y: seat.y });
+        }
+      }
     }
 
   if (seatingMode === "printing" && !upnext)
@@ -1111,15 +1130,18 @@ function paintPrintOrder(section, where, ox, oy) {
       const card = drawn.cards[id];
       if (!card) return;
       const tag = el("span", "ordertag seat", String(i + 1));
-      tag.title = `Prints ${i + 1} of ${run.length}. Click to change.`;
-      tag.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); };
-      tag.onclick = e => {
-        e.stopPropagation();
-        const seat = seatById(section, id);
-        if (seat) typeOrder(tag, i + 1, run.length,
-                            n => reorderRoomSeat(section, seat, n));
-      };
+      tag.title = `Prints ${i + 1} of ${run.length}. Drag onto another `
+        + "seat to trade places; press twice to type a number.";
       card.appendChild(tag);
+      const seat = seatById(section, id);
+      const at = drawn.seats.find(s => s.id === id);
+      holdBadge(tag, {
+        id: id, kind: "order",
+        swap: other => swapOrder(section, id, other),
+        type: text => reorderRoomSeat(section, seat, parseInt(text, 10)),
+      });
+      if (at) drawn.badges.push({ id: id, kind: "order", el: tag,
+                                  x: at.x, y: at.y });
     });
     return;
   }
@@ -1142,34 +1164,83 @@ function paintPrintOrder(section, where, ox, oy) {
            plainly about the chairs. */
         tag.style.left = ((Math.min(...xs) + Math.max(...xs)) / 2 - ox) + "px";
         tag.style.top = (Math.min(...ys) - CARD_H / 2 - 24 - oy) + "px";
-        tag.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); };
-        tag.onclick = e => {
-          e.stopPropagation();
-          typeOrder(tag, i + 1, line.length,
-                    n => reorderGroup(section, group, n));
-        };
+        tag.title = `This group prints ${i + 1} of ${line.length}. `
+          + "Drag onto another group to trade places; press twice to "
+          + "type a number.";
         seatingCanvas().appendChild(tag);
+        holdBadge(tag, {
+          id: group.id, kind: "grouporder",
+          swap: other => swapGroupOrder(section, group.id, other),
+          type: text => reorderGroup(section, group, parseInt(text, 10)),
+        });
+        drawn.badges.push({
+          id: group.id, kind: "grouporder", el: tag,
+          x: (Math.min(...xs) + Math.max(...xs)) / 2,
+          y: Math.min(...ys) - CARD_H / 2 - 24,
+        });
       }
     }
     seatRun(section, group).forEach((id, j) => {
       const card = drawn.cards[id];
       if (!card) return;
       const tag = el("span", "ordertag seat", String(j + 1));
-      tag.title = printBy === "group"
-        ? `Prints ${j + 1} of ${group.seats.length} within this group. `
-          + "Click to change."
-        : "Seat order is not built yet; this is the within-group "
-          + "position.";
-      tag.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); };
-      tag.onclick = e => {
-        e.stopPropagation();
-        const seat = seatById(section, id);
-        if (seat) typeOrder(tag, j + 1, group.seats.length,
-                            n => reorderSeat(section, group, seat, n));
-      };
+      tag.title = `Prints ${j + 1} of ${group.seats.length} within this `
+        + "group. Drag onto another seat to trade places; press twice "
+        + "to type a number.";
       card.appendChild(tag);
+      const seat = seatById(section, id);
+      const at = drawn.seats.find(s => s.id === id);
+      holdBadge(tag, {
+        id: id, kind: "order",
+        swap: other => swapOrder(section, id, other),
+        type: text => reorderSeat(section, group, seat, parseInt(text, 10)),
+      });
+      if (at) drawn.badges.push({ id: id, kind: "order", el: tag,
+                                  x: at.x, y: at.y });
     });
   });
+}
+
+function swapOrder(section, aId, bId) {
+  /* Two seats trade places in the stack. Whichever scale is in force:
+     within the group when the order is by group, across the room when
+     it is by seat. The numbers are what trade, so everything else
+     keeps its place and only these two move. */
+  const a = seatById(section, aId), b = seatById(section, bId);
+  if (!a || !b) return;
+  if (printBy === "seat") {
+    const run = roomRun(section);
+    const i = run.indexOf(aId), j = run.indexOf(bId);
+    if (i < 0 || j < 0) return;
+    run[i] = bId; run[j] = aId;
+    run.forEach((id, n) => { const s = seatById(section, id);
+                             if (s) s.order = n + 1; });
+  } else {
+    const group = groupOfSeat(section)[aId];
+    if (!group || groupOfSeat(section)[bId] !== group) {
+      toast("Those two are in different groups, and the order is by "
+            + "group. Trade places within one, or order by seat.");
+      return;
+    }
+    const run = seatRun(section, group);
+    const i = run.indexOf(aId), j = run.indexOf(bId);
+    if (i < 0 || j < 0) return;
+    run[i] = bId; run[j] = aId;
+    run.forEach((id, n) => { const s = seatById(section, id);
+                             if (s) s.spot = n + 1; });
+  }
+  renderSeating();
+}
+
+function swapGroupOrder(section, aId, bId) {
+  const line = printOrder(section);
+  const i = line.findIndex(g => g.id === aId);
+  const j = line.findIndex(g => g.id === bId);
+  if (i < 0 || j < 0) return;
+  const swapped = line.slice();
+  swapped[i] = line[j]; swapped[j] = line[i];
+  swapped.forEach((g, n) => { g.order = n + 1; });
+  renderSeating();
 }
 
 function swapVersions(section, aId, bId) {
@@ -1207,32 +1278,144 @@ async function spreadVersions(section) {
   } catch (err) { toast(err.message, true); }
 }
 
-function typeOrder(node, now, total, settle) {
-  /* Type a position, in place. The third thing in this app edited by
-     being replaced with an input rather than by opening a dialog --
-     the value is already on screen, so a dialog would be a second
-     copy of it. */
-  const input = el("input", "ordertype");
+/* When a badge was last pressed, and which one. The same two
+   timestamps the group label uses, and for the same reason: the first
+   press redraws, so the element the second press lands on is one the
+   browser has never seen and `dblclick` never fires. */
+let lastBadgeTap = { id: null, at: 0 };
+
+function holdBadge(node, spec) {
+  /* Every small thing written on the canvas behaves the same way:
+     hover shows a hand, pressing and moving drags it, pressing twice
+     retypes it.
+
+     One function for the order numbers and the version letters,
+     because they had grown two different answers to the same question
+     -- one opened an editor on a single click, the other could not be
+     edited at all -- and the group label had a third. This is the
+     label's behaviour, generalised: the label keeps its own because
+     what it drags to is anchors rather than other labels.
+
+     `spec` is { id, kind, value, swap(otherId), type(text), pick } */
+  node.classList.add("badge");
+  node.onpointerdown = event => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (projecting() || upnext) return;
+
+    const now = Date.now();
+    if (lastBadgeTap.id === spec.id && now - lastBadgeTap.at < 450) {
+      lastBadgeTap = { id: null, at: 0 };
+      editBadge(node, spec);
+      return;
+    }
+    lastBadgeTap = { id: spec.id, at: now };
+    dragBadge(event, node, spec);
+  };
+}
+
+function dragBadge(event, node, spec) {
+  /* Carry it to another badge of the same kind and the two trade.
+
+     Nearest within reach rather than whatever is under the pointer:
+     the badge being dragged is under the pointer, and a badge is a
+     17px target that nobody can be asked to hit exactly. Same
+     reasoning as dropping a name on a chair. */
+  const start = [event.clientX, event.clientY];
+  const home = [node.style.left, node.style.top, node.style.transform];
+  const ox = drawn.box ? drawn.box.x : 0, oy = drawn.box ? drawn.box.y : 0;
+  let moved = false, onto = null;
+
+  const near = e => {
+    const [cx, cy] = roomPoint(e);
+    let best = null, gap = REACH;
+    for (const other of drawn.badges) {
+      if (other.kind !== spec.kind || other.id === spec.id) continue;
+      const d = Math.hypot(other.x - cx, other.y - cy);
+      if (d < gap) { gap = d; best = other; }
+    }
+    return best;
+  };
+
+  const move = e => {
+    if (!moved
+        && Math.hypot(e.clientX - start[0], e.clientY - start[1]) < 4) return;
+    if (!moved) {
+      moved = true;
+      node.classList.add("dragging");
+      // Out of the card and onto the canvas, or it cannot be carried
+      // past the edge of the card it sits in.
+      seatingCanvas().appendChild(node);
+    }
+    const [cx, cy] = roomPoint(e);
+    node.style.left = (cx - ox) + "px";
+    node.style.top = (cy - oy) + "px";
+    node.style.transform = "translate(-50%, -50%)";
+    const found = near(e);
+    if (found !== onto) {
+      if (onto) onto.el.classList.remove("swapping");
+      onto = found;
+      if (onto) onto.el.classList.add("swapping");
+    }
+  };
+
+  const drop = e => {
+    node.removeEventListener("pointermove", move);
+    node.removeEventListener("pointerup", drop);
+    node.removeEventListener("pointercancel", drop);
+    if (onto) onto.el.classList.remove("swapping");
+    if (!moved) { if (spec.pick) spec.pick(); return; }
+    const found = near(e);
+    if (found) { spec.swap(found.id); return; }
+    // Nowhere to go: put it back where it was rather than leaving it
+    // wherever the hand stopped.
+    [node.style.left, node.style.top, node.style.transform] = home;
+    node.classList.remove("dragging");
+    renderSeating();
+  };
+
+  try { node.setPointerCapture(event.pointerId); } catch (err) { /* fine */ }
+  node.addEventListener("pointermove", move);
+  node.addEventListener("pointerup", drop);
+  node.addEventListener("pointercancel", drop);
+}
+
+function editBadge(node, spec) {
+  /* Retyped where it lives, at its size and in its position.
+
+     The badge is turned into its own editor rather than replaced by
+     one: same element, same box, same corner of the same card, so
+     nothing moves when the editing starts. The first draft swapped in
+     a differently sized absolutely positioned input and the number
+     jumped across the card.
+
+     White with a ring in the group's colour, which is what the label
+     does -- the dark field it had before was the islands' colour
+     worn by something that is not an island. */
+  const was = node.textContent;
+  node.textContent = "";
+  node.classList.add("editing");
+  const input = el("input");
   input.type = "text";
-  input.inputMode = "numeric";
-  input.value = String(now);
-  input.style.cssText = node.style.cssText;
-  node.replaceWith(input);
+  input.value = was;
+  if (spec.kind === "order") input.inputMode = "numeric";
+  node.appendChild(input);
   input.focus();
   input.select();
   let done = false;
-  const finish = keep => {
+  const settle = keep => {
     if (done) return;
     done = true;
-    const want = parseInt(input.value, 10);
-    if (keep && Number.isFinite(want) && want !== now) settle(want);
+    const typed = input.value.trim();
+    if (keep && typed && typed !== was) spec.type(typed);
     else renderSeating();
   };
-  input.onblur = () => finish(true);
+  input.onblur = () => settle(true);
   input.onkeydown = e => {
     e.stopPropagation();
-    if (e.key === "Enter") { e.preventDefault(); finish(true); }
-    if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    if (e.key === "Enter") { e.preventDefault(); settle(true); }
+    if (e.key === "Escape") { e.preventDefault(); settle(false); }
   };
 }
 
@@ -1661,7 +1844,7 @@ function drawStrip(section) {
     strip.appendChild(name);
 
     strip.appendChild(el("span", "isep"));
-    strip.appendChild(count("seats", (group.seats || []).length,
+    strip.appendChild(count("chair", (group.seats || []).length,
                             "Seats in this group"));
 
     /* Where it prints, and you can type a new one.
@@ -1674,7 +1857,7 @@ function drawStrip(section) {
        look assembled rather than designed. */
     const line = printOrder(section);
     const at = line.indexOf(group) + 1;
-    const ord = count("order", at + "/" + line.length,
+    const ord = count("printer", at + "/" + line.length,
                       group.order === null || group.order === undefined
                         ? `Prints ${at} of ${line.length}, after everything `
                           + "with a chosen place. Click to choose one."
@@ -1686,7 +1869,7 @@ function drawStrip(section) {
     const spec = seatingState.shapes[shape.kind];
     strip.appendChild(el("span", "sname", (spec && spec.label) || shape.kind));
     strip.appendChild(el("span", "isep"));
-    strip.appendChild(count("seats", (shape.seats || []).length,
+    strip.appendChild(count("chair", (shape.seats || []).length,
                             "Seats on this desk"));
   }
 
@@ -1723,11 +1906,8 @@ function drawPlanStrip(strip, section) {
   strip.hidden = false;
   strip.classList.add("planstrip");
 
-  // The numbered list, not the printer: the printer is Printing's own
-  // glyph in the rail now, and repeating it here would say "printing"
-  // where the question is "in what order".
   const head = el("span", "scount");
-  head.appendChild(svgIcon(ICON.order));
+  head.appendChild(svgIcon(ICON.printer));
   head.title = "How the printed stack is ordered";
   strip.appendChild(head);
 
