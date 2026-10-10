@@ -57,6 +57,28 @@
   overflow: hidden;
   border-radius: 10px;
   border: 1px solid var(--line);
+
+  /* No text selection anywhere in here.
+
+     Every name on the canvas is text, and a drag across text is a
+     drag across text as far as the browser is concerned -- so
+     panning the room or drawing a selection band left half the
+     class highlighted in blue behind it. The gesture meant one
+     thing to this window and another to the document underneath,
+     and the document had the older claim.
+
+     Switched back on below for the places where typing happens.
+     Setting this on an ancestor reaches into a field and stops you
+     selecting what you are editing, which is the one place in a
+     canvas where selecting text is exactly the point. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.seatapp input,
+.seatapp textarea,
+.seatapp [contenteditable] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* ------------------------------------------------------------- paper -- */
