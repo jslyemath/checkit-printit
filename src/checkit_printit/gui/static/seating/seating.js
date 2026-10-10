@@ -3994,15 +3994,37 @@ function dragShape(event, section, shape) {
   const scale = canvasScale();
   const start = [event.clientX, event.clientY];
   const home = shape.at.slice();
-  const mine = (shape.seats || []).map(seat => seat.id);
+
+  /* Everything that travels with this drag.
+
+     One desk normally; the whole catch when the desk you took hold of
+     is part of a banded set. Picking one up and leaving the other
+     five behind would make the band a selection you can only delete,
+     which is half a selection. */
+  const caught = banded.includes(
+    (groupOfSeat(section)[(shape.seats || [])[0] &&
+                          (shape.seats || [])[0].id] || {}).id);
+  const party = [shape];
+  if (caught)
+    for (const id of banded) {
+      const group = groupsOf(section).find(g => g.id === id);
+      for (const other of group ? shapesHolding(section, group) : [])
+        if (other !== shape && !party.includes(other)) party.push(other);
+    }
+  const alsoHome = party.map(s => s.at.slice());
+
+  const mine = [];
+  for (const s of party) for (const seat of s.seats || []) mine.push(seat.id);
   const riding = mine.map(id => drawn.cards[id]).filter(Boolean);
-  // A label whose group sits entirely at this desk travels with it. One
-  // spanning two desks stays and snaps on release, because half of it
-  // is not moving and there is no honest place to put it.
+  // A label whose group sits entirely on the desks being moved travels
+  // with them. One spanning a desk left behind stays and snaps on
+  // release, because half of it is not moving and there is no honest
+  // place to put it.
   const tags = drawn.labels
     .filter(l => l.seats.every(id => mine.includes(id)))
     .map(l => l.el);
   const held = [...riding, ...tags].map(n => [n, n.offsetLeft, n.offsetTop]);
+  const others = party.slice(1).map(s => [drawn.shapes[s.id], s]);
   const ox = drawn.box ? drawn.box.x : 0, oy = drawn.box ? drawn.box.y : 0;
 
   box.classList.add("dragging");
@@ -4021,6 +4043,21 @@ function dragShape(event, section, shape) {
       node.style.top = (top + to[1] - home[1]) + "px";
     }
     shape.at = to;
+    /* The rest of the catch, by the same delta.
+
+       Clamped as one: moving the others by the leader's clamped delta
+       keeps the set rigid, where clamping each against the canvas
+       separately would squash them together at the edge. A desk may
+       end up slightly outside, which is visible and draggable back --
+       a set that silently changed shape would not be. */
+    const dx = to[0] - home[0], dy = to[1] - home[1];
+    others.forEach(([node, other], i) => {
+      other.at = [alsoHome[i + 1][0] + dx, alsoHome[i + 1][1] + dy];
+      if (!node) return;
+      const [ow, oh] = shapeSize(other);
+      node.style.left = (other.at[0] - ow / 2 - ox) + "px";
+      node.style.top = (other.at[1] - oh / 2 - oy) + "px";
+    });
   };
 
   const finish = commit => {
@@ -4028,7 +4065,10 @@ function dragShape(event, section, shape) {
     box.classList.remove("dragging");
     // `place` writes straight to the model as the desk moves, so
     // putting it back is the undo.
-    if (!commit) shape.at = home;
+    if (!commit) {
+      shape.at = home;
+      others.forEach(([, other], i) => { other.at = alsoHome[i + 1]; });
+    }
     if (!moved) {
       // A click in Desks mode still selects, the way it does in the
       // other modes: one gesture should not mean nothing here.
