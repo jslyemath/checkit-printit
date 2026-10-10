@@ -757,6 +757,10 @@ function renderSeating() {
   drawRoom(section);
   drawPalette(section);
   drawStrip(section);
+  /* Crosshair only where a drag draws a band. In People, in
+     Printing, and under either overlay a drag moves the view, and a
+     crosshair there promises a selection that is not on offer. */
+  seatingPaper().classList.toggle("canband", Boolean(bandKind()));
   drawStageBar(section, sections.length);
   paintWalk();                 // `drawn.box` may have moved under it
   showOpen();                  // after the contents, so the height is real
@@ -934,7 +938,15 @@ function layoutRail() {
      Taking the class off was never the right answer either. Whether
      the rail furls is a fact about the window, and a window does not
      stop having a width because something is covering the rail. */
-  if (rail.offsetParent === null) return;
+  if (rail.offsetParent === null) {
+    /* Nothing is decided while it is off screen -- but the nudge it
+       left behind is not a decision, it is a leftover. Up Next hides
+       the rail, and the strip that stays behind was still sitting
+       wherever the last furled rail had been pushed to. */
+    const stack = document.getElementById("seat-bottom");
+    if (stack) stack.style.left = stack.style.transform = "";
+    return;
+  }
 
   const wide = railWidthUnfurled(rail);
   const zoom = document.querySelector("#view-seating .at-bl");
@@ -4112,7 +4124,7 @@ function applyZoom(section) {
   // The drawn route is a sibling of the canvas rather than a child --
   // an SVG cannot live inside it and keep its own coordinates -- so
   // it is given the same scale by hand.
-  for (const id of ["seat-walk", "seat-band"]) {
+  for (const id of ["seat-walk", "seat-bandlayer"]) {
     const layer = document.getElementById(id);
     if (layer) layer.style.transform = `scale(${zoom})`;
   }
@@ -4234,6 +4246,14 @@ function paintPaper(zoom) {
 }
 
 function bandKind() {
+  /* Which modes have a selection to make with a rectangle.
+
+     Not while Up Next or the projector is on: those are ways of
+     *showing* the room and nothing in them is selectable, so a drag
+     there is a drag of the view. The mode underneath is untouched --
+     Up Next over Groups is still Groups when you leave -- which is
+     why this has to ask about the overlay and not only the mode. */
+  if (upnext || projecting()) return null;
   return seatingMode === "groups" ? "group"
     : seatingMode === "seats" ? "seat" : null;
 }

@@ -69,25 +69,36 @@
      scrollbar beside that is a second, worse way to do one thing
      that also eats two strips of the room. */
   overflow: hidden;
-  /* A crosshair, because a plain drag now draws a band. The grabbing
-     hand appears while the space bar is held, which is when a drag
-     moves the view instead. */
-  cursor: crosshair;
+  /* A hand by default: in most modes a drag moves the view. The
+     crosshair appears only where a drag draws a band, and the
+     grabbing hand while space is held. */
+  cursor: grab;
   touch-action: none;
   background-color: var(--paper);
   background-repeat: repeat;
 }
-.paper.panready { cursor: grab; }
+.paper.canband { cursor: crosshair; }
+.paper.panready, .paper.canband.panready { cursor: grab; }
 .paper.panning { cursor: grabbing; }
 
 /* The band itself: in room units on the canvas box, so it scales
    with everything else. */
+/* The layer the band is drawn on: the canvas's own corner and the
+   canvas's own scale, so the band inside it is plain room units. */
+.bandlayer {
+  position: absolute; top: 0; left: 0;
+  transform-origin: top left;
+  pointer-events: none;
+  z-index: 7;
+  overflow: visible;
+}
+/* Grey, not the accent. The accent is a colour groups can wear, and
+   a band drawn in it over a green table says nothing; grey is the
+   one hue nothing in the room competes with. */
 .band {
   position: absolute;
-  z-index: 7;
-  pointer-events: none;
-  border: 1.5px solid var(--isle-key);
-  background: oklch(0.82 0.115 165 / .14);
+  border: 1.5px solid oklch(0.45 0.01 260 / .75);
+  background: oklch(0.45 0.01 260 / .13);
   border-radius: 3px;
 }
 
