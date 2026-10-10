@@ -233,6 +233,15 @@ const ICON = {
     + "|M4.5 11.5l4-4M4.5 11.5l4 4",
   revertall: "M7.5 13h7.5a4.5 4.5 0 1 1-4.5 4.5|M7.5 13l3.3-3.3M7.5 13l3.3 3.3"
     + "|M4.5 16V5.5a1.5 1.5 0 0 1 1.5-1.5h7.5",
+  /* A pointer, for the thing you do with one. The printer had been
+     here, which is Printing's own glyph in the rail -- a mode's
+     picture standing in for one action inside it says both are the
+     same thing. */
+  pointer: "M6 3.5l13 7.4-5.6 1.6-2.1 5.6z|M12.4 14.2l4.3 5.6",
+  /* How many versions: a row of them. The card-with-an-A was the
+     *seat letter* glyph borrowed from the other modes, which is the
+     one letter on a seat this menu has nothing to do with. */
+  howmany: "O5.5,12,2.6|O12,12,2.6|O18.5,12,2.6",
   // A route traced across the room.
   path: "M4 19c0-5 4-5 8-5s8 0 8-5|O4,19,2.1|O20,9,2.1",
   // A wand: ask the room to work something out.
@@ -1188,7 +1197,19 @@ function drawRoom(section) {
             id: seat.id, kind: "version",
             swap: other => swapVersions(section, seat.id, other),
             type: text => {
-              seat.seat.version = text.slice(0, 2).toUpperCase();
+              /* Only a letter the room is actually printing. A seat
+                 lettered "Q" in a room of A to D prints nothing --
+                 `seats_of` would hand "Q" to the build and the build
+                 has no paper by that name. */
+              const want = text.trim().toUpperCase();
+              const letters = (seatingRoom && seatingRoom.versions) || [];
+              if (!letters.includes(want)) {
+                toast(`This room prints ${letters.join(", ")}. `
+                      + "Use \u201cSet version count\u201d for more.", true);
+                renderSeating();
+                return;
+              }
+              seat.seat.version = want;
               renderSeating();
             },
             pick: () => {
@@ -3225,6 +3246,20 @@ function showOpen() {
     plus.classList.toggle("on", drawered && paletteOpen);
     plus.setAttribute("aria-expanded", String(drawered && paletteOpen));
   }
+
+  /* The save menu is placed here rather than where it is built,
+     because where it is built the floppy is still hidden.
+     `#seat-saving` is unhidden further down the same render, so
+     measuring the button a few lines earlier gave a rect of zeros
+     and put the menu at the top left corner of the app. */
+  if (menu && !menu.hidden) {
+    const near = document.getElementById("seat-save");
+    const app = document.getElementById("view-seating")
+      .getBoundingClientRect();
+    const box = near.getBoundingClientRect();
+    menu.style.left = Math.round(box.left - app.left) + "px";
+    menu.style.top = Math.round(box.bottom - app.top + 8) + "px";
+  }
 }
 
 function togglePalette(force) {
@@ -3265,19 +3300,19 @@ function printActions(section) {
     go: () => { setPrintBy(next.value); paletteOpen = true; renderSeating(); },
   };
   const spread = {
-    icon: "vletters", label: "Spread the versions",
-    why: "Hand the letters out again, as far apart as the room allows.",
+    icon: "vletters", label: "Shuffle versions",
+    why: "Hand the letters out again, as far apart as the room allows: "
+      + "nobody beside or across from somebody with the same paper.",
     go: () => spreadVersions(section),
   };
   const count = {
-    icon: "letters", label: "How many versions…",
-    why: "Change how many different papers are in play.",
+    icon: "howmany", label: "Set version count…",
+    why: "How many different papers are in play.",
     go: () => askVersionCount(section),
   };
   const byClick = {
-    icon: "printer",
-    label: printBy() === "group" ? "Number groups by clicking"
-                               : "Number seats by clicking",
+    icon: "pointer",
+    label: "Click in order",
     why: printBy() === "group"
       ? "Click the groups in the order you want them printed."
       : "Click the seats in the order you want them printed.",
@@ -3285,8 +3320,7 @@ function printActions(section) {
   };
   const byPath = {
     icon: "path",
-    label: printBy() === "group" ? "Draw a path past the groups"
-                               : "Draw a path past the seats",
+    label: "Draw the route",
     why: "Trace the route you will walk. Whatever the line passes "
       + "takes the next place. Lift the pointer to skip a gap and "
       + "carry on; press Done when the route is finished.",
@@ -4268,11 +4302,6 @@ function drawSaveMenu() {
     item("Discard all", "Put every room back the way it is on disk.",
          () => discardRoom(), "revertall");
 
-  const near = document.getElementById("seat-save");
-  const box = near.getBoundingClientRect();
-  const app = document.getElementById("view-seating").getBoundingClientRect();
-  pop.style.left = Math.round(box.left - app.left) + "px";
-  pop.style.top = Math.round(box.bottom - app.top + 8) + "px";
 }
 
 function sizeSeating() {
