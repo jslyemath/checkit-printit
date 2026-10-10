@@ -222,14 +222,42 @@
   background: var(--isle-key);
   border: 2px solid var(--isle);
 }
-/* Hollow when the changes are in a room you are not looking at: there
-   is something to save, but not here. */
-.savebtn.elsewhere::after { background: var(--isle);
-                            border-color: var(--isle-key); }
-.savemenu {
+/* Grey when the changes are in a room you are not looking at.
+
+   It was a hollow ring in the accent colour, which is the colour
+   this window uses for "the state you are in" -- so a room with
+   nothing to save wore a bright mark that read as though it had.
+   Grey still says "something, somewhere" without claiming it is
+   here, which is the whole of what it knows. */
+.savebtn.elsewhere::after { background: var(--isle-dim); }
+/* A disclosure that drops rather than rises. Everything else about
+   it is the drawer's: the same curves, the same durations, the same
+   `open` class, the same press-again-to-close. */
+.drop {
   position: absolute; z-index: 8;
-  flex-direction: column; align-items: stretch; gap: 2px; padding: 5px;
+  flex-direction: column; align-items: stretch;
+  gap: 2px;
+  overflow: hidden;
+  padding: 0;
+  border-color: transparent;
+  max-height: 0;
+  opacity: 0;
+  box-shadow: none;
+  transition: max-height var(--out-time) var(--out-curve),
+              opacity calc(var(--out-time) * .7) var(--out-curve),
+              padding var(--out-time) var(--out-curve);
 }
+.drop.open {
+  transition: max-height var(--in-time) var(--in-curve),
+              opacity var(--in-time) var(--in-curve),
+              padding var(--in-time) var(--in-curve);
+  max-height: 260px;
+  opacity: 1;
+  padding: 5px;
+  border-color: var(--isle-line);
+  box-shadow: var(--isle-shadow);
+}
+.savemenu { min-width: 190px; }
 .savemenu .deskopt.act:disabled { opacity: .38; cursor: default; }
 .savemenu .deskopt.act:disabled:hover { background: none; }
 
@@ -315,7 +343,6 @@
                           gap: 0;
                           transition: gap var(--out-time) var(--out-curve)
                                       var(--shut-wait, 0s); }
-.rail.furled:hover .railmodes,
 .rail.furled.open .railmodes { gap: 3px;
                                transition: gap var(--in-time) var(--in-curve)
                                            var(--open-wait, 0s); }
@@ -368,7 +395,6 @@
                       var(--shut-wait, 0s);
 }
 .rail.furled .railmodes .ibtn.on,
-.rail.furled:hover .railmodes .ibtn,
 .rail.furled.open .railmodes .ibtn {
   height: 40px;
   opacity: 1;
@@ -377,24 +403,20 @@
               opacity var(--in-time) var(--in-curve) var(--open-wait, 0s);
 }
 
-/* Hover opens it, and losing the pointer shuts it again. Asked for,
-   and the usual pairing: a pointer gets the list without a click, a
-   finger still taps for it, and the tap state is remembered in
-   `railOpen` so it survives the re-render a mode change causes.
+/* Opened by a press, not by a hover.
 
-   The two waits are hover intent. A short one before opening, so
-   sweeping the pointer across the corner on the way somewhere else
-   does not unroll a menu; a longer one before closing, so leaving the
-   pill for a moment -- or crossing a gap between rows -- does not
-   throw the list away mid-reach. A click sets `.open`, which zeroes
-   both: a deliberate press should not be kept waiting. */
-.rail.furled:hover { --open-wait: .1s; --shut-wait: .35s; }
-.rail.furled.open { --open-wait: 0s; --shut-wait: 0s; }
+   Hover-open was the odd one out: the furniture drawer and the save
+   menu both wanted a click, and a window with two ways of opening
+   things has to be learned twice. It is also the half of the app a
+   finger cannot reach -- there is no hover on a touch screen, which
+   is the same argument that ruled out a right-click menu.
+
+   See PRINT_TOOL_DESIGN.md 12.13: one disclosure, one behaviour. */
+.rail.furled { --open-wait: 0s; --shut-wait: 0s; }
 .rail.furled .railchev {
   transition: transform var(--out-time) var(--out-curve)
               var(--shut-wait, 0s);
 }
-.rail.furled:hover .ibtn.on .railchev,
 .rail.furled.open .ibtn.on .railchev {
   transform: rotate(180deg);
   transition: transform var(--in-time) var(--in-curve)
@@ -503,7 +525,7 @@
   color: var(--isle-key-ink);
   cursor: pointer;
   box-shadow: var(--isle-shadow);
-  transition: transform .15s ease;
+  transition: transform var(--in-time) var(--in-curve);
 }
 .plusbtn:hover { transform: scale(1.06); }
 .plusbtn.on { transform: rotate(45deg); }
@@ -608,6 +630,17 @@
   color: var(--isle-ink); font: inherit; font-size: 13px;
   white-space: nowrap;
 }
+/* A setting: the value on the right, and a rule under it. The rows
+   below are verbs; this one is a state, and a menu that does not say
+   which is which makes you click to find out. */
+.deskopt.act.setting { color: var(--isle-dim); }
+.deskopt.act.setting .actname { margin-right: 14px; }
+.deskopt.act.setting .actval {
+  margin-left: auto; color: var(--isle-ink); font-weight: 600;
+}
+.deskopt.act.setting svg:last-child { width: 14px; height: 14px; }
+.actrule { height: 1px; margin: 3px 2px; background: var(--isle-line); }
+
 .deskopt.act svg { width: 17px; height: 17px; flex: 0 0 auto;
                    fill: none; stroke: var(--isle-dim); stroke-width: 1.7;
                    stroke-linecap: round; stroke-linejoin: round; }

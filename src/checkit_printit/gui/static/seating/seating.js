@@ -114,6 +114,7 @@ let paletteOpen = false;
    than a class read off the DOM, because every re-render rebuilds the
    buttons and a menu you opened must not close because a desk moved. */
 let railOpen = false;
+let saveOpen = false;
 
 /* How the stack is ordered: group by group, or seat by seat.
 
@@ -210,9 +211,30 @@ const ICON = {
   // Two ways round: the button says which one is in force and
   // turning it is what the arrows are for.
   swapby: "M4 8h13l-3-3M20 16H7l3 3",
-  // A floppy. Thirty years after anybody last held one, still the
-  // only picture of "write this down" that nobody has to be taught.
+  // The same idea small, for the right-hand end of a settings row.
+  swap2: "M5 9h14l-3.5-3.5M19 15H5l3.5 3.5",
+  /* A floppy. Thirty years after anybody last held one, still the
+     only picture of "write this down" that nobody has to be taught.
+
+     The "all" variants put a second sheet behind the same glyph --
+     one mark meaning "more than one document", used identically for
+     both, so the pairs read as pairs. Eclipse and Visual Studio both
+     ship a separate stacked graphic for Save All rather than
+     repeating the plain one.
+
+     Discarding is drawn as a back-arrow, NOT a bin. A trash can says
+     the room is being thrown away, when what is being thrown away is
+     an edit -- KDE, Wikimedia and Neo4j have all had the same
+     ambiguity reported against bins used this way. It is an open
+     arrow rather than a closed circle, because a closed circular
+     arrow reads as "refresh". */
   save: "M4.5 3.5h11l4 4v13h-15z|M7.5 3.5v6h7v-6|M7.5 20v-6h9v6",
+  saveall: "M8.5 8h7l3.5 3.5V21h-10.5z|M11 8v3.5h4V8|M11 21v-4h5v4"
+    + "|M4.5 16V5.5a1.5 1.5 0 0 1 1.5-1.5h7.5",
+  revert: "M4.5 11.5h9a5.5 5.5 0 1 1-5.5 5.5"
+    + "|M4.5 11.5l4-4M4.5 11.5l4 4",
+  revertall: "M7.5 13h7.5a4.5 4.5 0 1 1-4.5 4.5|M7.5 13l3.3-3.3M7.5 13l3.3 3.3"
+    + "|M4.5 16V5.5a1.5 1.5 0 0 1 1.5-1.5h7.5",
   // A route traced across the room.
   path: "M4 19c0-5 4-5 8-5s8 0 8-5|O4,19,2.1|O20,9,2.1",
   // A wand: ask the room to work something out.
@@ -680,6 +702,7 @@ function renderSeating() {
 
   drawRail();
   drawSections(sections);
+  drawSaveMenu();
   const saving = document.getElementById("seat-saving");
   saving.hidden = !seatingDirty();
   const btn = document.getElementById("seat-save");
@@ -779,6 +802,7 @@ function drawRail() {
       // it opens it, and pressing it again puts it away.
       if (rail.classList.contains("furled") && mode.value === seatingMode) {
         railOpen = !railOpen;
+        if (railOpen) { paletteOpen = false; saveOpen = false; }
         renderSeating();
         return;
       }
@@ -3170,6 +3194,7 @@ function drawStageBar(section, count) {
    where they belong. */
 function togglePalette(force) {
   paletteOpen = force !== undefined ? force : !paletteOpen;
+  if (paletteOpen) saveOpen = false;      // one open at a time
   const section = currentSection();
   drawPalette(section);
   paintChrome();                  // the plus turns into a cross
@@ -3197,7 +3222,7 @@ function printActions(section) {
   const now = PRINT_BYS.find(o => o.value === printBy()) || PRINT_BYS[0];
   const next = PRINT_BYS[(PRINT_BYS.indexOf(now) + 1) % PRINT_BYS.length];
   const ordering = {
-    icon: "swapby", label: "Ordered " + now.label.toLowerCase(),
+    icon: "swapby", label: "Ordering", value: now.label.toLowerCase(),
     why: now.why + "  (click for: " + next.label.toLowerCase() + ")",
     go: () => { setPrintBy(next.value); paletteOpen = true; renderSeating(); },
   };
@@ -3467,8 +3492,20 @@ function drawPalette(section) {
       b.title = act.why;
       b.appendChild(svgIcon(ICON[act.icon]));
       b.appendChild(el("span", "actname", act.label));
-      b.onclick = () => { paletteOpen = false; act.go(); };
+      /* A row with a value on the right is a setting; a row that is
+         just a verb and its object is an action. Every menu in every
+         application draws that distinction this way, and without it
+         "Ordering by group" sat among four commands looking like a
+         fifth one. The rule below it is the other half: the setting
+         decides what the commands underneath say. */
+      if (act.value) {
+        b.classList.add("setting");
+        b.appendChild(el("span", "actval", act.value));
+        b.appendChild(svgIcon(ICON.swap2));
+      }
+      b.onclick = () => { if (!act.value) paletteOpen = false; act.go(); };
       pal.appendChild(b);
+      if (act.value) pal.appendChild(el("div", "actrule"));
     }
     return;
   }
@@ -4008,9 +4045,10 @@ function panPaper(event) {
     paper.removeEventListener("pointercancel", done);
     paper.classList.remove("panning");
     if (moved) return;                   // it was a drag, not a click
-    const wasOpen = paletteOpen || railOpen;
+    const wasOpen = paletteOpen || railOpen || saveOpen;
     paletteOpen = false;                 // rolls back into the plus
     railOpen = false;                    // and the mode list rolls shut
+    saveOpen = false;                    // and so does the save menu
     if (selected || selectedChair || wasOpen) {
       selected = null;
       selectedChair = null;
@@ -4049,7 +4087,14 @@ function presentKeys(event) {
   if (event.key === "Escape" && !projecting()) {
     // The quasimode first: it is the most temporary thing on screen,
     // so it is the thing Escape is most likely to be aimed at.
+    /* Anything open closes first. Escape means "put back what just
+       appeared", and what just appeared is whatever is in front. */
     if (numbering) { stopNumbering(false); return; }
+    if (saveOpen || paletteOpen || railOpen) {
+      saveOpen = paletteOpen = railOpen = false;
+      renderSeating();
+      return;
+    }
     if (picked) { picked = null; renderSeating(); return; }
 
     if (selected) { selected = null; renderSeating(); }
@@ -4143,13 +4188,24 @@ function discardSection(at) {
   renderSeating();
 }
 
-function openSaveMenu(near) {
+function drawSaveMenu() {
   /* What to save, as a short list rather than a row of buttons. Two
-     rooms is two of everything; six would be twelve. */
-  document.querySelectorAll(".savemenu").forEach(n => n.remove());
+     rooms is two of everything; six would be twelve.
+
+     Built on every render and shown by a class, like the furniture
+     drawer, rather than created on demand and destroyed. Created on
+     demand it could not animate -- there was nothing to transition
+     from -- and pressing the floppy again just built a second one on
+     top of the first, which is why it could only be closed by
+     clicking elsewhere. */
+  const pop = document.getElementById("seat-savemenu");
+  pop.textContent = "";
   const sections = (seatingRoom && seatingRoom.sections) || [];
   const dirty = dirtySections();
-  const pop = el("div", "isle savemenu");
+  const wanted = dirty.length > 0 && !projecting() && !upnext;
+  pop.hidden = !wanted;
+  pop.classList.toggle("open", wanted && saveOpen);
+  if (!wanted) { saveOpen = false; return; }
   const here = Math.min(seatingSection, sections.length - 1);
   const name = i => (sections[i] || {}).name || `section ${i + 1}`;
 
@@ -4157,39 +4213,33 @@ function openSaveMenu(near) {
     const b = el("button", "deskopt act", null);
     b.type = "button";
     b.title = why;
-    b.appendChild(svgIcon(ICON[off ? "trash" : "save"]));
+    b.appendChild(svgIcon(ICON[off]));
     b.appendChild(el("span", "actname", label));
     b.disabled = Boolean(go === null);
-    if (go) b.onclick = () => { pop.remove(); go(); };
+    if (go) b.onclick = () => { saveOpen = false; go(); };
     pop.appendChild(b);
     return b;
   };
 
   item("Save " + name(here),
        "Write this room. The other rooms keep what is on disk.",
-       sectionDirty(here) ? () => saveSeating(here) : null);
+       sectionDirty(here) ? () => saveSeating(here) : null, "save");
   if (sections.length > 1)
     item(dirty.length > 1 ? `Save all ${dirty.length} rooms` : "Save all",
          "Write every room that has changed.",
-         dirty.length ? () => saveSeating() : null);
+         dirty.length ? () => saveSeating() : null, "saveall");
   item("Discard " + name(here),
        "Put this room back the way it is on disk.",
-       sectionDirty(here) ? () => discardSection(here) : null, true);
+       sectionDirty(here) ? () => discardSection(here) : null, "revert");
   if (sections.length > 1 && dirty.length > 1)
     item("Discard all", "Put every room back the way it is on disk.",
-         () => discardRoom(), true);
+         () => discardRoom(), "revertall");
 
-  document.getElementById("view-seating").appendChild(pop);
+  const near = document.getElementById("seat-save");
   const box = near.getBoundingClientRect();
   const app = document.getElementById("view-seating").getBoundingClientRect();
   pop.style.left = Math.round(box.left - app.left) + "px";
   pop.style.top = Math.round(box.bottom - app.top + 8) + "px";
-  const shut = e => {
-    if (pop.contains(e.target)) return;
-    pop.remove();
-    document.removeEventListener("pointerdown", shut, true);
-  };
-  setTimeout(() => document.addEventListener("pointerdown", shut, true), 0);
 }
 
 function sizeSeating() {
@@ -4250,7 +4300,12 @@ function wireSeating() {
   paintChrome();                   // draws every icon for the first time
   const saveBtn = document.getElementById("seat-save");
   saveBtn.appendChild(svgIcon(ICON.save));
-  saveBtn.onclick = e => { e.stopPropagation(); openSaveMenu(saveBtn); };
+  saveBtn.onclick = e => {
+    e.stopPropagation();
+    saveOpen = !saveOpen;
+    paletteOpen = false;         // one open at a time
+    renderSeating();
+  };
   /* Pressing the paper, rather than a thing on it, either pans the
      room or -- if the pointer never travels -- clears the selection.
      `panPaper` decides which on release. */
