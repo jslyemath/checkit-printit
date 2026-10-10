@@ -213,9 +213,16 @@
              has to scale with the canvas, and an SVG is the only
              thing here that can hold a curve. -->
         <svg id="seat-walk" class="walk"></svg>
-        <!-- The band being dragged round a group of things. In room
-             units like the walk, for the same reason. -->
-        <div id="seat-band" class="band" hidden></div>
+        <!-- The band being dragged round a group of things, in room
+             units like the walk. It needs a layer of its own to ride
+             on: a `transform: scale()` is about the element's own
+             centre by default and does not touch `left`/`top`, so
+             scaling the band itself moved it and resized it by
+             different amounts. The layer sits at the origin, carries
+             the scale, and the band inside it is plain room units. -->
+        <div id="seat-bandlayer" class="bandlayer">
+          <div id="seat-band" class="band" hidden></div>
+        </div>
       </div>
       <p id="seating-empty" class="emptyroom" hidden></p>
     </div>
