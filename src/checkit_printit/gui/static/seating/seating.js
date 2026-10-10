@@ -142,6 +142,11 @@ let printBy = "group";           // group | seat
    done. Not a mode -- nothing here persists, there is no button left
    lit afterwards, and escaping puts the room back exactly. */
 let numbering = null;            // null, or { taken: [ids...] }
+/* The walk, while one is being drawn. `on` is true only between a
+   press and a release: the path is a sequence of strokes, not one
+   stroke, because an instructor walking a room lifts the pen to skip
+   the aisle and does not want a line drawn across it. */
+let walking = null;              // null, or { on: bool, strokes: [[[x,y]..]] }
 
 // ------------------------------------------------------------ constants --
 
@@ -186,6 +191,11 @@ const ICON = {
   upnext: "M20.5 4.5h-17A1.5 1.5 0 0 0 2 6v9a1.5 1.5 0 0 0 1.5 1.5H7v4"
     + "l5-4h8.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5z",
   grow: "M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5",
+  // Two ways round: the button says which one is in force and
+  // turning it is what the arrows are for.
+  swapby: "M4 8h13l-3-3M20 16H7l3 3",
+  // A route traced across the room.
+  path: "M4 19c0-5 4-5 8-5s8 0 8-5|O4,19,2.1|O20,9,2.1",
   // A wand: ask the room to work something out.
   wand: "M4 20L15 9|M12.5 6.5l5 5|M15.5 3.5l.9 2.1 2.1.9-2.1.9-.9 2.1"
     + "-.9-2.1-2.1-.9 2.1-.9z|M6 4.5l.6 1.4 1.4.6-1.4.6L6 8.5l-.6-1.4"
@@ -638,7 +648,7 @@ function renderSeating() {
   drawPalette(section);
   drawStrip(section);
   drawStageBar(section, sections.length);
-  stackBottom();
+  paintWalk();                 // `drawn.box` may have moved under it
   // The plus belongs to the mode and the selection, so it is redrawn
   // with them rather than only when a switch is flipped.
   paintChrome();
@@ -841,40 +851,26 @@ function layoutRail() {
      nothing moves while you zoom. The plus is reserved whether or not
      it is showing, for the same reason: a bound that changes with the
      mode would walk the pill about as you worked. */
+  /* The nudge moves the whole stack, not the rail alone: they are one
+     column now, and a rail shifted out from under its own strip would
+     be worse than either of them overlapping the zoom. */
+  const stack = document.getElementById("seat-bottom");
   if (!furl) {
-    rail.style.left = rail.style.transform = "";
+    stack.style.left = stack.style.transform = "";
     return;
   }
   const pill = rail.offsetWidth;
   const lo = (zoom ? zoom.offsetWidth : 0) + 12 + 10;
   const hi = half * 2 - (12 + 44 + 10) - pill;
   const mid = half - pill / 2;
-  rail.style.left = Math.round(Math.max(lo, Math.min(mid, hi))) + "px";
-  rail.style.transform = "none";
+  stack.style.left = Math.round(Math.max(lo, Math.min(mid, hi))) + "px";
+  stack.style.transform = "none";
   const here = rail.querySelector(".railmodes .ibtn.on");
   if (here) here.title = !furl ? (MODES.find(m => m.value === seatingMode)
                                   || {}).why
     : railOpen ? "Put the list away" : "Every mode";
 }
 
-function stackBottom() {
-  /* The bottom edge is a stack, not three fixed offsets: the rail is
-     taller unfurled than furled and the sub-rail is only there
-     sometimes, so anything above them has to be told where they
-     ended up rather than assume. */
-  const view = document.getElementById("view-seating");
-  if (!view || view.hidden) return;
-  const at = Number(getComputedStyle(view).getPropertyValue("--edge")) || 12;
-  const gap = 8;
-  let y = at;
-  for (const id of ["seat-modes", "seat-strip"]) {
-    const node = document.getElementById(id);
-    if (!node) continue;
-    const tall = node.hidden || !node.offsetHeight ? 0 : node.offsetHeight;
-    if (id !== "seat-modes") node.style.bottom = Math.round(y) + "px";
-    if (tall) y += tall + gap;
-  }
-}
 
 function drawSections(sections) {
   const host = document.getElementById("seat-sections");
@@ -957,7 +953,21 @@ function drawRoom(section) {
     const box = el("div", "shape " + spec.css);
     wrap.appendChild(box);
     if (isSelected(group, shape)) wrap.classList.add("chosen");
-    if (upnext) {
+    if (numbering) {
+      /* The table is as much "this group" as any chair at it. Only
+         the chairs answered at first, which meant aiming at a seat
+         to choose a group -- and in Printing the seats are carrying
+         numbers and versions you might be trying to hit instead. */
+      if (printBy === "group" && group) {
+        box.classList.add(numbering.taken.includes(group.id)
+                          ? "counted" : "tocount");
+        box.onpointerdown = e => {
+          e.preventDefault();
+          e.stopPropagation();
+          takeNext(group.id);
+        };
+      }
+    } else if (upnext) {
       // Shown, not edited: no drag, no keyboard nudge, no handles.
     } else if (seatingMode === "groups") {
       box.classList.add("movable");
@@ -1975,19 +1985,26 @@ function drawPrintPlan() {
   host.hidden = !wanted;
   if (!wanted) return;
   host.appendChild(el("span", "isep"));
-  for (const one of PRINT_BYS) {
-    const b = el("button", "ibtn" + (one.value === printBy ? " on" : ""),
-                 one.label);
-    b.type = "button";
-    b.title = one.why;
-    b.setAttribute("aria-pressed", String(one.value === printBy));
-    b.onclick = () => {
-      if (one.value === printBy) return;
-      printBy = one.value;
-      renderSeating();
-    };
-    host.appendChild(b);
-  }
+
+  /* One button showing the state, not two showing both states.
+
+     A binary drawn as a pair of mutually exclusive buttons costs
+     twice the width to say the same thing, and this island could not
+     afford it: with Save and Discard up it came to 365px and ran 63px
+     under the top-right island. The pair alone was 139 of that.
+
+     The window already has the right pattern for this -- the display
+     switch is one button that reads "Seat letters" or "Version
+     labels" depending on where you are. Same shape of fact, same
+     shape of control. */
+  const now = PRINT_BYS.find(o => o.value === printBy) || PRINT_BYS[0];
+  const next = PRINT_BYS[(PRINT_BYS.indexOf(now) + 1) % PRINT_BYS.length];
+  const b = el("button", "ibtn", now.label);
+  b.type = "button";
+  b.title = now.why + "  (click for: " + next.label.toLowerCase() + ")";
+  b.appendChild(svgIcon(ICON.swapby));
+  b.onclick = () => { printBy = next.value; renderSeating(); };
+  host.appendChild(b);
 }
 
 function drawPlanStrip(strip, section) {
@@ -2012,12 +2029,25 @@ function drawPlanStrip(strip, section) {
   const head = el("span", "scount");
   head.appendChild(svgIcon(ICON.printer));
   strip.appendChild(head);
-  strip.appendChild(el("span", "sname flat",
-    printBy === "group" ? "Click the groups in order"
-                        : "Click the seats in order"));
+  strip.appendChild(el("span", "sname flat", walking
+    ? (printBy === "group" ? "Draw past the groups in order"
+                           : "Draw past the seats in order")
+    : (printBy === "group" ? "Click the groups in order"
+                           : "Click the seats in order")));
   strip.appendChild(el("span", "smeta upcount",
                        numbering.taken.length + "/" + total));
   strip.appendChild(el("span", "isep"));
+  if (walking) {
+    /* Done, not "let go". The route is several strokes with lifts
+       between them, so releasing cannot be what finishes it -- the
+       first gap would end the walk half a room early. */
+    const done = el("button", "ibtn tiny key", "Done");
+    done.type = "button";
+    done.title = "Use the route as drawn. Anything the line missed "
+      + "keeps the order it had, after everything the line found.";
+    done.onclick = () => stopNumbering(true);
+    strip.appendChild(done);
+  }
   const stop = el("button", "ibtn tiny", "Cancel");
   stop.type = "button";
   stop.title = "Leave the order as it was. Escape does it too.";
@@ -3149,7 +3179,16 @@ function printActions(section) {
       : "Click the seats in the order you want them printed.",
     go: () => startNumbering(),
   };
-  return [byClick, spread, count];
+  const byPath = {
+    icon: "path",
+    label: printBy === "group" ? "Draw a path past the groups"
+                               : "Draw a path past the seats",
+    why: "Trace the route you will walk. Whatever the line passes "
+      + "takes the next place. Lift the pointer to skip a gap and "
+      + "carry on; press Done when the route is finished.",
+    go: () => startWalking(),
+  };
+  return [byClick, byPath, spread, count];
 }
 
 function startNumbering() {
@@ -3160,6 +3199,131 @@ function startNumbering() {
   renderSeating();
 }
 
+function startWalking() {
+  numbering = { taken: [] };
+  walking = { on: false, strokes: [] };
+  paletteOpen = false;
+  selected = null;
+  selectedChair = null;
+  renderSeating();
+}
+
+function walkPast(cx, cy) {
+  /* Whatever the line is passing takes the next place.
+
+     Within half a card of a seat's middle, which is generous on
+     purpose: this is a route sketched with a hand, not a series of
+     aimed clicks, and asking somebody to pass exactly through a
+     centre would make a drawn path worse than clicking.
+
+     Only forward. Crossing your own line does not un-count anything
+     -- a walk doubles back all the time and an instructor who wants
+     to undo one has the click for it. */
+  const section = currentSection();
+  if (!section || !numbering) return;
+  let best = null, gap = CARD_W * 0.5;
+  for (const seat of drawn.seats) {
+    const d = Math.hypot(seat.x - cx, seat.y - cy);
+    if (d < gap) { gap = d; best = seat; }
+  }
+  if (!best) return;
+  const id = printBy === "group"
+    ? (groupOfSeat(section)[best.id] || {}).id : best.id;
+  if (!id || numbering.taken.includes(id)) return;
+  numbering.taken.push(id);
+  paintWalk();
+  renderSeating();
+}
+
+function smoothPath(points) {
+  /* A rounded line through the samples rather than a polyline of
+     every pointer event.
+
+     Each segment is a quadratic curve whose control point is the
+     sample and whose ends are the midpoints between samples -- the
+     standard freehand smoothing, one pass, no fitting. A path drawn
+     pixel by pixel is a jagged thing with a visible corner at every
+     event, and at a canvas scale those corners are what makes a
+     drawn line look like a mistake rather than a gesture. */
+  if (points.length < 2) return "";
+  const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  let d = `M ${points[0][0]} ${points[0][1]}`;
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const [mx, my] = mid(points[i], points[i + 1]);
+    d += ` Q ${points[i][0]} ${points[i][1]} ${mx} ${my}`;
+  }
+  const last = points[points.length - 1];
+  d += ` L ${last[0]} ${last[1]}`;
+  return d;
+}
+
+function paintWalk() {
+  /* The line itself, in its own SVG over the canvas. In room units,
+     so it is drawn once and the zoom scales it like everything else
+     rather than it needing redrawing at every scale. */
+  const svg = document.getElementById("seat-walk");
+  if (!svg) return;
+  svg.textContent = "";
+  const area = drawn.box;
+  /* `.on`, not `.hidden`.
+
+     `hidden` is a property of `HTMLElement`, and an `<svg>` is an
+     `SVGElement`: assigning `svg.hidden = false` sets a plain
+     JavaScript property that nothing reads and leaves the `hidden`
+     attribute from the markup exactly where it was. The route was
+     drawn correctly, in the right place, at the right size, inside an
+     element the browser was still refusing to display. */
+  if (!walking || !area) { svg.classList.remove("on"); return; }
+  svg.classList.add("on");
+  svg.setAttribute("viewBox", `0 0 ${area.w} ${area.h}`);
+  svg.setAttribute("width", area.w);
+  svg.setAttribute("height", area.h);
+  const NS = "http://www.w3.org/2000/svg";
+  for (const stroke of walking.strokes) {
+    const d = smoothPath(stroke);
+    if (!d) continue;
+    const line = document.createElementNS(NS, "path");
+    line.setAttribute("d", d);
+    line.setAttribute("class", "walkline");
+    svg.appendChild(line);
+  }
+}
+
+function walkPointer(event) {
+  if (!walking) return false;
+  if (event.pointerType === "mouse" && event.button !== 0) return true;
+  event.preventDefault();
+  const paper = seatingPaper();
+  const area = drawn.box || { x: 0, y: 0 };
+  const stroke = [];
+  walking.strokes.push(stroke);
+  walking.on = true;
+
+  const add = e => {
+    const [cx, cy] = roomPoint(e);
+    const last = stroke[stroke.length - 1];
+    // Thin the samples: a pointer reports far more than a curve
+    // needs, and the extra ones are what put kinks in it.
+    if (last && Math.hypot(cx - last[0], cy - last[1]) < 8) return;
+    stroke.push([cx - area.x, cy - area.y]);
+    paintWalk();
+    walkPast(cx, cy);
+  };
+  add(event);
+
+  const up = () => {
+    paper.removeEventListener("pointermove", add);
+    paper.removeEventListener("pointerup", up);
+    paper.removeEventListener("pointercancel", up);
+    walking.on = false;
+  };
+  try { paper.setPointerCapture(event.pointerId); } catch (err) { /* fine */ }
+  paper.addEventListener("pointermove", add);
+  paper.addEventListener("pointerup", up);
+  paper.addEventListener("pointercancel", up);
+  return true;
+}
+
 function stopNumbering(keep) {
   /* Nothing is written until the last one is clicked. A half-finished
      order is not an order, and leaving the room half-renumbered
@@ -3168,6 +3332,8 @@ function stopNumbering(keep) {
   const section = currentSection();
   const taken = (numbering && numbering.taken) || [];
   numbering = null;
+  walking = null;
+  paintWalk();
   if (keep && section && taken.length) {
     if (printBy === "group") {
       const rest = printOrder(section).filter(g => !taken.includes(g.id));
@@ -3186,7 +3352,17 @@ function stopNumbering(keep) {
 }
 
 function takeNext(id) {
-  if (!numbering || numbering.taken.includes(id)) return;
+  if (!numbering) return;
+  const at = numbering.taken.indexOf(id);
+  if (at >= 0) {
+    /* Already counted, so this is a correction. Out it comes and
+       everything after it shuffles up, which is the only reading of
+       a second click that is any use -- the alternative is starting
+       the whole run again because you went one table too far. */
+    numbering.taken.splice(at, 1);
+    renderSeating();
+    return;
+  }
   numbering.taken.push(id);
   const section = currentSection();
   const total = printBy === "group"
@@ -3624,6 +3800,11 @@ function applyZoom(section) {
 
   const zoom = seatingZoom === null ? fitZoom(paper, area) : seatingZoom;
   canvas.style.transform = `scale(${zoom})`;
+  // The drawn route is a sibling of the canvas rather than a child --
+  // an SVG cannot live inside it and keep its own coordinates -- so
+  // it is given the same scale by hand.
+  const walk = document.getElementById("seat-walk");
+  if (walk) walk.style.transform = `scale(${zoom})`;
   // The box carries the scaled size, because a scaled element's own
   // layout box is still its unscaled one and nothing downstream could
   // tell how big the room had become.
@@ -3955,6 +4136,10 @@ function wireSeating() {
      room or -- if the pointer never travels -- clears the selection.
      `panPaper` decides which on release. */
   seatingPaper().addEventListener("pointerdown", e => {
+    // While a walk is being drawn the paper is the drawing surface,
+    // not something to pan: a pan and a stroke are the same gesture
+    // and only one of them can have it.
+    if (walking && walkPointer(e)) return;
     if (e.target.closest(".shape, .seatcard, .pill, .grip, .spinner")) return;
     panPaper(e);
   });

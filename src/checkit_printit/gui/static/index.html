@@ -208,6 +208,11 @@
     <div class="paper">
       <div id="canvasbox" class="canvasbox">
         <div id="canvas" class="canvas"></div>
+        <!-- The route being drawn, over the room and under the
+             islands. Its own layer because it is in room units and
+             has to scale with the canvas, and an SVG is the only
+             thing here that can hold a curve. -->
+        <svg id="seat-walk" class="walk"></svg>
       </div>
       <p id="seating-empty" class="emptyroom" hidden></p>
     </div>
@@ -276,8 +281,7 @@
       <button id="seat-full" class="ibtn" title="Fill the screen"></button>
     </div>
 
-    <!-- what is selected: one thin strip, with no expanded state -->
-    <div id="seat-strip" class="isle strip" hidden></div>
+
 
     <!-- The furniture, unrolling upward out of the plus. -->
     <div id="seat-palette" class="isle palette" hidden></div>
@@ -288,8 +292,23 @@
          is a description. -->
     <button id="seat-plus" class="plusbtn" hidden>+</button>
 
-    <!-- bottom centre: what am I doing. Modes only. -->
-    <div id="seat-modes" class="isle at-bc rail"></div>
+    <!-- The bottom edge, as one stack rather than as two things that
+         have to be told about each other.
+
+         The rail is 41px tall furled and 51 unfurled, and it also
+         grows to 220 while its list is open. The strip used to be
+         placed by measuring the rail and writing an offset, which is
+         a copy of a number -- and the copy was stale the moment the
+         rail changed height by any route that did not re-render. A
+         flex column anchored to the floor has the spacing as a
+         consequence of the geometry instead of a copy of it, and
+         there is nothing left to keep in step. -->
+    <div id="seat-bottom" class="bottomstack">
+      <!-- bottom centre: what am I doing. Modes only. -->
+      <div id="seat-modes" class="isle rail"></div>
+      <!-- what is selected: one thin strip, with no expanded state -->
+      <div id="seat-strip" class="isle strip" hidden></div>
+    </div>
 
     <!-- Shown only while presenting: which room this is, and the way
          out. Both are things a person at the front cannot otherwise
