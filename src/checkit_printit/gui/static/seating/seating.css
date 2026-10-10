@@ -590,6 +590,11 @@
 /* The furniture, in a column that unrolls upward out of the plus at
    the end of the strip, and rolls back into it. */
 .palette {
+  /* Above the bottom stack. Both were z-index 5 and the stack is
+     later in the markup, so the strip was drawn over a menu that had
+     been opened on top of it. A menu is in front of what it covers:
+     that is what makes it a menu. */
+  z-index: 8;
   bottom: 64px;
   right: 12px;
   margin-right: 0;
