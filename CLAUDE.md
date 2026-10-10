@@ -364,9 +364,50 @@ built rather than alphabetically, because several are part-done:
 | 8d | **Print job** | done -- modes, variants, extras, per-student override and version, preview, build |
 | 8e | the response pull | done -- it is Print job's first card, not a tab |
 | 8e | **Record** | **not started.** The only view still entirely untouched |
-| 8f | **Seating** | its own module under `gui/static/seating/`, with the island shell, selection, group colour, label anchors, the unseated rail and **Up Next**. Six modes; **Order** is the only one not built. A room can be built from nothing: Desks adds and removes furniture, Chairs moves and counts the seats on it. Specified in `../checkit/PRINT_TOOL_DESIGN.md` 12.11 and 12.12 |
+| 8f | **Seating** | its own module under `gui/static/seating/` — ~4,800 lines of JS and ~1,400 of CSS, the largest thing in the app. Four modes in the rail (**People, Groups, Seats, Printing**) and two overlays that cross them (**Up Next**, **projector**). A room can be built from nothing. See the table below, and `../checkit/PRINT_TOOL_DESIGN.md` 12.11–12.13 |
 | 8g | ~~Cold call~~ | **folded into Seating as the Up Next mode**, and renamed: the students see it. No tab of its own. See `../checkit/PRINT_TOOL_DESIGN.md` 12.12 |
 | 8h | **Setup** | half done -- a form can be created or attached from the app. The boilerplate editor is still to come |
+
+**Inside Seating.** The modes, and what a click means in each:
+
+| mode | a click | a drag on bare paper |
+|---|---|---|
+| **People** | pick a name, click a chair to seat them | pans |
+| **Groups** | select furniture; grips resize, the spinner turns | bands a selection of groups |
+| **Seats** | select a seat; drag to move or reparent it | bands a selection of seats |
+| **Printing** | select a seat; numbers and version circles are editable where they sit | pans |
+
+Space held, the middle button, or two fingers always pan; two fingers
+spreading zoom. `Up Next` and projector mode are switches in the
+top-right island, not modes -- they cross whatever mode is underneath
+and restore it on the way out.
+
+**Model fields this view owns** (all optional, all validated in
+`room.check`, all absent in a room nobody has touched):
+
+| field | means |
+|---|---|
+| `group.order` | where this group falls in the printed stack |
+| `group.hue`, `group.chroma` | its colour; lightness is the design system's and is never stored |
+| `group.label_at` | which desk and which of nine anchors the label hangs on |
+| `seat.version` | which paper prints for this seat |
+| `seat.spot` | its place inside its own group's run |
+| `seat.order` | its place across the whole room |
+| `section.print_by` | `"group"` or `"seat"` |
+| `shape.w`, `shape.h`, `shape.angle` | a desk resized or turned |
+
+A **seat letter** is *not* stored: it is derived clockwise from the top
+left of its group every time the room is drawn, so "recalculate when a
+seat moves" needs no bookkeeping. It is not the print version; the two
+start equal and diverge the moment versions are shuffled.
+
+**Known gap.** `section.print_by` is read by the canvas and **ignored by
+`seating.to_toml`**. By-seat ordering means a stack that ignores group
+boundaries, and the chart's unit is `[[group]]` with a seat's place being
+its index inside one -- so an interleaved order has nowhere to live.
+Flattening the room into one `[[group]]` would encode the order and
+destroy the meaning, because that field is what `seating.Chart.collisions`
+uses to decide who can see whom. Needs a format decision, not a patch.
 
 **All three decisions that were blocking 8e are settled**, on
 2026-10-01. See `../checkit/PRINT_TOOL_DESIGN.md` 12.6 under "Settled, and
