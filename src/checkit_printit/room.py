@@ -314,18 +314,39 @@ def apply_versions(section, assignment):
 # --------------------------------------------------- out to the CLI's file --
 
 def ordered_groups(section):
-    """Groups in print order, with ungrouped seats as groups of one.
+    """Groups in print order, each group's seats in its own order.
 
     An unplaced group keeps its existing position rather than being
     dropped: the instructor is warned that the order is incomplete and may
     go ahead, and "went out roughly right" beats "went out missing".
+
+    **Both scales matter.** The stack comes off the printer as these
+    groups in this order, each one's seats in the order they are listed
+    -- so a seat's `spot` has to be applied here or it is a number the
+    canvas draws and nothing reads. A seat with no `spot` keeps its
+    place in the list, which is the order the room was built in.
     """
     groups = list(section.get("groups") or [])
     placed = [g for g in groups if g.get("order") is not None]
     rest = [g for g in groups if g.get("order") is None]
     placed.sort(key=lambda g: g["order"])
 
-    out = [dict(g) for g in placed + rest]
+    spots = {}
+    for shape in section.get("shapes") or []:
+        for seat in shape.get("seats") or []:
+            at = seat.get("spot")
+            if at is not None:
+                spots[seat.get("id")] = at
+
+    out = []
+    for group in placed + rest:
+        copy = dict(group)
+        ids = list(copy.get("seats") or [])
+        # Stable, so seats without a spot stay where they were relative
+        # to each other and only the placed ones move.
+        copy["seats"] = sorted(
+            ids, key=lambda sid: spots.get(sid, math.inf))
+        out.append(copy)
     grouped = {sid for g in groups for sid in (g.get("seats") or [])}
     for seat in seats_of(section):
         if seat["id"] not in grouped:

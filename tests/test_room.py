@@ -54,6 +54,52 @@ def versions_at(section, chosen):
     return [chosen[s["id"]] for s in room_mod.seats_of(section)]
 
 
+class TestTheStackComesOutInOrder:
+    def test_a_seats_spot_decides_where_it_prints_in_its_group(self):
+        """`group.order` puts the tables in order; `spot` puts the seats
+        in order inside one. Both have to reach `ordered_groups`, because
+        that is the only thing the chart writer asks."""
+        s = section_with(table("t1", (0, 0), 4),
+                         groups=[group("g1", "t1", 4)])
+        plain = room_mod.ordered_groups(s)[0]["seats"]
+        assert plain == ["t1-0", "t1-1", "t1-2", "t1-3"]
+
+        # The canvas always renumbers a whole group, so this is the
+        # shape the file really takes: every seat spotted.
+        spots = {"t1-0": 4, "t1-1": 3, "t1-2": 2, "t1-3": 1}
+        for shape in s["shapes"]:
+            for seat in shape["seats"]:
+                seat["spot"] = spots[seat["id"]]
+        assert room_mod.ordered_groups(s)[0]["seats"] == \
+            ["t1-3", "t1-2", "t1-1", "t1-0"]
+
+    def test_a_half_spotted_group_prints_the_spotted_ones_first(self):
+        """Only reachable by hand-editing the file -- the canvas spots a
+        whole group at a time -- so the rule is chosen to match the one
+        a group already follows: a group with no `order` prints after
+        every group that has one, and a seat with no `spot` prints after
+        every seat that has one. Among themselves, both keep the order
+        they were listed in."""
+        s = section_with(table("t1", (0, 0), 4),
+                         groups=[group("g1", "t1", 4)])
+        by_id = {x["id"]: x for sh in s["shapes"] for x in sh["seats"]}
+        by_id["t1-2"]["spot"] = 1
+        out = room_mod.ordered_groups(s)[0]["seats"]
+        assert out == ["t1-2", "t1-0", "t1-1", "t1-3"]
+
+    def test_ordering_a_group_does_not_touch_the_room(self):
+        """`ordered_groups` hands back a view for the writer to read.
+        Sorting the group's own list in place would quietly reorder the
+        document every time anybody asked what order it was in."""
+        s = section_with(table("t1", (0, 0), 4),
+                         groups=[group("g1", "t1", 4)])
+        by_id = {x["id"]: x for sh in s["shapes"] for x in sh["seats"]}
+        by_id["t1-3"]["spot"] = 1
+        before = list(s["groups"][0]["seats"])
+        room_mod.ordered_groups(s)
+        assert s["groups"][0]["seats"] == before
+
+
 class TestATableGetsDifferentPapers:
     def test_four_seats_four_letters_are_all_different(self):
         s = section_with(table("t1", (0, 0), 4), groups=[group("g1", "t1", 4)])
