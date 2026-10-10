@@ -227,7 +227,7 @@ const MODES = [
   { value: "seats", label: "Seats", icon: "seats",
     why: "Move the seats on a group, add one, take one away — and drag "
       + "a seat onto another group to move it there." },
-  { value: "printing", label: "Printing", icon: "order",
+  { value: "printing", label: "Printing", icon: "printer",
     why: "What goes on the paper and what order it comes out in: "
       + "which version each seat gets, and the sequence the stack is "
       + "printed in." },
@@ -981,13 +981,21 @@ function drawRoom(section) {
         if (picked && picked.seat === seat) card.classList.add("picked");
         card.onpointerdown = e => dragName(e, card, { seat: seat });
       } else if (seatingMode === "printing") {
-        /* Clicking a seat selects it. Printing is about what lands on
-           a seat, so the seat is the thing you point at -- and the
-           strip has a seat state to say what you picked. */
+        /* Click a seat to pick it, click a second to trade versions.
+
+           The same gesture People mode uses to move somebody, because
+           it is the same shape of act: choose a thing, choose where it
+           goes. Clicking the one you already have puts it down. */
         if (seat.id === selectedChair) card.classList.add("picked");
+        if (selectedChair && seat.id !== selectedChair)
+          card.classList.add("chairable");
         card.onpointerdown = e => {
           e.preventDefault();
           e.stopPropagation();
+          if (selectedChair && selectedChair !== seat.id) {
+            swapVersions(section, selectedChair, seat.id);
+            return;
+          }
           selectedChair = selectedChair === seat.id ? null : seat.id;
           selected = null;
           renderSeating();
@@ -1094,6 +1102,28 @@ function paintPrintOrder(section, where, ox, oy) {
      the event, so a click anywhere else on the card still selects the
      seat. That is the whole reason Printing needs no submode: the
      thing you touch is the thing you change. */
+  if (printBy === "seat") {
+    /* One running number across the whole room and no group badges --
+       the stack is a single sequence, so a number saying which group
+       it belongs to would be answering a question nobody asked. */
+    const run = roomRun(section);
+    run.forEach((id, i) => {
+      const card = drawn.cards[id];
+      if (!card) return;
+      const tag = el("span", "ordertag seat", String(i + 1));
+      tag.title = `Prints ${i + 1} of ${run.length}. Click to change.`;
+      tag.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); };
+      tag.onclick = e => {
+        e.stopPropagation();
+        const seat = seatById(section, id);
+        if (seat) typeOrder(tag, i + 1, run.length,
+                            n => reorderRoomSeat(section, seat, n));
+      };
+      card.appendChild(tag);
+    });
+    return;
+  }
+
   const line = printOrder(section);
   line.forEach((group, i) => {
     if (printBy === "group") {
@@ -1140,6 +1170,41 @@ function paintPrintOrder(section, where, ox, oy) {
       card.appendChild(tag);
     });
   });
+}
+
+function swapVersions(section, aId, bId) {
+  /* Trade two seats' papers. The versions move and nothing else does
+     -- not the people, not the seat letters, not the print order.
+
+     A seat with no version yet is still a legal end of a trade: the
+     emptiness moves too, which is what lets an instructor pull a
+     letter off a seat by swapping it with a blank one. */
+  const a = seatById(section, aId), b = seatById(section, bId);
+  if (!a || !b) return;
+  const was = a.version || "";
+  a.version = b.version || "";
+  b.version = was;
+  selectedChair = null;
+  renderSeating();
+}
+
+async function spreadVersions(section) {
+  /* Hand the letters out again, spaced as far apart as the room
+     allows. The colouring runs on the server because `room.assign_
+     versions` is where it lives and where the CLI calls it -- a
+     second implementation here would agree with that one until one of
+     them was improved. */
+  try {
+    const out = await api("/api/seating/versions", {
+      room: seatingRoom,
+      section: seatingSection,
+      versions: (seatingRoom && seatingRoom.versions) || [],
+    });
+    seatingRoom = out.room;
+    selectedChair = null;
+    renderSeating();
+    toast(out.note);
+  } catch (err) { toast(err.message, true); }
 }
 
 function typeOrder(node, now, total, settle) {
@@ -1658,8 +1723,11 @@ function drawPlanStrip(strip, section) {
   strip.hidden = false;
   strip.classList.add("planstrip");
 
+  // The numbered list, not the printer: the printer is Printing's own
+  // glyph in the rail now, and repeating it here would say "printing"
+  // where the question is "in what order".
   const head = el("span", "scount");
-  head.appendChild(svgIcon(ICON.printer));
+  head.appendChild(svgIcon(ICON.order));
   head.title = "How the printed stack is ordered";
   strip.appendChild(head);
 
@@ -1676,6 +1744,22 @@ function drawPlanStrip(strip, section) {
     };
     strip.appendChild(b);
   }
+
+  strip.appendChild(el("span", "isep"));
+  const letters = (seatingRoom && seatingRoom.versions) || [];
+  const many = el("span", "scount");
+  many.appendChild(svgIcon(ICON.vletters));
+  many.appendChild(el("span", "num", String(letters.length)));
+  many.title = letters.length + " version" + (letters.length === 1 ? "" : "s")
+    + " in play: " + letters.join(" ");
+  strip.appendChild(many);
+
+  const spread = el("button", "ibtn tiny", "Spread out");
+  spread.type = "button";
+  spread.title = "Hand the letters out again, as far apart as the room "
+    + "allows. Neighbours and tablemates get different papers.";
+  spread.onclick = () => spreadVersions(section);
+  strip.appendChild(spread);
 }
 
 function drawSeatStrip(strip, section, seat) {
@@ -1760,6 +1844,37 @@ function printOrder(section) {
   const has = g => g.order !== null && g.order !== undefined;
   return all.filter(has).sort((a, b) => a.order - b.order)
             .concat(all.filter(g => !has(g)));
+}
+
+function roomRun(section) {
+  /* Every seat in the room, in the order the stack comes out when the
+     order is by seat rather than by group.
+
+     Seeded from the by-group plan -- group by group, and within each
+     group by its own run -- so switching between the two plans starts
+     from the answer you already had rather than from nothing. `order`
+     overrides it once a seat has been moved, the same way `spot` does
+     inside a group. */
+  const seeded = [];
+  for (const group of printOrder(section))
+    for (const id of seatRun(section, group)) seeded.push(id);
+  const given = id => {
+    const seat = seatById(section, id);
+    return seat && typeof seat.order === "number" ? seat.order : Infinity;
+  };
+  return seeded.sort((a, b) =>
+    (given(a) - given(b)) || (seeded.indexOf(a) - seeded.indexOf(b)));
+}
+
+function reorderRoomSeat(section, seat, want) {
+  const run = roomRun(section).filter(id => id !== seat.id);
+  const at = Math.min(Math.max(1, Math.round(want)), run.length + 1) - 1;
+  run.splice(at, 0, seat.id);
+  run.forEach((id, i) => {
+    const s = seatById(section, id);
+    if (s) s.order = i + 1;
+  });
+  renderSeating();
 }
 
 function seatRun(section, group) {

@@ -267,14 +267,18 @@ class TestTheRoomComingBackIsChecked:
         seat = r["sections"][0]["shapes"][0]["seats"][0]
         assert "spot" not in seat
         assert room_mod.check(r) is not None
-        for ok in (1, 2, 40, None):
-            seat["spot"] = ok
-            assert room_mod.check(r) is not None, f"{ok!r} should pass"
-        # 0 and below are not positions, and neither is half a place.
-        for bad in (0, -1, 1.5, "first", True, float("nan")):
-            seat["spot"] = bad
-            with pytest.raises(room_mod.RoomError, match="print order"):
-                room_mod.check(r)
+        # `order` is the same kind of thing one scale up: the seat's
+        # place across the whole room rather than inside its group.
+        for field in ("spot", "order"):
+            for ok in (1, 2, 40, None):
+                seat[field] = ok
+                assert room_mod.check(r) is not None, f"{field}={ok!r}"
+            # 0 and below are not positions, nor is half a place.
+            for bad in (0, -1, 1.5, "first", True, float("nan")):
+                seat[field] = bad
+                with pytest.raises(room_mod.RoomError, match="print order"):
+                    room_mod.check(r)
+            seat.pop(field, None)
 
     def test_a_label_may_only_hang_on_a_desk_that_is_there(self):
         """It would silently fall back to the middle of the group's

@@ -493,17 +493,25 @@ def check(room, known=None):
                 everywhere[sid] = where
                 here.add(sid)
                 _point(seat.get("at"), f"{where}: seat {sid!r}")
-                # Where this seat comes in its group's own run of the
-                # stack. Absent is the normal state and means "in seat
-                # order", which is the clockwise lettering the canvas
-                # works out for itself -- so a room nobody has
-                # reordered stores nothing and reads the same.
-                spot = seat.get("spot") if isinstance(seat, dict) else None
-                if spot is not None and (not _number(spot)
-                                         or int(spot) != spot or spot < 1):
-                    raise RoomError(
-                        f"{where}: a seat is {spot!r} in its group's "
-                        f"print order, which is not a position.")
+                # Where this seat comes in the stack. `spot` is its
+                # place inside its own group, `order` its place across
+                # the whole room; which is in force depends on how the
+                # instructor chose to order the printing, and a room
+                # may carry both.
+                #
+                # Absent is the normal state for each. A group nobody
+                # has reordered prints in seat order -- the clockwise
+                # lettering the canvas works out for itself -- so a
+                # room nobody has touched stores neither and reads the
+                # same.
+                for field in ("spot", "order"):
+                    at = seat.get(field)
+                    if at is None:
+                        continue
+                    if not _number(at) or int(at) != at or at < 1:
+                        raise RoomError(
+                            f"{where}: a seat is {at!r} in the print "
+                            f"order, which is not a position.")
 
                 who = seat.get("student") or ""
                 if not who:
