@@ -69,11 +69,27 @@
      scrollbar beside that is a second, worse way to do one thing
      that also eats two strips of the room. */
   overflow: hidden;
-  cursor: grab;
+  /* A crosshair, because a plain drag now draws a band. The grabbing
+     hand appears while the space bar is held, which is when a drag
+     moves the view instead. */
+  cursor: crosshair;
+  touch-action: none;
   background-color: var(--paper);
   background-repeat: repeat;
 }
+.paper.panready { cursor: grab; }
 .paper.panning { cursor: grabbing; }
+
+/* The band itself: in room units on the canvas box, so it scales
+   with everything else. */
+.band {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+  border: 1.5px solid var(--isle-key);
+  background: oklch(0.82 0.115 165 / .14);
+  border-radius: 3px;
+}
 
 /* Placed by `placeBox`, not by the layout.
 
@@ -709,6 +725,23 @@
 /* Always above the furniture, whichever desk was drawn last. */
 .canvas > .seatcard { z-index: 2; }
 .canvas > .pill { z-index: 3; }
+/* Caught by the band. A ring in the accent, like the one the drop
+   target wears, because both mean "this is what the gesture has
+   hold of". */
+.deskwrap.banded::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border: 2px solid var(--isle-key);
+  border-radius: 7px;
+  background: oklch(0.82 0.115 165 / .10);
+  pointer-events: none;
+}
+.seatcard.banded {
+  outline: 2px solid var(--isle-key);
+  outline-offset: 1px;
+}
+
 .deskwrap.chosen::before {
   content: "";
   position: absolute;
@@ -1134,6 +1167,13 @@
 /* The card left behind while its copy is on the cursor -- so a drag
    reads as "this is going somewhere", not "this has gone". */
 .seatcard.lifted { opacity: .3; }
+/* Sliding from the chair it was in to the chair it is in. The
+   transition is added only for the move, so a card that is merely
+   being redrawn does not creep. */
+.seatcard.flipping { z-index: 6; will-change: transform; }
+.seatcard.flipgo {
+  transition: transform var(--in-time) var(--in-curve);
+}
 
 /* The copy under the cursor. In `document.body`, because a transformed
    ancestor makes `position: fixed` behave like `absolute` and the
