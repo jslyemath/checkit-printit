@@ -890,7 +890,9 @@
 /* A triangle's middle is not its centre of area: two thirds of the
    way down is where it looks middled, and the apex squeezes a
    centred glyph against the sloping sides. */
-.desktile.triangle .tileone { align-items: flex-end; padding-bottom: 5px; }
+/* Between the two: centred rode up into the apex, and flush with
+   the base sat under the shape. */
+.desktile.triangle .tileone { align-items: flex-end; padding-bottom: 12px; }
 .deskopt:hover .tileone { color: var(--isle-ink); }
 
 /* Dragged off the palette: the shape, following the pointer, growing
@@ -983,15 +985,28 @@
    The radius is the desk's own 14 plus the offset, so the rectangle
    is concentric with what it surrounds instead of turning a much
    tighter corner than the thing inside it. */
+/* Grey, and nothing else on the canvas is.
+
+   A selection drawn in the group's own colour is a second coloured
+   ring a few pixels outside the first, and at any zoom the two read
+   as one doubled outline rather than as a desk and a selection. Grey
+   is the only colour on this canvas that cannot belong to a group,
+   which is what makes it mean "chosen" rather than "purple".
+
+   `--pick-out` is far enough that the ring is plainly around the
+   desk rather than hugging its edge, and `--pick-line` is the 2.5
+   every other line in the room is drawn at -- 1.5 was thinner than
+   the desk it surrounded. */
 .deskwrap.chosen {
-  --pick-out: 7px;
-  --pick-line: 1.5px;
+  --pick-out: 12px;
+  --pick-line: 2.5px;
+  --pick-ink: oklch(0.47 0.010 260);
 }
 .deskwrap.chosen::before {
   content: "";
   position: absolute;
   inset: calc(var(--pick-out) * -1);
-  border: var(--pick-line) solid var(--solid);
+  border: var(--pick-line) solid var(--pick-ink);
   border-radius: calc(14px + var(--pick-out));
   pointer-events: none;
 }
@@ -1113,7 +1128,7 @@
   margin: -5.5px 0 0 -5.5px;
   border-radius: 50%;
   background: white;
-  border: var(--pick-line, 1.5px) solid var(--solid);
+  border: var(--pick-line, 2.5px) solid var(--pick-ink, #666);
   z-index: 4;
 }
 .grip-n, .grip-s { cursor: ns-resize; }
@@ -1127,12 +1142,12 @@
    a nick in the outline. */
 .spinner {
   position: absolute;
-  left: 50%; top: calc(-30px - var(--pick-out, 7px));
+  left: 50%; top: calc(-30px - var(--pick-out, 12px));
   width: 15px; height: 15px;
   margin-left: -7.5px;
   border-radius: 50%;
-  background: var(--solid);
-  border: var(--pick-line, 1.5px) solid white;
+  background: var(--pick-ink, #666);
+  border: var(--pick-line, 2.5px) solid white;
   cursor: grab;
   z-index: 4;
 }
@@ -1140,10 +1155,10 @@
   content: "";
   position: absolute;
   left: 50%; top: 100%;
-  width: var(--pick-line, 1.5px);
-  height: calc(18px + var(--pick-out, 7px));
-  margin-left: calc(var(--pick-line, 1.5px) / -2);
-  background: var(--solid);
+  width: var(--pick-line, 2.5px);
+  height: calc(18px + var(--pick-out, 12px));
+  margin-left: calc(var(--pick-line, 2.5px) / -2);
+  background: var(--pick-ink, #666);
 }
 .spinner:active { cursor: grabbing; }
 
