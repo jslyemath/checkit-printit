@@ -2308,6 +2308,14 @@ function dragLabel(event, tag, section, group, ids, where) {
 // ------------------------------------------------------------ selection --
 
 function isSelected(group, shape) {
+  /* A band of more than one thing *is* the selection, and nothing
+     else is. Asked here rather than at each of the four places that
+     draw a selection, because the answer has to be the same at all
+     of them: a desk was showing its own ring, its own handles and
+     the band's highlight at once, and the two rings had different
+     geometry so it looked like two different selections of the same
+     thing. */
+  if (banded.length > 1) return false;
   if (!selected) return false;
   if (selected.kind === "group")
     return Boolean(group) && group.id === selected.id;
@@ -5086,31 +5094,34 @@ function dragName(event, element, from) {
 const ROOM_MAX = 12000;
 
 function clampShape(section, spec, x, y) {
-  /* Snapped to the grid, and inside a room that gets out of the way.
+  /* Snapped to the grid, and nothing else. The canvas has no edges.
 
-     It used to clamp to `section.canvas`, which starts at 1200 by 800
-     -- about four tables across. That is not a canvas, it is a pen,
-     and it was the whole reason furniture could not be put down from
-     one side of the window to the other.
+     It used to clamp to `section.canvas`, 1200 by 800 -- about four
+     tables across. Growing the right and bottom edges fixed half of
+     it and left the other half, because a room still could not be
+     extended up or to the left: the origin sat at (0, 0) and the
+     clamp floored everything at it.
 
-     So the right and bottom edges move when something is dragged past
-     them. Left and top cannot: the origin is fixed at (0, 0) and
-     moving it would move every shape, every seat anchor and every
-     label in the room to keep them still. Nothing needs it -- the
-     room grows away from the corner you start in.
+     **Coordinates may be negative.** Nothing in the model minds --
+     a position is two numbers and `room.check` has never asked for
+     a sign -- and nothing in the view minds either, because fitting
+     and centring measure the content's own box and subtract its
+     corner. The declared size stays as a record of how far the room
+     reaches from the origin, and is no longer a fence.
 
-     The room's size is only ever this clamp. Fitting and centring
-     both measure the *content*, so a room with acres of nothing to
-     the right still frames itself on the desks. */
+     What keeps a runaway drag recoverable is not a wall but Fit,
+     which frames whatever is actually there. */
   const size = section.canvas || (section.canvas = { width: 1200,
                                                      height: 800 });
   const fit = (v, span, axis) => {
-    const lo = span / 2;
-    const want = Math.max(lo, Math.round(v / GRID) * GRID);
+    const want = Math.round(v / GRID) * GRID;
+    // The stored size is a record of how far the room reaches, not a
+    // fence. It only ever grows, and only on the side that can be
+    // measured from the origin.
     const edge = want + span / 2;
     if (edge > size[axis])
       size[axis] = Math.min(ROOM_MAX, Math.ceil(edge / GRID) * GRID);
-    return Math.min(want, Math.max(lo, size[axis] - span / 2));
+    return want;
   };
   return [fit(x, spec.w, "width"), fit(y, spec.h, "height")];
 }
@@ -6032,6 +6043,19 @@ function wireSeating() {
         && e.target.closest("input, textarea, [contenteditable]")) return;
     if (!pointerOnPaper) return;
     e.preventDefault();
+    /* And take the focus off whatever control had it.
+
+       A button fires on the space **keyup**, not the keydown. So
+       after clicking something in an island, holding space to pan
+       and then letting go pressed that button again -- which, with
+       the projector button, meant ending a pan by going into
+       presentation mode. Preventing the default on keydown is
+       supposed to suppress that and cannot be relied on once the
+       key has been held across other events, so the focus is simply
+       moved off the control. Nothing in the canvas wants it. */
+    const held = document.activeElement;
+    if (held instanceof HTMLElement && held !== document.body
+        && held.closest("#view-seating")) held.blur();
     spaceDown = true;
     seatingPaper().classList.add("panready");
   });
@@ -6054,7 +6078,13 @@ function wireSeating() {
     spaceDown = false;
     seatingPaper().classList.remove("panready");
   };
-  document.addEventListener("keyup", e => { if (e.key === " ") letGo(); });
+  document.addEventListener("keyup", e => {
+    if (e.key !== " ") return;
+    // Belt as well as braces: if anything did regain focus during
+    // the pan, this keyup is ours and is not an activation.
+    if (spaceDown) e.preventDefault();
+    letGo();
+  });
   document.addEventListener("visibilitychange", letGo);
   /* A keydown of some other *printable* key while space is
      supposedly held means the keyup for space went somewhere this
