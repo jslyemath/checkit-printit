@@ -114,7 +114,7 @@
   z-index: 7;
   overflow: visible;
 }
-/* Grey, not the accent. The accent is a colour groups can wear, and
+/* Grey, not the accent. The accent is a color groups can wear, and
    a band drawn in it over a green table says nothing; grey is the
    one hue nothing in the room competes with. */
 .band {
@@ -273,7 +273,7 @@
 }
 /* Grey when the changes are in a room you are not looking at.
 
-   It was a hollow ring in the accent colour, which is the colour
+   It was a hollow ring in the accent color, which is the color
    this window uses for "the state you are in" -- so a room with
    nothing to save wore a bright mark that read as though it had.
    Grey still says "something, somewhere" without claiming it is
@@ -429,8 +429,8 @@
    to grow -- which is exactly what a hitch is.
 
    The border is the wrong thing to animate anyway. Nothing in the
-   rail ever gives it a colour: `.ibtn` sets `1px solid transparent`
-   and `.ibtn.on` colours the background, not the edge. So it draws
+   rail ever gives it a color: `.ibtn` sets `1px solid transparent`
+   and `.ibtn.on` colors the background, not the edge. So it draws
    nothing here and the honest fix is not to have it, rather than to
    make its arrival smoother. */
 .rail.furled .ibtn { border-width: 0; }
@@ -611,7 +611,7 @@
   border-radius: 6px; border: 2px solid transparent;
   background: oklch(0.585 calc(0.155 * var(--c, 1)) var(--h));
 }
-/* The tenth slot. A wheel rather than a colour, because it does not
+/* The tenth slot. A wheel rather than a color, because it does not
    stand for one -- it stands for all of them. The real `input` sits
    inside it at zero size so the platform's picker anchors here
    instead of in the corner of the window. */
@@ -690,7 +690,7 @@
 }
 /* A setting, not a verb: it says a state rather than naming an
    action, and the rule under it is what separates it from the
-   commands it governs. One text in one colour and one glyph -- the
+   commands it governs. One text in one color and one glyph -- the
    first draft had a grey label beside a white value with the same
    swap arrows at both ends, which is three marks for one fact. */
 .deskopt.act.setting { font-weight: 600; }
@@ -796,7 +796,7 @@
 
 /* A print position. Top left of a card, or just above a group.
 
-   The same solid colour the group's label pill wears, so a number
+   The same solid color the group's label pill wears, so a number
    reads as belonging to the group rather than to the app. Small, and
    only in Printing: everywhere else the card's corners are the seat
    letter's and nothing else's. */
@@ -866,9 +866,9 @@
    for the release to count. */
 .badge.swapping { outline: 2.5px solid var(--isle-key); outline-offset: 1px; }
 
-/* Being retyped. White with a ring in the group's own colour, which
+/* Being retyped. White with a ring in the group's own color, which
    is what the label does -- the dark field this had before was the
-   islands' colour worn by something that is not an island.
+   islands' color worn by something that is not an island.
 
    The badge becomes its own editor rather than being replaced by
    one, so the box, the corner and the card are all unchanged and
@@ -947,9 +947,9 @@
    hexagon left the ring showing along the flat top and bottom and
    nowhere else.
 
-   Two clipped layers instead. The element itself is the edge colour,
+   Two clipped layers instead. The element itself is the edge color,
    and a slightly smaller copy of the same polygon sits on top in the
-   surface colour; what shows between them is the outline, and it
+   surface color; what shows between them is the outline, and it
    follows every side because both sides are the same shape. */
 .shape.hex, .shape.trapezoid {
   border: none;
@@ -1012,8 +1012,8 @@
   position: absolute; top: 1px; right: 4px;
   font-size: 13px; font-weight: 800; color: var(--solid);
 }
-/* The print version: the same letter in the group's solid colour, in
-   a circle. The group labels are pills in that colour and this is the
+/* The print version: the same letter in the group's solid color, in
+   a circle. The group labels are pills in that color and this is the
    same badge drawn round rather than long, so a version reads as
    something the room has decided rather than something printed on the
    card.
@@ -1074,7 +1074,7 @@
    anchor is a guess about what was meant, and watching the label
    travel the last few pixels is what tells you which guess it made. */
 .pill.homing { transition: left .16s ease-out, top .16s ease-out; }
-/* Renaming, in the group's own colour. The accent means "the state
+/* Renaming, in the group's own color. The accent means "the state
    you are in" everywhere else in here; a yellow-green ring round a
    purple group's name said nothing about the purple group. */
 .renaming {
@@ -1288,7 +1288,7 @@
 
    Keyed on a class rather than `:fullscreen`, because fullscreen is a
    permission a host can refuse and the mode still has to work when it
-   does. The one `:fullscreen` rule is the backdrop colour, which
+   does. The one `:fullscreen` rule is the backdrop color, which
    nothing else can set. */
 #view-seating:fullscreen { background: var(--paper); }
 

@@ -401,7 +401,7 @@ function spin(dx, dy, deg) {
    angle and applying it everywhere afterwards.
 
    It means `room.seats_of`, the neighbour distances, the version
-   colouring and `seating.toml` need to know nothing about rotation: a
+   coloring and `seating.toml` need to know nothing about rotation: a
    chair is where its offset says, as it always was. `angle` is kept
    only so the silhouette stays turned, and so a second rotation knows
    where it started. The cost is a rounding each time, which is why
@@ -486,8 +486,8 @@ function groupOfSeat(section) {
 
 function hueOf(section, group) {
   /* A group's own hue if it has chosen one, otherwise one off the
-     palette by position -- so a room drawn before colour existed comes
-     up coloured, with nothing migrated. */
+     palette by position -- so a room drawn before color existed comes
+     up colored, with nothing migrated. */
   if (!group) return null;
   if (typeof group.hue === "number") return group.hue;
   const i = groupsOf(section).indexOf(group);
@@ -1478,7 +1478,7 @@ function swapVersions(section, aId, bId) {
 
 async function spreadVersions(section) {
   /* Hand the letters out again, spaced as far apart as the room
-     allows. The colouring runs on the server because `room.assign_
+     allows. The coloring runs on the server because `room.assign_
      versions` is where it lives and where the CLI calls it -- a
      second implementation here would agree with that one until one of
      them was improved. */
@@ -1607,8 +1607,8 @@ function editBadge(node, spec) {
      a differently sized absolutely positioned input and the number
      jumped across the card.
 
-     White with a ring in the group's colour, which is what the label
-     does -- the dark field it had before was the islands' colour
+     White with a ring in the group's color, which is what the label
+     does -- the dark field it had before was the islands' color
      worn by something that is not an island. */
   const was = node.textContent;
   node.textContent = "";
@@ -1715,9 +1715,9 @@ function tint(node, hue, chroma) {
 }
 
 function chromaOf(group) {
-  // Absent means the standard strength. Only a colour chosen from the
+  // Absent means the standard strength. Only a color chosen from the
   // picker writes one down, so every group drawn before the picker
-  // existed keeps exactly the colour it had.
+  // existed keeps exactly the color it had.
   return group && typeof group.chroma === "number" ? group.chroma : 1;
 }
 
@@ -1728,14 +1728,14 @@ function oklchOf(hex) {
      The lightness that comes back is thrown away on purpose. A group's
      three shades are built at fixed lightnesses chosen so that a name
      is readable on the card and the card is visible on the paper; let
-     the instructor set lightness and the first dark colour anybody
+     the instructor set lightness and the first dark color anybody
      picks makes a table whose names cannot be read from the back of
-     the room. So the picker chooses *which* colour and *how vivid*,
+     the room. So the picker chooses *which* color and *how vivid*,
      and the design system keeps deciding how light.
 
      The matrices are Bjorn Ottosson's sRGB-to-Oklab, which is the same
      conversion the browser does for the `oklch()` the stylesheet
-     already uses -- so a colour picked here and a colour written in
+     already uses -- so a color picked here and a color written in
      the stylesheet mean the same thing. */
   const n = parseInt(hex.slice(1), 16);
   const to = v => {
@@ -1752,7 +1752,7 @@ function oklchOf(hex) {
   let h = Math.atan2(b, a) * 180 / Math.PI;
   if (h < 0) h += 360;
   /* 0.155 is the chroma of the solid shade in the stylesheet, so a
-     colour as vivid as the built-in ones comes back as 1. A grey comes
+     color as vivid as the built-in ones comes back as 1. A grey comes
      back near 0 and stays grey, which is honest: the room already uses
      grey to mean "no group", and a group that chose it will look like
      one. */
@@ -1760,9 +1760,9 @@ function oklchOf(hex) {
 }
 
 function hexOf(hue, chroma) {
-  /* The other way, well enough to seed the picker with the colour the
+  /* The other way, well enough to seed the picker with the color the
      group already has. Oklab to linear sRGB, then gamma and clamp --
-     an out-of-gamut colour clips, which for a seed value is fine. */
+     an out-of-gamut color clips, which for a seed value is fine. */
   const L = 0.585, C = 0.155 * chroma, r = hue * Math.PI / 180;
   const a = C * Math.cos(r), b = C * Math.sin(r);
   const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
@@ -2002,7 +2002,7 @@ function drawStrip(section) {
      between modes is what you are about to do, not what you are
      looking at.
 
-     An earlier draft showed a group's colour and name in People and a
+     An earlier draft showed a group's color and name in People and a
      desk's kind and chair-count in Desks, so the island rearranged
      itself when you changed mode and sometimes lost the controls you
      had just been using. */
@@ -2021,7 +2021,7 @@ function drawStrip(section) {
      clicked, which is the only thing that could decide it. */
   /* Several things at once. Its own state, because what you can say
      about four groups is not what you can say about one -- there is
-     no name to rename, no colour that is theirs, no single place in
+     no name to rename, no color that is theirs, no single place in
      the order. What is left is how many, and what can be done to all
      of them. */
   if (banded.length > 1) { drawBandStrip(strip, section); return; }
@@ -2057,7 +2057,7 @@ function drawStrip(section) {
     // show: the strip has to stay one row at 515px.
     const dot = el("button", "swatch");
     dot.type = "button";
-    dot.title = "Colour";
+    dot.title = "Color";
     tint(dot, hueOf(section, group), chromaOf(group));
     dot.onclick = e => { e.stopPropagation(); openHues(dot, section, group); };
     strip.appendChild(dot);
@@ -2480,10 +2480,10 @@ function addShape(section, kind) {
   });
   shapes.push(shape);
 
-  /* And a group to go with it. A desk without one has no colour, no
+  /* And a group to go with it. A desk without one has no color, no
      label and no place in the print order, so the strip had nothing
      to show and fell back to "table, 2 by 2 — 4 chairs" — which is
-     why a new desk could not be coloured or named while an old one
+     why a new desk could not be colored or named while an old one
      could. Every desk arrives as a group of its own; merging two is
      a separate question. */
   const taken = new Set(groupsOf(section).map(g => g.id));
@@ -2568,7 +2568,7 @@ function duplicateGroup(section, group) {
      The letters, on the other hand, come along deliberately. They are
      most of the reason to duplicate: a second table arranged like the
      first wants the same pattern of papers around it, not a fresh
-     colouring that happens to be legal. */
+     coloring that happens to be legal. */
   const shapes = shapesHolding(section, group);
   if (!shapes.length) return;
 
@@ -2616,8 +2616,8 @@ function duplicateGroup(section, group) {
     order: null,                 // its place in the print order is a choice
   };
   // The hue is copied only when the original chose one. A group with no
-  // hue takes its colour from its position in the list, and writing
-  // that colour down here would freeze a copy to a shade the original
+  // hue takes its color from its position in the list, and writing
+  // that color down here would freeze a copy to a shade the original
   // would abandon the moment a group before it was deleted.
   if (typeof group.hue === "number") fresh.hue = group.hue;
   if (group.label_at && renamed.has(group.label_at.shape))
@@ -3151,17 +3151,17 @@ function openHues(near, section, group) {
      is sitting at, none of it to maintain. Writing a worse one would
      be the whole point of the exercise lost.
 
-     What comes back is a full colour and what is kept is its hue and
+     What comes back is a full color and what is kept is its hue and
      its vividness; `oklchOf` says why. */
   const own = el("button", "hue custom" + (standard ? "" : " on"));
   own.type = "button";
-  own.title = "Any other colour";
+  own.title = "Any other color";
   const pick = el("input");
   pick.type = "color";
   pick.value = hexOf(hueOf(section, group) || 255, chromaOf(group));
   // `input` rather than `change`: the picker previews live on every
   // platform that has one, and watching the room follow is most of
-  // how you tell whether a colour works against the paper.
+  // how you tell whether a color works against the paper.
   pick.oninput = () => {
     const got = oklchOf(pick.value);
     group.hue = Math.round(got.hue * 10) / 10;
@@ -3189,7 +3189,7 @@ function renameOnCanvas(tag, group) {
      name is retyped where it lives rather than in a box elsewhere
      that happens to hold the same string.
 
-     In the group's own colour, not the accent. The accent means "the
+     In the group's own color, not the accent. The accent means "the
      state you are in"; a yellow-green ring round a purple group's
      name said nothing about the purple group. */
   const section = currentSection();
@@ -3403,7 +3403,7 @@ function printActions(section) {
   /* The label *is* the value, the way the display switch's label is
      ("Seat letters" outside Printing, "Version labels" inside it).
      It had been "Ordering" in grey with "by seat" in white beside it
-     and a swap glyph at each end -- two text colours and the same
+     and a swap glyph at each end -- two text colors and the same
      arrows twice to say one thing. */
   const ordering = {
     icon: "swapby", label: now.label, setting: true,
@@ -3865,7 +3865,7 @@ function movePerson(who, fromSeat, toSeat) {
      the standing.
 
      The letters are untouched on purpose: a version belongs to the
-     chair, because the colouring is of the room, so two people trading
+     chair, because the coloring is of the room, so two people trading
      places must not trade letters or a swap could seat the same paper
      next to itself. */
   if (!toSeat) {

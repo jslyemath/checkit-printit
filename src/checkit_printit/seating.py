@@ -359,7 +359,7 @@ def to_toml(room, name_of, written_by="the seating chart tab"):
     name, and this is the file that has to identify them.
 
     **Every seat is pinned.** The app decides the letters now -- by
-    colouring the room, where `alternate` could only cycle a list -- so
+    coloring the room, where `alternate` could only cycle a list -- so
     the letters are written down rather than recomputed. `alternate`
     remains for a chart this tool did not write.
 

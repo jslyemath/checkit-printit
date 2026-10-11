@@ -388,7 +388,7 @@ and restore it on the way out.
 | field | means |
 |---|---|
 | `group.order` | where this group falls in the printed stack |
-| `group.hue`, `group.chroma` | its colour; lightness is the design system's and is never stored |
+| `group.hue`, `group.chroma` | its color; lightness is the design system's and is never stored |
 | `group.label_at` | which desk and which of nine anchors the label hangs on |
 | `seat.version` | which paper prints for this seat |
 | `seat.spot` | its place inside its own group's run |

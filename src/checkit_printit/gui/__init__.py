@@ -708,12 +708,12 @@ def api_seating(course, _body):
 
 
 def api_seating_versions(course, body):
-    """Hand out version letters again, by the real colouring.
+    """Hand out version letters again, by the real coloring.
 
     `room.assign_versions` -- the same function the CLI uses, with the
-    same graph colouring and the same heuristics about who can see
+    same graph coloring and the same heuristics about who can see
     whom. The rule in this project is that a button calls the function
-    the command does, and a second implementation of the colouring
+    the command does, and a second implementation of the coloring
     living in JavaScript would be exactly the kind of drift that rule
     exists to stop: the browser's answer and the printed answer would
     agree until one of them was improved.
@@ -747,7 +747,7 @@ def api_seating_versions(course, body):
     note = f"Versions spread over {len(letters)} letters."
     if clashes:
         # Said plainly rather than hidden: with fewer letters than a
-        # table has seats there is no colouring without a repeat, and
+        # table has seats there is no coloring without a repeat, and
         # the instructor is the one who chose how many letters.
         note += (f" {len(clashes)} pair"
                  f"{'s' if len(clashes) != 1 else ''} of neighbours had "

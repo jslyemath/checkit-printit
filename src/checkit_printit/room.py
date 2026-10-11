@@ -215,8 +215,8 @@ def assign_versions(seats, grouping, versions, rng=None,
                     near=NEIGHBOUR_DISTANCE, passes=4):
     """Give every seat a version letter, avoiding neighbours matching.
 
-    Graph colouring: seats are vertices, "must differ" is an edge, letters
-    are colours. Greedy, most-constrained seat first, choosing at random
+    Graph coloring: seats are vertices, "must differ" is an edge, letters
+    are colors. Greedy, most-constrained seat first, choosing at random
     among the letters that are legal -- random because the instructor asked
     for a shuffle, and preferring the least-used letter so the stack stays
     balanced.
@@ -226,7 +226,7 @@ def assign_versions(seats, grouping, versions, rng=None,
     often among that seat's own neighbours. "Impossible" becomes "as far
     apart as it can be" rather than a refusal.
 
-    Then a bounded repair: for each remaining clash, try recolouring one
+    Then a bounded repair: for each remaining clash, try recoloring one
     end and keep it if the total number of clashes drops. These graphs are
     about fifty vertices and nearly planar, so greedy is on or near optimal
     almost always and this finishes in microseconds. It cannot loop.
@@ -705,30 +705,30 @@ def check(room, known=None):
                     f"{where}: group {named!r} is {order!r} in the print "
                     f"order, which is not a position.")
 
-            # A group's colour: an angle, and optionally how vivid to
+            # A group's color: an angle, and optionally how vivid to
             # be at that angle. Two numbers, not a palette of six --
             # the three shades the canvas draws are derived from these
             # rather than stored, which is what keeps every group the
-            # same design however the colour was chosen.
+            # same design however the color was chosen.
             #
             # Lightness is deliberately NOT stored. It is what decides
             # whether a name on a card can be read, on a screen and on
             # a projector and on paper, and it is the one part of a
-            # colour an instructor should not be able to get wrong by
+            # color an instructor should not be able to get wrong by
             # picking something pretty.
             hue = group.get("hue")
             if hue is not None:
                 if not _number(hue) or not 0 <= hue < 360:
                     raise RoomError(
                         f"{where}: group {named!r} has hue {hue!r}, which "
-                        f"is not an angle on the colour wheel.")
+                        f"is not an angle on the color wheel.")
 
             chroma = group.get("chroma")
             if chroma is not None:
                 if not _number(chroma) or not 0 <= chroma <= 1.4:
                     raise RoomError(
                         f"{where}: group {named!r} has chroma {chroma!r}. "
-                        f"It scales the standard colour, so 0 is grey, 1 "
+                        f"It scales the standard color, so 0 is grey, 1 "
                         f"is the usual strength, and 1.4 is as far as it "
                         f"goes.")
 
