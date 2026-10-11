@@ -401,13 +401,27 @@ left of its group every time the room is drawn, so "recalculate when a
 seat moves" needs no bookkeeping. It is not the print version; the two
 start equal and diverge the moment versions are shuffled.
 
-**Known gap.** `section.print_by` is read by the canvas and **ignored by
-`seating.to_toml`**. By-seat ordering means a stack that ignores group
-boundaries, and the chart's unit is `[[group]]` with a seat's place being
-its index inside one -- so an interleaved order has nowhere to live.
-Flattening the room into one `[[group]]` would encode the order and
-destroy the meaning, because that field is what `seating.Chart.collisions`
-uses to decide who can see whom. Needs a format decision, not a patch.
+**How the chart says what order to print in** (settled 2026-10-10).
+A `[[group]]` is a *table*: its seats are listed in the order they sit,
+swept clockwise from the top left, and that order is never changed for
+printing. The stack is each seat's own `at`, written **only when it is
+not the order the file already reads in** -- so a room handed out table
+by table with nothing reordered produces exactly the file it always did,
+and every hand-written chart is untouched. A seat with no `at`, among
+seats that have one, prints last.
+
+That split is what lets `print_by = "seat"` reach the paper at all: one
+walk round the room crosses tables, and no ordering of `[[group]]`
+blocks can say that. It is also what keeps `Chart.collisions` honest,
+since consecutive entries in a table's list are people sitting beside
+each other and consecutive entries in the *stack* are not.
+
+**The sweep exists twice on purpose.** `room.seat_sweep` and `slotsOf`
+in `seating.js` are the same derivation: the canvas needs it live on
+every redraw, the writer needs it with no canvas at all. They are held
+together by `TestTheSweepMatchesTheCanvas`, which checks every palette
+shape by the letters it is known to draw. **A change to either belongs
+in both.**
 
 **All three decisions that were blocking 8e are settled**, on
 2026-10-01. See `../checkit/PRINT_TOOL_DESIGN.md` 12.6 under "Settled, and

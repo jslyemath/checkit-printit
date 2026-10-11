@@ -508,10 +508,12 @@ def printed_collisions(chart, roster, handouts):
             return by_sid[student.sid]
         return by_name.get(student.display)
 
+    # `Chart.neighbours` and not a walk down `chart.seats`: the seats
+    # come back in the order the papers print, which crosses tables once
+    # the stack does, and consecutive entries would then be two people
+    # who cannot see each other. One definition of "beside", read twice.
     found = []
-    for a, b in zip(chart.seats, chart.seats[1:]):
-        if a.group != b.group:
-            continue
+    for a, b in chart.neighbours():
         version = printed(a)
         if version is not None and version == printed(b):
             found.append((a, b, version))
