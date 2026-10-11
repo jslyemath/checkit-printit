@@ -475,29 +475,124 @@ const POLYGONS = {
   triangle: [[.5, 0], [1, 1], [0, 1]],
 };
 
+//: The rectangles' corner and edge, so the polygons can match them.
+//: Both are read from `.shape.rect` and `.shape` in the stylesheet,
+//: and both have to be changed in the two places together.
+const SHAPE_R = 14;
+const SHAPE_EDGE = 2.5;
+
+function roundedPath(points, r) {
+  /* A polygon with its corners rounded in the geometry.
+
+     The first version rounded them with `stroke-linejoin: round` on a
+     fat stroke, which is cheap and wrong: a round join's radius is
+     half the stroke width, so matching the rectangles' 14 would have
+     meant a 28-wide edge. Corner and thickness have to be separate,
+     which means cutting the corner in the path.
+
+     How far back to cut depends on the angle. A fixed cut rounds a
+     sharp corner far less than a blunt one, so the tangent length is
+     `r / tan(theta/2)` -- the real one for a circle of radius r
+     tucked into that corner -- clamped to half of each edge so a
+     short side cannot be cut away twice.
+
+     A quadratic through the vertex rather than an arc: at a corner
+     this size the two are a fraction of a pixel apart, and a Bezier
+     has no sweep flag to get backwards. */
+  const n = points.length;
+  let d = "";
+  for (let i = 0; i < n; i++) {
+    const prev = points[(i - 1 + n) % n];
+    const cur = points[i];
+    const next = points[(i + 1) % n];
+    const leg = (a, b) => {
+      const dx = a[0] - b[0], dy = a[1] - b[1];
+      const len = Math.hypot(dx, dy) || 1;
+      return { u: [dx / len, dy / len], len: len };
+    };
+    const back = leg(prev, cur), on = leg(next, cur);
+    const dot = back.u[0] * on.u[0] + back.u[1] * on.u[1];
+    const theta = Math.acos(Math.max(-1, Math.min(1, dot)));
+    let t = r / Math.tan(Math.max(theta, 0.001) / 2);
+    t = Math.min(t, back.len / 2, on.len / 2);
+    const p1 = [cur[0] + back.u[0] * t, cur[1] + back.u[1] * t];
+    const p2 = [cur[0] + on.u[0] * t, cur[1] + on.u[1] * t];
+    const at = p => `${p[0].toFixed(2)},${p[1].toFixed(2)}`;
+    d += (i ? "L" : "M") + at(p1) + "Q" + at(cur) + " " + at(p2);
+  }
+  return d + "Z";
+}
+
+//: The longest side of a palette tile, in pixels. Sized to fill the
+//: drawer, which is a mode rail wide: naming the shapes as well was
+//: tried and the names clipped at four characters, and a silhouette
+//: with a tooltip says more than "trapezo" does.
+const TILE_SPAN = 34;
+
+function shapeSilhouette(spec, span) {
+  /* The same outline the canvas draws, at whatever size is asked
+     for. The palette used to draw its own: a solid grey blob with a
+     `clip-path`, which meant the hexagon had square corners in the
+     menu and round ones on the paper, and no outline in the menu
+     while everything on the paper has one.
+
+     One drawing, two sizes. The corner radius scales with the shape
+     so a tile is a true miniature; the stroke does not, because a
+     scaled 2.5 is invisible at 46px and the outline is most of what
+     makes these read as furniture rather than as blobs. */
+  const k = span / Math.max(spec.w, spec.h);
+  const w = Math.max(16, spec.w * k), h = Math.max(16, spec.h * k);
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${w.toFixed(1)} ${h.toFixed(1)}`);
+  svg.setAttribute("width", w.toFixed(1));
+  svg.setAttribute("height", h.toFixed(1));
+  svg.setAttribute("aria-hidden", "true");
+  const pad = 0.9;                       // half the tile's own stroke
+  const points = POLYGONS[spec.css];
+  let node;
+  if (points) {
+    node = document.createElementNS(NS, "path");
+    const inset = (v, span2) => Math.min(Math.max(v * span2, pad),
+                                         span2 - pad);
+    node.setAttribute("d", roundedPath(
+      points.map(([x, y]) => [inset(x, w), inset(y, h)]), SHAPE_R * k));
+  } else if (spec.css === "circle") {
+    node = document.createElementNS(NS, "ellipse");
+    node.setAttribute("cx", w / 2);
+    node.setAttribute("cy", h / 2);
+    node.setAttribute("rx", w / 2 - pad);
+    node.setAttribute("ry", h / 2 - pad);
+  } else {
+    node = document.createElementNS(NS, "rect");
+    node.setAttribute("x", pad);
+    node.setAttribute("y", pad);
+    node.setAttribute("width", w - pad * 2);
+    node.setAttribute("height", h - pad * 2);
+    node.setAttribute("rx", Math.min(SHAPE_R * k, Math.min(w, h) / 2 - pad));
+  }
+  svg.appendChild(node);
+  return { svg: svg, w: w, h: h };
+}
+
 function polygonInto(box, kind, w, h) {
-  /* `R` is the corner radius in room units, and it is applied by the
-     stroke rather than by the geometry: a round join on a thick
-     stroke is a rounded corner, and it costs no arc maths and no
-     second copy of the outline. */
   const points = POLYGONS[kind];
   if (!points) return false;
-  const R = 5;
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   svg.setAttribute("preserveAspectRatio", "none");
   svg.setAttribute("aria-hidden", "true");
-  const poly = document.createElementNS(NS, "polygon");
-  // Inset by half the stroke so the outline sits inside the box, the
+  const path = document.createElementNS(NS, "path");
+  // Half the edge in from the box, so the outline sits inside it the
   // way a `border-box` border does on the rectangles.
-  const inset = (v, span) => Math.min(Math.max(v * span, R), span - R);
-  poly.setAttribute("points", points
-    .map(([x, y]) => `${inset(x, w).toFixed(1)},${inset(y, h).toFixed(1)}`)
-    .join(" "));
-  poly.setAttribute("stroke-width", R * 2);
-  poly.setAttribute("stroke-linejoin", "round");
-  svg.appendChild(poly);
+  const pad = SHAPE_EDGE / 2;
+  const inset = (v, span) =>
+    Math.min(Math.max(v * span, pad), span - pad);
+  path.setAttribute("d", roundedPath(
+    points.map(([x, y]) => [inset(x, w), inset(y, h)]), SHAPE_R));
+  path.setAttribute("stroke-width", SHAPE_EDGE);
+  svg.appendChild(path);
   box.appendChild(svg);
   return true;
 }
@@ -2694,7 +2789,7 @@ function freshId(prefix, taken) {
   return prefix + n;
 }
 
-function addShape(section, kind) {
+function addShape(section, kind, where) {
   /* A new desk, built from the palette the server sent rather than
      from a copy of the anchors kept here. `room.SHAPES` stays the one
      definition of where chairs go on a table. */
@@ -2710,11 +2805,12 @@ function addShape(section, kind) {
     }
   const id = freshId("d", usedShapes);
 
-  // Dropped in the middle of what is on screen, so it arrives where
-  // you are looking rather than at the room's origin.
+  /* Where it was let go, if it was dragged out; otherwise the middle
+     of what is on screen, so a click drops it where you are looking
+     rather than at the room's origin. */
   const area = drawn.box || { x: 0, y: 0, w: 800, h: 600 };
-  const at = clampShape(section, spec, area.x + area.w / 2,
-                        area.y + area.h / 2);
+  const aim = where || [area.x + area.w / 2, area.y + area.h / 2];
+  const at = clampShape(section, spec, aim[0], aim[1]);
   const shape = { id: id, kind: kind, at: at, seats: [] };
   (spec.seats || []).forEach((offset, i) => {
     const sid = freshId(id + "-", usedSeats) + "";
@@ -3156,6 +3252,26 @@ function alignSeat(moving, wx, wy) {
   return [dx <= ALIGN_REACH ? bx : null, dy <= ALIGN_REACH ? by : null];
 }
 
+function alignShape(moving, cx, cy) {
+  /* Centre to centre, and only centre to centre.
+
+     Edges were the other option and are not worth it: a desk can be
+     turned, and its box is the unrotated one, so an edge guide would
+     point at an edge the desk no longer has. A centre is a centre at
+     every angle, and lining a row of tables up on their middles is
+     the thing anybody is actually doing. */
+  let bx = null, by = null;
+  let dx = ALIGN_REACH + 1, dy = ALIGN_REACH + 1;
+  for (const other of (currentSection().shapes || [])) {
+    if (other.id === moving) continue;
+    const ax = Math.abs(other.at[0] - cx);
+    if (ax < dx) { dx = ax; bx = other.at[0]; }
+    const ay = Math.abs(other.at[1] - cy);
+    if (ay < dy) { dy = ay; by = other.at[1]; }
+  }
+  return [dx <= ALIGN_REACH ? bx : null, dy <= ALIGN_REACH ? by : null];
+}
+
 function showGuides(x, y) {
   /* The line it snapped to, so the snap is something you saw happen
      rather than something that happened to you. */
@@ -3213,6 +3329,9 @@ function dragChair(event, card, section, shape, seat) {
      shoving two desks together in Groups mode must not quietly
      rearrange who belongs to whom. */
   if (event.pointerType === "mouse" && event.button !== 0) return;
+  // Held space means "move the view", whatever the pointer is over.
+  // Letting this run would move the thing instead of the room.
+  if (spaceDown) return;
   event.preventDefault();
   // Touching a chair chooses its desk too, so the strip's add and
   // remove are about the thing just touched rather than about
@@ -4335,19 +4454,92 @@ function drawPalette(section) {
     // with a plain consonant or vowel, so the letter is enough.
     b.title = "Add a" + (/^[aeiou]/i.test(spec.label) ? "n " : " ")
       + spec.label;
-    const tile = el("span", "desktile " + spec.css);
-    const k = 26 / Math.max(spec.w, spec.h);
-    tile.style.width = Math.max(11, Math.round(spec.w * k)) + "px";
-    tile.style.height = Math.max(11, Math.round(spec.h * k)) + "px";
+    const tile = el("span", "desktile");
+    tile.appendChild(shapeSilhouette(spec, TILE_SPAN).svg);
     /* A single desk and a 2x2 are the same silhouette, so the one
        that holds one person says so. The 2x2 says nothing, because
        it is not "a 2x2" so much as "a table", and it stretches to
        whatever size the room wants. */
-    if (spec.seats && spec.seats.length === 1) tile.textContent = "1";
+    if (spec.seats && spec.seats.length === 1)
+      tile.appendChild(el("span", "tileone", "1"));
     b.appendChild(tile);
+    // Click to drop it in the middle, or drag it where you want it.
     b.onclick = () => { paletteOpen = false; addShape(section, kind); };
+    b.onpointerdown = e => dragShapeOut(e, section, kind, spec);
     pal.appendChild(b);
   }
+}
+
+function dragShapeOut(event, section, kind, spec) {
+  /* Pull a shape off the palette and put it where you let go.
+
+     Clicking still works and still drops it in the middle of the
+     view; this is the other half, and the one that answers "where
+     does it go" before you commit to it.
+
+     The ghost starts the size of the tile and grows to the size the
+     shape will actually be, over the first moment of the drag. That
+     is the part worth having: without it a 46px tile becomes a
+     250-unit table the instant you move, which reads as the thing
+     you grabbed being swapped for a different one. */
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  if (spaceDown) return;
+  const btn = event.currentTarget;
+  const from = btn.getBoundingClientRect();
+  const start = [event.clientX, event.clientY];
+  let ghost = null;
+
+  const onMove = e => {
+    if (!ghost) {
+      if (Math.hypot(e.clientX - start[0], e.clientY - start[1]) < 5) return;
+      const scale = canvasScale();
+      const grown = shapeSilhouette(
+        spec, Math.max(spec.w, spec.h) * scale);
+      ghost = el("div", "shapeghost");
+      ghost.appendChild(grown.svg);
+      ghost.style.width = from.width + "px";
+      ghost.style.height = from.height + "px";
+      document.body.appendChild(ghost);
+      // Next frame, or the transition has no value to start from --
+      // the same rule the drawers follow.
+      requestAnimationFrame(() => {
+        ghost.classList.add("grown");
+        ghost.style.width = grown.w + "px";
+        ghost.style.height = grown.h + "px";
+      });
+      paletteOpen = false;
+      showOpen();
+    }
+    const box = ghost.getBoundingClientRect();
+    ghost.style.left = (e.clientX - box.width / 2) + "px";
+    ghost.style.top = (e.clientY - box.height / 2) + "px";
+    seatingPaper().classList.toggle("dropping", overPaper(e));
+  };
+
+  const done = commit => {
+    btn.releasePointerCapture?.(event.pointerId);
+    btn.onpointermove = btn.onpointerup = btn.onpointercancel = null;
+    seatingPaper().classList.remove("dropping");
+    if (!ghost) return;                 // never travelled: the click runs
+    ghost.remove();
+    ghost = null;
+    if (!commit) { renderSeating(); return; }
+    addShape(section, kind, lastRoomPoint);
+  };
+
+  let lastRoomPoint = null;
+  const track = e => { if (overPaper(e)) lastRoomPoint = roomPoint(e); };
+
+  try { btn.setPointerCapture(event.pointerId); } catch (err) { /* fine */ }
+  btn.onpointermove = e => { track(e); onMove(e); };
+  btn.onpointerup = e => { track(e); done(true); };
+  btn.onpointercancel = () => done(false);
+}
+
+function overPaper(event) {
+  const box = seatingPaper().getBoundingClientRect();
+  return event.clientX >= box.left && event.clientX <= box.right
+    && event.clientY >= box.top && event.clientY <= box.bottom;
 }
 
 function paletteKinds() {
@@ -4593,6 +4785,9 @@ function dragName(event, element, from) {
      `{key}` -- a card on the unseated rail. One function, because the
      two differ only at the ends. */
   if (event.pointerType === "mouse" && event.button !== 0) return;
+  // Held space means "move the view", whatever the pointer is over.
+  // Letting this run would move the thing instead of the room.
+  if (spaceDown) return;
   event.preventDefault();
 
   const who = from.seat ? from.seat.student : from.key;
@@ -4679,6 +4874,9 @@ function dragShape(event, section, shape) {
      a ghost: a card is transferred and wants a ghost, but a desk is
      being positioned and watching it go is the point. */
   if (event.pointerType === "mouse" && event.button !== 0) return;
+  // Held space means "move the view", whatever the pointer is over.
+  // Letting this run would move the thing instead of the room.
+  if (spaceDown) return;
   event.preventDefault();
   const spec = seatingState.shapes[shape.kind];
   if (!spec) return;
@@ -4736,9 +4934,19 @@ function dragShape(event, section, shape) {
   const place = e => {
     if (Math.hypot(e.clientX - start[0], e.clientY - start[1]) < 4) return;
     moved = true;
+    const rawx = home[0] + (e.clientX - start[0]) / scale;
+    const rawy = home[1] + (e.clientY - start[1]) / scale;
+    /* A neighbour's centre line first, the grid second -- the same
+       order the seats use, and for the same reason: the grid is
+       always within half a cell and would always win. Only for a
+       single desk; dragging a banded set moves them as one and
+       snapping the leader would shear the set. */
+    const [gx, gy] = party.length > 1 ? [null, null]
+      : alignShape(shape.id, rawx, rawy);
+    showGuides(gx, gy);
     const to = clampShape(section, { w: sw, h: sh },
-                          home[0] + (e.clientX - start[0]) / scale,
-                          home[1] + (e.clientY - start[1]) / scale);
+                          gx !== null ? gx : rawx,
+                          gy !== null ? gy : rawy);
     box.style.left = (to[0] - sw / 2 - ox) + "px";
     box.style.top = (to[1] - sh / 2 - oy) + "px";
     for (const [node, left, top] of held) {
@@ -4768,6 +4976,7 @@ function dragShape(event, section, shape) {
     box.classList.remove("dragging");
     // `place` writes straight to the model as the desk moves, so
     // putting it back is the undo.
+    hideGuides();
     if (!commit) {
       shape.at = home;
       others.forEach(([, other], i) => { other.at = alsoHome[i + 1]; });
@@ -4899,6 +5108,9 @@ function applyZoom(section) {
 
   const zoom = seatingZoom === null ? fitZoom(paper, area) : seatingZoom;
   canvas.style.transform = `scale(${zoom})`;
+  // Published so anything drawn inside the canvas can hold a real
+  // on-screen thickness -- the alignment guides do.
+  canvas.style.setProperty("--z", zoom);
   // The drawn route is a sibling of the canvas rather than a child --
   // an SVG cannot live inside it and keep its own coordinates -- so
   // it is given the same scale by hand.
@@ -5487,8 +5699,13 @@ function wireSeating() {
   seatingPaper().addEventListener("pointerdown", e => {
     if (e.pointerType === "touch" && twoFinger(e)) return;
     if (walking && walkPointer(e)) return;
-    if (e.target.closest(".shape, .seatcard, .pill, .grip, .spinner")) return;
+    /* The pan key wins over everything, including whatever is under
+       the pointer. It used to be tested *after* the check below, so
+       space only panned from genuinely bare paper -- and in a full
+       room almost none of the canvas is bare, which is what made
+       panning look broken rather than merely limited. */
     if (spaceDown || e.button === 1) { panPaper(e); return; }
+    if (e.target.closest(".shape, .seatcard, .pill, .grip, .spinner")) return;
     if (bandPaper(e)) return;
     panPaper(e);
   });
