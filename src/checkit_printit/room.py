@@ -371,6 +371,55 @@ def shuffle_seats(section, rng=None):
     return sum(1 for was, now in zip(before, after) if was != now)
 
 
+def seat_students(section, students):
+    """Put these people into the empty chairs. Returns how many sat.
+
+    In stack order, which is the order the papers come off the printer
+    and therefore the order somebody walking the room would meet them.
+    A class seated this way comes out in the same order it is listed,
+    which is the least surprising thing a "seat everyone" button can
+    do -- the alternative, filling in whatever order the room was
+    built, scatters an alphabetical list across the tables.
+
+    Pinned chairs are left alone even when empty: a pin on an empty
+    chair is "keep this one free", which is a real thing to want next
+    to a door or a projector. Anybody who does not fit stays standing;
+    this never evicts somebody to make room.
+    """
+    waiting = [who for who in students if who]
+    if not waiting:
+        return 0
+    by_id = {seat["id"]: seat for seat in live_seats(section)}
+    sat = 0
+    for sid in stack_order(section):
+        if not waiting:
+            break
+        seat = by_id.get(sid)
+        if seat is None or seat.get("pinned") or seat.get("student"):
+            continue
+        seat["student"] = waiting.pop(0)
+        sat += 1
+    return sat
+
+
+def clear_seats(section):
+    """Stand everybody up. Returns how many were sitting.
+
+    Every unpinned chair, which is the same exemption the shuffle
+    makes and for the same reason: a pinned seat is an arrangement
+    somebody made on purpose, and a button called "clear everyone"
+    should not quietly undo the one decision in the room that was
+    about a person rather than a layout.
+    """
+    gone = 0
+    for seat in live_seats(section):
+        if seat.get("pinned") or not seat.get("student"):
+            continue
+        seat["student"] = ""
+        gone += 1
+    return gone
+
+
 # --------------------------------------------------- out to the CLI's file --
 
 def ordered_groups(section):

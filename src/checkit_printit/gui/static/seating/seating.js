@@ -200,6 +200,13 @@ const PAD = 26;         // breathing room around the drawn room, same units
    first that fits. Measured rather than counted -- counting put the
    ceiling at 20 when a five-letter name fits at 32, and cannot tell
    "Bartholomew" from "Christopher": same eleven letters, 13px and 17px. */
+//: A card in the unseated rail. Narrower than a chair's, because the
+//: rail is a list of people waiting and not something anybody reads
+//: from the back of the room. Matches `.pen .seatcard` in the CSS.
+const PEN_CARD_W = 74;
+//: and the largest its name is drawn at, since a short one would
+//: otherwise take a size that is taller than the card.
+const PEN_NAME = 13;
 const NAME_SIZES = [32, 29, 26, 23, 20, 17, 15, 13];
 const NAME_SMALLEST = 11;
 
@@ -245,6 +252,9 @@ const ICON = {
      cannot say -- so the fill is a CSS rule on `#seat-bg svg path`.
      The usual glyph for "how light is this surface". */
   backdrop: "O12,12,8.2|M12 3.8a8.2 8.2 0 0 1 0 16.4z",
+  // A person with a plus. Adding one is roster work, so this row
+  // leads out of the canvas rather than doing something on it.
+  personadd: "M3.5 20a5.5 5.5 0 0 1 11 0|O9,8,3.2|M17 13.5v5|M14.5 16h5",
   // Three dots: the overflow menu, which is what this corner is in
   // the modes that open a list rather than add a thing. Vertical,
   // which is also the direction the list unrolls.
@@ -564,9 +574,20 @@ function contentBox(section) {
 const nameFits = new Map();
 let nameProbe = null;
 
-function nameSize(text) {
+function nameSize(text, wide = CARD_W) {
+  /* `wide` is the card this name is going into, which is not always a
+     chair: the unseated rail draws the same card narrower, and sizing
+     its names against the room's 104 made every one of them come out
+     at the room's type size. A rail card then measured 86 by 46 next
+     to a seated card drawn at the room's zoom, which in a full class
+     is 31% -- the same person three times larger while waiting for a
+     chair than once they had one.
+
+     Cached per width as well as per name, or the first room card
+     measured would answer for every rail card after it. */
   if (!text) return NAME_SIZES[0];
-  if (nameFits.has(text)) return nameFits.get(text);
+  const key = wide + "|" + text;
+  if (nameFits.has(key)) return nameFits.get(key);
   if (!nameProbe) {
     /* A real card, off screen, so it is measured under the rules that
        will draw it. A bare div with a hand-copied font would be a
@@ -580,12 +601,12 @@ function nameSize(text) {
   let chosen = NAME_SMALLEST;
   for (const size of NAME_SIZES) {
     line.style.fontSize = size + "px";
-    if (line.getBoundingClientRect().width <= CARD_W - 10) {
+    if (line.getBoundingClientRect().width <= wide - 10) {
       chosen = size;
       break;
     }
   }
-  nameFits.set(text, chosen);
+  nameFits.set(key, chosen);
   return chosen;
 }
 
@@ -1905,9 +1926,14 @@ function hexOf(hue, chroma) {
   return "#" + out.map(v => v.toString(16).padStart(2, "0")).join("");
 }
 
-function fillCard(card, who, version) {
+function fillCard(card, who, version, wide, cap) {
   if (who) {
-    const size = nameSize(who.top);
+    /* `cap` because `nameSize` only answers "how wide". A short name
+       takes the largest size that fits across, which is right in a
+       card 54 tall and wrong in the rail's, where 32px of "f" is
+       taller than the card. The room has no cap; the rail does. */
+    const size = Math.min(nameSize(who.top, wide || CARD_W),
+                          cap || Infinity);
     const top = el("div", "top", who.top);
     top.style.fontSize = size + "px";
     card.appendChild(top);
@@ -3416,6 +3442,34 @@ function renameGroup(span, group) {
   };
 }
 
+function standingIn(section) {
+  /* Everybody on this section's roster with no chair anywhere, in the
+     order the rail lists them.
+
+     Its own function because two things ask now -- the rail draws
+     them and "Seat everyone" sends them -- and the filtering below is
+     a judgement call rather than an obvious rule. Two copies of a
+     judgement call drift the first time one of them is improved.
+  */
+  if (!section || !seatingState) return [];
+  const sitting = new Set();
+  for (const sec of (seatingRoom && seatingRoom.sections) || [])
+    for (const shape of sec.shapes || [])
+      for (const seat of shape.seats || [])
+        if (seat.student) sitting.add(seat.student);
+
+  // Filtered to this section when the roster uses that name; when it
+  // does not, everybody is shown, because hiding people behind a name
+  // mismatch is the worse of the two failures.
+  const name = section.name || "";
+  const known = Object.values(seatingState.sections).includes(name);
+  return Object.keys(seatingState.names)
+    .filter(k => !sitting.has(k)
+                 && (!known || seatingState.sections[k] === name))
+    .sort((a, b) => seatingState.names[a].full
+                      .localeCompare(seatingState.names[b].full));
+}
+
 function drawPen(section) {
   /* Everyone with no chair, as the students they are: the same card as
      a seated one, grey because it has no group. Being grey is the
@@ -3429,28 +3483,12 @@ function drawPen(section) {
   pen.classList.remove("over");
   if (seatingMode !== "people") { pen.hidden = true; return; }
 
-  const sitting = new Set();
-  for (const sec of seatingRoom.sections || [])
-    for (const shape of sec.shapes || [])
-      for (const seat of shape.seats || [])
-        if (seat.student) sitting.add(seat.student);
-
-  // Filtered to this section when the roster uses that name; when it
-  // does not, everybody is shown, because hiding people behind a name
-  // mismatch is the worse of the two failures.
-  const name = section.name || "";
-  const known = Object.values(seatingState.sections).includes(name);
-  const standing = Object.keys(seatingState.names)
-    .filter(k => !sitting.has(k)
-                 && (!known || seatingState.sections[k] === name))
-    .sort((a, b) => seatingState.names[a].full
-                      .localeCompare(seatingState.names[b].full));
-
+  const standing = standingIn(section);
   pen.hidden = standing.length === 0;
   for (const key of standing) {
     const card = el("div", "seatcard movable");
     tint(card, null);
-    fillCard(card, seatingState.names[key], "");
+    fillCard(card, seatingState.names[key], "", PEN_CARD_W, PEN_NAME);
     if (picked && !picked.seat && picked.who === key)
       card.classList.add("picked");
     card.onpointerdown = e => dragName(e, card, { key: key });
@@ -3923,12 +3961,35 @@ function peopleActions(section) {
      Short: a shuffle, and a way out of the pins. Seating somebody is
      a click on the canvas and does not belong behind a button. */
   const held = pinnedSeats(section);
-  const out = [{
+  const waiting = standingIn(section);
+  const seated = (section.shapes || [])
+    .flatMap(s => s.seats || []).filter(s => s.student && !s.pinned).length;
+
+  /* Filling the room, emptying it, and stirring it: the three things
+     that happen to a whole room of people rather than to one of
+     them. In that order, because that is the order a term goes in. */
+  const out = [];
+  if (waiting.length)
+    out.push({
+      icon: "people",
+      label: waiting.length === 1 ? "Seat the one who is standing"
+                                  : `Seat all ${waiting.length} standing`,
+      why: "Fill the empty chairs, in the order the papers print.",
+      go: () => fillSeats({ students: waiting }),
+    });
+  out.push({
     icon: "dice", label: "Shuffle the room",
     why: "Deal everybody who is sitting down into different chairs."
       + (held.length ? "  Pinned seats stay as they are." : ""),
     go: () => shuffleSeats(),
-  }];
+  });
+  if (seated)
+    out.push({
+      icon: "chair", label: "Clear every chair",
+      why: "Stand everybody up. The room keeps its desks and groups."
+        + (held.length ? "  Pinned seats stay as they are." : ""),
+      go: () => fillSeats({ clear: true }),
+    });
   if (held.length)
     out.push({
       icon: "pin",
@@ -3940,7 +4001,34 @@ function peopleActions(section) {
         renderSeating();
       },
     });
+
+  /* Adding a person is roster work, not canvas work, which is why it
+     is a row here rather than the corner button that Groups and Seats
+     use to add a desk. In this app it goes to the Roster tab, which
+     owns the list; in the standalone one it will open a form. */
+  out.push({
+    icon: "personadd", label: "Add a person",
+    why: "Opens the roster, which is where the class list lives.",
+    go: () => { location.hash = "roster"; },
+  });
   return out;
+}
+
+async function fillSeats(body, after) {
+  /* Seat everybody, or stand everybody up. One call, because they are
+     one request with the sign flipped, and both leave the room
+     unsaved so Discard puts the morning back. */
+  try {
+    const out = await api("/api/seating/fill", Object.assign(
+      { room: seatingRoom, section: seatingSection }, body));
+    seatingRoom = out.room;
+    picked = null;
+    // The same tween a drag uses: people are somewhere else now, and
+    // they should be seen going there.
+    flipPeople(() => renderSeating());
+    toast(out.note);
+    if (after) after(out);
+  } catch (err) { toast(err.message, true); }
 }
 
 async function shuffleSeats() {
@@ -4101,9 +4189,17 @@ function dropTarget(event, fromId) {
      is the chair you get however you grabbed the card. Geometry rather
      than `elementFromPoint`, because the cards overhang each other and
      the ghost is under the cursor. */
+  /* The rail's own box and not a pixel more.
+
+     It used to claim fourteen pixels to its left as well, on top of a
+     rail made of full-size cards, so the right-hand quarter of the
+     canvas was "stand them up" -- and a group sitting near that edge
+     could not be rearranged without somebody being evicted. The rail
+     is narrow now and the slack is gone, which leaves a sliver down
+     the right side that is only ever the rail itself. */
   const pen = seatingPen();
   const box = pen.getBoundingClientRect();
-  if (!pen.hidden && event.clientX >= box.left - 14
+  if (!pen.hidden && event.clientX >= box.left
       && event.clientX <= box.right && event.clientY >= box.top
       && event.clientY <= box.bottom)
     return { kind: "pen" };
@@ -4500,10 +4596,43 @@ function freeBand(paper) {
      projector hides it with CSS and leaves the attribute alone, so
      asking the attribute would reserve a gutter for something that is
      not on screen. */
-  const pen = seatingPen();
-  const side = pen.offsetWidth ? pen.offsetWidth + 22 : 0;
-  const top = projecting() ? 14 : 62;        // the two top islands
-  const bottom = projecting() ? 46 : 130;    // the rail, and the strip
+  if (projecting())
+    return { x: 14, y: 14,
+             w: Math.max(80, paper.clientWidth - 28),
+             h: Math.max(80, paper.clientHeight - 60) };
+
+  /* Measured, not guessed.
+
+     These were three constants -- 62 at the top, 130 at the bottom,
+     and the rail's width plus 22 -- and the bottom one was the worst
+     of them: 130 is the strip *and* the mode rail, so in a mode with
+     nothing selected there is no strip and eighty pixels of the band
+     were reserved for a thing that is not on screen. The room fitted
+     into what was left and sat in the middle of it, which put a hand's
+     width of empty canvas between the room and the islands and made
+     the room smaller than it needed to be.
+
+     Asking the elements costs one layout read per fit and cannot
+     drift: a drawer that opens, a strip that appears, a rail that
+     comes and goes are all already in the DOM when this is called. */
+  const box = paper.getBoundingClientRect();
+  const reach = (selector, side) => {
+    let most = 0;
+    for (const node of document.querySelectorAll(selector)) {
+      // A hidden island has no box, so it reserves nothing.
+      if (!node.offsetWidth && !node.offsetHeight) continue;
+      const r = node.getBoundingClientRect();
+      most = Math.max(most,
+                      side === "top" ? r.bottom - box.top
+                      : side === "bottom" ? box.bottom - r.top
+                      : box.right - r.left);
+    }
+    return most > 0 ? most + 12 : 0;
+  };
+  const top = Math.max(14, reach(".at-tl, .at-tr", "top"));
+  const bottom = Math.max(14, reach("#seat-bottom, .at-bl, .plusbtn",
+                                    "bottom"));
+  const side = reach("#seat-pen", "right");
   return {
     x: 14,
     y: top,
