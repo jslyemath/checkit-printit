@@ -119,6 +119,17 @@
 .paper.canband { cursor: crosshair; }
 .paper.panready, .paper.canband.panready { cursor: grab; }
 .paper.panning { cursor: grabbing; }
+/* And over everything on it, because the key pans from anywhere. A
+   desk still showing its own move cursor while space was held was
+   the whole of the evidence that panning was not working. */
+.paper.panready .shape,
+.paper.panready .seatcard,
+.paper.panready .pill,
+.paper.panready .deskwrap { cursor: grab; }
+.paper.panning .shape,
+.paper.panning .seatcard,
+.paper.panning .pill,
+.paper.panning .deskwrap { cursor: grabbing; }
 
 /* The band itself: in room units on the canvas box, so it scales
    with everything else. */
@@ -765,7 +776,20 @@
   bottom: 64px;
   right: 12px;
   margin-right: 0;
-  flex-direction: column;
+  /* The width of the unfurled mode rail. They are the same kind of
+     thing opened from the same edge, and a column half the width of
+     its neighbour reads as a different component. */
+  width: 104px;
+  /* Two across. One column of seven full-width tiles is 389px and
+     runs off the top of a short window; two columns of four fit in
+     half that, and a grid of silhouettes is what a shape picker
+     looks like anyway. */
+  display: grid;
+  /* `minmax(0, 1fr)`, not `1fr`: a grid track's minimum is its
+     content, so the tiles pushed the right-hand column eleven pixels
+     past the drawer and it was clipped. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
   gap: 2px;
   overflow: hidden;
   padding: 0;
@@ -781,19 +805,28 @@
   transition: max-height var(--in-time) var(--in-curve),
               opacity var(--in-time) var(--in-curve),
               padding var(--in-time) var(--in-curve);
-  max-height: var(--full, 320px);
+  max-height: min(var(--full, 320px), calc(100% - 140px));
+  overflow-y: auto;
   opacity: 1;
   padding: 5px;
   border-color: var(--isle-line);
   box-shadow: var(--isle-shadow);
 }
+/* A row in the furniture drawer: the silhouette, then its name.
+
+   The drawer is the width of the unfurled mode rail, because they
+   are the same kind of thing opened from the same edge and a column
+   half the width of its neighbour reads as a different component.
+   Having the width also means the shapes can be named, which the
+   46px version could not afford. */
 .deskopt {
   font: inherit; display: flex; align-items: center; justify-content: center;
-  width: 40px; height: 36px; padding: 0;
+  width: 100%; padding: 3px;
   border: 1px solid transparent; border-radius: 8px;
   background: none; cursor: pointer;
+  color: var(--isle-dim);
 }
-.deskopt:hover { background: var(--isle-2); }
+.deskopt:hover { background: var(--isle-2); color: var(--isle-ink); }
 /* An action, which has a name. The furniture can be a silhouette
    because a rectangle is what you are asking for; "spread the
    versions out" has no picture, and a column of unlabelled glyphs is
@@ -822,21 +855,53 @@
                    stroke-linecap: round; stroke-linejoin: round; }
 .deskopt.act:hover svg { stroke: var(--isle-ink); }
 #seat-plan:not([hidden]) { display: contents; }
+/* Outlined and lightly filled, which is what a desk looks like on
+   the paper -- a pale face inside a definite edge. The solid grey
+   blob it replaced said "a shape of this silhouette" and nothing
+   about what the thing is.
+
+   The fill is a step off the island rather than the canvas's own
+   pale grey: these sit on dark chrome, and the paper's surface
+   colour against it is a white chip, which reads as selected. */
 .desktile {
+  position: relative; flex: 0 0 auto;
+  width: 100%; height: 36px;
   display: flex; align-items: center; justify-content: center;
-  background: oklch(0.74 0.015 260); border-radius: 2px; flex: 0 0 auto;
-  font-size: 9px; font-weight: 800; color: var(--isle);
 }
-.deskopt:hover .desktile { background: var(--isle-ink); }
-.desktile.circle { border-radius: 50%; }
-.desktile.hex {
-  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
-  border-radius: 0;
+.desktile svg { overflow: visible; }
+.desktile path, .desktile rect, .desktile ellipse {
+  fill: var(--isle-2);
+  stroke: var(--isle-dim);
+  stroke-width: 1.8;
 }
-.desktile.trapezoid {
-  clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
-  border-radius: 0;
+.deskopt:hover .desktile path,
+.deskopt:hover .desktile rect,
+.deskopt:hover .desktile ellipse { stroke: var(--isle-ink); }
+/* The one that seats a single person says so. */
+.tileone {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; color: var(--isle-dim);
 }
+.deskopt:hover .tileone { color: var(--isle-ink); }
+
+/* Dragged off the palette: the shape, following the pointer, growing
+   from the size of its tile to the size it will be in the room. */
+.shapeghost {
+  position: fixed; z-index: 30; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  opacity: .85;
+}
+.shapeghost.grown {
+  transition: width var(--in-time) var(--in-curve),
+              height var(--in-time) var(--in-curve);
+}
+.shapeghost svg { width: 100%; height: 100%; }
+.shapeghost path, .shapeghost rect, .shapeghost ellipse {
+  fill: oklch(0.935 0 255); stroke: oklch(0.760 0 255); stroke-width: 2.5;
+}
+/* The canvas says it will take it. */
+.paper.dropping { outline: 2px solid var(--isle-key); outline-offset: -2px; }
 
 /* ---------------------------------------------------------- the room -- */
 
@@ -1079,9 +1144,9 @@
   height: 100%;
   overflow: visible;
 }
-.shape.hex polygon, .shape.trapezoid polygon, .shape.triangle polygon {
+.shape.hex path, .shape.trapezoid path, .shape.triangle path {
   fill: var(--surface);
-  stroke: var(--edge);
+  stroke: var(--edge);         /* 2.5, matching `.shape`'s border */
 }
 
 /* A person. Two lines so the card is squarish -- a single long line of
@@ -1326,14 +1391,21 @@
 .pen .seatcard .top { font-size: 12px; line-height: 1.15; }
 .pen .seatcard .bottom { font-size: 9px; line-height: 1.15; }
 
-/* The line a seat just snapped to. Shown only while something is
-   being dragged onto it, and in the accent, which everywhere else in
-   here means "this is the state you are in". */
+/* The line something just snapped to.
+
+   Grey, not the accent: the accent means "the state you are in", and
+   a guide is a passing remark about where a thing landed.
+
+   Its thickness is divided by the zoom, because the layer is inside
+   the scaled canvas -- at 49% a 1px line is half a device pixel and
+   rounds to one on one axis and nothing on the other, which is why
+   the horizontal looked heavier than the vertical. Dividing it out
+   makes both exactly 1px on screen at every zoom. */
 #seat-guides { position: absolute; inset: 0; pointer-events: none;
                z-index: 4; }
-.guide { position: absolute; background: var(--isle-key); opacity: .75; }
-.guide.v { top: 0; bottom: 0; width: 1px; }
-.guide.h { left: 0; right: 0; height: 1px; }
+.guide { position: absolute; background: oklch(0.52 0.012 260); }
+.guide.v { top: 0; bottom: 0; width: calc(1px / var(--z, 1)); }
+.guide.h { left: 0; right: 0; height: calc(1px / var(--z, 1)); }
 
 /* ------------------------------------------------------------- moving -- */
 
