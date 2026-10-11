@@ -652,6 +652,56 @@ class TestTheShuffleStepsRoundAPin:
                    for seat in room_mod.live_seats(s))
 
 
+class TestTheCanvasBackground:
+    """Per section, because two classes can meet in two rooms and the
+    projector in one of them is the whole reason to change it.
+
+    Called background and not paper: in this tool `paper` is the sheet
+    that comes out of the printer, and a field by that name sitting
+    beside `seat.version` would be read as the same question."""
+
+    def room(self, tint=None):
+        s = room_mod.new_section("820")
+        s["shapes"] = [room_mod.make_shape("table-1x2", (200, 200), "t1")]
+        if tint is not None:
+            s["canvas"]["background"] = tint
+        r = room_mod.empty("AB")
+        r["sections"] = [s]
+        return r
+
+    def test_absent_is_the_default(self):
+        """A room nobody has re-tinted stores nothing, like every other
+        optional field here."""
+        r = self.room()
+        room_mod.check(r)
+        assert "background" not in r["sections"][0]["canvas"]
+
+    @pytest.mark.parametrize("tint", room_mod.BACKGROUNDS)
+    def test_every_named_one_is_allowed(self, tint):
+        room_mod.check(self.room(tint))
+
+    def test_anything_else_is_refused(self):
+        """Fail loudly. A free color would quietly break the group
+        colors, which are designed against this surface."""
+        with pytest.raises(room_mod.RoomError, match="background"):
+            room_mod.check(self.room("#ff00ff"))
+
+    def test_they_are_all_light(self):
+        """The four differ in lightness and warmth only. A dark one
+        would need a second set of card colors, which is a larger
+        decision than "the projector in this room runs blue" -- so if
+        one is ever added, this test should fail and be thought about
+        rather than deleted."""
+        assert set(room_mod.BACKGROUNDS) == {"grey", "white", "warm", "cool"}
+
+    def test_it_survives_a_round_trip(self, tmp_path):
+        r = self.room("warm")
+        path = tmp_path / "room.json"
+        room_mod.save(str(path), r)
+        assert room_mod.load(str(path))["sections"][0]["canvas"]["background"] \
+            == "warm"
+
+
 class TestTheSweepMatchesTheCanvas:
     """`room.seat_sweep` is a second copy of `slotsOf` in `seating.js`,
     because the canvas needs the answer on every redraw and the chart

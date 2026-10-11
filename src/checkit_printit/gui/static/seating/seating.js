@@ -117,6 +117,7 @@ let railOpen = false;
 let saveOpen = false;
 let huesOpen = false;
 let huesFor = null;              // whose swatches are built, by group id
+let bgOpen = false;
 
 /* Several things chosen at once. Groups in Groups mode and seats in
    Seats mode -- never a mix, because a band drawn across two tables
@@ -226,10 +227,28 @@ const ANCHORS = {
 
 const ICON = {
   people: "M5.5 20a6.5 6.5 0 0 1 13 0|O12,8,3.4",
-  // A map pin, not a thumbtack: at 24 units a tack is a grey blob,
-  // and a teardrop with a hole in it reads as "here" at any size.
-  pin: "M12 21.5s6.6-6 6.6-10.5a6.6 6.6 0 1 0-13.2 0c0 4.5 6.6 10.5 6.6"
-    + " 10.5z|O12,10.6,2.5",
+  /* A push pin driven in at an angle, solid, pointing down-left.
+
+     Three filled quads that meet: the flat head, the barrel, and the
+     needle, all built on one 45-degree axis so they line up exactly.
+     The head's inner face is where the barrel's base sits, so the two
+     join without a seam.
+
+     A map pin was the first try and is the wrong object -- a teardrop
+     means "a place on a map", and this means "fixed down". Drawn
+     rather than borrowed, so the weight matches the rest of the set. */
+  pin: "M13.73 3.19 L20.81 10.27 L18.27 12.81 L11.19 5.73 Z"
+    + "|M12.47 7.01 L16.99 11.53 L12.18 14.08 L9.92 11.82 Z"
+    + "|M11.69 13.59 L7.51 16.49 L10.41 12.31 Z",
+  /* A disc half filled: the background. The circle is stroked like
+     every other icon here and the half is filled, which the DSL
+     cannot say -- so the fill is a CSS rule on `#seat-bg svg path`.
+     The usual glyph for "how light is this surface". */
+  backdrop: "O12,12,8.2|M12 3.8a8.2 8.2 0 0 1 0 16.4z",
+  // Three dots: the overflow menu, which is what this corner is in
+  // the modes that open a list rather than add a thing. Vertical,
+  // which is also the direction the list unrolls.
+  more: "O12,5,1.7|O12,12,1.7|O12,19,1.7",
   // A die. The shuffle needed a glyph that is not the swap arrows,
   // which already mean "by group or by seat" one drawer over.
   dice: "R4,4,16,16,3.5|O8.8,8.8,1.15|O12,12,1.15|O15.2,15.2,1.15",
@@ -273,10 +292,6 @@ const ICON = {
   howmany: "O5.5,12,2.6|O12,12,2.6|O18.5,12,2.6",
   // A route traced across the room.
   path: "M4 19c0-5 4-5 8-5s8 0 8-5|O4,19,2.1|O20,9,2.1",
-  // A wand: ask the room to work something out.
-  wand: "M4 20L15 9|M12.5 6.5l5 5|M15.5 3.5l.9 2.1 2.1.9-2.1.9-.9 2.1"
-    + "-.9-2.1-2.1-.9 2.1-.9z|M6 4.5l.6 1.4 1.4.6-1.4.6L6 8.5l-.6-1.4"
-    + "L4 6.5l1.4-.6z",
   /* One big A on a card, and a label pill: each icon is a small
      picture of the thing it turns on. A and B side by side said
      "these differ" more precisely, and looked like two bugs on a
@@ -621,6 +636,25 @@ function roomWith(only) {
   return out;
 }
 
+function showing() {
+  /* The room is being shown rather than worked on.
+
+     Projector mode and Up Next are the two, and they are not modes:
+     they cross whatever mode is underneath and give it back on the
+     way out. While either is on, nothing drawn on the canvas is a
+     control -- no drag, no handles, no pins, no keyboard nudge --
+     because somebody is looking at this from the back of a room and
+     a stray click should not move a desk.
+
+     One predicate rather than `upnext` tested at each site, which is
+     how projector mode came to be missing from four of them: a desk
+     could be dragged, a name could be moved, a group label could be
+     pushed around, and every pin was on show, all while the room was
+     on the wall.
+  */
+  return projecting() || upnext;
+}
+
 function projecting() {
   return document.body.classList.contains("projecting");
 }
@@ -642,7 +676,8 @@ function setProjecting(on) {
     selected = null;
     picked = null;
     selectedChair = null;
-    paletteOpen = false;
+    banded = [];            // a selection is an edit in progress
+    closeDrawers();         // every drawer, not only the furniture
   } else {
     enterMode(modeBefore);         // back where you were, not somewhere neutral
   }
@@ -694,6 +729,19 @@ function paintChrome() {
       upnext ? "Stop showing who is up"
              : "Up Next: light one student, one group, or one from "
                + "each group");
+  const bgBtn = document.getElementById("seat-bg");
+  if (bgBtn) {
+    const section = currentSection();
+    bgBtn.textContent = "";
+    bgBtn.appendChild(svgIcon(ICON.backdrop));
+    bgBtn.hidden = !section || projecting();
+    bgBtn.removeAttribute("aria-pressed");     // it opens, not toggles
+    bgBtn.setAttribute("aria-haspopup", "menu");
+    const now = BACKGROUNDS.find(o => o.value === backgroundOf(section));
+    bgBtn.title = "Background: " + (now ? now.label.toLowerCase() : "grey");
+    bgBtn.onclick = e => { e.stopPropagation(); toggleBackgrounds(); };
+  }
+
   set("seat-project", "projector", projecting(),
       projecting() ? "Back to editing — escape does it too"
                    : "Projector mode: the room and nothing else");
@@ -718,17 +766,35 @@ function paintChrome() {
      room to work something out. The position is the constant: the
      one thing this mode can do that is not about a selection. */
   plus.textContent = "";
-  /* The wand in People as well as Printing, which is not a borrowed
-     glyph: the rule above is that a wand means "asking the room to
-     work something out", and shuffling the seating is exactly that.
-     The plus stays where the action is adding a thing. */
-  if (seatingMode === "printing" || seatingMode === "people")
-    plus.appendChild(svgIcon(ICON.wand));
+  /* Two different controls sharing one corner, and they should look
+     it.
+
+     Material's rule is that a floating button carries the *one*
+     primary action of a screen, and that overflow -- the secondary,
+     the occasional, the settings -- belongs in a menu and not in
+     that button. Groups and Seats have a primary action, which is
+     adding a thing, so there the corner is a proper floating button:
+     accent-filled, a plus, turning to a cross when it is open.
+
+     People and Printing have no single primary action, only a short
+     list. So there the corner is an overflow control: the three dots
+     every toolbar uses, drawn quiet -- island-coloured, with the
+     island's own edge -- so it reads as one of the islands rather
+     than as the promoted action.
+
+     The wand was neither. "Magic" is a mood, not a kind of control,
+     and it gave the same prominence to a menu that the plus gives to
+     a command. */
+  const menuish = seatingMode === "printing" || seatingMode === "people";
+  plus.classList.toggle("menubtn", menuish);
+  if (menuish) plus.appendChild(svgIcon(ICON.more));
   else plus.textContent = "+";
   plus.title = seatingMode === "seats" ? "Add a seat to this group"
-    : seatingMode === "printing" ? "What Printing can do to this room"
-    : seatingMode === "people" ? "What you can do to the whole room"
+    : seatingMode === "printing" ? "More: what Printing can do to this room"
+    : seatingMode === "people" ? "More: what you can do to the whole room"
     : "Add a group";
+  plus.setAttribute("aria-haspopup", menuish ? "menu" : "false");
+  plus.setAttribute("aria-label", plus.title);
   plus.setAttribute("aria-expanded", String(drawered && paletteOpen));
   plus.onclick = e => {
     e.stopPropagation();
@@ -772,8 +838,12 @@ function renderSeating() {
   drawPen(section);
   drawRoom(section);
   drawPalette(section);
+  /* One write re-tints everything: the surface, the dot grid, and
+     the sample on each swatch, which wears the same attribute. */
+  document.querySelector(".seatapp").dataset.bg = backgroundOf(section);
   drawStrip(section);
   drawHues(section);           // after the strip: it reads the strip's dot
+  drawBackgrounds(section);
   /* Crosshair only where a drag draws a band. In People, in
      Printing, and under either overlay a drag moves the view, and a
      crosshair there promises a selection that is not on offer. */
@@ -1115,7 +1185,7 @@ function drawRoom(section) {
           takeNext(group.id);
         };
       }
-    } else if (upnext) {
+    } else if (showing()) {
       // Shown, not edited: no drag, no keyboard nudge, no handles.
     } else if (seatingMode === "groups") {
       box.classList.add("movable");
@@ -1154,9 +1224,10 @@ function drawRoom(section) {
       // others are, so none of them can be worked out one at a time.
       fillCard(card, who, "");
 
-      if (upnext) {
-        // Up Next is on, so nothing on the canvas is a control: the
-        // room is being shown, not edited, whatever mode it is in.
+      if (showing()) {
+        // Shown, not edited, whatever mode is underneath: no cards to
+        // drag, and no pins, which are an editing control and not a
+        // thing the back of the room needs to see.
       } else if (seatingMode === "people") {
         /* Pinned: somebody who has to sit where they are. The card
            stops being draggable rather than springing back, because
@@ -1247,8 +1318,14 @@ function drawRoom(section) {
       if (isSelected(group, null)) tag.classList.add("chosen");
       tag.style.left = (x - ox) + "px";
       tag.style.top = (y - oy) + "px";
-      tag.title = "Drag to move it; click twice to rename";
-      tag.onpointerdown = e => dragLabel(e, tag, section, group, ids, where);
+      // A label is draggable only while the room is being worked on.
+      // This one was never gated at all, so a group's name could be
+      // pushed around the wall during Up Next.
+      if (!showing()) {
+        tag.title = "Drag to move it; click twice to rename";
+        tag.onpointerdown = e =>
+          dragLabel(e, tag, section, group, ids, where);
+      }
       canvas.appendChild(tag);
       drawn.labels.push({ el: tag, seats: ids, group: group,
                          at: [x - ox, y - oy] });
@@ -1567,7 +1644,7 @@ function holdBadge(node, spec) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
-    if (projecting() || upnext) return;
+    if (showing()) return;
 
     const now = Date.now();
     if (lastBadgeTap.id === spec.id && now - lastBadgeTap.at < 450) {
@@ -3421,9 +3498,10 @@ function showOpen() {
   const pal = document.getElementById("seat-palette");
   const menu = document.getElementById("seat-savemenu");
   const hues = document.getElementById("seat-hues");
+  const bgs = document.getElementById("seat-bgs");
   if (rail) rail.classList.toggle("open", railOpen);
   for (const [node, open] of [[pal, paletteOpen], [menu, saveOpen],
-                              [hues, huesOpen]]) {
+                              [hues, huesOpen], [bgs, bgOpen]]) {
     if (!node) continue;
     /* The exact height, not a guess.
 
@@ -3461,6 +3539,19 @@ function showOpen() {
      is at the bottom of the window and there is nothing under it.
      Anchored by `bottom`, so the drawer unrolls upward out of the dot
      the way the furniture does out of the plus. */
+  /* Under the island it belongs to, at its right edge, which is where
+     a menu opened from a toolbar button goes. */
+  const bgBtn = document.getElementById("seat-bg");
+  if (bgs && !bgs.hidden && bgBtn) {
+    const app = document.getElementById("view-seating")
+      .getBoundingClientRect();
+    const box = bgBtn.getBoundingClientRect();
+    bgs.style.left = Math.round(box.left - app.left - 40) + "px";
+    bgs.style.top = Math.round(box.bottom - app.top + 8) + "px";
+    bgBtn.classList.toggle("on", bgOpen);
+    bgBtn.setAttribute("aria-expanded", String(bgOpen));
+  }
+
   const dot = document.getElementById("seat-swatch");
   if (hues && !hues.hidden && dot) {
     const app = document.getElementById("view-seating")
@@ -3480,9 +3571,64 @@ function closeDrawers() {
      close all of them -- a press on bare paper, a pan that turned out
      to be a click, and Escape. Listing the flags at each site is
      exactly how the fourth one ends up forgotten at two of them. */
-  const was = paletteOpen || railOpen || saveOpen || huesOpen;
-  paletteOpen = railOpen = saveOpen = huesOpen = false;
+  const was = paletteOpen || railOpen || saveOpen || huesOpen || bgOpen;
+  paletteOpen = railOpen = saveOpen = huesOpen = bgOpen = false;
   return was;
+}
+
+const BACKGROUNDS = [
+  { value: "grey", label: "Grey", why: "The default: a very pale grey." },
+  { value: "white", label: "White", why: "The most contrast, for a dim "
+    + "projector or a bright room." },
+  { value: "warm", label: "Warm", why: "A little cream, which settles a "
+    + "projector that runs blue." },
+  { value: "cool", label: "Cool", why: "A little blue, which settles a "
+    + "projector that runs yellow." },
+];
+
+function backgroundOf(section) {
+  return ((section && section.canvas) || {}).background || "grey";
+}
+
+function setBackground(section, value) {
+  if (!section) return;
+  section.canvas = section.canvas || {};
+  // Absent is the default, so choosing grey removes the key rather
+  // than writing it: a room nobody has re-tinted stores nothing.
+  if (value === "grey") delete section.canvas.background;
+  else section.canvas.background = value;
+  bgOpen = false;
+  renderSeating();
+}
+
+function drawBackgrounds(section) {
+  const pop = document.getElementById("seat-bgs");
+  if (!pop) return;
+  pop.hidden = !section || projecting();
+  if (pop.hidden) { bgOpen = false; return; }
+  const now = backgroundOf(section);
+  if (!pop.childElementCount)
+    for (const opt of BACKGROUNDS) {
+      const b = el("button", "bgsw", opt.label);
+      b.type = "button";
+      b.dataset.bg = opt.value;
+      b.title = opt.why;
+      // Each swatch is painted in the background it offers, by
+      // wearing the same attribute the canvas does. One definition
+      // of what "warm" means, not two.
+      b.setAttribute("data-bg-sample", opt.value);
+      b.onclick = () => setBackground(currentSection(), opt.value);
+      pop.appendChild(b);
+    }
+  for (const b of pop.querySelectorAll(".bgsw"))
+    b.classList.toggle("on", b.dataset.bg === now);
+}
+
+function toggleBackgrounds() {
+  const same = bgOpen;
+  closeDrawers();
+  bgOpen = !same;
+  showOpen();
 }
 
 function toggleHues(section, group) {
@@ -4137,6 +4283,18 @@ function dragName(event, element, from) {
     if (!lift) {
       if (Math.hypot(e.clientX - start[0], e.clientY - start[1]) < 4) return;
       lift = liftGhost(element, event);
+      /* The rail comes back for the length of the drag.
+
+         It hides itself when everybody is seated, which is right --
+         an empty rail is a box around nothing -- but `dropTarget`
+         refuses a hidden one, so standing somebody up was impossible
+         in exactly the room where it is most likely to be wanted: a
+         full one. The comment on `drawPen` had claimed this worked
+         for weeks. */
+      if (from.seat && seatingMode === "people") {
+        const pen = seatingPen();
+        if (pen.hidden) { pen.hidden = false; pen.classList.add("waiting"); }
+      }
     }
     lift.ghost.style.left = (e.clientX - lift.hold[0]) + "px";
     lift.ghost.style.top = (e.clientY - lift.hold[1]) + "px";
@@ -4159,6 +4317,7 @@ function dragName(event, element, from) {
     lift.ghost.remove();
     element.classList.remove("lifted");
     markTarget(target, false);
+    seatingPen().classList.remove("waiting");   // `drawPen` decides again
 
     // Nowhere is a cancel, not an eviction. Losing somebody out of the
     // chart because a drop was a few pixels short is not a trade worth
@@ -4504,7 +4663,7 @@ function bandKind() {
      there is a drag of the view. The mode underneath is untouched --
      Up Next over Groups is still Groups when you leave -- which is
      why this has to ask about the overlay and not only the mode. */
-  if (upnext || projecting()) return null;
+  if (showing()) return null;
   return seatingMode === "groups" ? "group"
     : seatingMode === "seats" ? "seat" : null;
 }

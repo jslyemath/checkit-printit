@@ -16,6 +16,9 @@
      by changing one number. */
   --edge: 12;
 
+  /* The canvas surface. Called paper here and nowhere near the
+     model, where `paper` is the sheet in the printer; the choice an
+     instructor makes is `section.canvas.background`. */
   --paper:      oklch(0.971 0.003 255);
   --paper-dot:  oklch(0.893 0.006 255);
 
@@ -80,6 +83,20 @@
   user-select: text;
   -webkit-user-select: text;
 }
+
+/* The four backgrounds, as a data attribute on the app so the whole
+   canvas re-tints from one write. All light, differing in lightness
+   and warmth: the group colors are designed against this surface, so
+   a dark one would need a second set of card colors.
+
+   `grey` is the default and is the `:root` value above, so it needs no
+   rule -- a room that has never been changed carries no attribute. */
+.seatapp[data-bg="white"] { --paper: oklch(0.995 0 255);
+                            --paper-dot: oklch(0.917 0.004 255); }
+.seatapp[data-bg="warm"]  { --paper: oklch(0.974 0.016 85);
+                            --paper-dot: oklch(0.897 0.025 85); }
+.seatapp[data-bg="cool"]  { --paper: oklch(0.969 0.019 235);
+                            --paper-dot: oklch(0.892 0.028 235); }
 
 /* ------------------------------------------------------------- paper -- */
 
@@ -582,19 +599,44 @@
 }
 .plusbtn:hover { transform: scale(1.06); }
 .plusbtn.on { transform: rotate(45deg); }
-/* A wand does not read as a cross when it is turned, so the button
-   that holds actions says it is open by lighting rather than by
-   spinning. */
 .plusbtn svg { width: 21px; height: 21px; fill: none; stroke: currentColor;
                stroke-width: 1.8; stroke-linecap: round;
                stroke-linejoin: round; }
-.plusbtn:has(svg).on { transform: none; background: var(--isle);
-                       color: var(--isle-key); }
+
+/* The same corner, the other kind of control.
+
+   A plus is the one promoted action of its mode and is dressed like
+   it: accent-filled, and it spins into a cross to close. A menu is
+   not promoted -- it is where the occasional things live -- so it
+   wears the island's own surface and edge, and says it is open by
+   lighting rather than by spinning, because three dots turned 45
+   degrees are still three dots. */
+.plusbtn.menubtn {
+  background: var(--isle);
+  color: var(--isle-ink);
+  border: 1px solid var(--isle-line);
+}
+.plusbtn.menubtn svg { width: 20px; height: 20px;
+                       fill: currentColor; stroke: none; }
+.plusbtn.menubtn.on { transform: none; color: var(--isle-key);
+                      border-color: var(--isle-key); }
+.plusbtn.menubtn:hover { transform: scale(1.06); }
 .strip .srename {
   font: inherit; font-weight: 600; width: 150px;
   padding: 3px 7px; border-radius: 6px;
   background: oklch(0.19 0.01 260); color: var(--isle-ink);
   border: 1px solid var(--isle-key);
+}
+
+/* Shown only for the length of a drag, because everybody is seated
+   and there would otherwise be nowhere to put somebody down. Dashed,
+   so it reads as a place to drop rather than as a list that is
+   mysteriously empty. */
+.pen.waiting { border-style: dashed; }
+.pen.waiting::after {
+  content: "Drop here to stand them up";
+  font-size: 12px; color: var(--isle-dim); padding: 0 6px;
+  align-self: center;
 }
 
 /* The pin, in the bottom right corner of a name card. Only People
@@ -618,16 +660,48 @@
   color: var(--faint);
   transition: opacity var(--out-time) var(--out-curve);
 }
-.seatcard .pin svg { width: 12px; height: 12px; }
+/* Solid in both states. A pin is a small object seen from across a
+   desk, and an outline of one at 12px is a smudge; faint is the same
+   solid shape turned down, not a different drawing. */
+.seatcard .pin svg { width: 13px; height: 13px;
+                     fill: currentColor; stroke: none; }
 /* Set, hovered, or the card in hand. The third is the one a finger
    can reach, since a touch screen has no hover. */
 .seatcard:hover .pin,
 .seatcard.picked .pin { opacity: .5; }
 .seatcard:hover .pin:hover { opacity: .9; }
 .seatcard.pinned .pin { opacity: 1; color: var(--solid); }
-.seatcard.pinned .pin svg { fill: currentColor; stroke: none; }
 /* A pinned card is not draggable, and says so before it is tried. */
 .seatcard.pinned { cursor: default; }
+
+/* The background chooser. Wider cells than the hue swatches: a
+   background is judged by its area, and a 24px dot of near-white
+   tells you nothing.
+
+   Down here rather than beside the `--paper` definitions because
+   these rules must come *after* `.isle` and `.drop`. All three are
+   one class deep, so the last one declared wins -- and declared
+   earlier, the grid lost to the island's `display: flex` and the
+   drawer's `flex-direction: column`, which stacked the four swatches
+   in one tall column and squashed each to 21px. */
+.bgs { z-index: 8; display: grid; grid-template-columns: repeat(2, 1fr);
+       gap: 6px; }
+.bgsw {
+  width: 62px; height: 34px; padding: 0; cursor: pointer;
+  border-radius: 7px; border: 2px solid var(--isle-line);
+  display: grid; place-items: center;
+  font-size: 11px; font-weight: 600;
+  /* Painted in what it offers, from the same definitions the canvas
+     uses rather than a second copy of the colors. */
+  background: var(--paper); color: oklch(0.42 0.02 255);
+}
+.bgsw[data-bg-sample="white"] { --paper: oklch(0.995 0 255); }
+.bgsw[data-bg-sample="warm"]  { --paper: oklch(0.974 0.016 85); }
+.bgsw[data-bg-sample="cool"]  { --paper: oklch(0.969 0.019 235); }
+.bgsw[data-bg-sample="grey"]  { --paper: oklch(0.971 0.003 255); }
+.bgsw:hover { border-color: var(--isle-dim); }
+.bgsw.on { border-color: var(--isle-key); }
+#seat-bg svg path { fill: currentColor; stroke: none; }
 
 /* The swatches, opened from the dot rather than always on show,
    because the strip has to stay one row at 515px.
