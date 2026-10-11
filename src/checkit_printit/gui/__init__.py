@@ -800,6 +800,58 @@ def api_seating_shuffle(course, body):
     return {"room": incoming, "note": note, "moved": moved, "pinned": held}
 
 
+def api_seating_fill(course, body):
+    """Seat everybody who is standing, or stand everybody up.
+
+    One handler for both, because they are the same request with the
+    sign flipped and they share every rule -- pinned chairs are
+    exempt, nothing is written, the room comes back for the canvas to
+    hold as an unsaved edit.
+
+    **The canvas says who is standing.** It is the only thing that
+    knows: the rail is filtered by section when the roster's section
+    names match the room's and shown whole when they do not, and a
+    second copy of that rule living here would answer differently the
+    first time somebody renamed a section.
+    """
+    incoming = body.get("room")
+    if not isinstance(incoming, dict):
+        raise GuiError("that request carried no room.")
+    at = body.get("section")
+    sections = incoming.get("sections") or []
+    if not isinstance(at, int) or not 0 <= at < len(sections):
+        raise GuiError("that request did not say which room.")
+
+    section = sections[at]
+    held = sum(1 for seat in room_mod.live_seats(section)
+               if seat.get("pinned"))
+    pinned_note = ""
+    if held:
+        chairs = "chair" if held == 1 else "chairs"
+        pinned_note = f" {held} pinned {chairs} left as they were."
+
+    if body.get("clear"):
+        gone = room_mod.clear_seats(section)
+        note = (f"{gone} stood up." + pinned_note) if gone \
+            else "Nobody was sitting in an unpinned chair."
+        return {"room": incoming, "note": note, "moved": gone}
+
+    students = body.get("students")
+    if not isinstance(students, list):
+        raise GuiError("that request did not say who is standing.")
+    sat = room_mod.seat_students(section, students)
+    left = len(students) - sat
+    if not sat:
+        note = ("Nobody sat down. There are no empty chairs that are not "
+                "pinned.") if students else "Everybody already has a chair."
+    else:
+        note = f"{sat} seated." + pinned_note
+        if left:
+            note += (f" {left} still standing -- the room ran out of "
+                     f"chairs.")
+    return {"room": incoming, "note": note, "moved": sat, "left": left}
+
+
 def api_seating_save(course, body):
     """Write the room the canvas is showing, and the chart if it is ours.
 
@@ -1148,6 +1200,7 @@ ROUTES = {
     "/api/seating/save": api_seating_save,
     "/api/seating/versions": api_seating_versions,
     "/api/seating/shuffle": api_seating_shuffle,
+    "/api/seating/fill": api_seating_fill,
     "/api/print": api_print,
     "/api/print/save": api_print_save,
     "/api/print/pull": api_print_pull,

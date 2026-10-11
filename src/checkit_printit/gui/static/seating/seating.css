@@ -632,11 +632,18 @@
    and there would otherwise be nowhere to put somebody down. Dashed,
    so it reads as a place to drop rather than as a list that is
    mysteriously empty. */
-.pen.waiting { border-style: dashed; }
+/* Shown only for the length of a drag, because everybody is seated
+   and there would otherwise be nowhere to put somebody down. */
+.pen.waiting {
+  border-style: dashed;
+  border-color: var(--isle-dim);
+  width: 92px;
+  justify-content: center;
+}
 .pen.waiting::after {
-  content: "Drop here to stand them up";
-  font-size: 12px; color: var(--isle-dim); padding: 0 6px;
-  align-self: center;
+  content: "Stand them up";
+  font-size: 11px; line-height: 1.3; color: var(--isle-dim);
+  padding: 0 6px; text-align: center;
 }
 
 /* The pin, in the bottom right corner of a name card. Only People
@@ -1253,29 +1260,69 @@
    the design should carry. No container, because the cards are the
    content and a box round them is a wall for no reason -- the well
    appears only while a name is in the air. */
+/* The unseated, as an island like every other piece of chrome.
+
+   It was the first thing built here and the last to join the design:
+   a transparent box whose only edge was the drop shadow under its
+   cards, so a column of name cards appeared to be floating loose on
+   the canvas with a browser scrollbar beside them. It is a tool, not
+   part of the document, so it wears the tool surface.
+
+   Its height is its contents, up to what the window allows. It used
+   to be pinned top and bottom to two guessed numbers, which left a
+   tall empty box when two people were standing and a box ending in
+   mid-air above the islands when many were. */
 .pen {
   position: absolute;
   z-index: 4;
-  top: 60px;
-  bottom: 74px;
+  top: 68px;                       /* clear of the top-right island */
   right: 12px;
+  max-height: calc(100% - 68px - 86px);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 7px;
-  overflow: auto;
-  border: 1px dashed transparent;
+  align-items: center;      /* not stretch: a card keeps its own width */
+  gap: 6px;
+  padding: 6px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--isle);
+  border: 1px solid var(--isle-line);
   border-radius: 12px;
+  box-shadow: var(--isle-shadow);
+  /* Thin, in the island's own greys. The default scrollbar was the
+     one piece of unstyled browser furniture left in the app. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--isle-dim) transparent;
 }
-.pen.over {
-  border-color: var(--isle-key);
-  background: oklch(0.255 0.012 260 / .35);
+.pen::-webkit-scrollbar { width: 8px; }
+.pen::-webkit-scrollbar-track { background: transparent; }
+.pen::-webkit-scrollbar-thumb {
+  background: var(--isle-dim); border-radius: 4px;
+  border: 2px solid transparent; background-clip: content-box;
 }
+.pen::-webkit-scrollbar-thumb:hover { background-clip: padding-box; }
+
+.pen.over { border-color: var(--isle-key); }
+
+/* Smaller than a seated card, and deliberately.
+
+   A card in the room is drawn at the room's zoom -- 31% in a full
+   class -- while these were drawn at 100%, so the same card was three
+   times the size in the rail as in the chair it was waiting for. A
+   list of people is a list; it does not have to be legible from the
+   back of the room, because nobody projects it. */
 .pen .seatcard {
   position: static;
   flex: 0 0 auto;
-  box-shadow: 0 3px 10px oklch(0.2 0.02 260 / .28);
+  width: 74px;
+  min-height: 0;
+  padding: 2px 4px;
+  border-radius: 6px;
+  border-width: 1px;
+  box-shadow: none;
 }
+.pen .seatcard .top { font-size: 12px; line-height: 1.15; }
+.pen .seatcard .bottom { font-size: 9px; line-height: 1.15; }
 
 /* ------------------------------------------------------------- moving -- */
 
@@ -1481,10 +1528,17 @@ body.projecting .seatapp:hover .at-tr { opacity: 1; }
    narrow. */
 @media (max-width: 760px) {
   .foldaway { display: none; }
-  .pen { top: 54px; bottom: 132px; padding: 5px; gap: 6px; }
-  .pen .seatcard { width: 86px; min-height: 46px; }
-  .pen .seatcard .top { font-size: 18px !important; }
-  .pen .seatcard .bottom { font-size: 11px !important; }
+  /* The rail only needs to start a little higher here, because the
+     top islands are shorter. Everything else it used to say -- a
+     narrower card, a shorter one, and `!important` on both font
+     sizes -- is what the rail now does at every width, so saying it
+     again here only meant the two could disagree.
+
+     The `!important` was there to beat `fillCard`, which writes the
+     name's size inline after measuring it against a *chair*. That is
+     fixed at the source: `fillCard` now takes the width it is
+     filling and a cap, so nothing has to shout over it. */
+  .pen { top: 54px; }
 }
 
 /* --------------------------------------------------- a short window -- */

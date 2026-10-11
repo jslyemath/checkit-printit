@@ -391,10 +391,11 @@ and restore it on the way out.
 | `group.hue`, `group.chroma` | its color; lightness is the design system's and is never stored |
 | `group.label_at` | which desk and which of nine anchors the label hangs on |
 | `seat.version` | which paper prints for this seat |
-| `seat.pinned` | this chair's occupant stays in it: no drag, no drop, no shuffle |
+| `seat.pinned` | this chair's occupant stays in it: no drag, no drop, no shuffle, and not filled by "seat everyone" if empty |
 | `seat.spot` | its place inside its own group's run |
 | `seat.order` | its place across the whole room |
 | `section.print_by` | `"group"` or `"seat"` |
+| `section.canvas.background` | one of `grey`, `white`, `warm`, `cool`. **Not** "paper", which here is the sheet in the printer |
 | `shape.w`, `shape.h`, `shape.angle` | a desk resized or turned |
 
 A **seat letter** is *not* stored: it is derived clockwise from the top

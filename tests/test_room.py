@@ -652,6 +652,103 @@ class TestTheShuffleStepsRoundAPin:
                    for seat in room_mod.live_seats(s))
 
 
+class TestFillingAndEmptyingTheRoom:
+    """"Seat everyone" and "Clear everyone". Both keep the shuffle's
+    exemption, because a pin is the one arrangement in the room that
+    is about a person rather than a layout."""
+
+    def room(self, seats=4, pinned=(), empty=()):
+        s = section_with(table("t1", (0, 0), seats),
+                         groups=[group("g1", "t1", seats)])
+        for seat in room_mod.live_seats(s):
+            if seat["id"] in pinned:
+                seat["pinned"] = True
+            if seat["id"] in empty:
+                seat["student"] = ""
+        return s
+
+    def who(self, section):
+        return {s["id"]: s.get("student") or ""
+                for s in room_mod.live_seats(section)}
+
+    # ------------------------------------------------ seating them --
+    def test_they_fill_the_empty_chairs(self):
+        s = self.room(empty={"t1-1", "t1-3"})
+        assert room_mod.seat_students(s, ["ann", "bo"]) == 2
+        assert self.who(s)["t1-1"] == "ann"
+        assert self.who(s)["t1-3"] == "bo"
+
+    def test_a_sitting_student_is_not_displaced(self):
+        s = self.room(empty={"t1-2"})
+        before = self.who(s)
+        room_mod.seat_students(s, ["ann"])
+        for sid, who in self.who(s).items():
+            if sid != "t1-2":
+                assert who == before[sid]
+
+    def test_an_empty_pinned_chair_stays_empty(self):
+        """A pin on an empty chair is "keep this one free", which is a
+        real thing to want beside a door or a projector."""
+        s = self.room(empty={"t1-0", "t1-2"}, pinned={"t1-0"})
+        assert room_mod.seat_students(s, ["ann", "bo"]) == 1
+        assert self.who(s)["t1-0"] == ""
+        assert self.who(s)["t1-2"] == "ann"
+
+    def test_they_sit_down_in_stack_order(self):
+        """Not in the order the room was built, which would scatter an
+        alphabetical list across the tables."""
+        s = self.room(empty={"t1-0", "t1-1", "t1-2", "t1-3"})
+        spot_them(s, {"t1-0": 4, "t1-1": 3, "t1-2": 2, "t1-3": 1})
+        room_mod.seat_students(s, ["first", "second"])
+        assert self.who(s)["t1-3"] == "first"
+        assert self.who(s)["t1-2"] == "second"
+
+    def test_nobody_is_evicted_when_the_room_runs_out(self):
+        s = self.room(empty={"t1-1"})
+        assert room_mod.seat_students(s, ["ann", "bo", "cal"]) == 1
+        assert sorted(self.who(s).values()).count("") == 0
+
+    def test_seating_nobody_is_not_an_error(self):
+        s = self.room()
+        assert room_mod.seat_students(s, []) == 0
+
+    # ----------------------------------------------- clearing them --
+    def test_clearing_stands_everybody_up(self):
+        s = self.room()
+        assert room_mod.clear_seats(s) == 4
+        assert set(self.who(s).values()) == {""}
+
+    def test_clearing_leaves_a_pinned_seat_sitting(self):
+        s = self.room(pinned={"t1-2"})
+        was = self.who(s)["t1-2"]
+        assert room_mod.clear_seats(s) == 3
+        assert self.who(s)["t1-2"] == was
+
+    def test_clearing_an_empty_room_counts_nobody(self):
+        s = self.room(empty={"t1-0", "t1-1", "t1-2", "t1-3"})
+        assert room_mod.clear_seats(s) == 0
+
+    def test_clearing_keeps_the_desks_and_the_groups(self):
+        """It stands people up; it does not undraw the room."""
+        s = self.room()
+        room_mod.clear_seats(s)
+        assert len(s["shapes"][0]["seats"]) == 4
+        assert s["groups"][0]["seats"] == ["t1-0", "t1-1", "t1-2", "t1-3"]
+
+    def test_clearing_keeps_the_letters_on_the_chairs(self):
+        """A version belongs to the chair. Emptying the room and
+        filling it again must not need a re-coloring."""
+        s = self.room()
+        chosen, _ = room_mod.assign_versions(
+            room_mod.seats_of(s), room_mod.group_of(s), "ABCD",
+            rng=random.Random(3))
+        room_mod.apply_versions(s, chosen)
+        before = {x["id"]: x["version"] for x in room_mod.live_seats(s)}
+        room_mod.clear_seats(s)
+        assert {x["id"]: x["version"]
+                for x in room_mod.live_seats(s)} == before
+
+
 class TestTheCanvasBackground:
     """Per section, because two classes can meet in two rooms and the
     projector in one of them is the whole reason to change it.
