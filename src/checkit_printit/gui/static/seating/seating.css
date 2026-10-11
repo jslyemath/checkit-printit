@@ -327,7 +327,10 @@
   border-color: var(--isle-line);
   box-shadow: var(--isle-shadow);
 }
-.savemenu { min-width: 190px; }
+/* No minimum: the drawer is as wide as its widest row. 190px was
+   wider than any of them, so the menu stood off to one side of its
+   own text. */
+.savemenu .actname { white-space: nowrap; }
 .savemenu .deskopt.act:disabled { opacity: .38; cursor: default; }
 .savemenu .deskopt.act:disabled:hover { background: none; }
 
@@ -1059,32 +1062,26 @@
 }
 .shape.rect { border-radius: 14px; }
 .shape.circle { border-radius: 50%; }
-/* A clipped shape cannot carry a border, and an inset shadow is no
-   substitute: a shadow follows the *rectangle*, so clipping it to a
-   hexagon left the ring showing along the flat top and bottom and
-   nowhere else.
-
-   Two clipped layers instead. The element itself is the edge color,
-   and a slightly smaller copy of the same polygon sits on top in the
-   surface color; what shows between them is the outline, and it
-   follows every side because both sides are the same shape. */
-.shape.hex, .shape.trapezoid {
+/* Anything that is not a rectangle or an ellipse is an SVG polygon,
+   built by `polygonInto`. One layer with a real stroke, where the
+   clip-path version needed two -- a clipped box cannot carry a
+   border, so the lower layer was the edge colour showing through --
+   and could not round a corner at all. */
+.shape.hex, .shape.trapezoid, .shape.triangle {
   border: none;
-  background: var(--edge);
+  background: none;
   box-shadow: none;
 }
-.shape.hex::after, .shape.trapezoid::after {
-  content: "";
+.shape.hex svg, .shape.trapezoid svg, .shape.triangle svg {
   position: absolute;
-  inset: 3px;
-  background: var(--surface);
-  clip-path: inherit;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
-.shape.hex, .shape.hex::after {
-  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
-}
-.shape.trapezoid, .shape.trapezoid::after {
-  clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
+.shape.hex polygon, .shape.trapezoid polygon, .shape.triangle polygon {
+  fill: var(--surface);
+  stroke: var(--edge);
 }
 
 /* A person. Two lines so the card is squarish -- a single long line of
@@ -1277,12 +1274,12 @@
 .pen {
   position: absolute;
   z-index: 4;
-  top: 68px;                       /* clear of the top-right island */
   right: 12px;
-  /* Down to just above the corner button, which is the only thing
-     under it: `--edge` off the floor, 44 of button, and 8 of air.
-     The reserve was a flat 86 and stopped a finger's width short. */
-  max-height: calc(100% - 68px - (var(--edge) * 1px) - 38px);
+  /* `top` and `max-height` are written by `placePen`, from the
+     islands it actually sits between. They were constants, and
+     constants cannot know that the strip comes and goes. */
+  top: 68px;
+  max-height: calc(100% - 150px);
   display: flex;
   flex-direction: column;
   align-items: center;      /* not stretch: a card keeps its own width */
@@ -1328,6 +1325,15 @@
 }
 .pen .seatcard .top { font-size: 12px; line-height: 1.15; }
 .pen .seatcard .bottom { font-size: 9px; line-height: 1.15; }
+
+/* The line a seat just snapped to. Shown only while something is
+   being dragged onto it, and in the accent, which everywhere else in
+   here means "this is the state you are in". */
+#seat-guides { position: absolute; inset: 0; pointer-events: none;
+               z-index: 4; }
+.guide { position: absolute; background: var(--isle-key); opacity: .75; }
+.guide.v { top: 0; bottom: 0; width: 1px; }
+.guide.h { left: 0; right: 0; height: 1px; }
 
 /* ------------------------------------------------------------- moving -- */
 

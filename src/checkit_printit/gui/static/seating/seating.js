@@ -289,15 +289,22 @@ const ICON = {
      stroke and no fill, so a small `O` comes out a ring, and five
      rings at this size are mush. A segment of nothing with a round
      cap is a dot of exactly the stroke width. */
-  dice: "R2,2,20,20,4|M6.8 6.8h.6|M16.6 6.8h.6|M11.7 11.7h.6"
-    + "|M6.8 16.6h.6|M16.6 16.6h.6",
+  /* Drawn at 17 of the 24 rather than 20: a square is the heaviest
+     shape there is at a given size, so a die sized like the other
+     glyphs outweighs them. */
+  dice: "R3.5,3.5,17,17,3.6|M7.5 7.5h.6|M15.9 7.5h.6|M11.7 11.7h.6"
+    + "|M7.5 15.9h.6|M15.9 15.9h.6",
   /* A chair with an arrow going in, and one with an arrow coming out.
      The chair is the same object both times and only the arrow turns,
      so the pair reads as one idea with a direction. */
-  seatall: "R12.5,4,7,5.5,1.6|R10.5,10.5,11,2.6,1.3|M12.5 19.5v-6.4"
-    + "|M19.5 19.5v-6.4|M1.8 12h6.4|M5.8 9.6L8.4 12l-2.6 2.4",
-  unseatall: "R12.5,4,7,5.5,1.6|R10.5,10.5,11,2.6,1.3|M12.5 19.5v-6.4"
-    + "|M19.5 19.5v-6.4|M8.4 12H2|M4.6 9.6L2 12l2.6 2.4",
+  /* The chair, with an arrow over its top right corner: into it to
+     seat, out of it to unseat. Diagonal rather than level, so the
+     arrow sits in the corner the chair leaves empty instead of
+     pushing the chair over to make room beside it. */
+  seatall: "R5,8,10,5.5,1.7|R3,14.5,14,2.6,1.3|M5.5 21v-3.9"
+    + "|M14.5 21v-3.9|M21.8 2.2L17 7|M17 4.2V7h2.8",
+  unseatall: "R5,8,10,5.5,1.7|R3,14.5,14,2.6,1.3|M5.5 21v-3.9"
+    + "|M14.5 21v-3.9|M17 7L21.8 2.2|M19 2.2h2.8v2.8",
   groups: "R3,4,18,7,1.5|R3,14,8,6,1.5|R14,14,7,6,1.5",
   upnext: "M20.5 4.5h-17A1.5 1.5 0 0 0 2 6v9a1.5 1.5 0 0 0 1.5 1.5H7v4"
     + "l5-4h8.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5z",
@@ -384,7 +391,8 @@ const MODES = [
       + "one you click by " + GRID + ", shift+arrows by 1." },
   { value: "seats", label: "Seats", icon: "chair",
     why: "Move the seats on a group, add one, take one away — and drag "
-      + "a seat onto another group to move it there." },
+      + "a seat onto another group to move it there. Arrows nudge the "
+      + "one you click by " + GRID + ", shift+arrows by 1." },
   { value: "printing", label: "Printing", icon: "printer",
     why: "What goes on the paper and what order it comes out in: "
       + "which version each seat gets, and the sequence the stack is "
@@ -449,6 +457,49 @@ function cardPosition(shape, seat) {
      is an offset from the shape's centre, and a dragged seat has to be
      able to leave the shape it started on. */
   return [shape.at[0] + seat.at[0], shape.at[1] + seat.at[1]];
+}
+
+/* The shapes that are not a rectangle or an ellipse, as fractions of
+   the box they fill.
+
+   They used to be `clip-path: polygon(...)`, which cannot carry a
+   border -- so each was two clipped layers, the lower one the edge
+   colour showing through as an outline -- and cannot round a corner
+   at all. Drawn as an SVG polygon instead, one layer with a real
+   stroke, and `stroke-linejoin: round` rounds every corner for free.
+   The stroke scales with the room because the canvas is scaled by a
+   transform, exactly as the rectangles' borders do. */
+const POLYGONS = {
+  hex: [[.25, 0], [.75, 0], [1, .5], [.75, 1], [.25, 1], [0, .5]],
+  trapezoid: [[.14, 0], [.86, 0], [1, 1], [0, 1]],
+  triangle: [[.5, 0], [1, 1], [0, 1]],
+};
+
+function polygonInto(box, kind, w, h) {
+  /* `R` is the corner radius in room units, and it is applied by the
+     stroke rather than by the geometry: a round join on a thick
+     stroke is a rounded corner, and it costs no arc maths and no
+     second copy of the outline. */
+  const points = POLYGONS[kind];
+  if (!points) return false;
+  const R = 5;
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+  const poly = document.createElementNS(NS, "polygon");
+  // Inset by half the stroke so the outline sits inside the box, the
+  // way a `border-box` border does on the rectangles.
+  const inset = (v, span) => Math.min(Math.max(v * span, R), span - R);
+  poly.setAttribute("points", points
+    .map(([x, y]) => `${inset(x, w).toFixed(1)},${inset(y, h).toFixed(1)}`)
+    .join(" "));
+  poly.setAttribute("stroke-width", R * 2);
+  poly.setAttribute("stroke-linejoin", "round");
+  svg.appendChild(poly);
+  box.appendChild(svg);
+  return true;
 }
 
 function shapeSize(shape) {
@@ -901,6 +952,7 @@ function renderSeating() {
   drawStrip(section);
   drawHues(section);           // after the strip: it reads the strip's dot
   drawBackgrounds(section);
+  placePen();                  // after the strip too: it measures it
   /* Crosshair only where a drag draws a band. In People, in
      Printing, and under either overlay a drag moves the view, and a
      crosshair there promises a selection that is not on offer. */
@@ -1225,6 +1277,7 @@ function drawRoom(section) {
     canvas.appendChild(wrap);
 
     const box = el("div", "shape " + spec.css);
+    polygonInto(box, spec.css, ...shapeSize(shape));
     wrap.appendChild(box);
     if (isSelected(group, shape)) wrap.classList.add("chosen");
     if (group && banded.includes(group.id)) wrap.classList.add("banded");
@@ -1355,6 +1408,8 @@ function drawRoom(section) {
       } else if (seatingMode === "seats") {
         card.classList.add("movable", "chairable");
         if (seat.id === selectedChair) card.classList.add("picked");
+        card.tabIndex = 0;
+        card.onkeydown = e => nudgeSeat(e, section, shape, seat);
         card.onpointerdown = e => dragChair(e, card, section, shape, seat);
       } else if (seatingMode !== "groups") {
         card.onpointerdown = e => { e.preventDefault(); choose(group, shape); };
@@ -3070,6 +3125,79 @@ function reparentSeat(section, from, to, seat, cx, cy) {
   return host;
 }
 
+//: How near a seat has to come to another seat's line before it
+//: lands on it, in room units. Below about half the grid the snap is
+//: never reachable, because the grid lands first.
+const ALIGN_REACH = 11;
+
+function alignSeat(moving, wx, wy) {
+  /* The x of the nearest seat above or below, and the y of the
+     nearest seat left or right -- the alignment every drawing
+     program offers, which is worth more here than the grid is: a row
+     of desks lines up on each other, not on an abstract lattice.
+
+     Per axis and independent, so a seat can take its neighbour's
+     column while keeping its own row. Returns null for an axis with
+     nothing near, and the caller falls back to the grid there.
+
+     Only seats. Shapes are not included because a desk at an angle
+     has no honest edge to line up with -- its box is the unrotated
+     one -- and a guide that pointed at the wrong edge would be worse
+     than no guide. */
+  let bx = null, by = null;
+  let dx = ALIGN_REACH + 1, dy = ALIGN_REACH + 1;
+  for (const other of drawn.seats) {
+    if (other.id === moving) continue;
+    const ax = Math.abs(other.x - wx);
+    if (ax < dx) { dx = ax; bx = other.x; }
+    const ay = Math.abs(other.y - wy);
+    if (ay < dy) { dy = ay; by = other.y; }
+  }
+  return [dx <= ALIGN_REACH ? bx : null, dy <= ALIGN_REACH ? by : null];
+}
+
+function showGuides(x, y) {
+  /* The line it snapped to, so the snap is something you saw happen
+     rather than something that happened to you. */
+  let layer = document.getElementById("seat-guides");
+  if (!layer) {
+    layer = el("div");
+    layer.id = "seat-guides";
+    seatingCanvas().appendChild(layer);
+  }
+  layer.textContent = "";
+  const ox = drawn.box ? drawn.box.x : 0, oy = drawn.box ? drawn.box.y : 0;
+  if (x !== null) {
+    const v = el("div", "guide v");
+    v.style.left = (x - ox) + "px";
+    layer.appendChild(v);
+  }
+  if (y !== null) {
+    const h = el("div", "guide h");
+    h.style.top = (y - oy) + "px";
+    layer.appendChild(h);
+  }
+}
+
+function hideGuides() {
+  const layer = document.getElementById("seat-guides");
+  if (layer) layer.remove();
+}
+
+function nudgeSeat(event, section, shape, seat) {
+  // The same two steps the furniture takes, for the same reason: a
+  // pointer is bad at the last few units.
+  const step = event.shiftKey ? 1 : GRID;
+  const by = { ArrowLeft: [-step, 0], ArrowRight: [step, 0],
+               ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
+  if (!by) return;
+  event.preventDefault();
+  seat.at = [seat.at[0] + by[0], seat.at[1] + by[1]];
+  renderSeating();
+  const again = drawn.cards[seat.id];
+  if (again) again.focus();
+}
+
 function dragChair(event, card, section, shape, seat) {
   /* Where a seat sits on its group. The anchor is an offset from the
      shape's centre, so this writes `seat.at` and the desk can still be
@@ -3105,8 +3233,16 @@ function dragChair(event, card, section, shape, seat) {
        lands on the same grid the desks do however far its own desk
        happens to sit off it. */
     const snap = v => Math.round(v / GRID) * GRID;
-    const wx = snap(shape.at[0] + home[0] + (e.clientX - start[0]) / scale);
-    const wy = snap(shape.at[1] + home[1] + (e.clientY - start[1]) / scale);
+    const rawx = shape.at[0] + home[0] + (e.clientX - start[0]) / scale;
+    const rawy = shape.at[1] + home[1] + (e.clientY - start[1]) / scale;
+    /* A neighbour's line first, the grid second. Alignment wins
+       because it is the thing that was aimed at: the grid is always
+       within half a cell, so checking it first would mean the snap
+       to a neighbour never fired. */
+    const [ax, ay] = alignSeat(seat.id, rawx, rawy);
+    const wx = ax !== null ? ax : snap(rawx);
+    const wy = ay !== null ? ay : snap(rawy);
+    showGuides(ax, ay);
     seat.at = [wx - shape.at[0], wy - shape.at[1]];
     card.style.left = (wx - CARD_W / 2 - ox) + "px";
     card.style.top = (wy - CARD_H / 2 - oy) + "px";
@@ -3121,6 +3257,7 @@ function dragChair(event, card, section, shape, seat) {
   const finish = commit => {
     card.onpointermove = card.onpointerup = card.onpointercancel = null;
     for (const w of Object.values(drawn.shapes)) w.classList.remove("adopting");
+    hideGuides();          // the lines belong to the drag, not the room
     if (!commit) seat.at = home;
     if (!moved || !commit) { renderSeating(); return; }
 
@@ -3504,6 +3641,62 @@ function standingIn(section) {
                  && (!known || seatingState.sections[k] === name))
     .sort((a, b) => seatingState.names[a].full
                       .localeCompare(seatingState.names[b].full));
+}
+
+//: What every island leaves between itself and the next one. The
+//: strip and the mode rail sit this far apart, so the unseated rail
+//: uses it too rather than a second number that looks about right.
+const ISLE_GAP = 8;
+
+function placePen() {
+  /* Where the unseated rail starts and stops, measured.
+
+     Both ends were constants: 68 from the top and a reserve at the
+     bottom. Which meant the top gap was 7 where every other gap in
+     the window is 8, and the bottom landed 3px above the strip when
+     the mode rail was furled -- the resting state, and the one it is
+     compared against.
+
+     **The bottom follows the strip only while the mode rail is
+     furled.** Unfurling the rail lifts the strip by about 110px, and
+     a persistent list that lost a third of its height every time a
+     transient flyout opened -- scrolling whatever was in view out of
+     it -- would be worse than the misalignment this fixes. So the
+     resting state is the one that lines up, and an open flyout
+     leaves the rail where it was.
+  */
+  const pen = seatingPen();
+  if (!pen || pen.hidden) return;
+  const app = document.getElementById("view-seating");
+  if (!app) return;
+  const base = app.getBoundingClientRect();
+  const box = sel => {
+    const node = document.querySelector(sel);
+    if (!node || (!node.offsetWidth && !node.offsetHeight)) return null;
+    return node.getBoundingClientRect();
+  };
+
+  /* Fractional, not rounded. The pane runs at a device pixel ratio
+     of 1.5, so rounding each edge to a whole pixel first put both
+     gaps one out -- 9 where every other gap is 8. */
+  const above = box(".at-tr");
+  const top = above ? (above.bottom - base.top) + ISLE_GAP : 68;
+
+  /* The strip's bottom edge when it is there and the mode rail is
+     down; otherwise clear of the corner button, which is the only
+     other thing on this edge. */
+  const corner = box("#seat-plus");
+  const strip = box("#seat-strip");
+  const rail = document.getElementById("seat-modes");
+  const furled = !rail || !rail.classList.contains("open");
+  let bottom = corner
+    ? (corner.top - base.top) - ISLE_GAP
+    : base.height - 64;
+  if (strip && furled)
+    bottom = Math.min(bottom, strip.bottom - base.top);
+
+  pen.style.top = top.toFixed(2) + "px";
+  pen.style.maxHeight = Math.max(80, bottom - top).toFixed(2) + "px";
 }
 
 function drawPen(section) {
@@ -4138,7 +4331,10 @@ function drawPalette(section) {
     if (!spec) continue;
     const b = el("button", "deskopt");
     b.type = "button";
-    b.title = "Add a " + spec.label;
+    // "an oval table", not "a oval table". Every label here starts
+    // with a plain consonant or vowel, so the letter is enough.
+    b.title = "Add a" + (/^[aeiou]/i.test(spec.label) ? "n " : " ")
+      + spec.label;
     const tile = el("span", "desktile " + spec.css);
     const k = 26 / Math.max(spec.w, spec.h);
     tile.style.width = Math.max(11, Math.round(spec.w * k)) + "px";
@@ -4487,8 +4683,16 @@ function dragShape(event, section, shape) {
   const spec = seatingState.shapes[shape.kind];
   if (!spec) return;
 
+  /* The wrap is what gets moved; the silhouette inside it is what
+     takes the keyboard.
+
+     `preventDefault` above cancels the browser's own focus-on-click,
+     and this used to call `focus()` on the wrap -- which carries no
+     `tabindex`, so the call did nothing and the arrow keys never
+     reached the handler. They are advertised in the mode's own
+     description and have never once worked. */
   const box = drawn.shapes[shape.id];       // the wrap, not the silhouette
-  box.focus();
+  (box.querySelector(".shape") || box).focus();
   const [sw, sh] = shapeSize(shape);
   const scale = canvasScale();
   const start = [event.clientX, event.clientY];
@@ -4606,8 +4810,10 @@ function nudgeShape(event, section, shape) {
   shape.at = event.shiftKey
     ? to : clampShape(section, { w: w, h: h }, to[0], to[1]);
   renderSeating();
+  // The render replaced the element, so the focus has to be put back
+  // on the new one or the second arrow press goes nowhere.
   const again = drawn.shapes[shape.id];
-  if (again) again.focus();
+  if (again) (again.querySelector(".shape") || again).focus();
 }
 
 // ------------------------------------------------------------------ zoom --
@@ -5184,17 +5390,22 @@ function drawSaveMenu() {
   };
 
   item("Save " + name(here),
-       "Write this room. The other rooms keep what is on disk.",
+       "The other rooms keep what is on disk.",
        sectionDirty(here) ? () => saveSeating(here) : null, "save");
   if (sections.length > 1)
     item(dirty.length > 1 ? `Save all ${dirty.length} rooms` : "Save all",
-         "Write every room that has changed.",
+         "Every room that has changed.",
          dirty.length ? () => saveSeating() : null, "saveall");
-  item("Discard " + name(here),
-       "Put this room back the way it is on disk.",
+  /* "Revert", not "Discard".
+     "Discard 820" reads as getting rid of the section -- the object
+     named is the thing discarded. Reverting a thing is returning it
+     to an earlier state, so the same two words now say what happens
+     without having to add "changes" to say what does not. */
+  item("Revert " + name(here),
+       "Back to what is on disk.",
        sectionDirty(here) ? () => discardSection(here) : null, "revert");
   if (sections.length > 1 && dirty.length > 1)
-    item("Discard all", "Put every room back the way it is on disk.",
+    item("Revert all", "Every room back to what is on disk.",
          () => discardRoom(), "revertall");
 
 }

@@ -97,6 +97,12 @@ SHAPES = {
         "label": "trapezoid", "w": 360, "h": 120, "css": "trapezoid",
         "seats": [(-110, 24), (0, 24), (110, 24)],
     },
+    # One seat, below the apex where the table is widest. A corner
+    # desk, a lectern, the one chair wedged into a diagonal wall.
+    "triangle": {
+        "label": "triangle", "w": 170, "h": 140, "css": "triangle",
+        "seats": [(0, 22)],
+    },
 }
 
 
