@@ -364,23 +364,39 @@ built rather than alphabetically, because several are part-done:
 | 8d | **Print job** | done -- modes, variants, extras, per-student override and version, preview, build |
 | 8e | the response pull | done -- it is Print job's first card, not a tab |
 | 8e | **Record** | **not started.** The only view still entirely untouched |
-| 8f | **Seating** | its own module under `gui/static/seating/` — ~4,800 lines of JS and ~1,400 of CSS, the largest thing in the app. Four modes in the rail (**People, Groups, Seats, Printing**) and two overlays that cross them (**Up Next**, **projector**). A room can be built from nothing. See the table below, and `../checkit/PRINT_TOOL_DESIGN.md` 12.11–12.13 |
+| 8f | **Seating** | its own module under `gui/static/seating/` — ~5,900 lines of JS and ~1,600 of CSS, by far the largest thing in the app. Four modes in the rail (**People, Groups, Seats, Printing**) and two overlays that cross them (**Up Next**, **projector**). A room can be built from nothing. See the table below, and `../checkit/PRINT_TOOL_DESIGN.md` 12.11–12.17 |
 | 8g | ~~Cold call~~ | **folded into Seating as the Up Next mode**, and renamed: the students see it. No tab of its own. See `../checkit/PRINT_TOOL_DESIGN.md` 12.12 |
 | 8h | **Setup** | half done -- a form can be created or attached from the app. The boilerplate editor is still to come |
 
 **Inside Seating.** The modes, and what a click means in each:
 
-| mode | a click | a drag on bare paper |
-|---|---|---|
-| **People** | pick a name, click a chair to seat them; the pin in a card's corner holds somebody in place | pans |
-| **Groups** | select furniture; grips resize, the spinner turns | bands a selection of groups |
-| **Seats** | select a seat; drag to move or reparent it | bands a selection of seats |
-| **Printing** | select a seat; numbers and version circles are editable where they sit | pans |
+| mode | a click | a drag on bare paper | the corner button |
+|---|---|---|---|
+| **People** | pick a name, click a chair to seat them; the pin in a card's corner holds somebody in place | pans | ⋯ seat all, shuffle, unseat all, unpin all, add person |
+| **Groups** | select furniture; grips resize, the spinner turns | bands a selection of groups | **+** the shape picker; drag a shape out, or click to drop it in the middle |
+| **Seats** | select a seat; drag to move or reparent it | bands a selection of seats | **+** add a seat to this desk |
+| **Printing** | select a seat; numbers and version circles are editable where they sit | pans | ⋯ what Printing can do to the room |
 
-Space held, the middle button, or two fingers always pan; two fingers
-spreading zoom. `Up Next` and projector mode are switches in the
-top-right island, not modes -- they cross whatever mode is underneath
-and restore it on the way out.
+**The corner button is two controls in one place.** A `+`, accent
+filled, where the mode has one primary action -- adding a thing. A
+quiet `⋯` where it has a short list instead. That is Material's rule:
+a floating button carries one action and overflow belongs in a menu.
+
+**Ctrl-click** (cmd on a Mac) adds to the same selection a dragged
+rectangle makes, in Groups and in Seats.
+
+**Space held, the middle button, or two fingers pan**; two fingers
+spreading, or the wheel, zoom -- the wheel about the pointer. Space is
+taken only while the pointer is over the paper, so a keyboard user
+keeps it for pressing the focused button; while it is held, the focus
+is dropped, because a button fires on the space *keyup* and panning
+would otherwise press whatever was last clicked.
+
+`Up Next` and projector mode are switches in the top-right island, not
+modes -- they cross whatever mode is underneath and restore it on the
+way out. **While either is on, nothing drawn on the canvas is a
+control**: `showing()` is the one predicate, and it takes out every
+drag, handle and pin at once.
 
 **Model fields this view owns** (all optional, all validated in
 `room.check`, all absent in a room nobody has touched):
@@ -397,6 +413,20 @@ and restore it on the way out.
 | `section.print_by` | `"group"` or `"seat"` |
 | `section.canvas.background` | one of `grey`, `white`, `warm`, `cool`. **Not** "paper", which here is the sheet in the printer |
 | `shape.w`, `shape.h`, `shape.angle` | a desk resized or turned |
+
+A group spans **whatever desks its seats sit on**, which is all
+"merging" two groups is: `room.merge_groups` folds the seat lists,
+`room.split_group` regroups by desk, and nothing moves either way. A
+merged group travels whole on a drag and turns about its common
+middle. Seat letters needed no case for it -- a letter is derived from
+its *group*, so a merged group sweeps the whole arrangement as one
+ring.
+
+**The canvas has no edges.** Coordinates may be negative; nothing in
+the model minds, and fitting and centring measure the content's own
+box. `section.canvas` is a record of how far the room reaches from the
+origin, not a fence. Fit, not a wall, is what makes a runaway drag
+recoverable.
 
 A **seat letter** is *not* stored: it is derived clockwise from the top
 left of its group every time the room is drawn, so "recalculate when a
@@ -423,6 +453,15 @@ each other and consecutive entries in the *stack* are not.
 those go in the tooltip, which is a fragment and not a sentence
 either. See `../checkit/PRINT_TOOL_DESIGN.md` 12.16, which exists
 because this was asked for three times.
+
+**Nothing on the canvas may wear the accent.** `--isle-key` means
+"the state you are in" on an island; on the paper it lands beside
+whatever colours the groups happen to be. Everything the canvas marks
+-- a band, a reparent target, a trade target, the paper under a
+dragged shape -- uses `--mark`, one grey. The exception is a *single*
+selected group, whose ring is that group's own colour, because that is
+what says which group you have hold of. One ring geometry for all of
+them: `--pick-out` and `--pick-line` on `.deskwrap`.
 
 **`seats_of` is a view, not the seats.** It builds a fresh dict per
 seat carrying id, shape, student, version and absolute position, so it
