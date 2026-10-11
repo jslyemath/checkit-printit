@@ -641,7 +641,7 @@
   justify-content: center;
 }
 .pen.waiting::after {
-  content: "Stand them up";
+  content: "Unseat";
   font-size: 11px; line-height: 1.3; color: var(--isle-dim);
   padding: 0 6px; text-align: center;
 }
@@ -812,6 +812,8 @@
 .deskopt.act.setting svg { stroke: var(--isle-ink); }
 .actrule { height: 1px; margin: 4px 2px; background: var(--isle-line); }
 
+/* A row whose glyph is a solid object rather than line art. */
+.deskopt.solidicon svg { fill: currentColor; stroke: none; }
 .deskopt.act svg { width: 17px; height: 17px; flex: 0 0 auto;
                    fill: none; stroke: var(--isle-dim); stroke-width: 1.7;
                    stroke-linecap: round; stroke-linejoin: round; }
@@ -1277,7 +1279,10 @@
   z-index: 4;
   top: 68px;                       /* clear of the top-right island */
   right: 12px;
-  max-height: calc(100% - 68px - 86px);
+  /* Down to just above the corner button, which is the only thing
+     under it: `--edge` off the floor, 44 of button, and 8 of air.
+     The reserve was a flat 86 and stopped a finger's width short. */
+  max-height: calc(100% - 68px - (var(--edge) * 1px) - 38px);
   display: flex;
   flex-direction: column;
   align-items: center;      /* not stretch: a card keeps its own width */
