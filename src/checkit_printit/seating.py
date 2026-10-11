@@ -30,6 +30,12 @@ class Seat:
     group: int
     version: str
     pinned: bool = False
+    # Which chair at its own table, counting as the file lists them.
+    # Kept because the seats are handed back in *stack* order, and once
+    # a print order can cross tables those are two different lists --
+    # so "who is sitting next to me" has to be remembered rather than
+    # read off the position in the one that came back.
+    at_table: int = 0
 
 
 def alternate(count, versions):
@@ -55,6 +61,28 @@ def load(path, versions=("A", "B")):
 
     A seat may pin its version. Everything else alternates around the pins,
     which is what lets a deliberate choice survive a re-run.
+
+    **A `[[group]]` is a table, not a pile of paper.** Its list is who
+    sits beside whom, which is the only thing here that knows it; the
+    order the papers come out is each seat's `at`, and the two part
+    company the moment an instructor hands out on a walk round the room
+    instead of a stack per table:
+
+    ```toml
+    [[group]]
+    seats = [{name = "Ada Lovelace", version = "A", at = 1},
+             {name = "Alan Turing", version = "B", at = 3}]
+
+    [[group]]
+    seats = [{name = "Grace Hopper", version = "A", at = 2},
+             {name = "Katherine Johnson", version = "B", at = 4}]
+    ```
+
+    Ada still sits with Alan; the stack still alternates tables. Where
+    no seat carries an `at` -- every hand-written chart, and every
+    written one nobody has reordered -- the stack is the order the file
+    reads in, exactly as it was before the key existed. A seat without
+    one, in a chart where others have them, prints last.
     """
     with open(path, "rb") as f:
         raw = tomllib.load(f)
@@ -91,7 +119,7 @@ def load(path, versions=("A", "B")):
                 f"paper. Name a second version."
             )
 
-    seats = []
+    found = []                     # (its place in the stack, the seat)
     for g, group in enumerate(groups, 1):
         entries = group.get("seats") or []
         assigned = alternate(len(entries), versions)
@@ -99,8 +127,9 @@ def load(path, versions=("A", "B")):
             if isinstance(entry, dict):
                 name = (entry.get("name") or "").strip()
                 pinned_version = entry.get("version")
+                at = entry.get("at")
             else:
-                name, pinned_version = str(entry).strip(), None
+                name, pinned_version, at = str(entry).strip(), None, None
             if not name:
                 continue
             if pinned_version is not None and pinned_version not in versions:
@@ -108,13 +137,32 @@ def load(path, versions=("A", "B")):
                     f"{path}: seat {name!r} is pinned to version "
                     f"{pinned_version!r}, which is not in {list(versions)}."
                 )
-            seats.append(Seat(
+            # Refused rather than ignored. A typo in the one key that
+            # decides what order a class is handed its papers in should
+            # stop the build, not quietly send the seat to the back.
+            if at is not None and (not isinstance(at, int)
+                                   or isinstance(at, bool) or at < 1):
+                raise SeatingError(
+                    f"{path}: seat {name!r} is at {at!r} in the stack, "
+                    f"which is not a position. Count from 1."
+                )
+            found.append((at, Seat(
                 name=name,
                 group=g,
                 version=pinned_version or assigned[i],
                 pinned=pinned_version is not None,
-            ))
-    return Chart(seats, versions)
+                at_table=i,
+            )))
+
+    # The seats come back in stack order, because that is what every
+    # caller wants: `Chart.order` turns it into the pile that comes off
+    # the printer. Sorting is skipped entirely where no seat claims a
+    # place, so a chart written before this key existed is not merely
+    # handled but untouched. Stable, and unnumbered seats last -- the
+    # rule an unplaced group and an unspotted seat already follow.
+    if any(at is not None for at, _ in found):
+        found.sort(key=lambda pair: (pair[0] is None, pair[0] or 0))
+    return Chart([seat for _, seat in found], versions)
 
 
 def blank_seat(text, name):
@@ -177,6 +225,31 @@ class Chart:
                 return seat.version
         return None
 
+    def neighbours(self):
+        """Pairs of seats that sit next to each other at a table.
+
+        Beside each other at the same table, in the order that table
+        listed them -- *not* next to each other in the stack. Those were
+        one list until a print order could cross tables; now a walk
+        round the room interleaves them, and "the next entry along"
+        would be somebody at another table half the time, which this
+        would read as nobody having a neighbour at all.
+
+        A table is read as a line and not a ring, so the first and last
+        seats are not compared. That is the existing reading and it is
+        deliberate: a chart knows who is listed beside whom and not the
+        geometry, and inventing the wrap would invent an adjacency for
+        every row of desks as well.
+        """
+        tables = {}
+        for seat in self.seats:
+            tables.setdefault(seat.group, []).append(seat)
+        pairs = []
+        for group in sorted(tables):
+            run = sorted(tables[group], key=lambda s: s.at_table)
+            pairs.extend(zip(run, run[1:]))
+        return pairs
+
     def collisions(self):
         """Adjacent seats in the same group sharing a version.
 
@@ -189,11 +262,8 @@ class Chart:
         build must ask `assemble.printed_collisions` instead; this one
         would answer for a room that is not the one being printed.
         """
-        found = []
-        for a, b in zip(self.seats, self.seats[1:]):
-            if a.group == b.group and a.version == b.version:
-                found.append((a, b))
-        return found
+        return [(a, b) for a, b in self.neighbours()
+                if a.version == b.version]
 
     def order(self, roster):
         """The roster, in seating order.
@@ -293,8 +363,12 @@ def to_toml(room, name_of, written_by="the seating chart tab"):
     the letters are written down rather than recomputed. `alternate`
     remains for a chart this tool did not write.
 
-    Groups come out in print order, sections in theirs, so the stack comes
-    off the printer in the order it is handed out.
+    Sections come out in their order, and groups in theirs, so a stack
+    handed out table by table comes off the printer already sorted. A
+    stack that crosses tables cannot be written as an order of tables,
+    so each seat carries its place in it as `at` -- and only then: a
+    room whose printing nobody has reordered produces exactly the file
+    it always did.
     """
     from . import room as room_mod
 
@@ -317,29 +391,77 @@ def to_toml(room, name_of, written_by="the seating chart tab"):
         key=lambda s: (s.get("order") is None, s.get("order") or 0,
                        s.get("name") or ""))
 
+    # Every section worked out before anything is written, because the
+    # numbering is **one sequence for the whole file**. A chart is a
+    # flat list of tables: it has no sections in it at all, only a
+    # comment saying where one begins. A counter that restarted per
+    # section would put 830's first seat level with 820's, and the two
+    # would come off the printer shuffled into each other.
+    #
+    # Found by writing the real two-section room. Every test had one.
+    laid = []
     for section in sections:
-        lines.append(f"# ---- section {section.get('name', '')}")
-        lines.append("")
         where = {s["id"]: s for s in room_mod.seats_of(section)}
-        for group in room_mod.ordered_groups(section):
+        plan = room_mod.ordered_groups(section)
+        reading = [sid for g in plan for sid in (g.get("seats") or [])]
+        who = {sid: name_of((where.get(sid) or {}).get("student") or "")
+               for sid in reading}
+        laid.append((section, where, plan, reading, who,
+                     room_mod.stack_order(section)))
+
+    # Numbered at all only where some section's stack is not already
+    # the order it reads in -- handing out table by table with nothing
+    # reordered, those are the same list, and an untouched room writes
+    # the file it always did. One section needing numbers means every
+    # section gets them: a seat without one prints last, so a section
+    # left bare would be dragged to the end of the stack.
+    #
+    # Only a seat that prints gets one. An empty chair is written as
+    # `""`, which has nowhere to put it, and its place in the stack is
+    # nobody's paper.
+    numbered = {}
+    if any(stack != reading for _, _, _, reading, _, stack in laid):
+        numbered = {sid: n for n, sid in enumerate(
+            (sid for _, _, _, _, who, stack in laid
+             for sid in stack if who.get(sid)), 1)}
+
+    body = []
+    for section, where, plan, _, who, _ in laid:
+        body.append(f"# ---- section {section.get('name', '')}")
+        body.append("")
+        for group in plan:
             label = group.get("label") or ""
             if label:
-                lines.append(f"# {label}")
+                body.append(f"# {label}")
             entries = []
             for seat_id in group.get("seats") or []:
                 seat = where.get(seat_id)
                 if seat is None:
                     continue
-                name = name_of(seat.get("student") or "")
+                name = who.get(seat_id) or ""
                 if not name:
                     entries.append('""')          # an empty chair
                     continue
                 version = seat.get("version") or ""
+                at = numbered.get(seat_id)
                 entries.append(
                     "{name = " + _quote(name)
                     + (", version = " + _quote(version) if version else "")
+                    + (f", at = {at}" if at else "")
                     + "}")
-            lines.append("[[group]]")
-            lines.append("seats = [" + ", ".join(entries) + "]")
-            lines.append("")
-    return "\n".join(lines)
+            body.append("[[group]]")
+            body.append("seats = [" + ", ".join(entries) + "]")
+            body.append("")
+
+    # Said here rather than in the header above, because it is only
+    # true of a room that was actually reordered and a standing note
+    # about a key the file does not contain is worse than no note.
+    if numbered:
+        lines += [
+            "# A seat's `at` is its place in the stack. The tables below say",
+            "# who sits beside whom; `at` says what order the papers come",
+            "# out, which stopped being the same list when the printing was",
+            "# reordered to cross the tables.",
+            "",
+        ]
+    return "\n".join(lines + body)

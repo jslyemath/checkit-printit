@@ -54,23 +54,38 @@ def versions_at(section, chosen):
     return [chosen[s["id"]] for s in room_mod.seats_of(section)]
 
 
+def spot_them(section, spots):
+    """Set `spot` on the named seats, as the canvas does."""
+    for shape in section["shapes"]:
+        for seat in shape["seats"]:
+            if seat["id"] in spots:
+                seat["spot"] = spots[seat["id"]]
+
+
+def order_them(section, orders):
+    """Set `order` -- a seat's place across the whole room."""
+    for shape in section["shapes"]:
+        for seat in shape["seats"]:
+            if seat["id"] in orders:
+                seat["order"] = orders[seat["id"]]
+
+
 class TestTheStackComesOutInOrder:
-    def test_a_seats_spot_decides_where_it_prints_in_its_group(self):
-        """`group.order` puts the tables in order; `spot` puts the seats
-        in order inside one. Both have to reach `ordered_groups`, because
-        that is the only thing the chart writer asks."""
+    def test_a_room_nobody_reordered_prints_as_it_was_built(self):
         s = section_with(table("t1", (0, 0), 4),
                          groups=[group("g1", "t1", 4)])
-        plain = room_mod.ordered_groups(s)[0]["seats"]
-        assert plain == ["t1-0", "t1-1", "t1-2", "t1-3"]
+        assert room_mod.stack_order(s) == ["t1-0", "t1-1", "t1-2", "t1-3"]
 
+    def test_a_seats_spot_decides_where_it_prints_in_its_group(self):
+        """`group.order` puts the tables in order; `spot` puts the seats
+        in order inside one. Both have to reach `stack_order`, because
+        that is what the chart writer asks for the stack."""
+        s = section_with(table("t1", (0, 0), 4),
+                         groups=[group("g1", "t1", 4)])
         # The canvas always renumbers a whole group, so this is the
         # shape the file really takes: every seat spotted.
-        spots = {"t1-0": 4, "t1-1": 3, "t1-2": 2, "t1-3": 1}
-        for shape in s["shapes"]:
-            for seat in shape["seats"]:
-                seat["spot"] = spots[seat["id"]]
-        assert room_mod.ordered_groups(s)[0]["seats"] == \
+        spot_them(s, {"t1-0": 4, "t1-1": 3, "t1-2": 2, "t1-3": 1})
+        assert room_mod.stack_order(s) == \
             ["t1-3", "t1-2", "t1-1", "t1-0"]
 
     def test_a_half_spotted_group_prints_the_spotted_ones_first(self):
@@ -82,10 +97,19 @@ class TestTheStackComesOutInOrder:
         they were listed in."""
         s = section_with(table("t1", (0, 0), 4),
                          groups=[group("g1", "t1", 4)])
-        by_id = {x["id"]: x for sh in s["shapes"] for x in sh["seats"]}
-        by_id["t1-2"]["spot"] = 1
-        out = room_mod.ordered_groups(s)[0]["seats"]
-        assert out == ["t1-2", "t1-0", "t1-1", "t1-3"]
+        spot_them(s, {"t1-2": 1})
+        assert room_mod.stack_order(s) == ["t1-2", "t1-0", "t1-1", "t1-3"]
+
+    def test_a_groups_seat_list_is_never_reordered_for_printing(self):
+        """The list is who sits beside whom, and that is the only record
+        of it. Sorting it by `spot` -- which `ordered_groups` used to do
+        -- made the chart claim two people sitting diagonally across a
+        table were side by side, and the collision check believed it."""
+        s = section_with(table("t1", (0, 0), 4),
+                         groups=[group("g1", "t1", 4)])
+        spot_them(s, {"t1-0": 4, "t1-1": 3, "t1-2": 2, "t1-3": 1})
+        assert room_mod.ordered_groups(s)[0]["seats"] == \
+            ["t1-0", "t1-1", "t1-2", "t1-3"]
 
     def test_ordering_a_group_does_not_touch_the_room(self):
         """`ordered_groups` hands back a view for the writer to read.
@@ -93,11 +117,48 @@ class TestTheStackComesOutInOrder:
         document every time anybody asked what order it was in."""
         s = section_with(table("t1", (0, 0), 4),
                          groups=[group("g1", "t1", 4)])
-        by_id = {x["id"]: x for sh in s["shapes"] for x in sh["seats"]}
-        by_id["t1-3"]["spot"] = 1
+        spot_them(s, {"t1-3": 1})
         before = list(s["groups"][0]["seats"])
         room_mod.ordered_groups(s)
         assert s["groups"][0]["seats"] == before
+
+    def test_by_seat_crosses_the_tables(self):
+        """The thing by-group ordering cannot express: one walk round
+        the room, taking a paper from each table in turn."""
+        s = section_with(table("t1", (0, 0), 2), table("t2", (0, 200), 2),
+                         groups=[group("g1", "t1", 2, order=1),
+                                 group("g2", "t2", 2, order=2)])
+        assert room_mod.stack_order(s) == ["t1-0", "t1-1", "t2-0", "t2-1"]
+
+        s["print_by"] = "seat"
+        order_them(s, {"t1-0": 1, "t2-0": 2, "t1-1": 3, "t2-1": 4})
+        assert room_mod.stack_order(s) == ["t1-0", "t2-0", "t1-1", "t2-1"]
+
+    def test_by_seat_starts_from_the_by_group_answer(self):
+        """Switching the plan with nothing yet dragged must not scramble
+        the room: an unnumbered seat keeps the place the by-group stack
+        gave it, so the two plans agree until somebody moves a seat."""
+        s = section_with(table("t1", (0, 0), 2), table("t2", (0, 200), 2),
+                         groups=[group("g1", "t1", 2, order=2),
+                                 group("g2", "t2", 2, order=1)])
+        by_group = room_mod.stack_order(s)
+        s["print_by"] = "seat"
+        assert room_mod.stack_order(s) == by_group
+
+        # And one seat moved to the front leaves the rest as they were.
+        order_them(s, {"t1-1": 1})
+        assert room_mod.stack_order(s) == \
+            ["t1-1"] + [x for x in by_group if x != "t1-1"]
+
+    def test_by_seat_ignores_spot_free_of_its_group(self):
+        """`order` is across the room, so it outranks `spot`, which is
+        only a place inside one group."""
+        s = section_with(table("t1", (0, 0), 3),
+                         groups=[group("g1", "t1", 3)])
+        s["print_by"] = "seat"
+        spot_them(s, {"t1-0": 3, "t1-1": 2, "t1-2": 1})
+        order_them(s, {"t1-0": 1, "t1-1": 2, "t1-2": 3})
+        assert room_mod.stack_order(s) == ["t1-0", "t1-1", "t1-2"]
 
 
 class TestATableGetsDifferentPapers:
@@ -342,6 +403,408 @@ class TestTheChartItProduces:
         path.write_text(seating_mod.to_toml(r, self.names), encoding="utf-8")
         assert seating_mod.load(str(path),
                                 versions=r["versions"]).collisions() == []
+
+    def test_an_untouched_room_writes_no_stack_numbers(self, tmp_path):
+        """The reason the order is derived and not stored: a room nobody
+        has reordered produces the file it always did, byte for byte."""
+        s = section_with(table("t1", (0, 0), 2), table("t2", (0, 300), 2),
+                         groups=[group("g1", "t1", 2, order=1),
+                                 group("g2", "t2", 2, order=2)])
+        r, _ = self.room_of(s)
+        assert "at =" not in seating_mod.to_toml(r, self.names)
+
+    def test_a_stack_that_crosses_tables_reaches_the_file(self, tmp_path):
+        """The gap this closes. By seat, the stack takes one paper from
+        each table in turn, and no ordering of `[[group]]` tables can
+        say that -- so each seat carries its own place in it."""
+        s = section_with(table("t1", (0, 0), 2), table("t2", (0, 300), 2),
+                         groups=[group("g1", "t1", 2, order=1),
+                                 group("g2", "t2", 2, order=2)])
+        s["print_by"] = "seat"
+        order_them(s, {"t1-0": 1, "t2-0": 2, "t1-1": 3, "t2-1": 4})
+        r, _ = self.room_of(s)
+        path = tmp_path / "s.toml"
+        path.write_text(seating_mod.to_toml(r, self.names), encoding="utf-8")
+
+        chart = seating_mod.load(str(path), versions=r["versions"])
+        assert [seat.name for seat in chart] == [
+            "Student idt10", "Student idt20",
+            "Student idt11", "Student idt21"]
+
+    def test_the_tables_are_still_tables_in_a_crossing_stack(self, tmp_path):
+        """Same file as above, read the other way: the stack interleaves
+        the tables and the `[[group]]` blocks do not, so each seat still
+        knows which table it is at and who is beside it."""
+        s = section_with(table("t1", (0, 0), 2), table("t2", (0, 300), 2),
+                         groups=[group("g1", "t1", 2, order=1),
+                                 group("g2", "t2", 2, order=2)])
+        s["print_by"] = "seat"
+        order_them(s, {"t1-0": 1, "t2-0": 2, "t1-1": 3, "t2-1": 4})
+        r, _ = self.room_of(s)
+        path = tmp_path / "s.toml"
+        path.write_text(seating_mod.to_toml(r, self.names), encoding="utf-8")
+
+        chart = seating_mod.load(str(path), versions=r["versions"])
+        beside = {frozenset((a.name, b.name)) for a, b in chart.neighbours()}
+        assert beside == {
+            frozenset(("Student idt10", "Student idt11")),
+            frozenset(("Student idt20", "Student idt21")),
+        }
+
+    def test_reordering_within_a_group_leaves_the_table_alone(self, tmp_path):
+        """A by-group stack can also need numbers -- the instructor can
+        reorder a table's own run -- and the table's list must not be
+        the thing that carries it."""
+        s = section_with(table("t1", (0, 0), 4), groups=[group("g1", "t1", 4)])
+        spot_them(s, {"t1-0": 4, "t1-1": 3, "t1-2": 2, "t1-3": 1})
+        r, _ = self.room_of(s)
+        text = seating_mod.to_toml(r, self.names)
+        assert "at = 1" in text
+        # Listed as they sit, which here is the order the ids were made.
+        assert text.index("Student idt10") < text.index("Student idt13")
+        path = tmp_path / "s.toml"
+        path.write_text(text, encoding="utf-8")
+        chart = seating_mod.load(str(path), versions=r["versions"])
+        assert [seat.name for seat in chart][0] == "Student idt13"
+
+    def test_an_empty_chair_carries_no_number(self, tmp_path):
+        """`""` has nowhere to put one, and its place in the stack is
+        nobody's paper. The numbers on the rest must still sort."""
+        s = section_with(table("t1", (0, 0), 3), groups=[group("g1", "t1", 3)])
+        s["shapes"][0]["seats"][0]["student"] = ""
+        s["print_by"] = "seat"
+        order_them(s, {"t1-2": 1, "t1-1": 2, "t1-0": 3})
+        r, _ = self.room_of(s)
+        text = seating_mod.to_toml(r, self.names)
+        assert '""' in text and '"", at' not in text
+        path = tmp_path / "s.toml"
+        path.write_text(text, encoding="utf-8")
+        chart = seating_mod.load(str(path), versions=r["versions"])
+        assert [seat.name for seat in chart] == \
+            ["Student idt12", "Student idt11"]
+
+
+class TestTheSweepMatchesTheCanvas:
+    """`room.seat_sweep` is a second copy of `slotsOf` in `seating.js`,
+    because the canvas needs the answer on every redraw and the chart
+    writer needs it with no canvas at all. These are what hold the two
+    together: every shape in the palette, by the letters the canvas is
+    known to draw on it.
+
+    If one copy is changed, these fail, and that is the point.
+    """
+
+    def letters(self, kind):
+        """The palette's own geometry, lettered."""
+        shape = room_mod.make_shape(kind, (0, 0), "s")
+        where = room_mod.seat_points({"shapes": [shape]})
+        ids = [seat["id"] for seat in shape["seats"]]
+        got = room_mod.seat_letters(ids, where)
+        return "".join(got[sid] for sid in ids)
+
+    def test_a_row_runs_left_to_right(self):
+        assert self.letters("table-1x3") == "ABC"
+        assert self.letters("table-1x2") == "AB"
+        assert self.letters("trapezoid") == "ABC"
+
+    def test_a_single_desk_is_its_own_a(self):
+        assert self.letters("desk") == "A"
+
+    def test_a_two_by_two_goes_round_and_not_across(self):
+        """The regression. Anchored at a fixed -135 degrees the top left
+        corner of a 2x2 sits about ten degrees *before* the start of the
+        sweep, so it wrapped the whole way round and lettered last: the
+        table came out D A C B. The seats are listed top left, top
+        right, bottom left, bottom right, so clockwise is A B D C."""
+        assert self.letters("table-2x2") == "ABDC"
+
+    def test_a_round_table_goes_round(self):
+        """Listed top, right, bottom, left, which is already clockwise."""
+        assert self.letters("round") == "ABCD"
+
+    def test_a_hexagon_starts_at_its_top_left_seat(self):
+        """Six seats listed from the top going clockwise, so the sweep
+        has to start one place in: the top left seat is the upper-left
+        one, not the top one."""
+        assert self.letters("hex") == "BCDEFA"
+
+    def test_an_oval_letters_both_rows(self):
+        """Two rows of three. Listed left to right along the top and
+        then along the bottom; clockwise is along the top and *back*
+        along the bottom."""
+        assert self.letters("oval") == "ABCFED"
+
+    def test_a_row_nudged_out_of_line_still_reads_along_it(self):
+        """The case the straight-line branch is actually for. Three
+        seats dead level sweep to the right answer by accident -- on a
+        horizontal line every seat left of centre has the bearing pi
+        and every seat right of it has 0, so a stable sort keeps them
+        in order anyway. Nudge one seat 20 units down, which is well
+        inside a card and still plainly a row, and the sweep puts it
+        last: A C B."""
+        shape = {"id": "s", "kind": "desk", "at": [0, 0],
+                 "seats": [{"id": "l", "at": [0, 0], "student": ""},
+                           {"id": "m", "at": [120, 20], "student": ""},
+                           {"id": "r", "at": [240, -20], "student": ""}]}
+        where = room_mod.seat_points({"shapes": [shape]})
+        got = room_mod.seat_letters(["l", "m", "r"], where)
+        assert (got["l"], got["m"], got["r"]) == ("A", "B", "C")
+
+    def test_a_column_nudged_out_of_line_still_reads_down_it(self):
+        """The same, turned ninety degrees: a row of desks against a
+        wall, none of them quite square to it.
+
+        The nudge leans left and then right, not right and then left.
+        Lean it the other way and the sweep happens to come out in
+        order anyway, which is how a first draft of this test passed
+        with the straight-line branch deleted."""
+        shape = {"id": "s", "kind": "desk", "at": [0, 0],
+                 "seats": [{"id": "hi", "at": [0, 0], "student": ""},
+                           {"id": "mid", "at": [-30, 120], "student": ""},
+                           {"id": "lo", "at": [30, 240], "student": ""}]}
+        where = room_mod.seat_points({"shapes": [shape]})
+        got = room_mod.seat_letters(["hi", "mid", "lo"], where)
+        assert (got["hi"], got["mid"], got["lo"]) == ("A", "B", "C")
+
+    def test_a_column_runs_top_to_bottom(self):
+        """Not in the palette -- it is what a row of desks against a
+        wall becomes. Sorting these by angle would be nonsense, so
+        seats within one card of a vertical line go down it."""
+        shape = {"id": "s", "kind": "desk", "at": [0, 0],
+                 "seats": [{"id": "lo", "at": [0, 120], "student": ""},
+                           {"id": "hi", "at": [0, -120], "student": ""},
+                           {"id": "mid", "at": [0, 0], "student": ""}]}
+        where = room_mod.seat_points({"shapes": [shape]})
+        got = room_mod.seat_letters(["lo", "hi", "mid"], where)
+        assert (got["hi"], got["mid"], got["lo"]) == ("A", "B", "C")
+
+    def test_past_z_it_counts(self):
+        """A group of twenty-seven is absurd and must not crash."""
+        shape = {"id": "s", "kind": "desk", "at": [0, 0],
+                 "seats": [{"id": f"s{i}", "at": [i * 120, 0],
+                            "student": ""} for i in range(27)]}
+        where = room_mod.seat_points({"shapes": [shape]})
+        got = room_mod.seat_letters([f"s{i}" for i in range(27)], where)
+        assert got["s25"] == "Z" and got["s26"] == "27"
+
+    def test_a_group_of_nobody_is_not_an_error(self):
+        assert room_mod.seat_letters([], {}) == {}
+        assert room_mod.seat_sweep(["gone"], {}) == []
+
+
+class TestAnUntouchedTablePrintsAsItSits:
+    def test_the_stack_takes_the_chair_order_not_the_list_order(self):
+        """What this fixed. A 2x2 is listed top left, top right, bottom
+        left, bottom right; it *prints* clockwise, which is top left,
+        top right, bottom right, bottom left. The canvas has always
+        shown the second and the chart used to write the first."""
+        shape = room_mod.make_shape("table-2x2", (0, 0), "t")
+        s = room_mod.new_section("820")
+        s["shapes"] = [shape]
+        ids = [seat["id"] for seat in shape["seats"]]
+        s["groups"] = [{"id": "g", "label": "1", "seats": list(ids),
+                        "order": 1}]
+        tl, tr, bl, br = ids
+        assert room_mod.stack_order(s) == [tl, tr, br, bl]
+
+    def test_a_spot_still_wins_over_the_chair(self):
+        """The sweep is only the default. Once the instructor has said
+        what order a table hands out in, that is the order."""
+        shape = room_mod.make_shape("table-2x2", (0, 0), "t")
+        s = room_mod.new_section("820")
+        s["shapes"] = [shape]
+        ids = [seat["id"] for seat in shape["seats"]]
+        s["groups"] = [{"id": "g", "label": "1", "seats": list(ids),
+                        "order": 1}]
+        spot_them(s, {sid: 4 - i for i, sid in enumerate(ids)})
+        assert room_mod.stack_order(s) == list(reversed(ids))
+
+
+class TestTwoSectionsStayApart:
+    """A chart is a flat list of tables with no sections in it, so the
+    stack numbers have to be one sequence across the whole file. These
+    were written after the real two-section room came out interleaved
+    while every test here had one section."""
+
+    def names(self, student_id):
+        return f"Student {student_id}" if student_id else ""
+
+    # Table by table, which is what a section nobody reordered does.
+    PLAIN_820 = ["Student ida0", "Student ida1",
+                 "Student idb0", "Student idb1"]
+    PLAIN_830 = ["Student idy0", "Student idy1",
+                 "Student idz0", "Student idz1"]
+    # One from each table in turn, which is what reordering buys.
+    CROSSED_830 = ["Student idy0", "Student idz0",
+                   "Student idy1", "Student idz1"]
+
+    def two(self, reorder=None):
+        """820 then 830, two tables each. `reorder` names the section
+        whose printing crosses its tables, or neither."""
+        a = section_with(table("a", (0, 0), 2), table("b", (0, 200), 2),
+                         groups=[group("ga", "a", 2, order=1),
+                                 group("gb", "b", 2, order=2)], name="820")
+        z = section_with(table("y", (0, 0), 2), table("z", (0, 200), 2),
+                         groups=[group("gy", "y", 2, order=1),
+                                 group("gz", "z", 2, order=2)], name="830")
+        a["order"], z["order"] = 1, 2
+        if reorder == "820":
+            a["print_by"] = "seat"
+            order_them(a, {"a-0": 1, "b-0": 2, "a-1": 3, "b-1": 4})
+        if reorder == "830":
+            z["print_by"] = "seat"
+            order_them(z, {"y-0": 1, "z-0": 2, "y-1": 3, "z-1": 4})
+        r = room_mod.empty("ABCD")
+        r["sections"] = [a, z]
+        for sec in (a, z):
+            chosen, _ = room_mod.assign_versions(
+                room_mod.seats_of(sec), room_mod.group_of(sec), "ABCD",
+                rng=random.Random(7))
+            room_mod.apply_versions(sec, chosen)
+        return r
+
+    def read(self, tmp_path, room):
+        path = tmp_path / "s.toml"
+        path.write_text(seating_mod.to_toml(room, self.names),
+                        encoding="utf-8")
+        return [s.name for s in
+                seating_mod.load(str(path), versions=room["versions"])]
+
+    def test_the_sections_do_not_interleave(self, tmp_path):
+        """A counter that restarted per section would give 830's first
+        seat the number 1 as well, and the two would come off the
+        printer shuffled into each other."""
+        order = self.read(tmp_path, self.two(reorder="820"))
+        first = [n for n in order if "ida" in n or "idb" in n]
+        second = [n for n in order if "idy" in n or "idz" in n]
+        assert order == first + second, "a section split across the stack"
+
+    def test_a_bare_section_is_not_dragged_behind_a_numbered_one(
+            self, tmp_path):
+        """The arrangement that can actually fail: 830 is reordered and
+        820 is not. Number only the section that asked and 820's seats
+        have none, which puts them after everyone who does -- so the
+        class that prints first comes out second. Numbering is all or
+        nothing across the file for this reason."""
+        order = self.read(tmp_path, self.two(reorder="830"))
+        assert order == self.PLAIN_820 + self.CROSSED_830
+
+    def test_the_reordered_section_still_crosses_its_own_tables(
+            self, tmp_path):
+        """And the point of all of it: 820 reordered hands out a-0,
+        b-0, a-1, b-1 -- one from each table in turn."""
+        order = self.read(tmp_path, self.two(reorder="820"))
+        assert order[:4] == ["Student ida0", "Student idb0",
+                             "Student ida1", "Student idb1"]
+
+    def test_two_plain_sections_are_still_written_bare(self, tmp_path):
+        """Neither one reordered: no numbers anywhere, which is the file
+        this tool has always written."""
+        assert "at =" not in seating_mod.to_toml(self.two(), self.names)
+
+
+class TestWhoIsSittingNextToMe:
+    """A chart read straight from text, because the question is about the
+    format and not about the room that produced it."""
+
+    def chart(self, tmp_path, text):
+        path = tmp_path / "s.toml"
+        path.write_text(text, encoding="utf-8")
+        return seating_mod.load(str(path))
+
+    def test_the_stack_is_the_order_the_seats_come_back(self, tmp_path):
+        c = self.chart(tmp_path, """
+versions = ["A", "B"]
+
+[[group]]
+seats = [{name = "Wren", at = 1}, {name = "Ash", at = 3}]
+
+[[group]]
+seats = [{name = "Fen", at = 2}, {name = "Oak", at = 4}]
+""")
+        assert [s.name for s in c] == ["Wren", "Fen", "Ash", "Oak"]
+
+    def test_a_diagonal_pair_is_not_a_collision(self, tmp_path):
+        """The bug this format change fixes. Seated A B A B round a
+        table, nobody can see their own paper twice. Print those four
+        in the order 1 3 2 4 and the stack reads A A B B -- so a check
+        that walked the stack reported two clashes that do not exist.
+        It has to walk the table."""
+        c = self.chart(tmp_path, """
+versions = ["A", "B"]
+
+[[group]]
+seats = [{name = "Wren", version = "A", at = 1},
+         {name = "Ash", version = "B", at = 3},
+         {name = "Fen", version = "A", at = 2},
+         {name = "Oak", version = "B", at = 4}]
+""")
+        assert [s.name for s in c] == ["Wren", "Fen", "Ash", "Oak"]
+        assert [(a.name, b.name) for a, b in c.neighbours()] == [
+            ("Wren", "Ash"), ("Ash", "Fen"), ("Fen", "Oak")]
+        assert c.collisions() == []
+
+    def test_a_real_clash_at_a_table_is_still_found(self, tmp_path):
+        """The other half: moving the check onto the table must not
+        make it stop reporting."""
+        c = self.chart(tmp_path, """
+versions = ["A", "B"]
+
+[[group]]
+seats = [{name = "Wren", version = "A", at = 1},
+         {name = "Ash", version = "A", at = 3}]
+""")
+        assert [(a.name, b.name) for a, b in c.collisions()] == \
+            [("Wren", "Ash")]
+
+    def test_two_tables_are_never_neighbours(self, tmp_path):
+        """Same letter, adjacent in the stack, different tables. They
+        cannot see each other, and that was already the rule."""
+        c = self.chart(tmp_path, """
+versions = ["A", "B"]
+
+[[group]]
+seats = [{name = "Wren", version = "A", at = 1}]
+
+[[group]]
+seats = [{name = "Ash", version = "A", at = 2}]
+""")
+        assert c.collisions() == []
+
+    def test_a_seat_with_no_number_prints_last(self, tmp_path):
+        """The rule an unplaced group and an unspotted seat already
+        follow: having no position puts you after everyone who has one,
+        not before them."""
+        c = self.chart(tmp_path, """
+versions = ["A", "B"]
+
+[[group]]
+seats = [{name = "Wren", at = 2}, {name = "Ash"}, {name = "Fen", at = 1}]
+""")
+        assert [s.name for s in c] == ["Fen", "Wren", "Ash"]
+
+    def test_a_chart_with_no_numbers_is_untouched(self, tmp_path):
+        """Every hand-written chart. The sort is skipped entirely."""
+        c = self.chart(tmp_path, """
+versions = ["A", "B"]
+
+[[group]]
+seats = ["Wren", "Ash", "Fen"]
+""")
+        assert [s.name for s in c] == ["Wren", "Ash", "Fen"]
+
+    @pytest.mark.parametrize("at", ["0", '"3"', "1.5", "-2"])
+    def test_a_nonsense_position_is_refused(self, tmp_path, at):
+        """Fail loudly. This is the one key that decides what order a
+        class is handed its papers in, so a typo in it should stop the
+        build rather than quietly send somebody to the back."""
+        with pytest.raises(seating_mod.SeatingError, match="stack"):
+            self.chart(tmp_path, f"""
+versions = ["A", "B"]
+
+[[group]]
+seats = [{{name = "Wren", at = {at}}}]
+""")
 
 
 class TestTheFileItself:

@@ -314,38 +314,38 @@ def apply_versions(section, assignment):
 # --------------------------------------------------- out to the CLI's file --
 
 def ordered_groups(section):
-    """Groups in print order, each group's seats in its own order.
+    """Groups in print order, each group's seats in the order they sit.
 
     An unplaced group keeps its existing position rather than being
     dropped: the instructor is warned that the order is incomplete and may
     go ahead, and "went out roughly right" beats "went out missing".
 
-    **Both scales matter.** The stack comes off the printer as these
-    groups in this order, each one's seats in the order they are listed
-    -- so a seat's `spot` has to be applied here or it is a number the
-    canvas draws and nothing reads. A seat with no `spot` keeps its
-    place in the list, which is the order the room was built in.
+    **A group's seat list says who sits beside whom, and nothing else.**
+    It used to say the print order too, sorted by `spot`, and the two
+    cannot be the same list: the collision check reads consecutive
+    entries as neighbours, so a group reordered for printing would have
+    it comparing two people sitting diagonally across a table and
+    reporting a clash that nobody can see. The stack is `stack_order`.
+
+    Which means the list comes out **swept** -- round the table from its
+    top left seat -- and not in the order the room happens to hold the
+    ids in. Those are different for eleven of the twelve tables in the
+    real room: a 2x2 is built top left, top right, bottom left, bottom
+    right, so the raw list calls two diagonal seats adjacent and misses
+    both of the pairs along the sides. The sweep is the only record of
+    the seating there is, and it costs nothing, because it is derived
+    from where the seats are.
     """
     groups = list(section.get("groups") or [])
     placed = [g for g in groups if g.get("order") is not None]
     rest = [g for g in groups if g.get("order") is None]
     placed.sort(key=lambda g: g["order"])
 
-    spots = {}
-    for shape in section.get("shapes") or []:
-        for seat in shape.get("seats") or []:
-            at = seat.get("spot")
-            if at is not None:
-                spots[seat.get("id")] = at
-
+    where = seat_points(section)
     out = []
     for group in placed + rest:
         copy = dict(group)
-        ids = list(copy.get("seats") or [])
-        # Stable, so seats without a spot stay where they were relative
-        # to each other and only the placed ones move.
-        copy["seats"] = sorted(
-            ids, key=lambda sid: spots.get(sid, math.inf))
+        copy["seats"] = seat_sweep(copy.get("seats") or [], where)
         out.append(copy)
     grouped = {sid for g in groups for sid in (g.get("seats") or [])}
     for seat in seats_of(section):
@@ -354,6 +354,137 @@ def ordered_groups(section):
             out.append({"id": f"solo:{seat['id']}", "label": "",
                         "seats": [seat["id"]], "order": None})
     return out
+
+
+#: A name card in room units, which is what decides whether a group of
+#: seats counts as a line or as a ring. Matches `CARD_W`/`CARD_H` in
+#: `seating.js` and `.seatcard` in `seating.css`.
+CARD_W, CARD_H = 104, 54
+
+ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def seat_points(section):
+    """Every seat's position on the canvas, by id.
+
+    A seat anchor is an offset from its desk's centre, and a seat that
+    was dragged off its desk keeps the offset that takes it there, so
+    the sum is the whole answer and no rotation is applied here: turning
+    a desk rewrites its seats' offsets.
+    """
+    out = {}
+    for shape in section.get("shapes") or []:
+        at = shape.get("at") or [0, 0]
+        for seat in shape.get("seats") or []:
+            spot = seat.get("at") or [0, 0]
+            out[seat["id"]] = (at[0] + spot[0], at[1] + spot[1])
+    return out
+
+
+def seat_sweep(ids, where):
+    """These seats in the order somebody walking the table would reach
+    them: clockwise from the top left.
+
+    **This is a second copy of `slotsOf` in `seating.js`, deliberately.**
+    The canvas needs the answer live, on every redraw while a seat is
+    being dragged, and the writer needs it when there is no canvas at
+    all -- so one of them cannot ask the other. They are pinned
+    together by `TestTheSweepMatchesTheCanvas`, and a change to either
+    belongs in both.
+
+    A row, a column and a ring want different answers. Sorting a row of
+    three by the angle round its own centre is nonsense, because the
+    middle seat *is* the centre and has no angle; sorting a 2x2 left to
+    right would letter it in reading order rather than clockwise. So
+    seats within one card of a single line are ordered along it, and
+    anything else is swept.
+
+    The sweep starts at the top left **seat's** own bearing and not at a
+    fixed -135 degrees, which is the obvious choice and is wrong: a
+    2x2's corner sits at about -145, ten degrees before that line, so it
+    wrapped the whole way round and came last. A 2x2 lettered D A C B.
+    The line through the seat cannot be just past the seat.
+
+    The seat letters the canvas draws are this order mapped onto
+    `ALPHABET`; `seat_letters` does that and nothing else.
+    """
+    here = [i for i in ids if i in where]
+    if len(here) < 2:
+        return list(here)
+    xs = [where[i][0] for i in here]
+    ys = [where[i][1] for i in here]
+    if max(ys) - min(ys) < CARD_H:
+        return sorted(here, key=lambda i: where[i][0])
+    if max(xs) - min(xs) < CARD_W:
+        return sorted(here, key=lambda i: where[i][1])
+
+    cx = (min(xs) + max(xs)) / 2
+    cy = (min(ys) + max(ys)) / 2
+    # The first minimum, as the canvas's `reduce` also takes.
+    first = min(here, key=lambda i: where[i][0] + where[i][1])
+    base = math.atan2(where[first][1] - cy, where[first][0] - cx)
+
+    def swept(i):
+        # Python's `%` is already non-negative for a positive modulus,
+        # where the canvas has to say so twice.
+        return (math.atan2(where[i][1] - cy, where[i][0] - cx)
+                - base) % (2 * math.pi)
+    return sorted(here, key=swept)
+
+
+def seat_letters(ids, where):
+    """Which chair at this table each seat is, by id.
+
+    Never stored. A seat letter is derived from where the seat is, so
+    "re-letter them when one moves" needs no bookkeeping, and it is not
+    the print version: a letter says *which chair* and a version says
+    *which paper*, and six chairs wanting three papers is reasonable.
+    """
+    return {sid: (ALPHABET[i] if i < len(ALPHABET) else str(i + 1))
+            for i, sid in enumerate(seat_sweep(ids, where))}
+
+
+def stack_order(section):
+    """Every seat in this section, in the order its paper comes out.
+
+    Two plans, and the second starts from the first.
+
+    **By group** the stack is a pile per table: group after group in
+    `group.order`, and inside each one by `seat.spot`. **By seat** it is
+    one walk round the room, which crosses tables -- so it is seeded
+    with the by-group answer and then moved by `seat.order`. Switching
+    plans therefore starts from the order you already had rather than
+    from nothing, and a room nobody has reordered carries no numbers at
+    all in either plan: absent is the normal state for both fields.
+
+    This is the twin of `roomRun` in the canvas, which is the same list
+    with the seats still on screen.
+    """
+    spots, orders = {}, {}
+    for shape in section.get("shapes") or []:
+        for seat in shape.get("seats") or []:
+            if seat.get("spot") is not None:
+                spots[seat["id"]] = seat["spot"]
+            if seat.get("order") is not None:
+                orders[seat["id"]] = seat["order"]
+
+    run = []
+    for group in ordered_groups(section):
+        # Already swept, so a table nobody has reordered prints round
+        # itself from its top left seat -- the order the canvas has
+        # always shown, and the order somebody handing the papers out
+        # would walk anyway. `sorted` is stable, so `spot` moves only
+        # the seats that carry one.
+        #
+        # One level up the rule stays the plainer one, because a group
+        # has no geometry of its own: an unplaced group prints after
+        # the placed ones, in the order it was listed.
+        run.extend(sorted(group.get("seats") or [],
+                          key=lambda sid: spots.get(sid, math.inf)))
+
+    if (section.get("print_by") or "group") != "seat":
+        return run
+    return sorted(run, key=lambda sid: orders.get(sid, math.inf))
 
 
 def empty_seats_for(room, ids):
