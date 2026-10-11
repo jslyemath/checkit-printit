@@ -131,6 +131,9 @@ let banded = [];                 // ids, of whatever the mode selects
    ctrl/cmd means "duplicate" in most of the same applications, so
    either would be saying something else. */
 let spaceDown = false;
+//: Whether the pointer is over the canvas. The pan key is a question
+//: about the pointer, not about what has keyboard focus.
+let pointerOnPaper = false;
 
 /* How the stack is ordered: group by group, or seat by seat.
 
@@ -278,6 +281,10 @@ const ICON = {
   // A person with a plus. Adding one is roster work, so this row
   // leads out of the canvas rather than doing something on it.
   personadd: "M3.5 20a5.5 5.5 0 0 1 11 0|O9,8,3.2|M17 13.5v5|M14.5 16h5",
+  // Two shapes closing on each other, and two coming apart. The
+  // arrows carry the direction; the bars are what is being joined.
+  merge: "M3 12h5|M21 12h-5|M7 9l3 3-3 3|M17 9l-3 3 3 3|R11,4,2,16,1",
+  split: "M2 12h5|M22 12h-5|M6 9l-3 3 3 3|M18 9l3 3-3 3|R11,4,2,16,1",
   // Three dots: the overflow menu, which is what this corner is in
   // the modes that open a list rather than add a thing. Vertical,
   // which is also the direction the list unrolls.
@@ -2437,6 +2444,18 @@ function drawStrip(section) {
     name.onclick = () => renameGroup(name, group);
     strip.appendChild(name);
 
+    /* Glued, so offer the way back. Only when it actually spans
+       more than one desk -- an ordinary group has nothing to split
+       and the button would be a dead control on every strip. */
+    if (shapesOfGroup(section, group).length > 1) {
+      const cut = el("button", "ibtn tiny");
+      cut.type = "button";
+      cut.title = "Give each desk its own group again";
+      cut.appendChild(svgIcon(ICON.split));
+      cut.onclick = () => splitGroup(section, group);
+      strip.appendChild(cut);
+    }
+
     strip.appendChild(el("span", "isep"));
     strip.appendChild(count("chair", (group.seats || []).length,
                             "Seats in this group"));
@@ -2551,6 +2570,18 @@ function drawBandStrip(strip, section) {
   go.textContent = "\u2715";
   go.onclick = () => { banded = []; renderSeating(); };
 
+  /* Glue, which only groups have: a seat belongs to a group
+     already, so merging a handful of seats would mean nothing. */
+  if (kind === "group" && banded.length > 1) {
+    const glue = el("button", "ibtn tiny");
+    glue.type = "button";
+    glue.title = `Make these ${banded.length} one group: one label, `
+      + "one colour, one set of handles. The desks do not move";
+    glue.appendChild(svgIcon(ICON.merge));
+    glue.onclick = () => mergeBanded(section);
+    strip.appendChild(glue);
+  }
+
   const kill = el("button", "ibtn tiny");
   kill.type = "button";
   kill.title = kind === "seat"
@@ -2561,6 +2592,84 @@ function drawBandStrip(strip, section) {
   kill.onclick = () => removeBanded(section);
   strip.appendChild(kill);
   strip.appendChild(go);
+}
+
+function mergeBanded(section) {
+  const kept = mergeGroups(section, banded.slice());
+  if (!kept) return;
+  banded = [];
+  selected = { kind: "group", id: kept.id };
+  renderSeating();
+  toast("Merged. Split from the strip to undo it.");
+}
+
+function mergeGroups(section, ids) {
+  /* The twin of `room.merge_groups`. Kept in step by
+     `TestGluingGroupsTogether`, which exercises the Python; this is
+     the same four rules and no others.
+
+     The survivor is whichever printed first, so the merged group
+     lands where the earliest of its parts was. */
+  const all = groupsOf(section);
+  const want = new Set(ids);
+  const picked = all.filter(g => want.has(g.id));
+  if (picked.length < 2) return null;
+  picked.sort((a, b) => (a.order == null) - (b.order == null)
+                        || (a.order || 0) - (b.order || 0));
+  const keep = picked[0];
+  const seats = (keep.seats || []).slice();
+  for (const other of picked.slice(1))
+    for (const sid of other.seats || [])
+      if (!seats.includes(sid)) seats.push(sid);
+  keep.seats = seats;
+  const gone = new Set(picked.slice(1).map(g => g.id));
+  section.groups = all.filter(g => !gone.has(g.id));
+  renumberGroups(section);
+  return keep;
+}
+
+function splitGroup(section, group) {
+  /* One group per desk. The original keeps its id, label and colour
+     and takes the desk its first seat is on; the rest are new, in
+     the same colour so the eye can follow what happened. */
+  const all = groupsOf(section);
+  const runs = new Map();
+  for (const shape of section.shapes || [])
+    for (const seat of shape.seats || [])
+      if ((group.seats || []).includes(seat.id))
+        runs.set(shape.id, (runs.get(shape.id) || []).concat(seat.id));
+  if (runs.size < 2) return;
+
+  const used = new Set(all.map(g => g.id));
+  let at = all.indexOf(group), made = 0, first = true;
+  for (const [, seats] of runs) {
+    if (first) { group.seats = seats; first = false; continue; }
+    let n = 1;
+    while (used.has(`${group.id}-${n}`)) n += 1;
+    const id = `${group.id}-${n}`;
+    used.add(id);
+    made += 1;
+    const born = { id: id, label: `Table ${all.length + made}`,
+                   seats: seats, order: null };
+    for (const field of ["hue", "chroma"])
+      if (group[field] !== undefined) born[field] = group[field];
+    at += 1;
+    all.splice(at, 0, born);
+  }
+  renumberGroups(section);
+  selected = { kind: "group", id: group.id };
+  renderSeating();
+  toast(`Split into ${runs.size}.`);
+}
+
+function renumberGroups(section) {
+  const placed = groupsOf(section).filter(g => g.order != null);
+  placed.sort((a, b) => a.order - b.order);
+  placed.forEach((g, i) => { g.order = i + 1; });
+}
+
+function shapesOfGroup(section, group) {
+  return group ? shapesHolding(section, group) : [];
 }
 
 function removeBanded(section) {
@@ -3034,18 +3143,29 @@ function paintShape(shape) {
   }
 }
 
+//: How far the selection ring runs outside the desk. Matches
+//: `--pick-out` in the stylesheet; both have to move together.
+const PICK_OUT = 12;
+
 function addHandles(wrap, section, shape) {
   for (const key of GRIPS) {
     const [fx, fy] = SPAN[key];
     const grip = el("div", "grip grip-" + key);
-    /* On the selection rectangle, not on the desk. Centred on the
-       desk's own edge they stood 1.5px inside the rectangle along an
-       edge and several pixels inside it at a corner, because a
-       corner of the rectangle is offset diagonally. Out by the same
-       amount the rectangle is, and every handle meets it the same
-       way. */
-    grip.style.left = `calc(${50 + fx * 50}% + ${fx * 7}px)`;
-    grip.style.top = `calc(${50 + fy * 50}% + ${fy * 7}px)`;
+    /* On the rectangle's *line*, which at a corner is not its corner.
+
+       Placing them all at the full offset put the four edge handles
+       exactly on the line and the four corner handles out in space
+       past the rounded corner, which is the uneven spacing that
+       looked like a mistake. A rounded corner of radius R bulges in
+       by `R - R/sqrt(2)` from the corner point, so the corner
+       handles come back by exactly that much and every handle meets
+       the line the same way. */
+    const R = 14 + PICK_OUT;
+    const pull = R - R / Math.SQRT2;
+    const out = (f, other) =>
+      f === 0 ? 0 : f * (PICK_OUT - (other === 0 ? 0 : pull));
+    grip.style.left = `calc(${50 + fx * 50}% + ${out(fx, fy)}px)`;
+    grip.style.top = `calc(${50 + fy * 50}% + ${out(fy, fx)}px)`;
     grip.onpointerdown = e => resizeShape(e, section, shape, key);
     wrap.appendChild(grip);
   }
@@ -3109,6 +3229,26 @@ function resizeShape(event, section, shape, key) {
   node.onpointercancel = () => finish(false);
 }
 
+function groupMiddle(section, group, fallback) {
+  /* The middle of everything the group is drawn on.
+
+     A merged group turns about this rather than about each desk's
+     own centre, which is the difference between a table arrangement
+     swinging round as a unit and three tables each spinning on the
+     spot in formation. */
+  const all = shapesOfGroup(section, group);
+  if (all.length < 2) return fallback.at.slice();
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const s of all) {
+    const [w, h] = shapeSize(s);
+    x0 = Math.min(x0, s.at[0] - w / 2);
+    y0 = Math.min(y0, s.at[1] - h / 2);
+    x1 = Math.max(x1, s.at[0] + w / 2);
+    y1 = Math.max(y1, s.at[1] + h / 2);
+  }
+  return [(x0 + x1) / 2, (y0 + y1) / 2];
+}
+
 function rotateShape(event, section, shape) {
   /* Turn the desk about its own centre. The chairs turn with it --
      `turnShape` rewrites their offsets -- but the name cards do not:
@@ -3117,13 +3257,30 @@ function rotateShape(event, section, shape) {
   event.preventDefault();
   event.stopPropagation();
   const node = event.currentTarget;
+  /* Everything the group is drawn on, and where each piece started.
+
+     A merged group swings about the middle of the whole arrangement:
+     each desk turns on its own axis *and* rides round the common
+     centre, which is the difference between a cluster of tables
+     rotating as one and three tables spinning on the spot in
+     formation. A group on one desk is the same code with a party of
+     one and a pivot at its own centre. */
+  const owner = groupFor(section, shape);
+  const body = shapesOfGroup(section, owner);
+  const party = body.length > 1 ? body : [shape];
+  const pivot = groupMiddle(section, owner, shape);
+  const start = party.map(s => ({
+    shape: s, at: s.at.slice(), angle: s.angle || 0,
+    seats: (s.seats || []).map(x => x.at.slice()),
+  }));
+
   const was = shape.angle || 0;
   const seats0 = (shape.seats || []).map(s => s.at.slice());
   const box = seatingCanvas().getBoundingClientRect();
   const k = canvasScale();
   const ox = drawn.box ? drawn.box.x : 0, oy = drawn.box ? drawn.box.y : 0;
-  const centre = [box.left + (shape.at[0] - ox) * k,
-                  box.top + (shape.at[1] - oy) * k];
+  const centre = [box.left + (pivot[0] - ox) * k,
+                  box.top + (pivot[1] - oy) * k];
   const angleTo = e => Math.atan2(e.clientY - centre[1],
                                   e.clientX - centre[0]) * 180 / Math.PI;
   const from = angleTo(event);
@@ -3131,17 +3288,32 @@ function rotateShape(event, section, shape) {
   const place = e => {
     let to = was + (angleTo(e) - from);
     if (e.shiftKey) to = Math.round(to / 15) * 15;
+    const by = Math.round(to) - was;
     // From the original offsets every time, so dragging back and
     // forth does not grind them down by rounding at each step.
-    (shape.seats || []).forEach((s, i) => { s.at = seats0[i].slice(); });
-    shape.angle = was;
-    turnShape(shape, Math.round(to) - was);
-    paintShape(shape);
+    const r = by * Math.PI / 180, cos = Math.cos(r), sin = Math.sin(r);
+    for (const first of start) {
+      const s = first.shape;
+      s.angle = first.angle;
+      (s.seats || []).forEach((x, i) => { x.at = first.seats[i].slice(); });
+      // Ride round the pivot, then turn on the spot. One desk has a
+      // pivot at its own centre, so the first step moves it nowhere.
+      const dx = first.at[0] - pivot[0], dy = first.at[1] - pivot[1];
+      s.at = [pivot[0] + dx * cos - dy * sin,
+              pivot[1] + dx * sin + dy * cos];
+      turnShape(s, by);
+      paintShape(s);
+    }
   };
 
   const finish = commit => {
     node.onpointermove = node.onpointerup = node.onpointercancel = null;
     if (!commit) {
+      for (const first of start) {
+        first.shape.at = first.at;
+        first.shape.angle = first.angle;
+        (first.shape.seats || []).forEach((x, i) => { x.at = first.seats[i]; });
+      }
       (shape.seats || []).forEach((s, i) => { s.at = seats0[i]; });
       shape.angle = was;
     }
@@ -4988,6 +5160,12 @@ function dragShape(event, section, shape) {
       for (const other of group ? shapesHolding(section, group) : [])
         if (other !== shape && !party.includes(other)) party.push(other);
     }
+  /* A merged group travels whole, band or no band. Its desks were
+     told to behave as one thing, and dragging one of them away from
+     the others would be the one gesture that forgets it. */
+  if (!caught)
+    for (const other of shapesOfGroup(section, owner))
+      if (other !== shape && !party.includes(other)) party.push(other);
   const alsoHome = party.map(s => s.at.slice());
 
   const mine = [];
@@ -5827,17 +6005,45 @@ function wireSeating() {
                                     e => { touching.delete(e.pointerId); });
   document.addEventListener("fullscreenchange", onFullscreenChange);
   document.addEventListener("keydown", presentKeys);
-  /* Space held is "move the view". Only while an editing mode is on
-     the canvas: Up Next already uses the key to step, and that is a
-     mode in which there is nothing to select anyway. */
+  /* Space held is "move the view".
+
+     **Why this only worked some of the time**, which is worth
+     writing down because the symptom was so unhelpful. A keydown's
+     target is whatever has keyboard focus, and this used to bail out
+     when that was a `button`. Clicking a button focuses it. The
+     canvas is surrounded by buttons -- the mode rail, the corner,
+     the palette, the strip, both islands -- so after touching any
+     control at all, focus was parked on it and space did nothing:
+     no flag, no palm, no pan. It came back only once focus happened
+     to land somewhere else, which is exactly "it works a bit of the
+     time". Worse, bailing out skipped the `preventDefault` too, so
+     the space went on to *activate* that focused button.
+
+     The guard was there for one real case: space typed into a rename
+     box must type a space. That is the only case it should cover.
+     Whether the key means "pan" is a question about the **pointer**,
+     not about focus -- so it is taken when the pointer is over the
+     paper, and left alone when it is not, which keeps space working
+     as the button-activation key for anyone driving by keyboard. */
   document.addEventListener("keydown", e => {
     if (e.key !== " " || upnext || e.repeat) return;
-    if (e.target instanceof Element
-        && e.target.closest("input, textarea, button")) return;
     if (document.getElementById("view-seating").hidden) return;
+    if (e.target instanceof Element
+        && e.target.closest("input, textarea, [contenteditable]")) return;
+    if (!pointerOnPaper) return;
     e.preventDefault();
     spaceDown = true;
     seatingPaper().classList.add("panready");
+  });
+  /* Where the pointer is, which is the question above. `pointerover`
+     and `pointerout` rather than `enter`/`leave`, because the canvas
+     is full of children and the enter pair does not fire reliably
+     when one of them captures the pointer mid-gesture. */
+  seatingPaper().addEventListener("pointerover", () => {
+    pointerOnPaper = true;
+  });
+  seatingPaper().addEventListener("pointerout", e => {
+    if (!seatingPaper().contains(e.relatedTarget)) pointerOnPaper = false;
   });
   /* Let go of it on anything that could mean the key was released
      while this window was not listening. A stuck pan key leaves the
@@ -5850,11 +6056,15 @@ function wireSeating() {
   };
   document.addEventListener("keyup", e => { if (e.key === " ") letGo(); });
   document.addEventListener("visibilitychange", letGo);
-  // A keydown of anything else while space is supposedly held means
-  // the keyup for space went somewhere this window never saw.
+  /* A keydown of some other *printable* key while space is
+     supposedly held means the keyup for space went somewhere this
+     window never saw. Modifiers are excluded: holding shift or ctrl
+     during a pan is an ordinary thing to do, and treating it as
+     evidence that space was released would drop the pan mid-drag. */
   document.addEventListener("keydown", e => {
-    if (e.key !== " " && !e.repeat && spaceDown && !e.ctrlKey && !e.metaKey)
-      letGo();
+    if (!spaceDown || e.repeat) return;
+    if (e.key === " " || e.key.length !== 1) return;
+    letGo();
   });
   window.addEventListener("blur", () => {
     spaceDown = false;

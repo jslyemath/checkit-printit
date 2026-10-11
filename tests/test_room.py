@@ -652,6 +652,130 @@ class TestTheShuffleStepsRoundAPin:
                    for seat in room_mod.live_seats(s))
 
 
+class TestGluingGroupsTogether:
+    """Merging is a fact about the group, not about the geometry: the
+    desks do not move, and splitting does not have to remember where
+    they were."""
+
+    def room(self):
+        s = section_with(table("t1", (0, 0), 2), table("t2", (0, 300), 2),
+                         table("t3", (0, 600), 2),
+                         groups=[group("g1", "t1", 2, order=1,
+                                       label="Table 1"),
+                                 group("g2", "t2", 2, order=2,
+                                       label="Table 2"),
+                                 group("g3", "t3", 2, order=3,
+                                       label="Table 3")])
+        s["groups"][0]["hue"] = 120
+        return s
+
+    def ids(self, s):
+        return [g["id"] for g in s["groups"]]
+
+    def test_two_become_one(self):
+        s = self.room()
+        kept = room_mod.merge_groups(s, ["g1", "g2"])
+        assert kept["id"] == "g1"
+        assert self.ids(s) == ["g1", "g3"]
+        assert kept["seats"] == ["t1-0", "t1-1", "t2-0", "t2-1"]
+
+    def test_nothing_moves(self):
+        s = self.room()
+        before = [sh["at"][:] for sh in s["shapes"]]
+        room_mod.merge_groups(s, ["g1", "g2"])
+        assert [sh["at"] for sh in s["shapes"]] == before
+
+    def test_the_survivor_is_the_one_that_printed_first(self):
+        """So the merged group lands where the earliest of its parts
+        was and the rest of the stack shifts as little as it can.
+
+        The orders here run backwards against the order the groups
+        are listed in, which is the only arrangement that can tell
+        the two apart: picking by list position gives the same answer
+        as picking by print order in every tidy room."""
+        s = self.room()
+        for g, order in zip(s["groups"], [3, 2, 1]):
+            g["order"] = order
+        kept = room_mod.merge_groups(s, ["g1", "g2"])
+        assert kept["id"] == "g2", "g2 prints before g1"
+        assert kept["label"] == "Table 2"
+
+    def test_it_keeps_one_label_and_one_colour(self):
+        s = self.room()
+        kept = room_mod.merge_groups(s, ["g1", "g2"])
+        assert kept["label"] == "Table 1"
+        assert kept["hue"] == 120
+
+    def test_the_order_closes_up(self):
+        s = self.room()
+        room_mod.merge_groups(s, ["g1", "g2"])
+        assert [g["order"] for g in s["groups"]] == [1, 2]
+
+    def test_one_group_is_not_a_merge(self):
+        s = self.room()
+        assert room_mod.merge_groups(s, ["g1"]) is None
+        assert len(s["groups"]) == 3
+
+    def test_every_seat_survives(self):
+        s = self.room()
+        before = sorted(x["id"] for x in room_mod.live_seats(s))
+        room_mod.merge_groups(s, ["g1", "g2", "g3"])
+        after = sorted(sid for g in s["groups"] for sid in g["seats"])
+        assert after == before
+
+    # ----------------------------------------------- and apart again --
+    def test_splitting_gives_one_group_per_desk(self):
+        s = self.room()
+        room_mod.merge_groups(s, ["g1", "g2"])
+        out = room_mod.split_group(s, "g1")
+        assert len(out) == 2
+        assert [sorted(g["seats"]) for g in out] == \
+            [["t1-0", "t1-1"], ["t2-0", "t2-1"]]
+
+    def test_splitting_keeps_the_colour_so_the_eye_can_follow(self):
+        s = self.room()
+        room_mod.merge_groups(s, ["g1", "g2"])
+        out = room_mod.split_group(s, "g1")
+        assert all(g.get("hue") == 120 for g in out)
+
+    def test_a_round_trip_puts_the_seats_back(self):
+        s = self.room()
+        before = {g["id"]: sorted(g["seats"]) for g in s["groups"]}
+        room_mod.merge_groups(s, ["g1", "g2"])
+        room_mod.split_group(s, "g1")
+        now = sorted(sorted(g["seats"]) for g in s["groups"])
+        assert now == sorted(before.values())
+
+    def test_splitting_something_already_apart_does_nothing(self):
+        s = self.room()
+        out = room_mod.split_group(s, "g2")
+        assert len(out) == 1 and len(s["groups"]) == 3
+
+    def test_the_new_groups_get_their_own_ids(self):
+        s = self.room()
+        room_mod.merge_groups(s, ["g1", "g2", "g3"])
+        out = room_mod.split_group(s, "g1")
+        ids = [g["id"] for g in out]
+        assert len(set(ids)) == 3, ids
+        assert all(g["id"] for g in s["groups"])
+
+    def test_a_merged_room_still_checks(self):
+        s = room_mod.new_section("820")
+        s["shapes"] = [room_mod.make_shape("table-1x2", (200, 200), "a"),
+                       room_mod.make_shape("table-1x2", (600, 200), "b")]
+        s["groups"] = [
+            {"id": "ga", "label": "Table 1", "order": 1,
+             "seats": [x["id"] for x in s["shapes"][0]["seats"]]},
+            {"id": "gb", "label": "Table 2", "order": 2,
+             "seats": [x["id"] for x in s["shapes"][1]["seats"]]}]
+        r = room_mod.empty("AB")
+        r["sections"] = [s]
+        room_mod.merge_groups(s, ["ga", "gb"])
+        room_mod.check(r)          # no complaint
+        room_mod.split_group(s, "ga")
+        room_mod.check(r)
+
+
 class TestFillingAndEmptyingTheRoom:
     """"Seat everyone" and "Clear everyone". Both keep the shuffle's
     exemption, because a pin is the one arrangement in the room that

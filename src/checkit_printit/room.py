@@ -63,8 +63,11 @@ ANCHORS = ("nw", "n", "ne", "w", "c", "e", "sw", "s", "se")
 #: the shape when it is added and can be dragged from there. Changing this
 #: table does not reach back into a room already drawn.
 SHAPES = {
+    # Brought in horizontally so a one-seat desk is not just a
+    # smaller version of the table's silhouette. Not square -- a card
+    # is 104 wide and has to fit on it -- but squarer.
     "desk": {
-        "label": "desk", "w": 124, "h": 78, "css": "rect",
+        "label": "desk", "w": 112, "h": 80, "css": "rect",
         "seats": [(0, 0)],
     },
     "table-1x2": {
@@ -336,6 +339,116 @@ def apply_versions(section, assignment):
             if seat.get("id") in assignment:
                 seat["version"] = assignment[seat["id"]]
     return section
+
+
+def shape_of_seat(section):
+    """seat id -> the id of the desk it sits on."""
+    out = {}
+    for shape in section.get("shapes") or []:
+        for seat in shape.get("seats") or []:
+            out[seat["id"]] = shape.get("id")
+    return out
+
+
+def merge_groups(section, ids):
+    """Fold several groups into one. Returns the one that remains.
+
+    **Nothing moves.** Two tables glued together while standing apart
+    stay apart; what changes is that from now on they are selected,
+    coloured, labelled, lettered and turned as one thing. The glue is
+    a fact about the group, not about the geometry, which is why it
+    can be undone by `split_group` without having to remember where
+    anything used to be.
+
+    The survivor is whichever of them printed first, so the merged
+    group lands in the stack where the earliest of its parts was and
+    the rest of the order shifts as little as possible. It keeps its
+    label, its colour and its place; the others are gone.
+
+    Seat letters need no special case at all: a letter is derived
+    clockwise from the top left of *its group*, so a merged group
+    sweeps the whole arrangement as one ring the moment it exists.
+    """
+    groups = section.get("groups") or []
+    want = set(ids or [])
+    picked = [g for g in groups if g.get("id") in want]
+    if len(picked) < 2:
+        return None
+
+    picked.sort(key=lambda g: (g.get("order") is None, g.get("order") or 0))
+    keep, gone = picked[0], picked[1:]
+    seats = list(keep.get("seats") or [])
+    for other in gone:
+        for sid in other.get("seats") or []:
+            if sid not in seats:
+                seats.append(sid)
+    keep["seats"] = seats
+
+    dropped = {id(g) for g in gone}
+    section["groups"] = [g for g in groups if id(g) not in dropped]
+    _renumber(section)
+    return keep
+
+
+def split_group(section, group_id):
+    """One group per desk again. Returns the groups it became.
+
+    The original keeps its id, its label and its colour and takes the
+    desk its first seat is on; every other desk gets a new group in
+    the same colour, numbered on from the labels already in the room.
+    Same colour because they were one thing a moment ago and the eye
+    should be able to follow what happened; renaming and recolouring
+    are one click each afterwards.
+    """
+    groups = section.get("groups") or []
+    here = next((g for g in groups if g.get("id") == group_id), None)
+    if here is None:
+        return []
+
+    on = shape_of_seat(section)
+    runs = {}
+    for sid in here.get("seats") or []:
+        runs.setdefault(on.get(sid), []).append(sid)
+    if len(runs) < 2:
+        return [here]
+
+    used = {g.get("id") for g in groups}
+    out, first = [], True
+    at = groups.index(here)
+    for shape_id in list(runs):
+        if first:
+            here["seats"] = runs[shape_id]
+            out.append(here)
+            first = False
+            continue
+        n = 1
+        while f"{group_id}-{n}" in used:
+            n += 1
+        new_id = f"{group_id}-{n}"
+        used.add(new_id)
+        born = {"id": new_id, "label": f"Table {len(groups) + len(out)}",
+                "seats": runs[shape_id], "order": None}
+        for field in ("hue", "chroma"):
+            if here.get(field) is not None:
+                born[field] = here[field]
+        at += 1
+        groups.insert(at, born)
+        out.append(born)
+    _renumber(section)
+    return out
+
+
+def _renumber(section):
+    """Close the gaps in the print order after groups come and go.
+
+    Only the ones that had a place keep one: a group with no `order`
+    printed after the placed ones before and still does.
+    """
+    placed = [g for g in (section.get("groups") or [])
+              if g.get("order") is not None]
+    placed.sort(key=lambda g: g["order"])
+    for i, g in enumerate(placed, 1):
+        g["order"] = i
 
 
 def shuffle_seats(section, rng=None):
