@@ -956,18 +956,35 @@
 /* Caught by the band. A ring in the accent, like the one the drop
    target wears, because both mean "this is what the gesture has
    hold of". */
+/* Caught by the band, or chosen on its own: the same ring, drawn in
+   two different inks.
+
+   They had different insets, radii and weights, so a desk that was
+   both looked like two selections -- and the band's was the accent,
+   which on this canvas belongs to the chrome and clashes with every
+   group colour it lands near.
+
+   **One thing chosen wears its own colour**; a group's ring is that
+   group's. **Several things wear grey**, because a band crosses
+   groups and there is no one colour that could be theirs. */
+.deskwrap.banded {
+  --pick-ink: oklch(0.47 0.010 260);
+}
 .deskwrap.banded::before {
   content: "";
   position: absolute;
-  inset: -7px;
-  border: 2px solid var(--isle-key);
-  border-radius: 7px;
-  background: oklch(0.82 0.115 165 / .10);
+  inset: calc(var(--pick-out) * -1);
+  border: var(--pick-line) solid var(--pick-ink);
+  border-radius: calc(14px + var(--pick-out));
+  background: oklch(0.47 0.010 260 / .07);
   pointer-events: none;
 }
+/* A card is a tenth the size of a desk, so the same 12 units of
+   offset would swallow the gaps between neighbours. The ink and the
+   weight are the ones above; only the distance is smaller. */
 .seatcard.banded {
-  outline: 2px solid var(--isle-key);
-  outline-offset: 1px;
+  outline: var(--pick-line, 2.5px) solid oklch(0.47 0.010 260);
+  outline-offset: 4px;
 }
 
 /* The selection rectangle, and the handles that sit on it.
@@ -997,11 +1014,13 @@
    desk rather than hugging its edge, and `--pick-line` is the 2.5
    every other line in the room is drawn at -- 1.5 was thinner than
    the desk it surrounded. */
-.deskwrap.chosen {
+.deskwrap {
   --pick-out: 12px;
   --pick-line: 2.5px;
-  --pick-ink: oklch(0.47 0.010 260);
 }
+/* One thing on its own: its own colour, which is what tells you
+   *which* group you have hold of. */
+.deskwrap.chosen { --pick-ink: var(--solid); }
 .deskwrap.chosen::before {
   content: "";
   position: absolute;
@@ -1129,7 +1148,7 @@
   border-radius: 50%;
   background: white;
   border: var(--pick-line, 2.5px) solid var(--pick-ink, #666);
-  z-index: 4;
+  z-index: 5;
 }
 .grip-n, .grip-s { cursor: ns-resize; }
 .grip-e, .grip-w { cursor: ew-resize; }
@@ -1149,6 +1168,8 @@
   background: var(--pick-ink, #666);
   border: var(--pick-line, 2.5px) solid white;
   cursor: grab;
+  /* Under the resize handles, so the stalk passes behind the one at
+     the top edge instead of being drawn across it. */
   z-index: 4;
 }
 .spinner::before {
