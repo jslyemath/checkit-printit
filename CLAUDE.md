@@ -165,6 +165,15 @@ path got.
 copy", not "did it deploy".** Both times that question was asked late, the
 deployment was fine.
 
+A fourth, 2026-10-11: the wheel's zoom anchoring was written *inside*
+`zoomTo`, so the pinch never had it and went on holding the middle of the
+window still. It is now `holdPoint`, a function with a name that both call.
+**Behaviour two gestures share wants a name, or only the gesture it was
+written for will have it.** It was found by writing a sentence about the
+feature in the docs and going to check whether the sentence was true --
+which no test did, because the tests passed, and no use did, because nobody
+pinches a desktop browser.
+
 ### A change with reasoning gets a dated section in the notes
 
 `../checkit/CODEBASE_NOTES.md`, a `##` heading with today's date. The commit
@@ -478,6 +487,21 @@ dragged shape -- uses `--mark`, one grey. The exception is a *single*
 selected group, whose ring is that group's own colour, because that is
 what says which group you have hold of. One ring geometry for all of
 them: `--pick-out` and `--pick-line` on `.deskwrap`.
+
+**Pointer capture does not give you the pointer to yourself.** It
+redirects the captured pointer to your element; it does nothing about
+any *other* pointer arriving there as well. So a `pointermove`
+handler for one gesture must check `e.pointerId`, or a second finger's
+position is read as the first one having travelled -- which jumped the
+room by the distance between the fingers until 2026-10-11. `panPaper`
+and `bandPaper` both guard it now.
+
+And when a second finger lands, the one-finger gesture is **called
+off**, not left running: both listen on the paper, so otherwise they
+fight over `pan` on every move. `endGesture` holds the teardown of
+whichever started, and `twoFinger` calls it. It is a bare teardown on
+purpose -- ending a pan that never travelled clears the selection, and
+starting a pinch is not a click on bare paper.
 
 **`seats_of` is a view, not the seats.** It builds a fresh dict per
 seat carrying id, shape, student, version and absolute position, so it
