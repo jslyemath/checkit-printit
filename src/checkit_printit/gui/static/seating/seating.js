@@ -1406,6 +1406,9 @@ function drawRoom(section) {
       box.classList.add("movable");
       if (isSelected(null, shape)) wrap.classList.add("chosen");
       box.onpointerdown = e => {
+        if (spaceDown) return;
+        if (addToBand(e, (shape.seats || [])[0]
+                           && (shape.seats || [])[0].id)) return;
         e.preventDefault();
         selectedChair = null;
         choose(null, shape);
@@ -2304,6 +2307,33 @@ function isSelected(group, shape) {
   return Boolean(shape) && shape.id === selected.id;
 }
 
+function addToBand(event, id) {
+  /* Ctrl-click (cmd on a Mac) adds to, or takes out of, the same
+     selection a dragged rectangle makes -- so the two ways of
+     choosing several things agree, and the strip that appears for a
+     band appears for this too.
+
+     Returns whether it handled the press, so each gesture can hand
+     over before it starts a drag. */
+  if (!event.ctrlKey && !event.metaKey) return false;
+  if (!bandKind() || !id) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  /* Whatever single thing was chosen comes along, or ctrl-clicking a
+     second desk would appear to *lose* the first. */
+  if (banded.length === 0 && selected && selected.id && selected.id !== id)
+    banded = [selected.id];
+  const at = banded.indexOf(id);
+  if (at >= 0) banded.splice(at, 1);
+  else banded.push(id);
+  selected = banded.length === 1 ? { kind: bandKind() === "group"
+                                       ? "group" : "shape", id: banded[0] }
+                                 : null;
+  if (banded.length === 1) banded = [];
+  renderSeating();
+  return true;
+}
+
 function choose(group, shape) {
   /* A table belongs to its group when it has one: what the instructor
      cares about is the group, and the shape is how it is drawn. A desk
@@ -3008,8 +3038,14 @@ function addHandles(wrap, section, shape) {
   for (const key of GRIPS) {
     const [fx, fy] = SPAN[key];
     const grip = el("div", "grip grip-" + key);
-    grip.style.left = (50 + fx * 50) + "%";
-    grip.style.top = (50 + fy * 50) + "%";
+    /* On the selection rectangle, not on the desk. Centred on the
+       desk's own edge they stood 1.5px inside the rectangle along an
+       edge and several pixels inside it at a corner, because a
+       corner of the rectangle is offset diagonally. Out by the same
+       amount the rectangle is, and every handle meets it the same
+       way. */
+    grip.style.left = `calc(${50 + fx * 50}% + ${fx * 7}px)`;
+    grip.style.top = `calc(${50 + fy * 50}% + ${fy * 7}px)`;
     grip.onpointerdown = e => resizeShape(e, section, shape, key);
     wrap.appendChild(grip);
   }
@@ -3332,6 +3368,7 @@ function dragChair(event, card, section, shape, seat) {
   // Held space means "move the view", whatever the pointer is over.
   // Letting this run would move the thing instead of the room.
   if (spaceDown) return;
+  if (addToBand(event, seat.id)) return;
   event.preventDefault();
   // Touching a chair chooses its desk too, so the strip's add and
   // remove are about the thing just touched rather than about
@@ -4028,8 +4065,22 @@ function toggleHues(section, group) {
   showOpen();
 }
 
+/* A drawer may only scroll once it has stopped growing. Listening
+   once, at startup, rather than per open: a `transitionend` on a
+   drawer that is closing has to take the class off again. */
+function watchPalette() {
+  const pal = document.getElementById("seat-palette");
+  if (!pal) return;
+  pal.addEventListener("transitionend", e => {
+    if (e.propertyName !== "max-height") return;
+    pal.classList.toggle("settled", pal.classList.contains("open"));
+  });
+}
+
 function togglePalette(force) {
   paletteOpen = force !== undefined ? force : !paletteOpen;
+  if (!paletteOpen)
+    document.getElementById("seat-palette")?.classList.remove("settled");
   if (paletteOpen) saveOpen = huesOpen = false;   // one open at a time
   showOpen();
 }
@@ -4454,7 +4505,7 @@ function drawPalette(section) {
     // with a plain consonant or vowel, so the letter is enough.
     b.title = "Add a" + (/^[aeiou]/i.test(spec.label) ? "n " : " ")
       + spec.label;
-    const tile = el("span", "desktile");
+    const tile = el("span", "desktile " + spec.css);
     tile.appendChild(shapeSilhouette(spec, TILE_SPAN).svg);
     /* A single desk and a 2x2 are the same silhouette, so the one
        that holds one person says so. The 2x2 says nothing, because
@@ -4857,16 +4908,39 @@ function dragName(event, element, from) {
   element.onpointercancel = () => finish(false);
 }
 
+//: As big as a room is ever allowed to get, in room units. Only a
+//: runaway drag reaches it; it is here so one cannot leave a room
+//: ten thousand desks wide that nothing can be fitted to again.
+const ROOM_MAX = 12000;
+
 function clampShape(section, spec, x, y) {
-  /* Inside the canvas, snapped to the grid. `hi` is floored at `lo` for
-     a table wider than the room it is in, where the two bounds cross
-     and a plain min/max flings it off the left edge. */
-  const size = section.canvas || { width: 1000, height: 700 };
-  const fit = (v, extent, span) => {
-    const lo = span / 2, hi = Math.max(lo, extent - span / 2);
-    return Math.min(Math.max(Math.round(v / GRID) * GRID, lo), hi);
+  /* Snapped to the grid, and inside a room that gets out of the way.
+
+     It used to clamp to `section.canvas`, which starts at 1200 by 800
+     -- about four tables across. That is not a canvas, it is a pen,
+     and it was the whole reason furniture could not be put down from
+     one side of the window to the other.
+
+     So the right and bottom edges move when something is dragged past
+     them. Left and top cannot: the origin is fixed at (0, 0) and
+     moving it would move every shape, every seat anchor and every
+     label in the room to keep them still. Nothing needs it -- the
+     room grows away from the corner you start in.
+
+     The room's size is only ever this clamp. Fitting and centring
+     both measure the *content*, so a room with acres of nothing to
+     the right still frames itself on the desks. */
+  const size = section.canvas || (section.canvas = { width: 1200,
+                                                     height: 800 });
+  const fit = (v, span, axis) => {
+    const lo = span / 2;
+    const want = Math.max(lo, Math.round(v / GRID) * GRID);
+    const edge = want + span / 2;
+    if (edge > size[axis])
+      size[axis] = Math.min(ROOM_MAX, Math.ceil(edge / GRID) * GRID);
+    return Math.min(want, Math.max(lo, size[axis] - span / 2));
   };
-  return [fit(x, size.width, spec.w), fit(y, size.height, spec.h)];
+  return [fit(x, spec.w, "width"), fit(y, spec.h, "height")];
 }
 
 function dragShape(event, section, shape) {
@@ -4877,6 +4951,8 @@ function dragShape(event, section, shape) {
   // Held space means "move the view", whatever the pointer is over.
   // Letting this run would move the thing instead of the room.
   if (spaceDown) return;
+  const owner = groupFor(section, shape);
+  if (addToBand(event, owner ? owner.id : shape.id)) return;
   event.preventDefault();
   const spec = seatingState.shapes[shape.kind];
   if (!spec) return;
@@ -5445,15 +5521,24 @@ function twoFinger(event) {
   return true;
 }
 
-function zoomBy(step) {
+function zoomNow() {
   const section = currentSection();
-  if (!section) return;
+  if (!section) return 1;
   const area = (drawn.box && drawn.box.w) ? drawn.box : contentBox(section);
+  return seatingZoom === null ? fitZoom(seatingPaper(), area) : seatingZoom;
+}
+
+function zoomBy(step) {
   // Proportional, not additive: a tenth of a point is a third of the
   // picture at 30% and a fortieth of it at 400%.
-  const now = seatingZoom === null
-    ? fitZoom(seatingPaper(), area) : seatingZoom;
-  const next = Math.min(4, Math.max(0.15, now * (step > 0 ? 1.25 : 0.8)));
+  zoomTo(zoomNow() * (step > 0 ? 1.25 : 0.8));
+}
+
+function zoomTo(want) {
+  const section = currentSection();
+  if (!section) return;
+  const now = zoomNow();
+  const next = Math.min(4, Math.max(0.15, want));
   /* Zoom about the middle of the window, so whatever you were looking
      at is still in front of you afterwards. Both the home position and
      the pan scale with the zoom, so holding the middle fixed works out
@@ -5643,8 +5728,21 @@ function sizeSeating() {
    `loadSeating` when the tab opens and otherwise knows nothing about
    what is in here. */
 function wireSeating() {
+  watchPalette();
   document.getElementById("seat-in").onclick = () => zoomBy(1);
   document.getElementById("seat-out").onclick = () => zoomBy(-1);
+
+  /* The wheel zooms, up for in. Continuous rather than in the
+     buttons' steps, because a wheel reports how far it was turned
+     and throwing that away makes a trackpad feel like a ratchet.
+
+     `passive: false`, or the browser scrolls the page underneath and
+     the preventDefault is ignored. */
+  seatingPaper().addEventListener("wheel", e => {
+    if (!seatingRoom || showing() || numbering) return;
+    e.preventDefault();
+    zoomTo(zoomNow() * Math.exp(-e.deltaY * 0.0016));
+  }, { passive: false });
   document.getElementById("seat-zoom").onclick = () => {
     refit();
     const section = currentSection();
@@ -5696,15 +5794,27 @@ function wireSeating() {
      the view" -- the first for touch, the others for a pointer.
      Anything else draws a band, in the modes that have one, and
      falls back to panning in the modes that do not. */
+  /* Panning is claimed in the **capture** phase, before anything on
+     the canvas can see the press at all.
+
+     Moving the test to the top of the bubble handler was not enough.
+     A dozen things on the paper stop propagation on `pointerdown` --
+     badges, grips, the spinner, the pin -- and any one of them ends
+     the event before it reaches the paper, so whether the pan key
+     worked depended on what happened to be under the pointer. In
+     capture the paper goes first by definition, and nothing
+     downstream gets a say. */
+  seatingPaper().addEventListener("pointerdown", e => {
+    if (e.pointerType === "touch") return;         // two fingers, below
+    if (!spaceDown && e.button !== 1) return;
+    if (showing() || walking) return;
+    e.stopPropagation();
+    panPaper(e);
+  }, true);
+
   seatingPaper().addEventListener("pointerdown", e => {
     if (e.pointerType === "touch" && twoFinger(e)) return;
     if (walking && walkPointer(e)) return;
-    /* The pan key wins over everything, including whatever is under
-       the pointer. It used to be tested *after* the check below, so
-       space only panned from genuinely bare paper -- and in a full
-       room almost none of the canvas is bare, which is what made
-       panning look broken rather than merely limited. */
-    if (spaceDown || e.button === 1) { panPaper(e); return; }
     if (e.target.closest(".shape, .seatcard, .pill, .grip, .spinner")) return;
     if (bandPaper(e)) return;
     panPaper(e);
@@ -5729,10 +5839,22 @@ function wireSeating() {
     spaceDown = true;
     seatingPaper().classList.add("panready");
   });
-  document.addEventListener("keyup", e => {
-    if (e.key !== " ") return;
+  /* Let go of it on anything that could mean the key was released
+     while this window was not listening. A stuck pan key leaves the
+     canvas unable to select anything, with no visible cause and no
+     way back -- which is a far worse failure than missing a keyup. */
+  const letGo = () => {
+    if (!spaceDown) return;
     spaceDown = false;
     seatingPaper().classList.remove("panready");
+  };
+  document.addEventListener("keyup", e => { if (e.key === " ") letGo(); });
+  document.addEventListener("visibilitychange", letGo);
+  // A keydown of anything else while space is supposedly held means
+  // the keyup for space went somewhere this window never saw.
+  document.addEventListener("keydown", e => {
+    if (e.key !== " " && !e.repeat && spaceDown && !e.ctrlKey && !e.metaKey)
+      letGo();
   });
   window.addEventListener("blur", () => {
     spaceDown = false;

@@ -801,12 +801,16 @@
               opacity calc(var(--out-time) * .7) var(--out-curve),
               padding var(--out-time) var(--out-curve);
 }
+/* Scrollable only once it has finished opening. While the height is
+   animating the content is taller than the box, so `auto` put a
+   scrollbar on screen for the length of the transition and took it
+   away again at the end. `.settled` is added on `transitionend`. */
+.palette.open.settled { overflow-y: auto; }
 .palette.open {
   transition: max-height var(--in-time) var(--in-curve),
               opacity var(--in-time) var(--in-curve),
               padding var(--in-time) var(--in-curve);
   max-height: min(var(--full, 320px), calc(100% - 140px));
-  overflow-y: auto;
   opacity: 1;
   padding: 5px;
   border-color: var(--isle-line);
@@ -883,6 +887,10 @@
   display: flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 700; color: var(--isle-dim);
 }
+/* A triangle's middle is not its centre of area: two thirds of the
+   way down is where it looks middled, and the apex squeezes a
+   centred glyph against the sloping sides. */
+.desktile.triangle .tileone { align-items: flex-end; padding-bottom: 5px; }
 .deskopt:hover .tileone { color: var(--isle-ink); }
 
 /* Dragged off the palette: the shape, following the pointer, growing
@@ -960,12 +968,31 @@
   outline-offset: 1px;
 }
 
+/* The selection rectangle, and the handles that sit on it.
+
+   `--pick-out` is how far outside the desk it runs, and it is used
+   by both -- a handle centred on the *desk* rather than on the
+   rectangle is 1.5px from it along an edge and much further at a
+   corner, because the corner of the rectangle is out diagonally.
+   That uneven gap was the thing that looked like a mistake.
+
+   `--pick-line` is the one line weight. The rectangle was 1.5 and
+   the handles 2, which at any zoom reads as two different tools
+   drawn by two different people.
+
+   The radius is the desk's own 14 plus the offset, so the rectangle
+   is concentric with what it surrounds instead of turning a much
+   tighter corner than the thing inside it. */
+.deskwrap.chosen {
+  --pick-out: 7px;
+  --pick-line: 1.5px;
+}
 .deskwrap.chosen::before {
   content: "";
   position: absolute;
-  inset: -7px;
-  border: 1.5px solid var(--solid);
-  border-radius: 7px;
+  inset: calc(var(--pick-out) * -1);
+  border: var(--pick-line) solid var(--solid);
+  border-radius: calc(14px + var(--pick-out));
   pointer-events: none;
 }
 /* While a seat is being dragged over it in Seats mode. */
@@ -1086,7 +1113,7 @@
   margin: -5.5px 0 0 -5.5px;
   border-radius: 50%;
   background: white;
-  border: 2px solid var(--solid);
+  border: var(--pick-line, 1.5px) solid var(--solid);
   z-index: 4;
 }
 .grip-n, .grip-s { cursor: ns-resize; }
@@ -1096,14 +1123,16 @@
 
 /* Above the desk, on a stalk, which is where every tool that rotates
    anything puts it. */
+/* Far enough above the rectangle that the stalk is a stalk and not
+   a nick in the outline. */
 .spinner {
   position: absolute;
-  left: 50%; top: -30px;
+  left: 50%; top: calc(-30px - var(--pick-out, 7px));
   width: 15px; height: 15px;
   margin-left: -7.5px;
   border-radius: 50%;
   background: var(--solid);
-  border: 2px solid white;
+  border: var(--pick-line, 1.5px) solid white;
   cursor: grab;
   z-index: 4;
 }
@@ -1111,8 +1140,9 @@
   content: "";
   position: absolute;
   left: 50%; top: 100%;
-  width: 2px; height: 18px;
-  margin-left: -1px;
+  width: var(--pick-line, 1.5px);
+  height: calc(18px + var(--pick-out, 7px));
+  margin-left: calc(var(--pick-line, 1.5px) / -2);
   background: var(--solid);
 }
 .spinner:active { cursor: grabbing; }
