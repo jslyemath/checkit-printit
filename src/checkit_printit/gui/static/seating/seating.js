@@ -134,6 +134,10 @@ let spaceDown = false;
 //: Whether the pointer is over the canvas. The pan key is a question
 //: about the pointer, not about what has keyboard focus.
 let pointerOnPaper = false;
+//: True only while a group label is being moved. The nine anchor
+//: dots are that gesture's feedback and nothing else's, and the
+//: resize handles stand down while it runs.
+let placingLabel = false;
 
 /* How the stack is ordered: group by group, or seat by seat.
 
@@ -281,10 +285,17 @@ const ICON = {
   // A person with a plus. Adding one is roster work, so this row
   // leads out of the canvas rather than doing something on it.
   personadd: "M3.5 20a5.5 5.5 0 0 1 11 0|O9,8,3.2|M17 13.5v5|M14.5 16h5",
-  // Two shapes closing on each other, and two coming apart. The
-  // arrows carry the direction; the bars are what is being joined.
-  merge: "M3 12h5|M21 12h-5|M7 9l3 3-3 3|M17 9l-3 3 3 3|R11,4,2,16,1",
-  split: "M2 12h5|M22 12h-5|M6 9l-3 3 3 3|M18 9l3 3-3 3|R11,4,2,16,1",
+  /* Two table edges, and a fat arrow between them.
+
+     The first pair put a bar down the middle with two thin arrows
+     either side, which at 17px is five grey marks and no shape. The
+     edges are brackets now -- `]` and `[`, which is what the end of
+     a table looks like from above -- and there is one arrow each
+     side, short and thick enough to read as a direction. */
+  merge: "M4 4h3v16H4|M20 4h-3v16h3"
+    + "|M8.4 8.8L11 12l-2.6 3.2|M15.6 8.8L13 12l2.6 3.2",
+  split: "M4 4h3v16H4|M20 4h-3v16h3"
+    + "|M11 8.8L8.4 12l2.6 3.2|M13 8.8l2.6 3.2-2.6 3.2",
   // Three dots: the overflow menu, which is what this corner is in
   // the modes that open a list rather than add a thing. Vertical,
   // which is also the direction the list unrolls.
@@ -1404,7 +1415,8 @@ function drawRoom(section) {
       box.tabIndex = 0;
       box.onkeydown = e => nudgeShape(e, section, shape);
       box.onpointerdown = e => dragShape(e, section, shape);
-      if (isSelected(group, shape) || isSelected(null, shape))
+      if (!placingLabel
+          && (isSelected(group, shape) || isSelected(null, shape)))
         addHandles(wrap, section, shape);
     } else if (seatingMode === "seats") {
       // The desk itself, not its group: this mode is about the
@@ -1613,7 +1625,15 @@ function drawRoom(section) {
      Drawn inside each desk's own wrap, as percentages of it, so they
      move and turn with the desk. Tracked separately they were the
      elements that stayed behind when a desk was dragged. */
-  if (showLabels && selected && selected.kind === "group") {
+  /* Only while a label is actually being dragged.
+
+     They used to show whenever a group was selected, which put nine
+     white dots on exactly the nine points the eight resize handles
+     occupy -- two sets of handles on one desk, which is what that
+     looked like. They are feedback for one gesture, so they belong
+     to that gesture, and the handles stand down for its duration. */
+  if (showLabels && placingLabel && selected
+      && selected.kind === "group") {
     const group = groupsOf(section).find(g => g.id === selected.id);
     const at = group && group.label_at;
     for (const shape of group ? shapesHolding(section, group) : []) {
@@ -2234,7 +2254,11 @@ function dragLabel(event, tag, section, group, ids, where) {
   }
   lastLabelTap = { id: group.id, at: now };
 
+  // Up for the length of the gesture: it is what puts the anchors on
+  // screen and takes the resize handles off.
+  placingLabel = true;
   if (!isSelected(group, null)) choose(group, null);
+  else renderSeating();
 
   // `choose` re-drew, so the element under the pointer is a new one.
   const live = (drawn.labels.find(l => l.group.id === group.id) || {}).el || tag;
@@ -2278,7 +2302,12 @@ function dragLabel(event, tag, section, group, ids, where) {
 
   const finish = commit => {
     live.onpointermove = live.onpointerup = live.onpointercancel = null;
-    if (!moved) { live.classList.remove("dragging"); return; }
+    placingLabel = false;
+    if (!moved) {
+      live.classList.remove("dragging");
+      renderSeating();            // take the anchors back off
+      return;
+    }
     if (!commit || !best) { live.classList.remove("dragging"); renderSeating(); return; }
 
     /* Fly home rather than appear there. The anchor it chose is a
@@ -5723,11 +5752,37 @@ function zoomBy(step) {
   zoomTo(zoomNow() * (step > 0 ? 1.25 : 0.8));
 }
 
-function zoomTo(want) {
+function zoomTo(want, at) {
+  /* `at` is a point on screen to hold still -- the pointer, for the
+     wheel. Without it the zoom is about the middle of the window,
+     which is right for the buttons and wrong for a wheel: what you
+     are pointing at is what you want to get closer to, and every
+     other canvas works that way.
+
+     The room point under the cursor is found before the change and
+     put back under it afterwards by solving for `pan`, which is the
+     only unknown in where the box lands. */
   const section = currentSection();
   if (!section) return;
   const now = zoomNow();
   const next = Math.min(4, Math.max(0.15, want));
+  if (at && next !== now) {
+    const paper = seatingPaper();
+    const pr = paper.getBoundingClientRect();
+    const box = document.getElementById("canvasbox").getBoundingClientRect();
+    const area = (drawn.box && drawn.box.w) ? drawn.box : contentBox(section);
+    const band = freeBand(paper);
+    const cx = at[0] - pr.left, cy = at[1] - pr.top;
+    // Where in the unscaled room the pointer is, measured from the
+    // box's own corner.
+    const rx = (cx - (box.left - pr.left)) / now;
+    const ry = (cy - (box.top - pr.top)) / now;
+    seatingZoom = next;
+    pan.x = cx - rx * next - band.x - (band.w - area.w * next) / 2;
+    pan.y = cy - ry * next - band.y - (band.h - area.h * next) / 2;
+    applyZoom(section);
+    return;
+  }
   /* Zoom about the middle of the window, so whatever you were looking
      at is still in front of you afterwards. Both the home position and
      the pan scale with the zoom, so holding the middle fixed works out
@@ -5930,7 +5985,8 @@ function wireSeating() {
   seatingPaper().addEventListener("wheel", e => {
     if (!seatingRoom || showing() || numbering) return;
     e.preventDefault();
-    zoomTo(zoomNow() * Math.exp(-e.deltaY * 0.0016));
+    zoomTo(zoomNow() * Math.exp(-e.deltaY * 0.0016),
+           [e.clientX, e.clientY]);
   }, { passive: false });
   document.getElementById("seat-zoom").onclick = () => {
     refit();

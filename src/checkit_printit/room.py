@@ -63,11 +63,16 @@ ANCHORS = ("nw", "n", "ne", "w", "c", "e", "sw", "s", "se")
 #: the shape when it is added and can be dragged from there. Changing this
 #: table does not reach back into a room already drawn.
 SHAPES = {
-    # Brought in horizontally so a one-seat desk is not just a
-    # smaller version of the table's silhouette. Not square -- a card
-    # is 104 wide and has to fit on it -- but squarer.
+    # Squarer than the table, so a one-seat desk is not just a
+    # smaller version of the same silhouette.
+    #
+    # **112 is the floor across.** A name card is 104 wide and sits
+    # *on* the desk rather than inside it, so anything narrower has
+    # the card hanging over both edges. The squaring is therefore
+    # done by growing the other way: 112 by 96 reads as 7:6, where
+    # the first draft's 124 by 78 read as 8:5.
     "desk": {
-        "label": "desk", "w": 112, "h": 80, "css": "rect",
+        "label": "desk", "w": 112, "h": 96, "css": "rect",
         "seats": [(0, 0)],
     },
     "table-1x2": {
