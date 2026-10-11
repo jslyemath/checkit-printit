@@ -292,10 +292,24 @@ const ICON = {
      edges are brackets now -- `]` and `[`, which is what the end of
      a table looks like from above -- and there is one arrow each
      side, short and thick enough to read as a direction. */
-  merge: "M4 4h3v16H4|M20 4h-3v16h3"
-    + "|M8.4 8.8L11 12l-2.6 3.2|M15.6 8.8L13 12l2.6 3.2",
-  split: "M4 4h3v16H4|M20 4h-3v16h3"
-    + "|M11 8.8L8.4 12l2.6 3.2|M13 8.8l2.6 3.2-2.6 3.2",
+  /* Two table ends and a solid arrow laid over each.
+
+     The ends are brackets with the corner radius the desks actually
+     have, drawn as a path so the curve is in the geometry rather
+     than in a fat stroke. Each end is broken where its arrow
+     crosses it -- a short gap, so the arrow reads as a separate
+     solid object on top rather than as part of the outline.
+
+     The arrows are filled triangles, which is the only way a
+     direction survives at 17px; two thin chevrons were a smudge. */
+  merge: "M8 4.6H6.5a2.4 2.4 0 0 0-2.4 2.4v2.6|M4.1 14.4V17a2.4 2.4 0"
+    + " 0 0 2.4 2.4H8|M16 4.6h1.5a2.4 2.4 0 0 1 2.4 2.4v2.6"
+    + "|M19.9 14.4V17a2.4 2.4 0 0 1-2.4 2.4H16"
+    + "|FM2.6 8.4L8.2 12L2.6 15.6Z|FM21.4 8.4L15.8 12L21.4 15.6Z",
+  split: "M8 4.6H6.5a2.4 2.4 0 0 0-2.4 2.4v2.6|M4.1 14.4V17a2.4 2.4 0"
+    + " 0 0 2.4 2.4H8|M16 4.6h1.5a2.4 2.4 0 0 1 2.4 2.4v2.6"
+    + "|M19.9 14.4V17a2.4 2.4 0 0 1-2.4 2.4H16"
+    + "|FM8.2 8.4L2.6 12L8.2 15.6Z|FM15.8 8.4L21.4 12L15.8 15.6Z",
   // Three dots: the overflow menu, which is what this corner is in
   // the modes that open a list rather than add a thing. Vertical,
   // which is also the direction the list unrolls.
@@ -423,7 +437,14 @@ const BUILT = new Set(["people", "groups", "seats", "printing"]);
 function svgIcon(spec) {
   /* A tiny path language, so an icon is one string in `ICON` rather
      than six lines of createElementNS at each use. `Ox,y,r` is a
-     circle, `Rx,y,w,h,r` a rounded rect, anything else a path. */
+     circle, `Rx,y,w,h,r` a rounded rect, `F` followed by path data a
+     *filled* path, and anything else a stroked path.
+
+     The filled case earns itself on the merge and split glyphs: an
+     arrowhead has to be solid to read as a direction at 17px, and
+     the rest of the same glyph has to stay line art to match every
+     other icon here. One part of one icon cannot be styled from the
+     stylesheet, because the parts have no names. */
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
@@ -444,6 +465,16 @@ function svgIcon(spec) {
       node.setAttribute("width", w);
       node.setAttribute("height", h);
       node.setAttribute("rx", r);
+    } else if (part.startsWith("F")) {
+      node = document.createElementNS(NS, "path");
+      node.setAttribute("d", part.slice(1));
+      /* Style, not attribute. Every rule that paints these icons
+         sets `fill: none` on the `svg`, and a presentation
+         attribute on a child loses to an inherited style -- so the
+         filled parts came out invisible. An inline style on the
+         child wins. */
+      node.style.fill = "currentColor";
+      node.style.stroke = "none";
     } else {
       node = document.createElementNS(NS, "path");
       node.setAttribute("d", part);
@@ -2505,6 +2536,13 @@ function drawStrip(section) {
        was a sentence beside a badge -- two ways of saying a number
        sitting next to each other, which is most of what made the strip
        look assembled rather than designed. */
+    /* Only while the stack is ordered by group.
+
+       By seat there is no such thing as this group's place -- the
+       stack crosses tables, and a group's position in it is not a
+       number that exists. Offering one to edit would be offering to
+       set something nothing reads. */
+    if (printBy() === "seat") return;
     const line = printOrder(section);
     const at = line.indexOf(group) + 1;
     const ord = count("printer", at + "/" + line.length,
@@ -2788,13 +2826,31 @@ function drawSeatStrip(strip, section, seat) {
   strip.appendChild(seatBit);
 
   if (seat.version) {
-    const printBit = el("span", "scount");
-    printBit.title = "The version of the paper that prints for this seat";
+    const printBit = el("span", "scount typable");
+    printBit.title = "The version that prints for this seat. Click to change";
     printBit.appendChild(svgIcon(ICON.printer));
     const v = el("span", "vchip", seat.version);
     tint(v, hueOf(section, group), chromaOf(group));
     printBit.appendChild(v);
+    printBit.onclick = () => editVersion(printBit, section, seat);
     strip.appendChild(printBit);
+  }
+
+  /* Where this seat comes in the stack -- but only when the stack is
+     ordered by seat, because that is the only plan in which a single
+     seat has a place of its own. By group a seat's position is its
+     group's, and the group strip is where that is said. */
+  if (printBy() === "seat") {
+    const run = roomRun(section);
+    const at = run.indexOf(seat.id) + 1;
+    if (at > 0) {
+      const spot = count("howmany", at + "/" + run.length,
+                         `Prints ${at} of ${run.length}. Click to change`);
+      spot.classList.add("typable");
+      spot.onclick = () => editRoomSpot(spot, section, seat, at);
+      strip.appendChild(el("span", "isep"));
+      strip.appendChild(spot);
+    }
   }
 
   if (shape) {
@@ -2808,6 +2864,66 @@ function drawSeatStrip(strip, section, seat) {
     kill.onclick = () => removeChair(section, shape, seat);
     strip.appendChild(kill);
   }
+}
+
+function editVersion(node, section, seat) {
+  /* Type a version letter. Validated against the room's own list,
+     because a letter nothing prints is worse than no change: the
+     chart would name a version the build has never heard of. */
+  const letters = (seatingRoom && seatingRoom.versions) || [];
+  const input = el("input", "srename sorder");
+  input.type = "text";
+  input.value = seat.version || "";
+  input.size = 2;
+  node.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const settle = keep => {
+    if (done) return;
+    done = true;
+    const want = input.value.trim().toUpperCase();
+    if (keep && want && letters.includes(want)) seat.version = want;
+    else if (keep && want)
+      toast(`There is no version ${want}. The room has `
+            + letters.join(", ") + ".", true);
+    renderSeating();
+  };
+  input.onblur = () => settle(true);
+  input.onkeydown = e => {
+    if (e.key === "Enter") { e.preventDefault(); settle(true); }
+    if (e.key === "Escape") {
+      e.preventDefault(); e.stopPropagation(); settle(false);
+    }
+  };
+}
+
+function editRoomSpot(node, section, seat, now) {
+  /* Type a place in the whole-room stack. The same remove-and-insert
+     `reorderSeat` and `reorderGroup` use, so there is one rule for
+     "put it here" and no arithmetic on the numbers to get wrong. */
+  const input = el("input", "srename sorder");
+  input.type = "text";
+  input.inputMode = "numeric";
+  input.value = String(now);
+  node.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const settle = keep => {
+    if (done) return;
+    done = true;
+    const want = parseInt(input.value, 10);
+    if (keep && Number.isFinite(want)) reorderRoomSeat(section, seat, want);
+    else renderSeating();
+  };
+  input.onblur = () => settle(true);
+  input.onkeydown = e => {
+    if (e.key === "Enter") { e.preventDefault(); settle(true); }
+    if (e.key === "Escape") {
+      e.preventDefault(); e.stopPropagation(); settle(false);
+    }
+  };
 }
 
 function count(icon, value, why) {
@@ -4142,7 +4258,28 @@ function showOpen() {
        sitting still -- which is the jitter: a fast move, then a
        stall, then the padding and the fade finishing on their own
        schedule. Measured, every property lands together. */
-    node.style.setProperty("--full", node.scrollHeight + 10 + "px");
+    /* Measured with the cap off.
+
+       Two ratchets lived here. `scrollHeight` includes the padding
+       when the drawer is open and not when it is shut, so a flat
+       `+10` made an open measurement ten pixels too tall -- and the
+       Printing menu re-measures on every press of the by-group
+       switch, so it grew ten pixels a press. Adding the padding
+       only when closed fixed that and left the other: `scrollHeight`
+       is a whole number, so a drawer capped at its own rounded-down
+       height measures one pixel shorter next time, and the menu
+       shrank a pixel a press instead.
+
+       Both go away by measuring what the contents actually want
+       rather than what they have been allowed. The cap comes off,
+       the height is read, the cap goes back on -- all before the
+       frame is painted, so nothing flashes. */
+    const capped = node.style.maxHeight;
+    node.style.maxHeight = "none";
+    const pad = node.classList.contains("open") ? 0 : 10;
+    const full = node.scrollHeight + pad;
+    node.style.maxHeight = capped;
+    node.style.setProperty("--full", full + "px");
     node.classList.toggle("open", open);
   }
   const plus = document.getElementById("seat-plus");
@@ -5437,9 +5574,15 @@ function placeBox(zoom, area) {
   const band = freeBand(paper);
   const w = area.w * zoom, h = area.h * zoom;
   clampPan(paper, band, w, h);
+  /* Not rounded. A whole-pixel position loses up to half a pixel
+     each time it is set, and zooming at the pointer reads the
+     position back to work out what is under the cursor -- so the
+     loss went round the loop and the point crept, about two room
+     units over eight wheel clicks. Sub-pixel positions cost nothing
+     and the drift is gone. */
   const box = document.getElementById("canvasbox");
-  box.style.left = Math.round(band.x + (band.w - w) / 2 + pan.x) + "px";
-  box.style.top = Math.round(band.y + (band.h - h) / 2 + pan.y) + "px";
+  box.style.left = (band.x + (band.w - w) / 2 + pan.x).toFixed(2) + "px";
+  box.style.top = (band.y + (band.h - h) / 2 + pan.y).toFixed(2) + "px";
   paintPaper(zoom);
 }
 
@@ -5767,20 +5910,53 @@ function zoomTo(want, at) {
   const now = zoomNow();
   const next = Math.min(4, Math.max(0.15, want));
   if (at && next !== now) {
-    const paper = seatingPaper();
-    const pr = paper.getBoundingClientRect();
-    const box = document.getElementById("canvasbox").getBoundingClientRect();
-    const area = (drawn.box && drawn.box.w) ? drawn.box : contentBox(section);
-    const band = freeBand(paper);
-    const cx = at[0] - pr.left, cy = at[1] - pr.top;
-    // Where in the unscaled room the pointer is, measured from the
-    // box's own corner.
-    const rx = (cx - (box.left - pr.left)) / now;
-    const ry = (cy - (box.top - pr.top)) / now;
+    /* Zoom, then put the point back where it was.
+
+       The first version solved for `pan` from the same arithmetic
+       `placeBox` uses, which ought to be exact and was not: it left
+       about an eighth of a pixel a click, always the same way, so
+       ten clicks walked the thing under the cursor off it. The
+       error is somewhere in the two sides disagreeing by a
+       sub-pixel about where the box is -- a measured rect is
+       snapped to the device grid, a computed one is not -- and
+       chasing it is less reliable than not depending on it.
+
+       So: note the room point under the cursor, change the zoom,
+       ask where that point went, and shift `pan` to bring it back.
+
+       **Repeated until it stops moving**, which is the part that
+       matters. One pass left about a seventh of a room unit a
+       click -- a sixth of a screen pixel, always the same way, so
+       ten clicks walked the thing under the cursor visibly off it.
+       Measuring and correcting is a fixed point: each pass divides
+       whatever is left by a large factor, and two or three reach
+       the hundredth of a pixel this stops at. It does not matter
+       which of the measurements is the inaccurate one, which is
+       the advantage over solving it in closed form -- that version
+       had to be right about every rect in the chain, and was not.
+
+       Three layout passes at worst, on a wheel click. */
+    const was = roomPoint({ clientX: at[0], clientY: at[1] });
     seatingZoom = next;
-    pan.x = cx - rx * next - band.x - (band.w - area.w * next) / 2;
-    pan.y = cy - ry * next - band.y - (band.h - area.h * next) / 2;
     applyZoom(section);
+    for (let pass = 0; pass < 5; pass++) {
+      /* Where that room point is drawing now, in screen pixels, and
+         how far that is from the cursor. `pan` is in screen pixels
+         too, so the gap goes straight into it -- no conversion, and
+         so nothing to get the scale of wrong. The first attempt
+         measured the error in room units and multiplied, which is
+         dimensionally right and left a residue every pass, so the
+         loop had nothing to converge on. */
+      const canvas = seatingCanvas().getBoundingClientRect();
+      const z = canvasScale();
+      const area = drawn.box || { x: 0, y: 0 };
+      const dx = at[0] - (canvas.left + (was[0] - area.x) * z);
+      const dy = at[1] - (canvas.top + (was[1] - area.y) * z);
+      if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) break;
+      pan.x += dx;
+      pan.y += dy;
+      applyZoom(section);
+    }
     return;
   }
   /* Zoom about the middle of the window, so whatever you were looking

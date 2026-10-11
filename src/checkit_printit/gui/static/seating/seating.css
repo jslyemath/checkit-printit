@@ -31,6 +31,16 @@
   --isle-ink:  oklch(0.955 0.004 260);
   --isle-dim:  oklch(0.700 0.010 260);
   --isle-key:  oklch(0.820 0.115 165);
+  /* What the canvas marks things with.
+
+     The accent is the chrome's: it means "the state you are in" on
+     an island, and on the paper it lands next to whatever colours
+     the groups happen to be and clashes with them. Nothing drawn on
+     the canvas may use it. This is the one grey that says "this is
+     the thing in question" -- a selection, a band, the desk a seat
+     would move to, the badge a version would trade with, the canvas
+     a shape would land on. */
+  --mark:      oklch(0.470 0.010 260);
   --isle-key-ink: oklch(0.230 0.040 165);
 
   --isle-shadow: 0 6px 22px oklch(0.2 0.02 260 / .30),
@@ -530,7 +540,10 @@
 .strip .swatch.flat { border-color: transparent; }
 /* The seat's own letter: the heading of this strip, the way the
    group's name is the heading of the other one. */
-.strip .seatletter { font-size: 15px; font-weight: 800;
+/* Regular weight. Two bold characters side by side shouted at each
+   other and said nothing about which was which; the chair and the
+   printer beside them already say that. */
+.strip .seatletter { font-size: 14px; font-weight: 400;
                      min-width: 13px; text-align: center; }
 /* The version, in the circle it wears on the canvas. */
 .strip .vchip {
@@ -538,7 +551,7 @@
   display: flex; align-items: center; justify-content: center;
   border-radius: 50%;
   background: oklch(0.585 calc(0.155 * var(--c, 1)) var(--h, 255));
-  color: white; font-size: 12px; font-weight: 800;
+  color: white; font-size: 12px; font-weight: 400;
 }
 /* The name is the point of this strip, so it is the one thing in it
    allowed to be bigger than the row. */
@@ -917,7 +930,7 @@
   fill: oklch(0.935 0 255); stroke: oklch(0.760 0 255); stroke-width: 2.5;
 }
 /* The canvas says it will take it. */
-.paper.dropping { outline: 2px solid var(--isle-key); outline-offset: -2px; }
+.paper.dropping { outline: 2px solid var(--mark); outline-offset: -2px; }
 
 /* ---------------------------------------------------------- the room -- */
 
@@ -973,23 +986,21 @@
    **One thing chosen wears its own colour**; a group's ring is that
    group's. **Several things wear grey**, because a band crosses
    groups and there is no one colour that could be theirs. */
-.deskwrap.banded {
-  --pick-ink: oklch(0.47 0.010 260);
-}
+.deskwrap.banded { --pick-ink: var(--mark); }
 .deskwrap.banded::before {
   content: "";
   position: absolute;
   inset: calc(var(--pick-out) * -1);
   border: var(--pick-line) solid var(--pick-ink);
   border-radius: calc(14px + var(--pick-out));
-  background: oklch(0.47 0.010 260 / .07);
+  background: oklch(0.470 0.010 260 / .07);
   pointer-events: none;
 }
 /* A card is a tenth the size of a desk, so the same 12 units of
    offset would swallow the gaps between neighbours. The ink and the
    weight are the ones above; only the distance is smaller. */
 .seatcard.banded {
-  outline: var(--pick-line, 2.5px) solid oklch(0.47 0.010 260);
+  outline: var(--pick-line, 2.5px) solid var(--mark);
   outline-offset: 4px;
 }
 
@@ -1052,12 +1063,17 @@
   pointer-events: none;
 }
 /* While a seat is being dragged over it in Seats mode. */
+/* The desk a dragged seat would move to. Dashed, because it is a
+   question rather than a state, and in the same grey and the same
+   geometry as every other mark -- it was a green dotted rectangle
+   with its own inset and radius, which made it a fourth kind of
+   selection rather than the same one asking something. */
 .deskwrap.adopting::before {
   content: "";
   position: absolute;
-  inset: -7px;
-  border: 2px dashed var(--isle-key);
-  border-radius: 7px;
+  inset: calc(var(--pick-out) * -1);
+  border: var(--pick-line) dashed var(--mark);
+  border-radius: calc(14px + var(--pick-out));
   background: oklch(0.82 0.115 165 / .12);
   pointer-events: none;
 }
@@ -1096,13 +1112,13 @@
    state it is in rather than a banner saying it. */
 .canvas .seatcard.tocount { cursor: pointer; }
 .canvas .seatcard.tocount:hover {
-  outline: 2.5px solid var(--isle-key); outline-offset: 2px;
+  outline: 2.5px solid var(--mark); outline-offset: 2px;
 }
 .canvas .seatcard.counted { opacity: .45; }
 /* The desk itself, for the same reason and with the same look. */
 .canvas .shape.tocount { cursor: pointer; }
 .canvas .deskwrap:has(.shape.tocount):hover .shape {
-  outline: 2.5px solid var(--isle-key); outline-offset: 3px;
+  outline: 2.5px solid var(--mark); outline-offset: 3px;
 }
 .canvas .shape.counted { opacity: .5; }
 /* Clicking a counted one takes it back out, so it has to look
@@ -1132,7 +1148,7 @@
 }
 /* The one it would trade with, lit while the pointer is near enough
    for the release to count. */
-.badge.swapping { outline: 2.5px solid var(--isle-key); outline-offset: 1px; }
+.badge.swapping { outline: 2.5px solid var(--mark); outline-offset: 1px; }
 
 /* Being retyped. White with a ring in the group's own color, which
    is what the label does -- the dark field this had before was the
@@ -1491,7 +1507,7 @@
    makes both exactly 1px on screen at every zoom. */
 #seat-guides { position: absolute; inset: 0; pointer-events: none;
                z-index: 4; }
-.guide { position: absolute; background: oklch(0.52 0.012 260); }
+.guide { position: absolute; background: var(--mark); }
 .guide.v { top: 0; bottom: 0; width: calc(1px / var(--z, 1)); }
 .guide.h { left: 0; right: 0; height: calc(1px / var(--z, 1)); }
 
