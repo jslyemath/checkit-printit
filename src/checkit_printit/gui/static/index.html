@@ -264,6 +264,12 @@
            corner, and a label pill. -->
       <button id="seat-versions" class="ibtn" title="Version letters"></button>
       <button id="seat-labels" class="ibtn" title="Group labels"></button>
+      <!-- The canvas background. With the two display switches rather
+           than with the zoom, because it is a question about how the
+           room is drawn and not about where the camera is -- and next
+           to the projector button, which is the reason anybody
+           changes it. -->
+      <button id="seat-bg" class="ibtn" title="Background"></button>
       <span class="isep"></span>
       <!-- Up Next. Here rather than in the mode rail, because it does
            not change what a click on the canvas means -- it changes
@@ -309,6 +315,10 @@
          The fourth and last of these to be built once and opened by a
          class rather than created where it is needed. -->
     <div id="seat-hues" class="isle drop hues" hidden></div>
+
+    <!-- The canvas backgrounds, unrolling down out of the island at
+         the top right. The fifth and last of the drawers. -->
+    <div id="seat-bgs" class="isle drop bgs" hidden></div>
 
     <!-- One more of whatever this mode is about: a group in Groups, a
          seat in Seats. Its own button in its own corner rather than

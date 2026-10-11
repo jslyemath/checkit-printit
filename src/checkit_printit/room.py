@@ -416,6 +416,18 @@ def ordered_groups(section):
     return out
 
 
+#: What the canvas can be tinted. **Not** "paper", which in this tool
+#: is the sheet that comes out of the printer -- `seat.version` picks
+#: one of those, and a field called `paper` sitting next to it would be
+#: read as the same question. The canvas is the background.
+#:
+#: A named set rather than a free color, because the group colors are
+#: designed against this surface: all four are light, and differ in
+#: lightness and warmth only. Somewhere to put a dark one would mean
+#: a second set of card colors, which is a larger decision than
+#: "the projector in this room runs blue".
+BACKGROUNDS = ("grey", "white", "warm", "cool")
+
 #: A name card in room units, which is what decides whether a group of
 #: seats counts as a line or as a ring. Matches `CARD_W`/`CARD_H` in
 #: `seating.js` and `.seatcard` in `seating.css`.
@@ -652,6 +664,15 @@ def check(room, known=None):
                 raise RoomError(
                     f"{where}: the canvas {side} is {canvas.get(side)!r}, "
                     f"which is not a size.")
+
+        # Per section, because two classes can meet in two rooms, and
+        # the projector in one of them is the reason to change this at
+        # all. Absent is the default, which is `grey`.
+        tint = canvas.get("background")
+        if tint is not None and tint not in BACKGROUNDS:
+            raise RoomError(
+                f"{where}: the background is {tint!r}. It is one of "
+                f"{', '.join(BACKGROUNDS)}.")
 
         # Whether this room's stack comes out group by group or seat
         # by seat. Per section, because one class may want handing a
