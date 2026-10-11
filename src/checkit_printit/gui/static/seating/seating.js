@@ -244,9 +244,32 @@ const ICON = {
      A map pin was the first try and is the wrong object -- a teardrop
      means "a place on a map", and this means "fixed down". Drawn
      rather than borrowed, so the weight matches the rest of the set. */
-  pin: "M13.73 3.19 L20.81 10.27 L18.27 12.81 L11.19 5.73 Z"
-    + "|M12.47 7.01 L16.99 11.53 L12.18 14.08 L9.92 11.82 Z"
-    + "|M11.69 13.59 L7.51 16.49 L10.41 12.31 Z",
+  /* A push pin driven in at an angle, solid, point to the lower left.
+
+     Three filled parts on one 45-degree axis, with the proportions a
+     real tack has rather than the ones that are easy to draw: a big
+     round head, a broad body about a third longer than the head, and
+     a needle longer than either and very thin. The first attempt made
+     the head a thin bar and the needle a stub, which read as an arrow
+     or a trowel -- the head has to be the heaviest thing in the glyph
+     or the eye does not find the tack in it.
+
+     A circle for the head was the second attempt and read as a
+     lollipop: a disc is as long as it is wide, and a tack's cap is a
+     *flat* thing seen nearly edge on -- wide across the axis, short
+     along it. Short and wide is what makes it a cap rather than a
+     ball -- a circle was tried twice and is a lollipop both times,
+     because a disc is as long as it is wide and a cap is not.
+
+     Four quads on one axis: cap, waist, body, needle. The waist is
+     what the first attempts were missing; without it the cap and the
+     body merge into one diamond and the thing reads as a trowel. The
+     cap is wider than the body is at its widest, which is what keeps
+     the eye going to the head rather than the middle. */
+  pin: "M16.46 15.46 L8.54 7.54 L12.43 5.07 L18.93 11.57 Z"
+    + "|M12.78 13.90 L10.10 11.22 L11.16 10.16 L13.84 12.84 Z"
+    + "|M9.25 18.15 L5.85 14.75 L8.47 9.59 L14.41 15.53 Z"
+    + "|M2.6 21.4 L8.22 17.12 L6.88 15.78 Z",
   /* A disc half filled: the background. The circle is stroked like
      every other icon here and the half is filled, which the DSL
      cannot say -- so the fill is a CSS rule on `#seat-bg svg path`.
@@ -261,7 +284,20 @@ const ICON = {
   more: "O12,5,1.7|O12,12,1.7|O12,19,1.7",
   // A die. The shuffle needed a glyph that is not the swap arrows,
   // which already mean "by group or by seat" one drawer over.
-  dice: "R4,4,16,16,3.5|O8.8,8.8,1.15|O12,12,1.15|O15.2,15.2,1.15",
+  /* A five-pip face. The pips are zero-length strokes rather than
+     circles: everything in this set is drawn with a round-capped
+     stroke and no fill, so a small `O` comes out a ring, and five
+     rings at this size are mush. A segment of nothing with a round
+     cap is a dot of exactly the stroke width. */
+  dice: "R2,2,20,20,4|M6.8 6.8h.6|M16.6 6.8h.6|M11.7 11.7h.6"
+    + "|M6.8 16.6h.6|M16.6 16.6h.6",
+  /* A chair with an arrow going in, and one with an arrow coming out.
+     The chair is the same object both times and only the arrow turns,
+     so the pair reads as one idea with a direction. */
+  seatall: "R12.5,4,7,5.5,1.6|R10.5,10.5,11,2.6,1.3|M12.5 19.5v-6.4"
+    + "|M19.5 19.5v-6.4|M1.8 12h6.4|M5.8 9.6L8.4 12l-2.6 2.4",
+  unseatall: "R12.5,4,7,5.5,1.6|R10.5,10.5,11,2.6,1.3|M12.5 19.5v-6.4"
+    + "|M19.5 19.5v-6.4|M8.4 12H2|M4.6 9.6L2 12l2.6 2.4",
   groups: "R3,4,18,7,1.5|R3,14,8,6,1.5|R14,14,7,6,1.5",
   upnext: "M20.5 4.5h-17A1.5 1.5 0 0 0 2 6v9a1.5 1.5 0 0 0 1.5 1.5H7v4"
     + "l5-4h8.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5z",
@@ -3971,31 +4007,25 @@ function peopleActions(section) {
   const out = [];
   if (waiting.length)
     out.push({
-      icon: "people",
-      label: waiting.length === 1 ? "Seat the one who is standing"
-                                  : `Seat all ${waiting.length} standing`,
-      why: "Fill the empty chairs, in the order the papers print.",
+      icon: "seatall", label: "Seat all",
+      why: `${waiting.length} standing`,
       go: () => fillSeats({ students: waiting }),
     });
   out.push({
-    icon: "dice", label: "Shuffle the room",
-    why: "Deal everybody who is sitting down into different chairs."
-      + (held.length ? "  Pinned seats stay as they are." : ""),
+    icon: "dice", label: "Shuffle room",
+    why: held.length ? `${held.length} pinned stay put` : "",
     go: () => shuffleSeats(),
   });
   if (seated)
     out.push({
-      icon: "chair", label: "Clear every chair",
-      why: "Stand everybody up. The room keeps its desks and groups."
-        + (held.length ? "  Pinned seats stay as they are." : ""),
+      icon: "unseatall", label: "Unseat all",
+      why: held.length ? `${held.length} pinned stay put` : "",
       go: () => fillSeats({ clear: true }),
     });
   if (held.length)
     out.push({
-      icon: "pin",
-      label: held.length === 1 ? "Unpin the one pinned seat"
-                               : `Unpin all ${held.length} seats`,
-      why: "Let everybody be moved and shuffled again.",
+      icon: "pin", label: "Unpin all", solid: true,
+      why: `${held.length} pinned`,
       go: () => {
         for (const seat of held) delete seat.pinned;
         renderSeating();
@@ -4007,8 +4037,8 @@ function peopleActions(section) {
      use to add a desk. In this app it goes to the Roster tab, which
      owns the list; in the standalone one it will open a form. */
   out.push({
-    icon: "personadd", label: "Add a person",
-    why: "Opens the roster, which is where the class list lives.",
+    icon: "personadd", label: "Add person",
+    why: "Opens the roster",
     go: () => { location.hash = "roster"; },
   });
   return out;
@@ -4093,6 +4123,9 @@ function drawPalette(section) {
          fifth one. The rule below it is the other half: the setting
          decides what the commands underneath say. */
       if (act.setting) b.classList.add("setting");
+      // A few glyphs are drawn as filled shapes rather than line
+      // art -- the push pin is a solid object, not an outline of one.
+      if (act.solid) b.classList.add("solidicon");
       b.onclick = () => { if (!act.setting) paletteOpen = false; act.go(); };
       pal.appendChild(b);
       if (act.setting) pal.appendChild(el("div", "actrule"));

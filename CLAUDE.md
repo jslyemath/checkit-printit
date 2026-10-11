@@ -418,6 +418,12 @@ blocks can say that. It is also what keeps `Chart.collisions` honest,
 since consecutive entries in a table's list are people sitting beside
 each other and consecutive entries in the *stack* are not.
 
+**Labels are a verb and its object: two words, three at a push.**
+"Seat all", "Shuffle room", "Unpin all". No counts, no sentences --
+those go in the tooltip, which is a fragment and not a sentence
+either. See `../checkit/PRINT_TOOL_DESIGN.md` 12.16, which exists
+because this was asked for three times.
+
 **`seats_of` is a view, not the seats.** It builds a fresh dict per
 seat carrying id, shape, student, version and absolute position, so it
 **drops `pinned`, `spot` and `order`**, and writes to what it returns
