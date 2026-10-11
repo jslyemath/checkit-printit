@@ -5685,6 +5685,14 @@ function bandKind() {
     : seatingMode === "seats" ? "seat" : null;
 }
 
+/* Whatever a single pointer started on the paper -- a pan or a band --
+   and how to call it off. Set while such a gesture is live; `twoFinger`
+   calls it when a second finger lands, because the one-finger gesture
+   is not what the user is doing any more. A plain teardown and not the
+   normal ending: ending a pan that never travelled clears the
+   selection, and a pinch is not a click on bare paper. */
+let endGesture = null;
+
 function bandPaper(event) {
   /* Drag a rectangle round things.
 
@@ -5727,6 +5735,11 @@ function bandPaper(event) {
     : groupsOf(currentSection()).map(g => g.id);
 
   const move = e => {
+    /* This pointer only. A second finger on the paper dispatches here
+       too, and its position was being read as this one having
+       travelled -- so a pinch in Groups or Seats stretched the band
+       out to the other finger instead of zooming. */
+    if (e.pointerId !== event.pointerId) return;
     const to = roomPoint(e);
     if (!moved && Math.hypot(to[0] - from[0], to[1] - from[1]) < 4) return;
     moved = true;
@@ -5749,11 +5762,19 @@ function bandPaper(event) {
     renderSeating();
   };
 
-  const done = () => {
+  // The teardown on its own, so a pinch can take the gesture away
+  // without also running what a finished band does.
+  const stop = () => {
     paper.removeEventListener("pointermove", move);
     paper.removeEventListener("pointerup", done);
     paper.removeEventListener("pointercancel", done);
     band.hidden = true;
+    if (endGesture === stop) endGesture = null;
+  };
+
+  const done = e => {
+    if (e && e.pointerId !== event.pointerId) return;
+    stop();
     if (!moved) {
       // A press that did not travel is a press on bare paper, which
       // has always meant "nothing is selected now".
@@ -5769,6 +5790,7 @@ function bandPaper(event) {
   paper.addEventListener("pointermove", move);
   paper.addEventListener("pointerup", done);
   paper.addEventListener("pointercancel", done);
+  endGesture = stop;
   return true;
 }
 
@@ -5799,6 +5821,15 @@ function panPaper(event) {
   try { paper.setPointerCapture(event.pointerId); } catch (err) { /* fine */ }
 
   const onMove = e => {
+    /* This pointer only.
+
+       Pointer capture does not do this for you: it redirects the
+       captured pointer to this element, it does not stop any other
+       pointer arriving here as well. So a second finger's position
+       was read as this one having travelled, and the room jumped by
+       the distance between the fingers -- a hundred and ten pixels
+       an event, measured. */
+    if (e.pointerId !== event.pointerId) return;
     const dx = e.clientX - from[0], dy = e.clientY - from[1];
     if (!moved && Math.abs(dx) + Math.abs(dy) < 4) return;
     moved = true;
@@ -5808,11 +5839,17 @@ function panPaper(event) {
     const section = currentSection();
     if (section) applyZoom(section);
   };
-  const done = () => {
+  const stop = () => {
     paper.removeEventListener("pointermove", onMove);
     paper.removeEventListener("pointerup", done);
     paper.removeEventListener("pointercancel", done);
     paper.classList.remove("panning");
+    if (endGesture === stop) endGesture = null;
+  };
+
+  const done = e => {
+    if (e && e.pointerId !== event.pointerId) return;
+    stop();
     if (moved) return;                   // it was a drag, not a click
     const wasOpen = closeDrawers();      // the plus, the modes, the menus
     if (wasOpen) showOpen();
@@ -5822,6 +5859,7 @@ function panPaper(event) {
       renderSeating();
     }
   };
+  endGesture = stop;
   paper.addEventListener("pointermove", onMove);
   paper.addEventListener("pointerup", done);
   paper.addEventListener("pointercancel", done);
@@ -5834,12 +5872,25 @@ function twoFinger(event) {
 
      The touch answer to the space bar, and the one every map and
      photo viewer has taught: one finger does the tool, two move the
-     view. Both at once, because a pinch that did not also pan would
-     zoom about the wrong point and feel like the picture running
-     away. */
+     view.
+
+     Panning and zooming are **one statement**, not two added
+     together: the room point under the midpoint of the fingers stays
+     under the midpoint of the fingers. Fingers that slide carry the
+     room; fingers that spread zoom about themselves; doing both does
+     both. The version this replaced added a translation and then
+     scaled `pan` by the zoom ratio, and scaling `pan` holds the
+     middle of the *window* still -- so a pinch anywhere but the
+     centre of the screen pulled the room out from under the hand.
+     Measured at a hundred and seventeen pixels over four moves. */
   const paper = seatingPaper();
   touching.set(event.pointerId, [event.clientX, event.clientY]);
   if (touching.size !== 2) return false;
+  /* The first finger started a pan or a band on its way in, and that
+     is not what is happening any more. Called off rather than left
+     to run: it listens on the same element, so it was reading these
+     moves too and fighting this handler for `pan`. */
+  if (endGesture) endGesture();
 
   const spread = () => {
     const [a, b] = [...touching.values()];
@@ -5852,21 +5903,17 @@ function twoFinger(event) {
     if (!touching.has(e.pointerId)) return;
     touching.set(e.pointerId, [e.clientX, e.clientY]);
     if (touching.size !== 2) return;
-    const now = spread();
-    pan.x += now.mid[0] - last.mid[0];
-    pan.y += now.mid[1] - last.mid[1];
-    if (last.gap > 10 && now.gap > 10) {
-      const was = seatingZoom === null
-        ? fitZoom(paper, drawn.box || contentBox(currentSection()))
-        : seatingZoom;
-      const next = Math.min(4, Math.max(0.15, was * (now.gap / last.gap)));
-      pan.x *= next / was;
-      pan.y *= next / was;
-      seatingZoom = next;
-    }
-    last = now;
     const section = currentSection();
-    if (section) applyZoom(section);
+    if (!section) return;
+    const now = spread();
+    // Read against the layout as it stands, before anything moves.
+    const anchor = roomPoint({ clientX: last.mid[0], clientY: last.mid[1] });
+    if (last.gap > 10 && now.gap > 10)
+      seatingZoom = Math.min(4, Math.max(0.15,
+                                         zoomNow() * (now.gap / last.gap)));
+    applyZoom(section);
+    holdPoint(section, anchor, now.mid);
+    last = now;
   };
   const up = e => {
     touching.delete(e.pointerId);
@@ -5895,6 +5942,41 @@ function zoomBy(step) {
   zoomTo(zoomNow() * (step > 0 ? 1.25 : 0.8));
 }
 
+function holdPoint(section, room, at) {
+  /* Move `pan` until room point `room` draws at screen point `at`.
+
+     Measure and correct rather than solve. Solving for `pan` in
+     closed form has to be right about every rectangle in the chain
+     and was not -- a measured rect is snapped to the device grid and
+     a computed one is not, which left an eighth of a pixel a click,
+     always the same way, so ten clicks walked the subject off the
+     cursor. Correcting by the measured gap is a fixed point: each
+     pass divides what is left by a large factor and two reach the
+     hundredth of a pixel this stops at, and it does not matter which
+     of the measurements was the inaccurate one.
+
+     The gap goes straight into `pan` because both are in screen
+     pixels -- no conversion, so no scale to get wrong. An earlier
+     version measured in room units and multiplied, which is
+     dimensionally right and left a residue every pass, so the loop
+     had nothing to converge on.
+
+     Used by the wheel and by the pinch. It was written for the wheel
+     and the pinch did not get it, which is the whole reason this is
+     a function with a name. */
+  for (let pass = 0; pass < 5; pass++) {
+    const canvas = seatingCanvas().getBoundingClientRect();
+    const z = canvasScale();
+    const area = drawn.box || { x: 0, y: 0 };
+    const dx = at[0] - (canvas.left + (room[0] - area.x) * z);
+    const dy = at[1] - (canvas.top + (room[1] - area.y) * z);
+    if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) break;
+    pan.x += dx;
+    pan.y += dy;
+    applyZoom(section);
+  }
+}
+
 function zoomTo(want, at) {
   /* `at` is a point on screen to hold still -- the pointer, for the
      wheel. Without it the zoom is about the middle of the window,
@@ -5910,53 +5992,13 @@ function zoomTo(want, at) {
   const now = zoomNow();
   const next = Math.min(4, Math.max(0.15, want));
   if (at && next !== now) {
-    /* Zoom, then put the point back where it was.
-
-       The first version solved for `pan` from the same arithmetic
-       `placeBox` uses, which ought to be exact and was not: it left
-       about an eighth of a pixel a click, always the same way, so
-       ten clicks walked the thing under the cursor off it. The
-       error is somewhere in the two sides disagreeing by a
-       sub-pixel about where the box is -- a measured rect is
-       snapped to the device grid, a computed one is not -- and
-       chasing it is less reliable than not depending on it.
-
-       So: note the room point under the cursor, change the zoom,
-       ask where that point went, and shift `pan` to bring it back.
-
-       **Repeated until it stops moving**, which is the part that
-       matters. One pass left about a seventh of a room unit a
-       click -- a sixth of a screen pixel, always the same way, so
-       ten clicks walked the thing under the cursor visibly off it.
-       Measuring and correcting is a fixed point: each pass divides
-       whatever is left by a large factor, and two or three reach
-       the hundredth of a pixel this stops at. It does not matter
-       which of the measurements is the inaccurate one, which is
-       the advantage over solving it in closed form -- that version
-       had to be right about every rect in the chain, and was not.
-
-       Three layout passes at worst, on a wheel click. */
+    /* Note the room point under the cursor, change the zoom, and
+       put that point back under the cursor. Why it is done by
+       measuring rather than by solving is on `holdPoint`. */
     const was = roomPoint({ clientX: at[0], clientY: at[1] });
     seatingZoom = next;
     applyZoom(section);
-    for (let pass = 0; pass < 5; pass++) {
-      /* Where that room point is drawing now, in screen pixels, and
-         how far that is from the cursor. `pan` is in screen pixels
-         too, so the gap goes straight into it -- no conversion, and
-         so nothing to get the scale of wrong. The first attempt
-         measured the error in room units and multiplied, which is
-         dimensionally right and left a residue every pass, so the
-         loop had nothing to converge on. */
-      const canvas = seatingCanvas().getBoundingClientRect();
-      const z = canvasScale();
-      const area = drawn.box || { x: 0, y: 0 };
-      const dx = at[0] - (canvas.left + (was[0] - area.x) * z);
-      const dy = at[1] - (canvas.top + (was[1] - area.y) * z);
-      if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) break;
-      pan.x += dx;
-      pan.y += dy;
-      applyZoom(section);
-    }
+    holdPoint(section, was, at);
     return;
   }
   /* Zoom about the middle of the window, so whatever you were looking
