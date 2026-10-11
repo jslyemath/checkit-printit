@@ -136,6 +136,22 @@ longest name is "Test Student", and clipped most of every real row. Use
 same section split, same name lengths, same chart shape -- for anything whose
 size or layout matters.
 
+**It is a fixture, so it has to come back unchanged.** Seating is developed
+against it through the real endpoints, which means a session of canvas work
+writes to it for real. Copy the course directory aside before anything that
+saves, restore it after, and check these:
+
+```bash
+cd "$HOME/CheckItPrintIt/courses/Scratch 48" && sha256sum room.json seating.toml
+```
+
+    d13caeafa670828def0a20cbefcf00ba8284ae829215354304952ac1ff28ac6e *room.json
+    1bae8e12b93cca22c64ee73473ec016f95ce81bd8eba1b5c19fbc3963b23e748 *seating.toml
+
+Unchanged as of 2026-10-11. If a deliberate change to the fixture is ever
+right, change these numbers in the same commit -- a pin nobody updates is a
+pin everybody learns to ignore.
+
 ### A fix applied to one path is not applied to the others
 
 Three times in one day. The `workspace`->`course` rename replaced `"-w"` in
