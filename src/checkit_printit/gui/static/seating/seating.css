@@ -776,19 +776,7 @@
   bottom: 64px;
   right: 12px;
   margin-right: 0;
-  /* The width of the unfurled mode rail. They are the same kind of
-     thing opened from the same edge, and a column half the width of
-     its neighbour reads as a different component. */
-  width: 104px;
-  /* Two across. One column of seven full-width tiles is 389px and
-     runs off the top of a short window; two columns of four fit in
-     half that, and a grid of silhouettes is what a shape picker
-     looks like anyway. */
-  display: grid;
-  /* `minmax(0, 1fr)`, not `1fr`: a grid track's minimum is its
-     content, so the tiles pushed the right-hand column eleven pixels
-     past the drawer and it was clipped. */
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex-direction: column;
   align-items: stretch;
   gap: 2px;
   overflow: hidden;
@@ -831,6 +819,24 @@
   color: var(--isle-dim);
 }
 .deskopt:hover { background: var(--isle-2); color: var(--isle-ink); }
+/* The shape picker, and only it.
+
+   The width and the two columns used to sit on `.palette`, which is
+   the same drawer the labelled action lists open in -- so People's
+   menu became a 104px two-column grid as well, with every row cut in
+   half. `.named` is set when the contents are actions; the furniture
+   is the other case, and the only one that wants a grid.
+
+   Two across because one column of seven full-width tiles is 389px
+   and runs off the top of a short window. `minmax(0, 1fr)` rather
+   than `1fr`, because a grid track's minimum is its content and the
+   tiles pushed the right column past the drawer's edge. */
+.palette:not(.named) {
+  width: 104px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 /* An action, which has a name. The furniture can be a silhouette
    because a rectangle is what you are asking for; "spread the
    versions out" has no picture, and a column of unlabelled glyphs is
@@ -892,7 +898,7 @@
    centred glyph against the sloping sides. */
 /* Between the two: centred rode up into the apex, and flush with
    the base sat under the shape. */
-.desktile.triangle .tileone { align-items: flex-end; padding-bottom: 12px; }
+.desktile.triangle .tileone { align-items: flex-end; padding-bottom: 8px; }
 .deskopt:hover .tileone { color: var(--isle-ink); }
 
 /* Dragged off the palette: the shape, following the pointer, growing
@@ -1021,6 +1027,22 @@
 /* One thing on its own: its own colour, which is what tells you
    *which* group you have hold of. */
 .deskwrap.chosen { --pick-ink: var(--solid); }
+
+/* And the same soft halo a chosen seat wears, in the group's colour,
+   fading out across the gap between the desk and its ring.
+
+   `filter: drop-shadow` rather than `box-shadow`, because half the
+   shapes are an SVG path inside a transparent box -- a box-shadow
+   would draw a rectangle round a hexagon, where a drop-shadow
+   follows whatever was actually painted. Two passes, a tight one and
+   a wide one, which is what makes it taper rather than stop. */
+.deskwrap.chosen .shape {
+  filter:
+    drop-shadow(0 0 3px oklch(0.585 calc(0.155 * var(--c, 1))
+                              var(--h, 255) / .40))
+    drop-shadow(0 0 9px oklch(0.585 calc(0.155 * var(--c, 1))
+                              var(--h, 255) / .30));
+}
 .deskwrap.chosen::before {
   content: "";
   position: absolute;
