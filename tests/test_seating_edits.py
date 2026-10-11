@@ -210,7 +210,7 @@ class TestTheRoomComingBackIsChecked:
     def test_turning_a_desk_does_not_reach_the_chart(self):
         """Rotating rewrites the seats' own offsets, so a seat is
         always simply where it says it is. Nothing downstream -- the
-        neighbour distances, the colouring, `seating.toml` -- has to
+        neighbour distances, the coloring, `seating.toml` -- has to
         learn about angles, which is the whole reason it is stored
         that way round."""
         r = a_room()
@@ -222,7 +222,7 @@ class TestTheRoomComingBackIsChecked:
                [(s["x"], s["y"]) for s in after], \
             "seats_of must read the offsets and not the angle"
 
-    def test_a_colour_is_an_angle_on_the_wheel(self):
+    def test_a_color_is_an_angle_on_the_wheel(self):
         """One number, because the three shades the canvas draws are
         derived from it rather than stored."""
         r = a_room()
@@ -230,16 +230,16 @@ class TestTheRoomComingBackIsChecked:
         group["hue"] = 150
         assert room_mod.check(r) is not None
         # No hue at all is the normal state: a group that has never
-        # been coloured takes one off the palette by position.
+        # been colored takes one off the palette by position.
         group["hue"] = None
         assert room_mod.check(r) is not None
         for bad in (-1, 360, 400, "blue", True, float("nan")):
             group["hue"] = bad
-            with pytest.raises(room_mod.RoomError, match="colour wheel"):
+            with pytest.raises(room_mod.RoomError, match="color wheel"):
                 room_mod.check(r)
 
-    def test_how_vivid_a_colour_is_scales_the_standard_one(self):
-        """Hue says which colour; chroma says how much of it. Lightness
+    def test_how_vivid_a_color_is_scales_the_standard_one(self):
+        """Hue says which color; chroma says how much of it. Lightness
         is not stored at all -- it is what decides whether a name can
         be read from the back of the room, so the picker does not get
         to set it."""
@@ -455,7 +455,7 @@ class TestSaving:
         assert [s["student"] for s in back][:2] == ["s1-1", "s1-0"]
 
     def test_a_swap_leaves_the_letters_on_the_chairs(self, course):
-        """The colouring is of the *room*: letters belong to chairs, not
+        """The coloring is of the *room*: letters belong to chairs, not
         to people, or two neighbours trading places could end up holding
         the same paper."""
         obj, gui_mod, course_mod = course
@@ -515,7 +515,7 @@ class TestWhatSaveDoesToTheChart:
         assert "Ada Lovelace" in open(chart, encoding="utf-8").read()
 
     def test_it_pins_what_the_room_said(self, course):
-        """Not re-derived. The room chose the letters by colouring it,
+        """Not re-derived. The room chose the letters by coloring it,
         and `alternate` could only cycle a list."""
         obj, gui_mod, course_mod = course
         r = a_room()

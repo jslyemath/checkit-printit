@@ -67,12 +67,12 @@ class Bank:
         `<category prefix="W" color="Violet"/>` entries.
 
         The LONGEST matching prefix wins, so `W` covers W1 and W4-E while a
-        single outcome can still claim a colour of its own -- `FCP` takes an
+        single outcome can still claim a color of its own -- `FCP` takes an
         entry for "FCP" ahead of the one for "F". mat-106's older pdfgenerator.py
         matched the first letter only, which left no way to say that.
 
         Read from the XML here rather than from the outcome: CheckIt's own Bank
-        does not model the colour map at all. It is a print-side convention the
+        does not model the color map at all. It is a print-side convention the
         platform carries without interpreting.
         """
         if self._colors is None:

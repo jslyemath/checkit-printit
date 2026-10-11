@@ -4,9 +4,9 @@ Stage one of the seating tab, and the part that decides whether the rest
 is easy: the data model, the version assignment, and the `seating.toml`
 a room produces. No canvas yet.
 
-The assignment is graph colouring -- seats are vertices, "must differ" is
-an edge, letters are colours -- so what is worth testing is the thing
-colouring is for: that neighbours differ, that it degrades sensibly when
+The assignment is graph coloring -- seats are vertices, "must differ" is
+an edge, letters are colors -- so what is worth testing is the thing
+coloring is for: that neighbours differ, that it degrades sensibly when
 there are more seats at a table than letters in the bag, and that what it
 decided survives the trip out to the file the build actually reads.
 
@@ -394,7 +394,7 @@ class TestTheChartItProduces:
         r, _ = self.room_of(s)
         assert '""' in seating_mod.to_toml(r, self.names)
 
-    def test_a_well_coloured_room_has_no_collisions(self, tmp_path):
+    def test_a_well_colored_room_has_no_collisions(self, tmp_path):
         """`collisions()` is the build's own check, and it still runs over
         what the app chose."""
         s = section_with(table("t1", (0, 0), 4), groups=[group("g1", "t1", 4)])
@@ -848,7 +848,7 @@ def row_of_desks(count, gap=100):
 
 def clash_count(section, chosen, near=room_mod.NEIGHBOUR_DISTANCE):
     """Score the answer against the real room, not against whatever graph
-    the colourer used.
+    the colorer used.
 
     This is the whole reason three mutations survived the first run:
     `assign_versions` returns clashes measured against its own adjacency,
@@ -888,7 +888,7 @@ class TestTheDistanceRuleDoesSomething:
 class TestTheBusiestSeatGoesFirst:
     """One desk ringed by four, and only two letters. The centre must take
     one and all four leaves the other -- which only works if the centre is
-    coloured before them."""
+    colored before them."""
 
     def ringed(self):
         s = room_mod.new_section("x")
@@ -897,7 +897,7 @@ class TestTheBusiestSeatGoesFirst:
                 "id": f"l{i}", "kind": "desk", "at": list(at),
                 "seats": [{"id": f"l{i}-0", "at": [0, 0],
                            "student": f"s{i}"}]})
-        # Listed last on purpose: in file order it is coloured after every
+        # Listed last on purpose: in file order it is colored after every
         # leaf, by which time both letters are next door.
         s["shapes"].append({"id": "c", "kind": "desk", "at": [0, 0],
                             "seats": [{"id": "c-0", "at": [0, 0],

@@ -652,13 +652,13 @@ class TestSpatextFields:
             assert "\\(" in body, "the maths was dropped rather than rendered"
 
 
-# ---------------------------------------------------------------- colour ----
+# ---------------------------------------------------------------- color ----
 
-class TestColourMap:
-    """`bank.xml` may colour each family of skills, and print ignored it.
+class TestColorMap:
+    """`bank.xml` may color each family of skills, and print ignored it.
 
     Every printed box came out in the theme's default blue, which is not what a
-    bank declaring a colour map is asking for -- and it left no way to make one
+    bank declaring a color map is asking for -- and it left no way to make one
     outcome stand apart from the rest.
     """
 
@@ -675,30 +675,30 @@ class TestColourMap:
             f.write(xml)
         return root
 
-    def test_a_prefix_colours_its_family(self, bank_dir, tmp_path):
+    def test_a_prefix_colors_its_family(self, bank_dir, tmp_path):
         root = self.bank_with_map(bank_dir, tmp_path, [("A", "Violet")])
         assert Bank(root).color("AD") == "Violet"
 
-    def test_no_map_means_no_colour(self, bank_dir, tmp_path):
-        """An uncoloured bank keeps the theme's default rather than being given
+    def test_no_map_means_no_color(self, bank_dir, tmp_path):
+        """An uncolored bank keeps the theme's default rather than being given
         one, so nothing changes for a bank that never asked."""
         assert Bank(bank_dir).color("AD") is None
 
     def test_the_longest_prefix_wins(self, bank_dir, tmp_path):
-        """How one outcome claims a colour of its own: FCP would otherwise take
-        the fractions' colour, since F is the only other match."""
+        """How one outcome claims a color of its own: FCP would otherwise take
+        the fractions' color, since F is the only other match."""
         root = self.bank_with_map(bank_dir, tmp_path,
                                   [("A", "teal"), ("AD", "Sepia")])
         assert Bank(root).color("AD") == "Sepia"
         assert Bank(root).color("AX") == "teal"
 
-    def test_the_colour_reaches_the_descriptions_file(self, bank_dir, tmp_path):
+    def test_the_color_reaches_the_descriptions_file(self, bank_dir, tmp_path):
         """Where it actually has to arrive: \\setskilldesc's optional argument."""
         root = self.bank_with_map(bank_dir, tmp_path, [("A", "Violet")])
         bank = Bank(root)
         written = assemble_mod.descriptions_tex(bank, ["AD", "SU"])
         assert r"\setskilldesc[Violet]{AD}" in written
-        assert r"\setskilldesc{SU}" in written, "an unmapped slug gets no colour"
+        assert r"\setskilldesc{SU}" in written, "an unmapped slug gets no color"
 
 
 # --------------------------------------------------------------- figures ----
