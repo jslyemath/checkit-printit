@@ -137,7 +137,11 @@ def new_section(name, order=None):
         #: Which section's papers print first. The run covers every
         #: section, so this decides the order of the whole stack.
         "order": order,
-        "canvas": {"width": 1200, "height": 800},
+        # Generous, because the only thing this size does is bound
+        # where furniture may go -- fitting and centring measure the
+        # content. The canvas grows further if anything is dragged
+        # past an edge; this is just somewhere roomy to start.
+        "canvas": {"width": 2400, "height": 1600},
         #: Desks and tables. Each owns the seat positions on it.
         "shapes": [],
         #: A group owns its label, its print position, and -- through its
