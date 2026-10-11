@@ -484,6 +484,174 @@ class TestTheChartItProduces:
             ["Student idt12", "Student idt11"]
 
 
+class TestTheShuffleStepsRoundAPin:
+    """A pin is an accommodation -- a student who has to sit where they
+    are -- so the one thing a shuffle must never do is move one."""
+
+    def room(self, seats=6, pinned=()):
+        s = section_with(table("t1", (0, 0), seats),
+                         groups=[group("g1", "t1", seats)])
+        for shape in s["shapes"]:
+            for seat in shape["seats"]:
+                if seat["id"] in pinned:
+                    seat["pinned"] = True
+        return s
+
+    def who(self, section):
+        return {seat["id"]: seat.get("student") or ""
+                for seat in room_mod.seats_of(section)}
+
+    def test_it_moves_people(self):
+        s = self.room()
+        before = self.who(s)
+        moved = room_mod.shuffle_seats(s, random.Random(4))
+        assert moved > 0
+        assert self.who(s) != before
+
+    def test_everybody_is_still_there(self):
+        """A shuffle is a permutation. Losing or duplicating a student
+        is the one way it can be worse than doing nothing."""
+        s = self.room()
+        before = sorted(self.who(s).values())
+        room_mod.shuffle_seats(s, random.Random(5))
+        assert sorted(self.who(s).values()) == before
+
+    def test_a_pinned_seat_keeps_its_person(self):
+        s = self.room(pinned={"t1-2"})
+        before = self.who(s)["t1-2"]
+        for seed in range(25):
+            here = self.room(pinned={"t1-2"})
+            room_mod.shuffle_seats(here, random.Random(seed))
+            assert self.who(here)["t1-2"] == before, f"moved on seed {seed}"
+
+    def test_pinning_everybody_leaves_the_room_alone(self):
+        s = self.room(pinned={f"t1-{i}" for i in range(6)})
+        before = self.who(s)
+        assert room_mod.shuffle_seats(s, random.Random(6)) == 0
+        assert self.who(s) == before
+
+    def test_one_free_chair_cannot_shuffle(self):
+        """Five pinned and one loose: there is nowhere for the sixth to
+        go, and the button has to say so rather than report a move.
+
+        The count is also asserted, because the answer has to be right
+        however it is arrived at -- but the count alone does not test
+        the guard. Without it the re-roll loop simply spins twenty
+        times over a list of one and returns zero anyway, which is the
+        same answer reached by brute force. What the guard promises is
+        that it does not try."""
+        class Counting(random.Random):
+            tries = 0
+
+            def shuffle(self, seq):
+                Counting.tries += 1
+                super().shuffle(seq)
+
+        s = self.room(pinned={f"t1-{i}" for i in range(5)})
+        assert room_mod.shuffle_seats(s, Counting(7)) == 0
+        assert Counting.tries == 0, "it tried to shuffle one chair"
+
+    def test_a_room_of_empty_chairs_is_not_shuffled_either(self):
+        """The same guard, reached the other way: six free chairs with
+        nobody in any of them is six identical values, and no ordering
+        of them is a different room."""
+        class Counting(random.Random):
+            tries = 0
+
+            def shuffle(self, seq):
+                Counting.tries += 1
+                super().shuffle(seq)
+
+        s = self.room()
+        for seat in room_mod.live_seats(s):
+            seat["student"] = ""
+        assert room_mod.shuffle_seats(s, Counting(7)) == 0
+        assert Counting.tries == 0
+
+    def test_an_empty_chair_shuffles_like_anyone(self):
+        """Otherwise every gap collects at the end of the room."""
+        s = self.room()
+        for shape in s["shapes"]:
+            shape["seats"][0]["student"] = ""
+        landed = set()
+        for seed in range(30):
+            here = self.room()
+            for shape in here["shapes"]:
+                shape["seats"][0]["student"] = ""
+            room_mod.shuffle_seats(here, random.Random(seed))
+            for sid, who in self.who(here).items():
+                if not who:
+                    landed.add(sid)
+        assert len(landed) > 1, "the empty chair never moved"
+
+    def test_it_never_hands_everybody_back_their_own_chair(self):
+        """A permutation that changes nothing is a correct answer and a
+        broken button. With two free chairs it is half of all presses,
+        so it is re-rolled rather than left to luck."""
+        for seed in range(40):
+            s = self.room(pinned={f"t1-{i}" for i in range(4)})
+            before = self.who(s)
+            assert room_mod.shuffle_seats(s, random.Random(seed)) == 2
+            assert self.who(s) != before, f"nothing moved on seed {seed}"
+
+    def test_the_letters_stay_on_the_chairs(self):
+        """A version belongs to the chair, because the coloring is of
+        the room. Letters travelling with people would let a shuffle
+        seat the same paper next to itself."""
+        s = self.room()
+        chosen, _ = room_mod.assign_versions(
+            room_mod.seats_of(s), room_mod.group_of(s), "ABCD",
+            rng=random.Random(8))
+        room_mod.apply_versions(s, chosen)
+        before = {seat["id"]: seat["version"]
+                  for seat in room_mod.seats_of(s)}
+        room_mod.shuffle_seats(s, random.Random(9))
+        assert {seat["id"]: seat["version"]
+                for seat in room_mod.seats_of(s)} == before
+
+    def test_the_unseated_are_left_standing(self):
+        """The rail is somewhere a person was put on purpose. A shuffle
+        that emptied it into the room would be undoing a decision."""
+        s = self.room()
+        for shape in s["shapes"]:
+            shape["seats"][5]["student"] = ""
+        seated = {w for w in self.who(s).values() if w}
+        room_mod.shuffle_seats(s, random.Random(10))
+        assert {w for w in self.who(s).values() if w} == seated
+
+    def checkable(self):
+        """A room `check` will look at. The `table` helper above uses a
+        shape kind that only the seat maths cares about; validation
+        wants one from the palette."""
+        s = room_mod.new_section("820")
+        s["shapes"] = [room_mod.make_shape("table-1x3", (200, 200), "t1")]
+        ids = [seat["id"] for seat in s["shapes"][0]["seats"]]
+        s["groups"] = [{"id": "g1", "label": "1", "seats": ids,
+                        "order": 1}]
+        r = room_mod.empty("AB")
+        r["sections"] = [s]
+        return r, s
+
+    def test_a_pin_is_yes_or_no(self):
+        r, s = self.checkable()
+        s["shapes"][0]["seats"][0]["pinned"] = "yes please"
+        with pytest.raises(room_mod.RoomError, match="not yes or no"):
+            room_mod.check(r)
+
+    def test_a_pin_may_be_set(self):
+        r, s = self.checkable()
+        s["shapes"][0]["seats"][0]["pinned"] = True
+        room_mod.check(r)          # no complaint
+
+    def test_an_unpinned_room_says_nothing_about_pins(self):
+        """Absent is the normal state, like every other optional field
+        on a seat."""
+        r, s = self.checkable()
+        room_mod.check(r)
+        assert all("pinned" not in seat
+                   for seat in room_mod.live_seats(s))
+
+
 class TestTheSweepMatchesTheCanvas:
     """`room.seat_sweep` is a second copy of `slotsOf` in `seating.js`,
     because the canvas needs the answer on every redraw and the chart

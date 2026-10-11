@@ -226,6 +226,13 @@ const ANCHORS = {
 
 const ICON = {
   people: "M5.5 20a6.5 6.5 0 0 1 13 0|O12,8,3.4",
+  // A map pin, not a thumbtack: at 24 units a tack is a grey blob,
+  // and a teardrop with a hole in it reads as "here" at any size.
+  pin: "M12 21.5s6.6-6 6.6-10.5a6.6 6.6 0 1 0-13.2 0c0 4.5 6.6 10.5 6.6"
+    + " 10.5z|O12,10.6,2.5",
+  // A die. The shuffle needed a glyph that is not the swap arrows,
+  // which already mean "by group or by seat" one drawer over.
+  dice: "R4,4,16,16,3.5|O8.8,8.8,1.15|O12,12,1.15|O15.2,15.2,1.15",
   groups: "R3,4,18,7,1.5|R3,14,8,6,1.5|R14,14,7,6,1.5",
   upnext: "M20.5 4.5h-17A1.5 1.5 0 0 0 2 6v9a1.5 1.5 0 0 0 1.5 1.5H7v4"
     + "l5-4h8.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5z",
@@ -700,7 +707,8 @@ function paintChrome() {
     : (selected && selected.kind === "group" && section
        ? shapesHolding(section,
            groupsOf(section).find(g => g.id === selected.id) || {})[0] : null);
-  const drawered = seatingMode === "groups" || seatingMode === "printing";
+  const drawered = seatingMode === "groups" || seatingMode === "printing"
+    || seatingMode === "people";
   const wanted = !projecting() && !upnext && !numbering && section
     && (drawered || (seatingMode === "seats" && shape));
   plus.hidden = !wanted;
@@ -710,10 +718,16 @@ function paintChrome() {
      room to work something out. The position is the constant: the
      one thing this mode can do that is not about a selection. */
   plus.textContent = "";
-  if (seatingMode === "printing") plus.appendChild(svgIcon(ICON.wand));
+  /* The wand in People as well as Printing, which is not a borrowed
+     glyph: the rule above is that a wand means "asking the room to
+     work something out", and shuffling the seating is exactly that.
+     The plus stays where the action is adding a thing. */
+  if (seatingMode === "printing" || seatingMode === "people")
+    plus.appendChild(svgIcon(ICON.wand));
   else plus.textContent = "+";
   plus.title = seatingMode === "seats" ? "Add a seat to this group"
     : seatingMode === "printing" ? "What Printing can do to this room"
+    : seatingMode === "people" ? "What you can do to the whole room"
     : "Add a group";
   plus.setAttribute("aria-expanded", String(drawered && paletteOpen));
   plus.onclick = e => {
@@ -1144,9 +1158,40 @@ function drawRoom(section) {
         // Up Next is on, so nothing on the canvas is a control: the
         // room is being shown, not edited, whatever mode it is in.
       } else if (seatingMode === "people") {
-        if (who) card.classList.add("movable");
+        /* Pinned: somebody who has to sit where they are. The card
+           stops being draggable rather than springing back, because
+           springing back is a thing that looks like a missed drop,
+           and the point of the pin is that the move was never on. */
+        const held = isPinned(seat);
+        card.classList.toggle("pinned", held);
+        if (who && !held) card.classList.add("movable");
         if (picked && picked.seat === seat) card.classList.add("picked");
-        card.onpointerdown = e => dragName(e, card, { seat: seat });
+        if (!held) card.onpointerdown = e => dragName(e, card, { seat: seat });
+
+        /* The pin itself, bottom right.
+
+           Shown when it is set, when the card is hovered, and when
+           the card is the one in hand. The last of those is what
+           makes it reachable under a finger, which has no hover --
+           tap somebody, then tap their pin. Always showing all
+           twenty-five would be a row of grey dots nobody is looking
+           for. */
+        const tack = el("button", "pin");
+        tack.type = "button";
+        tack.tabIndex = -1;
+        tack.title = held ? "Unpin: let this person be moved again"
+                          : "Pin: keep this person in this chair";
+        tack.setAttribute("aria-pressed", String(held));
+        tack.appendChild(svgIcon(ICON.pin));
+        // `pointerdown`, not `click`: the card starts a drag on
+        // pointerdown, so a click handler here fires after the drag
+        // has already begun.
+        tack.onpointerdown = e => {
+          e.preventDefault();
+          e.stopPropagation();
+          togglePin(seat);
+        };
+        if (who) card.appendChild(tack);
       } else if (numbering) {
         /* Armed: every click is "this one next", and nothing else on
            the canvas does anything until the run is over. */
@@ -3392,7 +3437,8 @@ function showOpen() {
   }
   const plus = document.getElementById("seat-plus");
   if (plus) {
-    const drawered = seatingMode === "groups" || seatingMode === "printing";
+    const drawered = seatingMode === "groups" || seatingMode === "printing"
+    || seatingMode === "people";
     plus.classList.toggle("on", drawered && paletteOpen);
     plus.setAttribute("aria-expanded", String(drawered && paletteOpen));
   }
@@ -3721,6 +3767,57 @@ async function askVersionCount(section) {
   await spreadVersions(section);
 }
 
+function peopleActions(section) {
+  /* What People can do to the room, as against what it can do to one
+     person. The same corner button the other modes use, because it is
+     the same question -- "what does this mode do that is not about a
+     selection" -- and a second kind of menu would be a second thing
+     to learn.
+
+     Short: a shuffle, and a way out of the pins. Seating somebody is
+     a click on the canvas and does not belong behind a button. */
+  const held = pinnedSeats(section);
+  const out = [{
+    icon: "dice", label: "Shuffle the room",
+    why: "Deal everybody who is sitting down into different chairs."
+      + (held.length ? "  Pinned seats stay as they are." : ""),
+    go: () => shuffleSeats(),
+  }];
+  if (held.length)
+    out.push({
+      icon: "pin",
+      label: held.length === 1 ? "Unpin the one pinned seat"
+                               : `Unpin all ${held.length} seats`,
+      why: "Let everybody be moved and shuffled again.",
+      go: () => {
+        for (const seat of held) delete seat.pinned;
+        renderSeating();
+      },
+    });
+  return out;
+}
+
+async function shuffleSeats() {
+  /* On the server, like the coloring and for the same reason: the
+     rule here is that a button calls the function a command would.
+     The rules a shuffle keeps -- step round the pinned, leave the
+     rail standing, leave the letters on the chairs -- are worth
+     testing, and a shuffle living in this file could not be. */
+  try {
+    const out = await api("/api/seating/shuffle", {
+      room: seatingRoom,
+      section: seatingSection,
+    });
+    seatingRoom = out.room;
+    picked = null;
+    // Shown moving rather than appearing moved. The same tween a
+    // drag uses, because it is the same event from the room's point
+    // of view: people are somewhere else now.
+    flipPeople(() => renderSeating());
+    toast(out.note);
+  } catch (err) { toast(err.message, true); }
+}
+
 function drawPalette(section) {
   /* The furniture, in a column that grows up out of the plus at the
      end of the strip. Closed by default: an empty room needs it once
@@ -3729,7 +3826,8 @@ function drawPalette(section) {
   const pal = document.getElementById("seat-palette");
   pal.textContent = "";
   const wanted = Boolean(section) && !projecting() && !upnext
-    && (seatingMode === "groups" || seatingMode === "printing");
+    && (seatingMode === "groups" || seatingMode === "printing"
+        || seatingMode === "people");
   if (!wanted) {
     pal.hidden = true;
     pal.classList.remove("open", "named");
@@ -3738,14 +3836,17 @@ function drawPalette(section) {
   // Kept in the layout while shut, so its height can be animated to
   // nothing rather than the island blinking out of existence.
   pal.hidden = false;
-  pal.classList.toggle("named", seatingMode === "printing");
+  const labelled = seatingMode === "printing" || seatingMode === "people";
+  pal.classList.toggle("named", labelled);
 
-  if (seatingMode === "printing") {
+  if (labelled) {
     /* Labelled, not silhouettes. The furniture can be a picture
        because a rectangle is what you are asking for; "spread the
        versions out" has no picture, and a row of mystery glyphs is
        the hidden menu this was meant to avoid. */
-    for (const act of printActions(section)) {
+    const acts = seatingMode === "people" ? peopleActions(section)
+                                         : printActions(section);
+    for (const act of acts) {
       const b = el("button", "deskopt act");
       b.type = "button";
       b.title = act.why;
@@ -3872,6 +3973,7 @@ function dropTarget(event, fromId) {
   let best = null, near = Infinity;
   for (const chair of drawn.seats) {
     if (chair.id === fromId) continue;
+    if (isPinned(chair.seat)) continue;    // not a place a name can land
     const dx = Math.max(Math.abs(cx - chair.x) - CARD_W / 2, 0);
     const dy = Math.max(Math.abs(cy - chair.y) - CARD_H / 2, 0);
     const out = Math.hypot(dx, dy);
@@ -3932,6 +4034,28 @@ function flipPeople(work) {
   }
 }
 
+function isPinned(seat) {
+  return Boolean(seat && seat.pinned);
+}
+
+function pinnedSeats(section) {
+  const out = [];
+  for (const shape of (section && section.shapes) || [])
+    for (const seat of shape.seats || []) if (isPinned(seat)) out.push(seat);
+  return out;
+}
+
+function togglePin(seat) {
+  /* On the card rather than in the drawer, because it is a fact about
+     one person and the drawer is about the room. Pinning from a menu
+     would mean choosing the person twice. */
+  if (isPinned(seat)) delete seat.pinned;
+  else seat.pinned = true;
+  // Nothing marks this dirty: `sectionDirty` compares the room with
+  // the one that was loaded, so changing it *is* the mark.
+  renderSeating();
+}
+
 function movePerson(who, fromSeat, toSeat) {
   /* The whole of what a move is, in one place, so the drag and the
      click cannot drift into meaning different things.
@@ -3945,6 +4069,15 @@ function movePerson(who, fromSeat, toSeat) {
      chair, because the coloring is of the room, so two people trading
      places must not trade letters or a swap could seat the same paper
      next to itself. */
+  /* A pinned chair is refused here and not only at the gestures.
+
+     There are four ways to start a move -- drag a card, drop onto a
+     card, click a name, click a chair -- and the affordances for all
+     four are turned off elsewhere. This is the one place all four
+     arrive at, so it is the one place where "pinned means pinned" is
+     actually true rather than true four times over. */
+  if (isPinned(fromSeat) || isPinned(toSeat)) return;
+
   if (!toSeat) {
     if (fromSeat) fromSeat.student = "";
     return;
@@ -3969,6 +4102,7 @@ function clickOn(from) {
      anybody tries first. */
   const seat = from.seat || null;
   const who = seat ? seat.student : from.key;
+  if (isPinned(seat)) return;      // neither a source nor a destination
 
   if (picked) {
     const held = picked;

@@ -756,6 +756,50 @@ def api_seating_versions(course, body):
     return {"room": incoming, "note": note, "clashes": len(clashes)}
 
 
+def api_seating_shuffle(course, body):
+    """Deal the seated people into different chairs.
+
+    Server-side for the same reason the coloring is: the rule in this
+    project is that a button calls the function a command would, and
+    the rule a shuffle has to keep -- step round the pinned, leave the
+    rail alone, leave the letters on the chairs -- is the kind of thing
+    that is worth a test, which a shuffle living in the canvas could
+    not have.
+
+    Nothing is written. The room comes back changed and the canvas
+    holds it as an unsaved edit, so an instructor who does not like
+    where everyone landed presses Discard and the morning's seating is
+    still there. A reshuffle is not a decision anybody should have to
+    commit to in order to look at it.
+    """
+    incoming = body.get("room")
+    if not isinstance(incoming, dict):
+        raise GuiError("that request carried no room.")
+    at = body.get("section")
+    sections = incoming.get("sections") or []
+    if not isinstance(at, int) or not 0 <= at < len(sections):
+        raise GuiError("that request did not say which room.")
+
+    section = sections[at]
+    # `live_seats`, not `seats_of`. The latter is a view that builds a
+    # fresh dict per seat and carries only id, shape, student, version
+    # and position -- so asking it about pins answers none, every
+    # time, and the note quietly stopped mentioning them.
+    held = sum(1 for seat in room_mod.live_seats(section)
+               if seat.get("pinned"))
+    moved = room_mod.shuffle_seats(section)
+
+    if not moved:
+        note = ("Nobody moved. There has to be more than one unpinned "
+                "chair with somebody in it.")
+    else:
+        note = f"{moved} moved."
+        if held:
+            chairs = "chair" if held == 1 else "chairs"
+            note += f" {held} pinned {chairs} stayed put."
+    return {"room": incoming, "note": note, "moved": moved, "pinned": held}
+
+
 def api_seating_save(course, body):
     """Write the room the canvas is showing, and the chart if it is ours.
 
@@ -1103,6 +1147,7 @@ ROUTES = {
     "/api/seating": api_seating,
     "/api/seating/save": api_seating_save,
     "/api/seating/versions": api_seating_versions,
+    "/api/seating/shuffle": api_seating_shuffle,
     "/api/print": api_print,
     "/api/print/save": api_print_save,
     "/api/print/pull": api_print_pull,
