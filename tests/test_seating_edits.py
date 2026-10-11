@@ -429,6 +429,67 @@ def course(tmp_path, monkeypatch, bank_dir):
     return gui_mod.Course("P"), gui_mod, course_mod
 
 
+class TestShufflingFromTheCanvas:
+    """The endpoint behind the wand's first row. The rules themselves
+    are tested in `test_room.py`; what is tested here is that the
+    button reaches them, hands back a room nobody has written, and
+    reports honestly."""
+
+    def test_the_route_is_wired(self):
+        """A handler nothing routes to is a handler nobody can reach."""
+        from checkit_printit import gui as gui_mod
+        assert gui_mod.ROUTES["/api/seating/shuffle"] \
+            is gui_mod.api_seating_shuffle
+
+    def test_people_move(self, course):
+        obj, gui_mod, _ = course
+        out = gui_mod.api_seating_shuffle(
+            obj, {"room": a_room(), "section": 0})
+        assert out["moved"] > 0
+        assert [s["student"] for s in chairs(out["room"])] \
+            != ["s1-0", "s1-1", "s1-2", "s1-3"]
+
+    def test_nothing_is_written(self, course):
+        """A reshuffle is not a decision anybody should have to commit
+        to in order to look at it. The room comes back changed and the
+        canvas holds it unsaved, so Discard puts the morning back."""
+        obj, gui_mod, course_mod = course
+        gui_mod.api_seating_save(obj, {"room": a_room()})
+        on_disk = room_mod.load(course_mod.file_in("P", "room"))
+        gui_mod.api_seating_shuffle(obj, {"room": a_room(), "section": 0})
+        assert room_mod.load(course_mod.file_in("P", "room")) == on_disk
+
+    def test_the_note_counts_the_pinned(self, course):
+        """It said nothing about them for a while, because it counted
+        through `seats_of` -- a view that does not carry `pinned`, so
+        the answer was none however many there were."""
+        obj, gui_mod, _ = course
+        r = a_room()
+        chairs(r)[0]["pinned"] = True
+        out = gui_mod.api_seating_shuffle(obj, {"room": r, "section": 0})
+        assert out["pinned"] == 1
+        assert "1 pinned chair stayed put" in out["note"]
+
+    def test_the_note_says_so_when_nobody_can_move(self, course):
+        obj, gui_mod, _ = course
+        r = a_room()
+        for seat in chairs(r):
+            seat["pinned"] = True
+        out = gui_mod.api_seating_shuffle(obj, {"room": r, "section": 0})
+        assert out["moved"] == 0
+        assert "Nobody moved" in out["note"]
+
+    def test_a_request_with_no_room_is_refused(self, course):
+        obj, gui_mod, _ = course
+        with pytest.raises(gui_mod.GuiError):
+            gui_mod.api_seating_shuffle(obj, {"section": 0})
+
+    def test_a_request_naming_no_section_is_refused(self, course):
+        obj, gui_mod, _ = course
+        with pytest.raises(gui_mod.GuiError):
+            gui_mod.api_seating_shuffle(obj, {"room": a_room(), "section": 9})
+
+
 class TestSaving:
     def test_the_route_is_wired(self):
         """A handler nothing routes to is a handler nobody can reach --

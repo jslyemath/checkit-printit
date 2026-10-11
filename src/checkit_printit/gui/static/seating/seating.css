@@ -597,6 +597,38 @@
   border: 1px solid var(--isle-key);
 }
 
+/* The pin, in the bottom right corner of a name card. Only People
+   mode builds one: it is about who may be moved, and no other mode
+   moves people.
+
+   Out of the flow and inside the card's padding, so adding it does
+   not change the card's size -- a card whose height depended on
+   whether somebody was pinned would reflow the room on every pin. */
+.seatcard .pin {
+  position: absolute; right: 2px; bottom: 1px;
+  width: 15px; height: 15px; padding: 0;
+  display: grid; place-items: center;
+  border: 0; background: none; cursor: pointer;
+  opacity: 0;
+  /* The card's own inks: `--faint` while it is only an offer, and
+     `--solid` -- the group's strong color, which the version letter
+     in the opposite corner also wears -- once it is set. A pin means
+     the room has decided something about this card, which is what
+     that color says everywhere else it is used. */
+  color: var(--faint);
+  transition: opacity var(--out-time) var(--out-curve);
+}
+.seatcard .pin svg { width: 12px; height: 12px; }
+/* Set, hovered, or the card in hand. The third is the one a finger
+   can reach, since a touch screen has no hover. */
+.seatcard:hover .pin,
+.seatcard.picked .pin { opacity: .5; }
+.seatcard:hover .pin:hover { opacity: .9; }
+.seatcard.pinned .pin { opacity: 1; color: var(--solid); }
+.seatcard.pinned .pin svg { fill: currentColor; stroke: none; }
+/* A pinned card is not draggable, and says so before it is tried. */
+.seatcard.pinned { cursor: default; }
+
 /* The swatches, opened from the dot rather than always on show,
    because the strip has to stay one row at 515px.
 

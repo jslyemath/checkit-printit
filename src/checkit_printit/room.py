@@ -164,6 +164,23 @@ def seats_of(section):
     return out
 
 
+def live_seats(section):
+    """The seat objects themselves, for code that changes one.
+
+    `seats_of` looks like the obvious way to reach every seat and is
+    not: it is a **view**, building a fresh dict per seat with absolute
+    positions and a fixed set of keys. So it silently drops `pinned`,
+    `spot` and `order`, and anything written to what it hands back is
+    thrown away with it.
+
+    Reading where a seat is asks that one. Reading a field it does not
+    carry, or changing a seat at all, asks this one.
+    """
+    for shape in section.get("shapes") or []:
+        for seat in shape.get("seats") or []:
+            yield seat
+
+
 def group_of(section):
     """seat id -> group id, with ungrouped seats left out.
 
@@ -309,6 +326,49 @@ def apply_versions(section, assignment):
             if seat.get("id") in assignment:
                 seat["version"] = assignment[seat["id"]]
     return section
+
+
+def shuffle_seats(section, rng=None):
+    """Deal the people who are sitting down into different chairs.
+
+    Returns how many of them moved.
+
+    **Only the unpinned chairs, and only the people already in them.**
+    A pin is an accommodation, so a shuffle has to step round it; and
+    the unseated rail is somewhere a person was put on purpose, so a
+    shuffle that emptied it into the room would be undoing a decision
+    rather than making one. An empty chair shuffles like anybody else,
+    which is what keeps the gaps from all collecting at one table.
+
+    The version letters are deliberately untouched. A letter belongs
+    to the chair, not to the person -- the coloring is of the room --
+    so the arrangement stays legal however the people are rearranged,
+    and nobody needs re-coloring after a shuffle.
+    """
+    rng = rng or random.Random()
+    # `live_seats`, not `seats_of`: the latter is a view that drops
+    # `pinned` and discards every write, so a shuffle written against
+    # it permutes six throwaway dicts and reports that it moved five
+    # people. Which it did.
+    free = [seat for seat in live_seats(section) if not seat.get("pinned")]
+    before = [seat.get("student") or "" for seat in free]
+    if len(set(before)) < 2:
+        return 0                      # nothing here to tell apart
+
+    # A permutation that changes nothing is a correct answer and a
+    # broken button. With two free chairs it is every other press, so
+    # it is re-rolled rather than left to luck. Bounded, because "keep
+    # going until it differs" on input that cannot differ is a hang,
+    # and the guard above is the only thing standing between them.
+    after = before
+    for _ in range(20):
+        after = before[:]
+        rng.shuffle(after)
+        if after != before:
+            break
+    for seat, who in zip(free, after):
+        seat["student"] = who
+    return sum(1 for was, now in zip(before, after) if was != now)
 
 
 # --------------------------------------------------- out to the CLI's file --
@@ -675,6 +735,21 @@ def check(room, known=None):
                         raise RoomError(
                             f"{where}: a seat is {at!r} in the print "
                             f"order, which is not a position.")
+
+                # Pinned: whoever is in this chair stays in it. An
+                # accommodation, usually -- a student who has to sit
+                # where they are -- which is why a shuffle steps
+                # round it and a drag refuses rather than asking.
+                #
+                # Not the same word as `seating.Seat.pinned`, which
+                # is about a version letter being written down in the
+                # chart rather than worked out. Different file,
+                # different question.
+                held = seat.get("pinned")
+                if held is not None and not isinstance(held, bool):
+                    raise RoomError(
+                        f"{where}: a seat is pinned {held!r}, which is "
+                        f"not yes or no.")
 
                 who = seat.get("student") or ""
                 if not who:

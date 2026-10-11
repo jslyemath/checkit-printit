@@ -372,7 +372,7 @@ built rather than alphabetically, because several are part-done:
 
 | mode | a click | a drag on bare paper |
 |---|---|---|
-| **People** | pick a name, click a chair to seat them | pans |
+| **People** | pick a name, click a chair to seat them; the pin in a card's corner holds somebody in place | pans |
 | **Groups** | select furniture; grips resize, the spinner turns | bands a selection of groups |
 | **Seats** | select a seat; drag to move or reparent it | bands a selection of seats |
 | **Printing** | select a seat; numbers and version circles are editable where they sit | pans |
@@ -391,6 +391,7 @@ and restore it on the way out.
 | `group.hue`, `group.chroma` | its color; lightness is the design system's and is never stored |
 | `group.label_at` | which desk and which of nine anchors the label hangs on |
 | `seat.version` | which paper prints for this seat |
+| `seat.pinned` | this chair's occupant stays in it: no drag, no drop, no shuffle |
 | `seat.spot` | its place inside its own group's run |
 | `seat.order` | its place across the whole room |
 | `section.print_by` | `"group"` or `"seat"` |
@@ -415,6 +416,13 @@ walk round the room crosses tables, and no ordering of `[[group]]`
 blocks can say that. It is also what keeps `Chart.collisions` honest,
 since consecutive entries in a table's list are people sitting beside
 each other and consecutive entries in the *stack* are not.
+
+**`seats_of` is a view, not the seats.** It builds a fresh dict per
+seat carrying id, shape, student, version and absolute position, so it
+**drops `pinned`, `spot` and `order`**, and writes to what it returns
+are thrown away. It cost two bugs in one hour. Reading a position asks
+it; changing a seat, or reading a field it does not carry, asks
+`room.live_seats`.
 
 **The sweep exists twice on purpose.** `room.seat_sweep` and `slotsOf`
 in `seating.js` are the same derivation: the canvas needs it live on
