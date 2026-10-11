@@ -115,6 +115,8 @@ let paletteOpen = false;
    buttons and a menu you opened must not close because a desk moved. */
 let railOpen = false;
 let saveOpen = false;
+let huesOpen = false;
+let huesFor = null;              // whose swatches are built, by group id
 
 /* Several things chosen at once. Groups in Groups mode and seats in
    Seats mode -- never a mix, because a band drawn across two tables
@@ -757,6 +759,7 @@ function renderSeating() {
   drawRoom(section);
   drawPalette(section);
   drawStrip(section);
+  drawHues(section);           // after the strip: it reads the strip's dot
   /* Crosshair only where a drag draws a band. In People, in
      Printing, and under either overlay a drag moves the view, and a
      crosshair there promises a selection that is not on offer. */
@@ -2057,9 +2060,11 @@ function drawStrip(section) {
     // show: the strip has to stay one row at 515px.
     const dot = el("button", "swatch");
     dot.type = "button";
+    dot.id = "seat-swatch";
+    dot.dataset.group = group.id;     // `drawHues` reads whose it is
     dot.title = "Color";
     tint(dot, hueOf(section, group), chromaOf(group));
-    dot.onclick = e => { e.stopPropagation(); openHues(dot, section, group); };
+    dot.onclick = e => { e.stopPropagation(); toggleHues(section, group); };
     strip.appendChild(dot);
 
     // The heading is the label; clicking it renames.
@@ -3123,65 +3128,97 @@ function drawUpNext(strip, section) {
   strip.appendChild(arrow(1, "The next one"));
 }
 
-function openHues(near, section, group) {
-  document.querySelectorAll(".hues").forEach(n => n.remove());
-  const pop = el("div", "hues");
-  const standard = chromaOf(group) === 1;
-  for (const hue of HUES) {
-    const b = el("button", "hue" + (standard && hueOf(section, group) === hue
-                                    ? " on" : ""));
-    b.type = "button";
-    b.style.setProperty("--h", hue);
-    b.style.setProperty("--c", 1);
-    b.onclick = () => {
-      group.hue = hue;
-      delete group.chroma;        // back to the standard strength
-      pop.remove();
-      renderSeating();
-    };
-    pop.appendChild(b);
+function drawHues(section) {
+  /* The group's colors, in the drawer that belongs to the dot.
+
+     Whose colors it shows is read off the dot itself rather than
+     worked out again here: the dot is built by `drawStrip`, which is
+     the one place that decides what the strip is describing, and a
+     second copy of that decision is a second thing to keep right. No
+     dot means no group is selected, so there is nothing to open.
+  */
+  const pop = document.getElementById("seat-hues");
+  if (!pop) return;
+  const dot = document.getElementById("seat-swatch");
+  const group = dot
+    ? groupsOf(section).find(g => g.id === dot.dataset.group) : null;
+  pop.hidden = !group;
+  if (!group) {
+    huesOpen = false;
+    huesFor = null;
+    pop.textContent = "";
+    return;
   }
 
-  /* One more slot: anything else.
+  /* Rebuilt only for a different group. Otherwise the existing
+     buttons are *told* which one is current, which is 12.13's rule
+     and here it is load-bearing rather than cosmetic: the custom
+     slot holds a live `input type="color"` whose preview calls
+     `renderSeating` on every movement of the picker. Rebuilding in
+     that render would replace the element the platform's picker is
+     anchored to, and the picker would shut on first use. */
+  if (huesFor !== group.id) {
+    huesFor = group.id;
+    pop.textContent = "";
+    for (const hue of HUES) {
+      const b = el("button", "hue");
+      b.type = "button";
+      b.dataset.hue = hue;
+      b.style.setProperty("--h", hue);
+      b.style.setProperty("--c", 1);
+      b.onclick = () => {
+        group.hue = hue;
+        delete group.chroma;        // back to the standard strength
+        huesOpen = false;           // picking one is also closing it
+        renderSeating();
+      };
+      pop.appendChild(b);
+    }
 
-     `input type="color"` rather than a wheel built here. It is the
-     platform's own picker, which means it already has a visual field,
-     a hex box, RGB numbers and -- on every desktop -- an eyedropper,
-     all of it in the conventions of whatever machine the instructor
-     is sitting at, none of it to maintain. Writing a worse one would
-     be the whole point of the exercise lost.
+    /* One more slot: anything else.
 
-     What comes back is a full color and what is kept is its hue and
-     its vividness; `oklchOf` says why. */
-  const own = el("button", "hue custom" + (standard ? "" : " on"));
-  own.type = "button";
-  own.title = "Any other color";
-  const pick = el("input");
-  pick.type = "color";
-  pick.value = hexOf(hueOf(section, group) || 255, chromaOf(group));
-  // `input` rather than `change`: the picker previews live on every
-  // platform that has one, and watching the room follow is most of
-  // how you tell whether a color works against the paper.
-  pick.oninput = () => {
-    const got = oklchOf(pick.value);
-    group.hue = Math.round(got.hue * 10) / 10;
-    group.chroma = got.chroma;
-    renderSeating();
-  };
-  own.appendChild(pick);
-  own.onclick = () => pick.click();
-  pop.appendChild(own);
-  document.getElementById("view-seating").appendChild(pop);
-  const box = near.getBoundingClientRect();
-  const app = document.getElementById("view-seating").getBoundingClientRect();
-  pop.style.left = Math.round(box.left - app.left - 6) + "px";
-  pop.style.bottom = Math.round(app.bottom - box.top + 8) + "px";
-  const shut = e => {
-    if (pop.contains(e.target)) return;
-    pop.remove();
-    document.removeEventListener("pointerdown", shut, true);
-  };
-  setTimeout(() => document.addEventListener("pointerdown", shut, true), 0);
+       `input type="color"` rather than a wheel built here. It is the
+       platform's own picker, which means it already has a visual
+       field, a hex box, RGB numbers and -- on every desktop -- an
+       eyedropper, all of it in the conventions of whatever machine
+       the instructor is sitting at, none of it to maintain. Writing a
+       worse one would be the whole point of the exercise lost.
+
+       What comes back is a full color and what is kept is its hue and
+       its vividness; `oklchOf` says why. */
+    const own = el("button", "hue custom");
+    own.type = "button";
+    own.title = "Any other color";
+    const pick = el("input");
+    pick.type = "color";
+    // `input` rather than `change`: the picker previews live on every
+    // platform that has one, and watching the room follow is most of
+    // how you tell whether a color works against the paper.
+    pick.oninput = () => {
+      const got = oklchOf(pick.value);
+      group.hue = Math.round(got.hue * 10) / 10;
+      group.chroma = got.chroma;
+      renderSeating();
+    };
+    own.appendChild(pick);
+    own.onclick = () => pick.click();
+    pop.appendChild(own);
+  }
+
+  // Which one is current, every render, on whichever buttons are
+  // already there.
+  const standard = chromaOf(group) === 1;
+  const mine = hueOf(section, group);
+  for (const b of pop.querySelectorAll(".hue")) {
+    const own = b.classList.contains("custom");
+    b.classList.toggle("on", own ? !standard
+                                 : standard && Number(b.dataset.hue) === mine);
+    const pick = own ? b.querySelector("input") : null;
+    // Not while the picker is open on it: writing `value` under a
+    // live picker is what makes one jump back to the old color.
+    if (pick && document.activeElement !== pick)
+      pick.value = hexOf(mine || 255, chromaOf(group));
+  }
 }
 
 function renameOnCanvas(tag, group) {
@@ -3338,8 +3375,10 @@ function showOpen() {
   const rail = document.getElementById("seat-modes");
   const pal = document.getElementById("seat-palette");
   const menu = document.getElementById("seat-savemenu");
+  const hues = document.getElementById("seat-hues");
   if (rail) rail.classList.toggle("open", railOpen);
-  for (const [node, open] of [[pal, paletteOpen], [menu, saveOpen]]) {
+  for (const [node, open] of [[pal, paletteOpen], [menu, saveOpen],
+                              [hues, huesOpen]]) {
     if (!node) continue;
     /* The exact height, not a guess.
 
@@ -3371,11 +3410,49 @@ function showOpen() {
     menu.style.left = Math.round(box.left - app.left) + "px";
     menu.style.top = Math.round(box.bottom - app.top + 8) + "px";
   }
+
+  /* The swatches sit above their dot, not below it, because the dot
+     is at the bottom of the window and there is nothing under it.
+     Anchored by `bottom`, so the drawer unrolls upward out of the dot
+     the way the furniture does out of the plus. */
+  const dot = document.getElementById("seat-swatch");
+  if (hues && !hues.hidden && dot) {
+    const app = document.getElementById("view-seating")
+      .getBoundingClientRect();
+    const box = dot.getBoundingClientRect();
+    hues.style.left = Math.round(box.left - app.left - 6) + "px";
+    hues.style.bottom = Math.round(app.bottom - box.top + 8) + "px";
+    dot.classList.toggle("on", huesOpen);
+    dot.setAttribute("aria-expanded", String(huesOpen));
+  }
+}
+
+function closeDrawers() {
+  /* Put every drawer away, and say whether any of them was out.
+
+     One function because there are four now and three places have to
+     close all of them -- a press on bare paper, a pan that turned out
+     to be a click, and Escape. Listing the flags at each site is
+     exactly how the fourth one ends up forgotten at two of them. */
+  const was = paletteOpen || railOpen || saveOpen || huesOpen;
+  paletteOpen = railOpen = saveOpen = huesOpen = false;
+  return was;
+}
+
+function toggleHues(section, group) {
+  /* The dot again is "put it away", which is what every other one of
+     these does and what the old swatches could not: created fresh on
+     each press, a second press built a second copy on top of the
+     first. */
+  const same = huesOpen && huesFor === group.id;
+  if (!same) paletteOpen = saveOpen = false;      // one open at a time
+  huesOpen = !same;
+  showOpen();
 }
 
 function togglePalette(force) {
   paletteOpen = force !== undefined ? force : !paletteOpen;
-  if (paletteOpen) saveOpen = false;      // one open at a time
+  if (paletteOpen) saveOpen = huesOpen = false;   // one open at a time
   showOpen();
 }
 
@@ -4371,9 +4448,7 @@ function bandPaper(event) {
       // A press that did not travel is a press on bare paper, which
       // has always meant "nothing is selected now".
       banded = [];
-      const wasOpen = paletteOpen || railOpen || saveOpen;
-      paletteOpen = railOpen = saveOpen = false;
-      if (wasOpen) showOpen();
+      if (closeDrawers()) showOpen();
       selected = null;
       selectedChair = null;
     }
@@ -4429,10 +4504,7 @@ function panPaper(event) {
     paper.removeEventListener("pointercancel", done);
     paper.classList.remove("panning");
     if (moved) return;                   // it was a drag, not a click
-    const wasOpen = paletteOpen || railOpen || saveOpen;
-    paletteOpen = false;                 // rolls back into the plus
-    railOpen = false;                    // and the mode list rolls shut
-    saveOpen = false;                    // and so does the save menu
+    const wasOpen = closeDrawers();      // the plus, the modes, the menus
     if (wasOpen) showOpen();
     if (selected || selectedChair || wasOpen) {
       selected = null;
@@ -4530,11 +4602,7 @@ function presentKeys(event) {
     /* Anything open closes first. Escape means "put back what just
        appeared", and what just appeared is whatever is in front. */
     if (numbering) { stopNumbering(false); return; }
-    if (saveOpen || paletteOpen || railOpen) {
-      saveOpen = paletteOpen = railOpen = false;
-      showOpen();
-      return;
-    }
+    if (closeDrawers()) { showOpen(); return; }
     if (picked) { picked = null; renderSeating(); return; }
 
     if (selected) { selected = null; renderSeating(); }
