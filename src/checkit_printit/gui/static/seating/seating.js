@@ -1358,6 +1358,9 @@ function drawEmpty(host) {
      nothing to lay them on, because every control that adds furniture
      adds it to a *section* and a new course has none. Nothing in the
      app made the first one. */
+  /* Reached only when starting one failed -- `loadSeating` does it on
+     the way in. So this is a retry, and the reason is in the toast
+     that the failure already raised. */
   host.textContent = "No room drawn for this course yet.";
   const named = rosterSections();
   const go = el("button", "startroom", "Start the room");
@@ -1365,20 +1368,32 @@ function drawEmpty(host) {
   go.title = named.length
     ? "One room per section on the roster: " + named.join(", ")
     : "One room to lay desks out on";
-  go.onclick = startRoom;
+  go.onclick = async () => {
+    if (await startRoom()) { sizeSeating(); renderSeating(); }
+  };
   host.appendChild(go);
 }
 
-async function startRoom() {
-  // The server builds it, so `room.new_section` has one definition.
+async function startRoom(quiet) {
+  /* The server builds it, so `room.new_section` has one definition.
+
+     **Groups, not People.** A room with no furniture has nowhere to
+     put anybody, and the plus that opens the shape palette exists
+     only in Groups -- so landing in People would mean a bare canvas,
+     a rail full of students and no way to begin. The rail is still
+     People's; nobody is being hidden, there is just nothing to seat
+     them on yet.
+
+     Does not render. The caller does, because the one that matters
+     is `loadSeating`, which has its own sizing to do first. */
   try {
     const out = await api("/api/seating/start", { room: seatingRoom });
     seatingRoom = out.room;
     seatingSection = 0;
-    refit();
-    renderSeating();
-    toast(out.note);
-  } catch (err) { toast(err.message, true); }
+    enterMode("groups");
+    if (!quiet) toast(out.note);
+    return true;
+  } catch (err) { toast(err.message, true); return false; }
 }
 
 function drawSections(sections) {
@@ -6118,6 +6133,13 @@ async function loadSeating() {
     seatingState = await api("/api/seating", {});
   } catch (err) { toast(err.message, true); return; }
   seatingRoom = keep || JSON.parse(JSON.stringify(seatingState.room));
+  /* A course whose roster names its sections does not have to be
+     asked to make them. The rooms arrive unsaved, like a shuffle, so
+     Discard still puts it back and nothing is written by looking.
+
+     Quietly: this is the state the tab should already have been in,
+     not an action somebody took. */
+  if (!(seatingRoom.sections || []).length) await startRoom(true);
   sizeSeating();
   renderSeating();
 }
@@ -6317,6 +6339,18 @@ function wireSeating() {
   seatingPaper().addEventListener("pointerdown", e => {
     if (e.pointerType === "touch" && twoFinger(e)) return;
     if (walking && walkPointer(e)) return;
+    /* A control drawn on the paper is not the paper.
+
+       Without this the press starts a pan, `setPointerCapture` sends
+       the pointerup to the paper instead of the button, and the
+       click the browser would have synthesised is dispatched to
+       their common ancestor -- so the button never fires. Named by
+       role rather than by class, because the next control added here
+       will not be in any list this file keeps.
+
+       `.plusbtn` never hit it only because it lives outside
+       `.paper`, which is luck rather than design. */
+    if (e.target.closest("button, input, select, textarea, a")) return;
     if (e.target.closest(".shape, .seatcard, .pill, .grip, .spinner")) return;
     if (bandPaper(e)) return;
     panPaper(e);

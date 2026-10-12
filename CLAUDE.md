@@ -409,6 +409,25 @@ built rather than alphabetically, because several are part-done:
 | 8g | ~~Cold call~~ | **folded into Seating as the Up Next mode**, and renamed: the students see it. No tab of its own. See `../checkit/PRINT_TOOL_DESIGN.md` 12.12 |
 | 8h | **Setup** | half done -- a form can be created or attached from the app. The boilerplate editor is still to come |
 
+**A control drawn inside `.paper` must be excluded from the paper's
+own `pointerdown`,** or pressing it starts a pan, pointer capture
+takes the `pointerup`, and no click is ever dispatched to it. The
+handler skips `button, input, select, textarea, a` for that reason.
+`.plusbtn` never hit it only because it lives outside `.paper`.
+
+**`element.click()` cannot verify a button.** It runs the handler
+without hit testing, capture, or any ancestor's listeners -- so it
+reports success on a button no pointer can reach. That shipped once,
+over the top of two real clicks that had already failed and been
+explained away.
+
+**A course starts its rooms by itself.** `loadSeating` calls
+`/api/seating/start` when the room has no sections, so a roster that
+names 820 and 830 gets 820 and 830 without being asked, unsaved. A
+new room opens in **Groups**, because the shape palette's plus is
+only there. The empty state below is now only the retry when that
+fails.
+
 **A course starts with no room, and the empty state is where it
 begins.** "Start the room" posts to `/api/seating/start`, which makes
 one section per section the *roster* names. The names come from the
