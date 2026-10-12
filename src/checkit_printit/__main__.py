@@ -465,7 +465,10 @@ def form_map(space):
 @click.option("-c", "--course", "space", required=True)
 @click.option("--dry-run", is_flag=True,
               help="Show exactly what would be sent, and send nothing.")
-def form_push(space, dry_run):
+@click.option("--force", is_flag=True,
+              help="Send even when the assessment is unset, which blanks "
+                   "the wording on the form.")
+def form_push(space, dry_run, force):
     """Write this week's wording and skill list onto the form."""
     path = _space_path(space)
     conn = form_mod.load(path)
@@ -501,6 +504,11 @@ def form_push(space, dry_run):
     if not conn.items:
         raise click.ClickException(
             "no items are mapped yet -- run `checkit-printit form map`.")
+    # After the preview above, which is the thing worth seeing: the
+    # refusal reads much better underneath what it is refusing to send.
+    empty = av.nothing_to_say()
+    if empty and not force:
+        raise click.ClickException(empty + " (or --force).")
     if dry_run:
         click.echo("\ndry run -- nothing was sent.")
         return

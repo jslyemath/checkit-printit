@@ -491,6 +491,12 @@ def api_form_push(course, _body):
                        "`checkit-printit form map`.")
     try:
         av = course.availability()
+        # The same question the command asks. There is no dry run
+        # behind a button, so this is the only thing between one click
+        # and a form that has lost its wording.
+        empty = av.nothing_to_say()
+        if empty:
+            raise GuiError(empty + ".")
         answer = form_mod.call(conn, "push", _wording(course, av))
     except (availability_mod.AvailabilityError, form_mod.FormError) as exc:
         raise GuiError(str(exc)) from None

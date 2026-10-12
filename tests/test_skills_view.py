@@ -187,6 +187,34 @@ class TestTheSkillsView:
         with pytest.raises(gui_mod.GuiError, match="not connected"):
             gui_mod.api_form_push(course, {})
 
+    def test_pushing_an_unset_assessment_is_refused(self, course,
+                                                    monkeypatch):
+        """The button has no dry run, so this refusal is the only
+        thing between one click and a live form losing its wording.
+
+        Reached past the earlier guards on purpose: "not connected"
+        and "no items mapped" already stop a brand-new course, so a
+        test that only ever sees one of those never reaches this one.
+        """
+        from checkit_printit import course as course_mod
+        from checkit_printit import form as form_mod
+        # Blank, the way `course init` leaves it. The fixture above
+        # fills the assessment in, so without this the push is
+        # perfectly legitimate and the test asserts nothing.
+        with open(course.file("availability"), "w", encoding="utf-8") as f:
+            f.write(course_mod.AVAILABILITY_TEMPLATE)
+        conn = form_mod.Connection(
+            script_id="S", form_id="F", url="https://script.example/x/exec",
+            secret="s", items={k: f"id-{k}" for k in form_mod.SLOTS})
+        monkeypatch.setattr(form_mod, "load", lambda path: conn)
+        sent = []
+        monkeypatch.setattr(form_mod, "call",
+                            lambda c, op, payload=None: sent.append(op) or {})
+
+        with pytest.raises(gui_mod.GuiError, match="blanks"):
+            gui_mod.api_form_push(course, {})
+        assert sent == [], sent
+
 
 class TestTheWordingItself:
     """Anything a student reads is specified by the retired Apps Script."""
