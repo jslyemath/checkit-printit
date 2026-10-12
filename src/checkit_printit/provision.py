@@ -20,6 +20,7 @@ work. There is one copy here.
 
 import os
 import shutil
+import tempfile
 
 from . import clasp as clasp_mod
 from . import course as course_mod
@@ -84,6 +85,44 @@ def script_sources():
     here = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))))
     return os.path.join(here, "appsscript")
+
+
+#: What printit stages, named the way Apps Script files it rather than
+#: the way a filesystem does.
+#:
+#: **The extension is not part of the identity.** `.gs` and `.js` are
+#: one file type to Apps Script; clasp writes `.js` when it clones and
+#: printit stages `.gs`, so `Code.gs` and `Code.js` are not two files,
+#: they are one file twice -- which is what `clasp push` means by
+#: "Conflicting files found".
+OURS = frozenset({"Code", "Secret", "appsscript"})
+
+#: Everything Apps Script keeps in a project. `.gs` and `.js` are the
+#: same thing; `.json` is the manifest; `.html` is a template.
+SCRIPT_FILES = (".gs", ".js", ".json", ".html")
+
+
+def _filed_as(name):
+    """The name Apps Script would know this file by."""
+    return name.rsplit(".", 1)[0]
+
+
+def _drop_our_twins(directory):
+    """Remove cloned files that are printit's files under another
+    extension, so staging ours leaves exactly one of each.
+
+    Deleting rather than overwriting, because the collision is between
+    *different* names for the same remote file and an overwrite cannot
+    reach a name it does not share.
+    """
+    gone = []
+    for name in sorted(os.listdir(directory)):
+        path = os.path.join(directory, name)
+        if (os.path.isfile(path) and name.endswith(SCRIPT_FILES)
+                and _filed_as(name) in OURS):
+            os.remove(path)
+            gone.append(name)
+    return gone
 
 
 def stage_script(space, secret):
@@ -242,6 +281,11 @@ def attach_form(space, script_id, reach=reach):
     directory = stage_script(space, conn.secret)
     try:
         clasp_mod.clone(script_id, directory)
+        # Before re-staging, not after: the clone brings `Code.js` down
+        # beside the `Code.gs` we staged, and those are one file to
+        # Apps Script. Overwriting cannot fix that -- the names differ
+        # -- so the twin goes.
+        _drop_our_twins(directory)
         stage_script(space, conn.secret)       # ours, over the fetched ones
         conn.script_id = script_id
         clasp_mod.push(directory)
@@ -265,15 +309,33 @@ def what_the_clone_would_replace(space, script_id):
     stages share names with the ones most Apps Script projects already use,
     and a form can be driven by something else that is still in service.
     """
-    directory = os.path.join(clasp_dir(space), "_inspect")
-    os.makedirs(directory, exist_ok=True)
+    # **Not** under `clasp_dir`. It used to clone into `_inspect/`
+    # inside it, which is the directory clasp pushes *from* and pushes
+    # recursively -- so asking what attaching would overwrite left a
+    # second copy of the whole project where the push would find it,
+    # and the next attach failed on conflicting files. Asking a safe
+    # question has to leave nothing behind.
+    directory = tempfile.mkdtemp(prefix="printit-inspect-")
     try:
         clasp_mod.clone(script_id, directory)
     except clasp_mod.ClaspError as exc:
+        shutil.rmtree(directory, ignore_errors=True)
         raise ProvisionError(str(exc)) from None
-    ours = {"Code.gs", "appsscript.json", "Secret.gs"}
-    theirs = sorted(n for n in os.listdir(directory)
-                    if n.endswith((".gs", ".json", ".html")))
-    return {"files": theirs,
-            "replaced": sorted(n for n in theirs if n in ours),
-            "kept": sorted(n for n in theirs if n not in ours)}
+    try:
+        theirs = sorted(
+            n for n in os.listdir(directory)
+            if n.endswith(SCRIPT_FILES)
+            # clasp writes this itself when it clones; it was never
+            # theirs, and reporting it as a file at risk is noise.
+            and n != ".clasp.json")
+        # Compared by the name Apps Script files them under, so a
+        # remote `Code.js` is recognised as the `Code.gs` we stage.
+        # Matching whole filenames missed exactly that, which is the
+        # only case that actually happens.
+        return {"files": theirs,
+                "replaced": sorted(n for n in theirs
+                                   if _filed_as(n) in OURS),
+                "kept": sorted(n for n in theirs
+                               if _filed_as(n) not in OURS)}
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
