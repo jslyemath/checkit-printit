@@ -143,6 +143,11 @@ class Pull:
         self.out_of_scope = 0     # confirmed a different assessment
         self.superseded = 0       # replaced by a later response
         self.silent = []          # on the roster, never responded
+        #: Silent students who were still carrying a choice from an
+        #: earlier assessment. Counted because clearing it is a real
+        #: change to the roster and a quiet one would be worse than
+        #: the bug it fixes.
+        self.stale = []
 
     @property
     def answered(self):
@@ -198,6 +203,7 @@ def collect(raw_responses, roster, items, date, known_skills=()):
     answered = {id(s) for s, _ in out.by_student.values()}
     out.silent = [s for s in roster
                   if not s.dropped and id(s) not in answered]
+    out.stale = [s for s in out.silent if s.skills]
     return out
 
 
@@ -295,12 +301,33 @@ def pull_for_course(space, *, write=True, force=False):
         # about. `written` carries the decision; `trouble` explains it.
         return out
 
+    # A date nobody confirmed is a date nobody sat, and now that a
+    # pull clears the silent it would empty every choice on the
+    # roster. Refused rather than performed: the likeliest cause is
+    # the wrong date, and the likeliest moment is the morning of.
+    if write and not out.pulled.chosen and not force:
+        raise ResponseError(
+            f"no response names {availability_mod.spoken_date(out.date) or out.date}, "
+            f"so every student would be treated as having chosen nothing "
+            f"and their choices cleared. Check the assessment date, or "
+            f"pass --force if that is really what you want.")
+
     updated = []
+    silent = {roster_mod.key_of(s) for s in out.pulled.silent}
     for student in people:
         key = roster_mod.key_of(student)
         if key in out.pulled.chosen:
             updated.append(dataclasses.replace(
                 student, skills=list(out.pulled.chosen[key])))
+        elif key in silent and student.skills:
+            # **Cleared, not kept.** `skills` means "what this student
+            # chose for the assessment being prepared", and somebody
+            # who did not answer chose nothing. Keeping the previous
+            # assessment's answer made `default_when_missing` dead for
+            # exactly the students it exists for -- and the pull said
+            # they would get it, which is how it went unnoticed into a
+            # real print run.
+            updated.append(dataclasses.replace(student, skills=[]))
         else:
             updated.append(student)
     with open(roster_path, "w", encoding="utf-8") as f:
