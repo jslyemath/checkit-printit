@@ -41,6 +41,16 @@ lay in the middle.
 An anchored `text.replace(old, new)` with `assert text.count(old) == 1`
 cannot do this. Index slicing has no way to notice.
 
+### Backticks in a `-m` commit message are command substitution
+
+A commit message in double quotes is still shell text, so a word
+wrapped in backticks is run as a command and replaced by its output
+-- which is usually nothing. It has already silently deleted a word
+from a pushed commit here.
+Single-quote the message, or leave backticks out of it. Same family as
+the heredoc eating backslashes and `sed` eating `\u`: **anything handed
+to the shell is shell text first and prose second.**
+
 ### `command | tail` reports tail's exit code, not the command's
 
 A failed build reads as success. Redirect to a file, check `$?` on its own
