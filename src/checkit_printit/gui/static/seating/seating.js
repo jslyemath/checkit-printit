@@ -792,8 +792,21 @@ function contentBox(section) {
     grow(note.at[0] - 70, note.at[1] - 14, note.at[0] + 70, note.at[1] + 14);
 
   if (x0 === Infinity) {
-    const size = (section && section.canvas) || { width: 1000, height: 700 };
-    return { x: 0, y: 0, w: size.width, h: size.height };
+    /* Nothing drawn yet, so there is nothing to fit.
+
+       **Not the declared canvas.** Since the canvas lost its edges
+       that number is a record of how far a room has ever reached,
+       not a thing to measure against -- and `new_section` declares
+       2400 by 1600, so a brand-new room opened at 19% and the first
+       desk dropped into it would have been a speck. A modest box
+       instead: an empty room should open at a size somebody can work
+       at, and the moment there is any furniture this branch is not
+       taken.
+
+       `empty` is carried on the box because `fitZoom` is handed the
+       box and not the section, and "there is nothing here" is the
+       one thing it cannot work out from a rectangle. */
+    return { x: 0, y: 0, w: 1000, h: 700, empty: true };
   }
   return { x: x0 - PAD, y: y0 - PAD,
            w: x1 - x0 + PAD * 2, h: y1 - y0 + PAD * 2 };
@@ -5580,6 +5593,14 @@ function fitZoom(paper, area) {
      is 4 rather than 1: on a projector the room should be blown up past
      life size, and refusing to go over 100% was most of why a small
      class filled a quarter of the screen. */
+  /* Nothing to fit, so nothing to scale: life size.
+
+     Fitting the placeholder box would be fitting a number this file
+     made up, and it showed -- a new room opened at 19% against the
+     declared canvas, and at 44% against the placeholder. Neither
+     means anything, and both make the first desk you drop too small
+     to work with. 100% does mean something. */
+  if (area.empty) return 1;
   const band = freeBand(paper);
   return Math.min(4, Math.max(0.05,
     Math.min(band.w / area.w, band.h / area.h)));
