@@ -199,12 +199,29 @@ def init(name, bank="", root=None, adopt=None):
                   encoding="utf-8") as f:
             f.write(AVAILABILITY_TEMPLATE)
 
-    if adopt and os.path.isfile(os.path.join(path, FILENAMES["roster"])):
-        notes.append(
-            "an adopted roster has display names and no student ids -- import "
-            "a class list next, which will match on those names and fill the "
-            "rest in"
-        )
+    adopted_roster = os.path.join(path, FILENAMES["roster"])
+    if adopt and os.path.isfile(adopted_roster):
+        # Asked, not assumed. This said every adopted roster carries
+        # display names and no ids, which is true of one built from a
+        # spreadsheet and false of one a class list has been imported
+        # into -- and the first real course it ran against had a
+        # Banner id and an email for all forty-five, so the advice was
+        # to go and fix something that was not broken. Wrong
+        # instructions in a tool's own output are worse than none: the
+        # import it recommends would have been against a class list
+        # older than the roster, which resurrects anybody who left.
+        try:
+            from .roster import load as _load_roster
+            people = _load_roster(adopted_roster)
+        except Exception:                            # noqa: BLE001
+            people = None
+        if people is not None:
+            thin = [s for s in people if not (s.sid or s.alt_id or s.email)]
+            if thin:
+                notes.append(
+                    f"{len(thin)} of {len(people)} adopted students have a "
+                    f"name and no id -- import a class list to match on "
+                    f"those names and fill the rest in")
     return path, notes
 
 

@@ -203,6 +203,22 @@
   color: oklch(0.52 0.012 260); font-size: 13px;
 }
 
+/* The one action on an otherwise empty canvas, so it carries the
+   accent the way the corner plus does -- this is chrome offering a
+   thing to do, not the canvas marking an object. */
+.startroom {
+  display: block;
+  margin: 12px auto 0;
+  padding: 7px 14px;
+  font: inherit; font-size: 13px; font-weight: 500;
+  color: #fff;
+  background: var(--isle-key);
+  border: 0; border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+.startroom:hover { transform: scale(1.04); }
+
 /* ----------------------------------------------------------- islands -- */
 
 .isle {

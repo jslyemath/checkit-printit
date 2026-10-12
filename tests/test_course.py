@@ -72,11 +72,36 @@ class TestInit:
         copied = [n for n in notes if n.startswith("adopted ")]
         assert len(copied) == 2, copied
 
-    def test_adopting_warns_that_the_roster_has_no_ids(self, home, job):
-        """An adopted roster carries display names only, so the class list
-        imported next has to reconcile against those names."""
+    def test_adopting_warns_when_the_roster_has_no_ids(self, home, job):
+        """A roster built from a spreadsheet carries display names only,
+        so the class list imported next has to reconcile against those
+        names."""
         _, notes = ws.init("MAT 106", adopt=str(job))
-        assert any("no student ids" in n for n in notes)
+        assert any("name and no id" in n for n in notes)
+
+    def test_it_says_nothing_when_the_adopted_roster_has_ids(self, home,
+                                                             job):
+        """The other half, which nothing checked until 2026-10-11.
+
+        The note used to be unconditional, so a course adopting a
+        roster that already had a Banner id and an email for every
+        student was still told to go and import a class list -- and
+        the only lists to hand were older than the roster, which
+        resurrects anybody who had left. A tool giving confident wrong
+        instructions is worse than one saying nothing.
+        """
+        (job / "roster.toml").write_text(
+            '[[student]]\nname = "Ada Lovelace"\nsection = "820"\n'
+            'sid = "806001"\nemail = "ada@example.edu"\nskills = ["W1"]\n',
+            encoding="utf-8")
+        _, notes = ws.init("MAT 106", adopt=str(job))
+        # Nothing but the "adopted X from Y" lines: a complete roster
+        # earns no advice at all. Asserted that way round rather than
+        # against a phrase, because the phrase this replaced does not
+        # contain the phrase it was replaced by -- so checking for one
+        # would pass against the old unconditional note and prove
+        # nothing.
+        assert [n for n in notes if not n.startswith("adopted ")] == []
 
     def test_the_newest_job_is_the_one_offered(self, home, job):
         older = home / "jobs" / "W1 2026-09-10"
