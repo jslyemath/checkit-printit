@@ -156,6 +156,155 @@ class TestWhatAttachingWouldReplace:
         assert out["replaced"] == ["Code.gs", "appsscript.json"]
         assert out["kept"] == ["ControlCenter.gs", "Sidebar.html"]
 
+    def test_it_sees_the_extension_a_clone_actually_leaves(self, space,
+                                                           monkeypatch):
+        """`.gs` and `.js` are one file type to Apps Script, and clasp
+        writes `.js` when it clones.
+
+        This scanned for `.gs`, `.json` and `.html` only, so the one
+        function whose job is to say what attaching would destroy was
+        blind to the extension every real clone produces -- it reported
+        "nothing of yours" over a live `Code.js`. The test above hid it
+        for the same reason the bug survived: its fake clone writes
+        `Code.gs`, which is the name *printit* stages, not the name a
+        clone leaves behind.
+        """
+        def clone(script_id, directory):
+            os.makedirs(directory, exist_ok=True)
+            for name in ("Code.js", "Helpers.js", "appsscript.json"):
+                with open(os.path.join(directory, name), "w",
+                          encoding="utf-8") as f:
+                    f.write("x")
+        monkeypatch.setattr(clasp_mod, "clone", clone)
+
+        out = provision_mod.what_the_clone_would_replace(space, "SCRIPT1")
+        assert out["replaced"] == ["Code.js", "appsscript.json"]
+        assert out["kept"] == ["Helpers.js"]
+
+    def test_it_does_not_report_clasps_own_bookkeeping(self, space,
+                                                       monkeypatch):
+        """`.clasp.json` is written by the clone itself. Listing it as a
+        file at risk says the instructor has something to lose that they
+        never had."""
+        def clone(script_id, directory):
+            os.makedirs(directory, exist_ok=True)
+            for name in (".clasp.json", "Code.js"):
+                with open(os.path.join(directory, name), "w",
+                          encoding="utf-8") as f:
+                    f.write("x")
+        monkeypatch.setattr(clasp_mod, "clone", clone)
+
+        out = provision_mod.what_the_clone_would_replace(space, "SCRIPT1")
+        assert ".clasp.json" not in out["files"]
+        assert ".clasp.json" not in out["kept"]
+
+    def test_asking_leaves_nothing_where_the_push_would_find_it(
+            self, space, monkeypatch):
+        """It used to clone into `_inspect/` **inside** the directory
+        clasp pushes from, and clasp pushes recursively -- so asking
+        what attaching would overwrite left a second copy of the whole
+        project exactly where the next push would trip over it. Asking
+        a safe question has to leave nothing behind.
+        """
+        where = {}
+
+        def clone(script_id, directory):
+            where["at"] = directory
+            os.makedirs(directory, exist_ok=True)
+            for name in ("Code.js", "appsscript.json"):
+                with open(os.path.join(directory, name), "w",
+                          encoding="utf-8") as f:
+                    f.write("x")
+        monkeypatch.setattr(clasp_mod, "clone", clone)
+
+        provision_mod.what_the_clone_would_replace(space, "SCRIPT1")
+        pushes_from = os.path.abspath(provision_mod.clasp_dir(space))
+
+        # Both halves, asserted separately. Checking only that nothing
+        # is left behind passed with the old location restored, because
+        # the cleanup added alongside it ran either way -- so the test
+        # proved the cleanup and silently stopped proving the location,
+        # which is the half that matters when a cleanup cannot run:
+        # a clone that dies partway, or a file Windows still has open.
+        assert os.path.commonpath(
+            [pushes_from, os.path.abspath(where["at"])]) != pushes_from, \
+            f"inspected inside the push root: {where['at']}"
+        assert not os.path.exists(where["at"]), where["at"]
+        left = (sorted(os.listdir(pushes_from))
+                if os.path.isdir(pushes_from) else [])
+        assert left == [], left
+
+
+class TestAttachingToAFormThatAlreadyHasAScript:
+    """What `clasp push` means by "Conflicting files found".
+
+    The clone brings `Code.js` down beside the `Code.gs` printit
+    staged. Those are not two files -- they are one file under two
+    names -- so clasp refuses, and re-staging cannot help because an
+    overwrite cannot reach a name it does not share. Attach was simply
+    broken against any real form until 2026-10-11.
+    """
+
+    def test_our_file_under_the_other_extension_is_dropped(
+            self, space, monkeypatch, no_clasp):
+        def clone(script_id, directory):
+            os.makedirs(directory, exist_ok=True)
+            for name in ("Code.js", "ControlCenter.gs", "appsscript.json"):
+                with open(os.path.join(directory, name), "w",
+                          encoding="utf-8") as f:
+                    f.write("theirs")
+        monkeypatch.setattr(clasp_mod, "clone", clone)
+        seen = {}
+        monkeypatch.setattr(clasp_mod, "push",
+                            lambda d: seen.update(at=sorted(os.listdir(d))))
+        answers(monkeypatch)
+
+        provision_mod.attach_form(space, "SCRIPT1")
+        assert "Code.js" not in seen["at"]
+        assert "Code.gs" in seen["at"]
+
+    def test_a_file_that_is_not_ours_survives_the_push(
+            self, space, monkeypatch, no_clasp):
+        """The whole point of attach is a form worth keeping. Dropping
+        everything would be a rebuild wearing attach's name."""
+        def clone(script_id, directory):
+            os.makedirs(directory, exist_ok=True)
+            for name in ("Code.js", "ControlCenter.gs", "Sidebar.html"):
+                with open(os.path.join(directory, name), "w",
+                          encoding="utf-8") as f:
+                    f.write("theirs")
+        monkeypatch.setattr(clasp_mod, "clone", clone)
+        seen = {}
+        monkeypatch.setattr(clasp_mod, "push",
+                            lambda d: seen.update(at=sorted(os.listdir(d))))
+        answers(monkeypatch)
+
+        provision_mod.attach_form(space, "SCRIPT1")
+        assert "ControlCenter.gs" in seen["at"]
+        assert "Sidebar.html" in seen["at"]
+
+    def test_exactly_one_of_each_of_ours_is_pushed(self, space, monkeypatch,
+                                                   no_clasp):
+        """Stated as a count, because the failure was a duplicate and a
+        test that only looks for the right file still passes with the
+        wrong one beside it."""
+        def clone(script_id, directory):
+            os.makedirs(directory, exist_ok=True)
+            for name in ("Code.js", "Secret.js", "appsscript.json"):
+                with open(os.path.join(directory, name), "w",
+                          encoding="utf-8") as f:
+                    f.write("theirs")
+        monkeypatch.setattr(clasp_mod, "clone", clone)
+        seen = {}
+        monkeypatch.setattr(clasp_mod, "push",
+                            lambda d: seen.update(at=sorted(os.listdir(d))))
+        answers(monkeypatch)
+
+        provision_mod.attach_form(space, "SCRIPT1")
+        filed = [provision_mod._filed_as(n) for n in seen["at"]]
+        for ours in ("Code", "Secret", "appsscript"):
+            assert filed.count(ours) == 1, (ours, seen["at"])
+
 
 class TestTheSetupView:
     @pytest.fixture

@@ -165,6 +165,22 @@ path got.
 copy", not "did it deploy".** Both times that question was asked late, the
 deployment was fine.
 
+### A fake built from your own vocabulary cannot fail like the boundary
+
+`what_the_clone_would_replace` scanned for `.gs`, `.json` and `.html`, and
+clasp clones Apps Script files as **`.js`** -- so the one guard against
+destroying an instructor's script was blind to every real clone. Its test
+had a fake clone writing `Code.gs`: printit's spelling, not clasp's.
+
+`.gs` and `.js` are **one file** to Apps Script. Two of them in a push
+directory is what `clasp push` means by "Conflicting files found", and
+re-staging cannot fix it because an overwrite cannot reach a name it does
+not share. `provision.OURS` holds what printit stages, by the name Apps
+Script files it under rather than by filename.
+
+**When stubbing something at a boundary, spell the fixture the way the far
+side spells it.**
+
 A fourth, 2026-10-11: the wheel's zoom anchoring was written *inside*
 `zoomTo`, so the pinch never had it and went on holding the middle of the
 window still. It is now `holdPoint`, a function with a name that both call.
