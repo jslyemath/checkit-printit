@@ -80,7 +80,8 @@ def for_assessment(raw_responses, confirm_item_id, date):
     if day is None:
         raise ResponseError(
             f"the assessment has no usable date ({date!r}), so responses "
-            f"cannot be scoped to it. Set one with `skills set --date`.")
+            f"cannot be scoped to it. Set one on the Skills tab, or with "
+            f"`skills set --date`.")
     want = (day.month, day.day)
 
     kept, unconfirmed = [], []

@@ -826,3 +826,70 @@ class TestStartingTheFirstRoom:
         obj, gui_mod, _ = course
         out = gui_mod.api_seating_start(obj, {"room": room_mod.empty("ABCD")})
         room_mod.check(out["room"], {"s1-0", "s1-1", "s1-2", "s1-3"})
+
+
+def a_room_with_no_letters():
+    """`a_room` puts "A" on every chair. This is the state a real room
+    is in until somebody runs the coloring, which is the state nothing
+    used to mention."""
+    r = a_room()
+    for seat in chairs(r):
+        seat["version"] = ""
+    return r
+
+
+class TestSayingThatNoVersionIsChosen:
+    """A room whose seats carry no letter still produces a chart, and
+    `seating.load` alternates A B C D along each table to fill the
+    gap. That is safe *within* a table and knows nothing about who
+    sits near whom across the room -- and the Print view shows those
+    invented letters under a heading that reads "Version", where an
+    instructor reasonably believes their seating has been read.
+
+    Found on the real MAT 106 room: 45 students seated, not one letter
+    anywhere, and nothing in the app, the file or the view said so.
+    """
+
+    def test_the_chart_says_so_when_nothing_is_chosen(self):
+        out = seating_mod.to_toml(a_room_with_no_letters(), lambda k: k)
+        assert "NO VERSIONS ARE SET" in out
+
+    def test_the_chart_does_not_cry_wolf(self):
+        """The same file must not warn when the letters are there, or
+        the warning stops being read."""
+        out = seating_mod.to_toml(a_room(), lambda k: k)
+        assert "NO VERSIONS ARE SET" not in out
+        assert "the room chose it" in out
+
+    def test_an_unlettered_chart_really_does_alternate(self, tmp_path):
+        """The reason the warning is worth printing: what comes back
+        is not nothing, it is plausible letters nobody picked."""
+        p = tmp_path / "seating.toml"
+        p.write_text(seating_mod.to_toml(a_room_with_no_letters(),
+                                         lambda k: k), encoding="utf-8")
+        chart = seating_mod.load(str(p))
+        assert [s.version for s in chart] == ["A", "B", "C", "D"]
+        assert not any(s.pinned for s in chart)
+
+    def test_saving_warns_when_no_seat_has_a_letter(self, course):
+        obj, gui_mod, _ = course
+        out = gui_mod.api_seating_save(obj, {"room": a_room_with_no_letters()})
+        assert "No seat has a version" in out["note"], out["note"]
+
+    def test_saving_a_lettered_room_says_nothing_about_versions(self,
+                                                                course):
+        obj, gui_mod, _ = course
+        out = gui_mod.api_seating_save(obj, {"room": a_room()})
+        assert "version" not in out["note"].lower(), out["note"]
+
+    def test_an_empty_room_is_not_nagged(self, course):
+        """Nobody is seated, so there is nothing to give a letter to.
+        The chart is left alone in that case anyway, and a warning
+        about versions on a room with no people in it is noise."""
+        obj, gui_mod, _ = course
+        bare = a_room()
+        for seat in chairs(bare):
+            seat["student"] = ""
+            seat["version"] = ""
+        out = gui_mod.api_seating_save(obj, {"room": bare})
+        assert "No seat has a version" not in out["note"], out["note"]

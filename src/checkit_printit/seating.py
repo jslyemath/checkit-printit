@@ -372,13 +372,35 @@ def to_toml(room, name_of, written_by="the seating chart tab"):
     """
     from . import room as room_mod
 
+    # Said truthfully, not aspirationally. The header used to state
+    # that every seat names its version "because the room chose it",
+    # and a room where nobody has run the coloring chose nothing -- so
+    # the file asserted the opposite of what it contained, and the
+    # letters a build then used came from `alternate` with nothing
+    # anywhere admitting it.
+    chose = any(
+        (seat.get("version") or "").strip()
+        for section in room.get("sections") or []
+        for seat in room_mod.live_seats(section)
+        if (seat.get("student") or "").strip()
+    )
     lines = [
         f"# Written by `{written_by}` from this course's room.",
         "#",
         GENERATED_MARK + ", and the next write",
-        "# will overwrite this. Every seat names its version because the",
-        "# room chose it; a hand-written chart may leave them out and have",
-        "# them alternate instead.",
+        "# will overwrite this.",
+    ]
+    lines += ([
+        "# Every seat names its version because the room chose it.",
+    ] if chose else [
+        "#",
+        "# NO VERSIONS ARE SET. No seat in the room carries a letter, so",
+        "# none is written here and a build will alternate A B C D along",
+        "# each table instead -- which is safe within a table and knows",
+        "# nothing about who sits near whom across the room. Assign them",
+        "# in Printing mode, under the corner menu: Shuffle versions.",
+    ])
+    lines += [
         "",
         "versions = [" + ", ".join(_quote(v) for v in room["versions"]) + "]",
         "",

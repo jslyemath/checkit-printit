@@ -203,3 +203,18 @@ class TestCollecting:
     def test_not_knowing_which_item_is_which_says_what_to_run(self):
         with pytest.raises(r.ResponseError, match="form map"):
             r.collect([], roster_of(ADA), {}, "2026-09-25", KNOWN)
+
+
+class TestTheRefusalNamesBothFrontEnds:
+    def test_an_unset_date_points_at_the_tab_as_well_as_the_cli(self):
+        """`responses.for_assessment` is reached from the Pull button
+        and from the command, and it used to name only
+        `skills set --date` -- sending somebody who is looking at a
+        Skills tab with a date field on it away to a terminal."""
+        import pytest
+        from checkit_printit import responses as responses_mod
+        with pytest.raises(responses_mod.ResponseError) as caught:
+            responses_mod.for_assessment([], "item1", None)
+        said = str(caught.value)
+        assert "Skills tab" in said
+        assert "skills set --date" in said

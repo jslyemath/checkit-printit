@@ -960,6 +960,24 @@ def api_seating_save(course, body):
             f.write(seating_mod.to_toml(
                 incoming, lambda key: name_of.get(key, "")))
         note = f"Room saved, and {name} rewritten from it."
+        # The one thing a saved room can be silently missing.
+        #
+        # With no letters on the seats the chart carries none, and a
+        # build alternates A B C D along each table instead -- safe
+        # within a table, and knowing nothing about who sits near whom
+        # across the room. The Print view shows those invented letters
+        # in a column headed "Version", which is where an instructor
+        # reasonably believes their seating has been read. Said here
+        # because this is the moment the file is written.
+        lettered = any(
+            (seat.get("version") or "").strip()
+            for section in incoming.get("sections") or []
+            for seat in room_mod.live_seats(section)
+            if (seat.get("student") or "").strip()
+        )
+        if seated and not lettered:
+            note += (" No seat has a version yet, so the build will "
+                     "alternate them. Printing \u22ef Shuffle versions.")
 
     out = _seating_json(course)
     out["note"] = note
