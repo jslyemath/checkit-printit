@@ -156,3 +156,60 @@ class TestWritingInPlace:
         p = tmp_path / "a.toml"
         p.write_text(out, encoding="utf-8")
         assert av.spoken_date(av.load(str(p)).date) == "Friday, 10/2"
+
+
+class TestWhetherThereIsAnythingToSay:
+    """`form push` writes the assessment's wording and its skill list
+    into items on a form that is already in front of students.
+
+    It used to check only that the items were *mapped* -- not that
+    there was anything to put in them. Against an untouched
+    `availability.toml` that sends "...attempt on the  on ." over the
+    instructor's own sentence and leaves the skill question with no
+    options, from a GUI button that has no dry run behind it.
+    """
+
+    def one(self, **kw):
+        base = dict(name="Redo", date=av.as_date("2026-10-02"),
+                    due="2026-10-01T23:59", choose=3, limit="at most",
+                    skills=("W1",))
+        base.update(kw)
+        return av.Availability(**base)
+
+    def test_a_full_assessment_says_nothing_is_wrong(self):
+        assert self.one().nothing_to_say() == ""
+
+    def test_no_date_is_refused(self):
+        why = self.one(date=None).nothing_to_say()
+        assert "a date" in why
+
+    def test_no_skills_is_refused(self):
+        """A question with no options is worse than the one it
+        replaced: nobody can answer it."""
+        why = self.one(skills=()).nothing_to_say()
+        assert "open skills" in why
+
+    def test_both_missing_are_named_together(self):
+        """One refusal listing both, not one that has to be hit twice."""
+        why = self.one(date=None, skills=()).nothing_to_say()
+        assert "a date" in why and "open skills" in why
+
+    def test_a_missing_name_alone_does_not_refuse(self):
+        """The name reads as a blank in one sentence. The date and the
+        options are the two that make the form unusable, and refusing
+        on the name would block a push somebody meant."""
+        assert self.one(name="").nothing_to_say() == ""
+
+    def test_an_untouched_course_has_nothing_to_say(self, tmp_path):
+        """The state every new course starts in, which is the one that
+        matters.
+
+        Loaded from the template `course init` really writes, not from
+        this module's `FILE` -- that one is fully filled in, so a test
+        built on it would have asserted the opposite of the case the
+        guard exists for.
+        """
+        from checkit_printit import course as course_mod
+        p = tmp_path / "a.toml"
+        p.write_text(course_mod.AVAILABILITY_TEMPLATE, encoding="utf-8")
+        assert av.load(str(p)).nothing_to_say() != ""

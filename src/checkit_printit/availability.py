@@ -98,6 +98,15 @@ def spoken_time(value):
 
 @dataclasses.dataclass
 class Availability:
+    """What is open for retake, and what the next assessment is.
+
+    `nothing_to_say` is here rather than in either front end because
+    both ask it and the rule is one sentence: a push writes the
+    assessment's wording and its skill list into the form, so an
+    assessment with no date and no skills has nothing to write and a
+    push would replace real text with blanks.
+    """
+
     name: str = ""
     date: object = None
     due: object = None
@@ -105,6 +114,27 @@ class Availability:
     limit: str = "at most"
     skills: tuple = ()
     source_path: str = ""
+
+    def nothing_to_say(self):
+        """Why a push should be refused, or "" to go ahead.
+
+        The date and the skills, not the name: the wording says when
+        the assessment is and the question lists what may be chosen,
+        and either of those being empty makes the form worse than it
+        was. A missing name reads as a blank in one sentence; a
+        missing skill list is a question nobody can answer.
+        """
+        missing = []
+        if not self.date:
+            missing.append("a date")
+        if not self.skills:
+            missing.append("any open skills")
+        if not missing:
+            return ""
+        return ("the assessment has " + " and ".join(missing)
+                + ", so a push would write blanks over what the form "
+                  "says now. Set it with `checkit-printit skills set` "
+                  "and `skills open` first")
 
     @property
     def unlimited(self):
