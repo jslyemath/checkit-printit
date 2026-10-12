@@ -193,12 +193,25 @@ def finish(space, rename_to="", reach=reach):
     back from "not authorized yet" is to call this again, not to start
     over.
 
-    `rename_to` is set only when printit made the form: clasp's --title
-    names the *script project* and leaves the form itself untitled. A push
-    must never touch an existing form's title.
+    **`rename_to` is the signal that printit made this form**, and
+    everything that writes to the form hangs off it: the rename, the
+    four items, and `configure`. clasp's --title names the *script
+    project* and leaves the form itself untitled, so only a create has
+    a title to set -- and a form printit did not make belongs to the
+    instructor, down to its question list.
+
+    An attached form therefore gets **none** of them. Its items are
+    recorded by `form map`, which asks which existing question is
+    which, or created deliberately by `form add-items`. Until
+    2026-10-11 `addItems` ran here on both paths, so attaching to a
+    form that already had the four questions -- which is what a form
+    worth attaching to looks like -- appended four more and reported
+    that nothing had changed.
     """
     conn = _course_conn(space)
     said = []
+    #: Did printit make this form? Everything that writes to it asks.
+    ours = bool(rename_to)
     answer = reach(conn)
 
     if rename_to:
@@ -208,11 +221,21 @@ def finish(space, rename_to="", reach=reach):
     if answer.get("editUrl"):
         said.append(answer["editUrl"])
 
-    made = form_mod.call(conn, "addItems",
-                         {"items": dict(conn.items)})["items"]
-    conn.items = made
+    if ours:
+        made = form_mod.call(conn, "addItems",
+                             {"items": dict(conn.items)})["items"]
+        conn.items = made
+    else:
+        # Not even to fill a gap. `addItems` creates whatever it cannot
+        # find by id, and an attached form's items are unknown until
+        # `form map` says which they are -- so "only what is missing"
+        # means "all four" here, beside the four already there.
+        made = dict(conn.items)
+        if not made:
+            said.append("no items mapped yet -- run `form map` to say "
+                        "which question is which")
 
-    if rename_to:
+    if ours:
         # A form printit just made. Never for attach: an existing form's
         # settings belong to the instructor, like its banner and its title.
         done = form_mod.call(conn, "configure", {

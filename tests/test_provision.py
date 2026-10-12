@@ -100,15 +100,56 @@ class TestTheDeployIsSavedBeforeGoogleCanRefuse:
 
 class TestFinishingAfterAuthorization:
     def test_it_adds_the_items_and_saves(self, space, monkeypatch):
+        """On the create path. `rename_to` is what says printit made
+        this form -- this used to be called without one, which is the
+        attach path, and so asserted that attaching creates questions
+        on somebody else's form."""
         conn = form_mod.load(course_mod.path_for(space))
         conn.url, conn.secret = "https://script.example/x/exec", "s"
         form_mod.save(course_mod.path_for(space), conn)
         answers(monkeypatch)
 
-        provision_mod.finish(space)
+        provision_mod.finish(space, rename_to="Skill Selection Form")
         after = form_mod.load(course_mod.path_for(space))
         assert set(after.items) == set(form_mod.SLOTS)
         assert after.form_id == "FORM1"
+
+    def test_attaching_writes_nothing_to_the_form(self, space,
+                                                  monkeypatch):
+        """The whole promise of attach, asserted as one property.
+
+        `finish` called `addItems` on both paths, so attaching to a
+        form that already had the four questions -- which is what a
+        form worth attaching to looks like -- appended four more and
+        returned the line "nothing on the form itself was changed".
+        The real MAT 106 form has all four by hand; it would have
+        ended up with nine items and two spare required checkboxes.
+
+        Asserted as "no operation but `ping`" rather than as a list of
+        the three ops that write. The list was the bug: `rename` and
+        `configure` were both gated and tested, and `addItems` was
+        neither, because nothing said *every* write is gated -- only
+        that those two were.
+        """
+        conn = form_mod.load(course_mod.path_for(space))
+        conn.url, conn.secret = "https://script.example/x/exec", "s"
+        form_mod.save(course_mod.path_for(space), conn)
+        asked = answers(monkeypatch)
+
+        provision_mod.finish(space)
+        assert [op for op in asked if op != "ping"] == [], asked
+
+    def test_it_says_the_items_are_not_mapped_yet(self, space,
+                                                  monkeypatch):
+        """Because the next move is `form map`, and silence after an
+        attach looks like it finished the job."""
+        conn = form_mod.load(course_mod.path_for(space))
+        conn.url, conn.secret = "https://script.example/x/exec", "s"
+        form_mod.save(course_mod.path_for(space), conn)
+        answers(monkeypatch)
+
+        said = provision_mod.finish(space)
+        assert any("form map" in line for line in said), said
 
     def test_running_it_twice_changes_nothing(self, space, monkeypatch):
         """Which is why coming back here is the way on from "not
@@ -118,11 +159,14 @@ class TestFinishingAfterAuthorization:
         form_mod.save(course_mod.path_for(space), conn)
         answers(monkeypatch)
 
-        provision_mod.finish(space)
+        provision_mod.finish(space, rename_to="Skill Selection Form")
         once = form_mod.load(course_mod.path_for(space))
-        provision_mod.finish(space)
+        provision_mod.finish(space, rename_to="Skill Selection Form")
         twice = form_mod.load(course_mod.path_for(space))
         assert once.items == twice.items and once.form_id == twice.form_id
+        # On the create path, where there is something to repeat. With
+        # no `rename_to` this compared one empty item map to another.
+        assert set(once.items) == set(form_mod.SLOTS)
 
     def test_a_rename_happens_only_when_asked(self, space, monkeypatch):
         """clasp's --title names the script project, so a form printit made
@@ -134,6 +178,7 @@ class TestFinishingAfterAuthorization:
         asked = answers(monkeypatch)
         provision_mod.finish(space)
         assert "rename" not in asked and "configure" not in asked
+        assert "addItems" not in asked
 
         asked2 = answers(monkeypatch)
         provision_mod.finish(space, rename_to="Skill Selection Form")
