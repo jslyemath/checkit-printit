@@ -744,3 +744,85 @@ class TestWhoIsStillStanding:
         obj, gui_mod, _ = course
         out = gui_mod.api_seating(obj, {})
         assert set(out["names"]) == {"s1-0", "s1-1", "s1-2", "s1-3"}
+
+
+class TestStartingTheFirstRoom:
+    """Until 2026-10-11 a real course could not start one.
+
+    `room.new_section` existed and only this test file ever called it:
+    nothing in the CLI or the app made the first section, and every
+    control that adds furniture adds it to a section. The empty state
+    said "the canvas is where you lay the desks out" and offered
+    nowhere to lay them. Found by pointing the app at a real class.
+    """
+
+    def test_the_route_is_wired(self):
+        """A handler nothing routes to is a handler nobody can reach."""
+        from checkit_printit import gui as gui_mod
+        assert gui_mod.ROUTES["/api/seating/start"] \
+            is gui_mod.api_seating_start
+
+    def test_one_room_per_section_on_the_roster(self, course):
+        obj, gui_mod, _ = course
+        out = gui_mod.api_seating_start(obj, {"room": room_mod.empty("ABCD")})
+        assert [s["name"] for s in out["room"]["sections"]] == ["820", "830"]
+
+    def test_the_names_come_from_the_roster(self, course):
+        """Not a label, and not something typed.
+
+        `standing` filters the unseated rail by comparing a room's
+        section name to the roster's `section` field, and a name that
+        matches no student turns the filter off rather than failing --
+        so both sections would be offered every chair. The names have
+        to come from the roster for that filter to mean anything.
+        """
+        obj, gui_mod, _ = course
+        out = gui_mod.api_seating_start(obj, {"room": room_mod.empty("ABCD")})
+        from_roster = {s.section for s in obj.roster() if s.section}
+        assert {s["name"] for s in out["room"]["sections"]} == from_roster
+
+    def test_the_rooms_are_ordered(self, course):
+        """`order` decides which section's papers print first, and the
+        run covers every section, so it has to be set on all of them."""
+        obj, gui_mod, _ = course
+        out = gui_mod.api_seating_start(obj, {"room": room_mod.empty("ABCD")})
+        assert [s["order"] for s in out["room"]["sections"]] == [1, 2]
+
+    def test_a_roster_with_no_sections_gets_one_room(self, course,
+                                                     tmp_path):
+        """One room, not none. A course that does not use sections is
+        the simplest case and must not fall through to an empty list,
+        which is the state this whole endpoint exists to escape."""
+        obj, gui_mod, course_mod = course
+        from checkit_printit import roster as roster_mod
+        from checkit_printit.roster import Roster, Student
+        plain = Roster([Student(name="Ada Lovelace", skills=[], sid="s1-0")])
+        with open(course_mod.file_in("P", "roster"), "w",
+                  encoding="utf-8") as f:
+            f.write(roster_mod.to_toml(plain, "test"))
+        out = gui_mod.api_seating_start(
+            gui_mod.Course("P"), {"room": room_mod.empty("ABCD")})
+        assert len(out["room"]["sections"]) == 1
+
+    def test_nothing_is_written(self, course):
+        """Like the shuffle: the room comes back as an unsaved edit, so
+        Discard works and looking does not commit."""
+        obj, gui_mod, course_mod = course
+        before = os.path.isfile(course_mod.file_in("P", "room"))
+        gui_mod.api_seating_start(obj, {"room": room_mod.empty("ABCD")})
+        assert os.path.isfile(course_mod.file_in("P", "room")) == before
+
+    def test_it_refuses_a_course_that_already_has_a_room(self, course):
+        """Otherwise the button is a way to throw a term's seating
+        away, and it sits on an empty canvas where it looks harmless."""
+        obj, gui_mod, _ = course
+        with pytest.raises(gui_mod.GuiError):
+            gui_mod.api_seating_start(obj, {"room": a_room()})
+
+    def test_what_comes_back_is_a_room_the_guard_accepts(self, course):
+        """The canvas posts this straight back to `save`, which runs
+        `room.check`. A section this endpoint built and that one
+        rejects would be unsaveable and say so only on the way out."""
+        obj, gui_mod, _ = course
+        out = gui_mod.api_seating_start(obj, {"room": room_mod.empty("ABCD")})
+        room_mod.check(out["room"], {"s1-0", "s1-1", "s1-2", "s1-3"})

@@ -1076,8 +1076,7 @@ function renderSeating() {
   }
 
   if (!sections.length) {
-    empty.textContent = "No room drawn for this course yet. The canvas is "
-      + "where you lay the desks out; adding shapes comes next.";
+    drawEmpty(empty);
     empty.hidden = false;
     seatingCanvas().textContent = "";
     seatingPen().hidden = true;
@@ -1341,6 +1340,46 @@ function layoutRail() {
     : railOpen ? "Put the list away" : "Every mode";
 }
 
+
+function rosterSections() {
+  /* The section names the roster actually uses, distinct and sorted.
+
+     These and not something typed: `standing` filters the rail by
+     comparing a room's section name to this field, and a name that
+     matches nothing turns the filter off rather than erroring. */
+  const all = (seatingState && seatingState.sections) || {};
+  return [...new Set(Object.values(all).filter(Boolean))].sort();
+}
+
+function drawEmpty(host) {
+  /* An empty state has to be a door, not a sign.
+
+     This read "the canvas is where you lay the desks out" and offered
+     nothing to lay them on, because every control that adds furniture
+     adds it to a *section* and a new course has none. Nothing in the
+     app made the first one. */
+  host.textContent = "No room drawn for this course yet.";
+  const named = rosterSections();
+  const go = el("button", "startroom", "Start the room");
+  go.type = "button";
+  go.title = named.length
+    ? "One room per section on the roster: " + named.join(", ")
+    : "One room to lay desks out on";
+  go.onclick = startRoom;
+  host.appendChild(go);
+}
+
+async function startRoom() {
+  // The server builds it, so `room.new_section` has one definition.
+  try {
+    const out = await api("/api/seating/start", { room: seatingRoom });
+    seatingRoom = out.room;
+    seatingSection = 0;
+    refit();
+    renderSeating();
+    toast(out.note);
+  } catch (err) { toast(err.message, true); }
+}
 
 function drawSections(sections) {
   const host = document.getElementById("seat-sections");

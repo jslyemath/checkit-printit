@@ -756,6 +756,46 @@ def api_seating_versions(course, body):
     return {"room": incoming, "note": note, "clashes": len(clashes)}
 
 
+def api_seating_start(course, body):
+    """Draw the first room for a course that has none.
+
+    **Server-side so `room.new_section` stays one definition.** The
+    canvas could build the dict itself in four lines, and then there
+    would be two answers to "what is a section" -- which is the shape
+    of bug this codebase keeps finding. The rule here is that a button
+    calls the function a command would.
+
+    **One room per section the roster names.** Not one room, and not a
+    name typed into a box: `standing` filters the unseated rail by
+    comparing the section's name to the roster's `section` field, so a
+    name that does not match a roster value silently turns the filter
+    off and shows every student in both sections. The names are
+    therefore taken from the roster rather than invented. A roster with
+    no sections at all is one room, not none.
+
+    Nothing is written, like the shuffle: the room comes back as an
+    unsaved edit for the canvas to hold, so Discard still works and an
+    empty room is not committed to disk by looking at it.
+    """
+    incoming = body.get("room")
+    if not isinstance(incoming, dict):
+        raise GuiError("that request carried no room.")
+    if incoming.get("sections"):
+        raise GuiError("this course already has a room drawn.")
+
+    people = course.roster()
+    names = sorted({s.section for s in people if s.section}) if people else []
+    if not names:
+        names = [""]
+    incoming["sections"] = [room_mod.new_section(name, i + 1)
+                            for i, name in enumerate(names)]
+
+    shown = ", ".join(n or "unnamed" for n in names)
+    note = (f"Started {len(names)} rooms: {shown}. Add some furniture."
+            if len(names) > 1 else "Room started. Add some furniture.")
+    return {"room": incoming, "note": note}
+
+
 def api_seating_shuffle(course, body):
     """Deal the seated people into different chairs.
 
@@ -1199,6 +1239,7 @@ ROUTES = {
     "/api/seating": api_seating,
     "/api/seating/save": api_seating_save,
     "/api/seating/versions": api_seating_versions,
+    "/api/seating/start": api_seating_start,
     "/api/seating/shuffle": api_seating_shuffle,
     "/api/seating/fill": api_seating_fill,
     "/api/print": api_print,

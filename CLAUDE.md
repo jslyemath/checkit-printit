@@ -393,6 +393,22 @@ built rather than alphabetically, because several are part-done:
 | 8g | ~~Cold call~~ | **folded into Seating as the Up Next mode**, and renamed: the students see it. No tab of its own. See `../checkit/PRINT_TOOL_DESIGN.md` 12.12 |
 | 8h | **Setup** | half done -- a form can be created or attached from the app. The boilerplate editor is still to come |
 
+**A course starts with no room, and the empty state is where it
+begins.** "Start the room" posts to `/api/seating/start`, which makes
+one section per section the *roster* names. The names come from the
+roster because `standing` filters the unseated rail by comparing them
+to a student's `section`, and a name matching nobody turns the filter
+off instead of failing. Until 2026-10-11 there was no such control and
+`room.new_section` was called only by tests, so a real course could
+not draw a room at all.
+
+**`course init --adopt` can hand you a chart the tab will not
+overwrite.** A `seating.toml` from a spreadsheet export is not a room,
+and `save` leaves a chart it did not write alone -- so the room saves,
+the build keeps reading the old chart, and nothing looks wrong. Check
+`seating.was_generated` on it, and delete the adopted copy if the room
+is meant to be the source. The job folder still has the original.
+
 **Inside Seating.** The modes, and what a click means in each:
 
 | mode | a click | a drag on bare paper | the corner button |
