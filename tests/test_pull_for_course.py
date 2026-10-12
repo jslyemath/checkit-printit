@@ -97,11 +97,141 @@ class TestTheHappyPull:
         assert out.written is True
         assert skills_now(course)["Ada Lovelace"] == ["AD", "SU"]
 
-    def test_it_leaves_the_silent_alone(self, course, monkeypatch):
+    def test_the_silent_are_named(self, course, monkeypatch):
+        """This used to be called "leaves the silent alone" and assert
+        that a silent student's skills were `[]` afterwards -- which
+        the fixture had made them before the pull ran, so it passed
+        whether they were kept or cleared. See the test below for the
+        case it could not see."""
         responding(monkeypatch, answer("ada@example.edu"))
         out = responses_mod.pull_for_course(course)
         assert skills_now(course)["Grace Hopper"] == []
         assert [s.display for s in out.pulled.silent] == ["Grace Hopper"]
+
+    def test_a_silent_students_earlier_choice_is_cleared(self, course,
+                                                         monkeypatch):
+        """`skills` means "what this student chose for the assessment
+        being prepared". Somebody who did not answer chose nothing.
+
+        Keeping last week's answer made `default_when_missing` dead
+        for exactly the students it exists for, while the pull said
+        they would get it. On the first real run that was 17 students
+        and 51 papers nobody had asked for.
+        """
+        stale = Roster([
+            Student(name="Ada Lovelace", skills=[], sid="806001",
+                    email="ada@example.edu"),
+            Student(name="Grace Hopper", skills=["W5", "W6", "W7"],
+                    sid="806002", email="grace@example.edu"),
+        ])
+        with open(course_mod.file_in(course, "roster"), "w",
+                  encoding="utf-8") as f:
+            f.write(roster_mod.to_toml(stale, "test"))
+
+        responding(monkeypatch, answer("ada@example.edu"))
+        out = responses_mod.pull_for_course(course)
+        assert skills_now(course)["Grace Hopper"] == []
+        assert [s.display for s in out.pulled.stale] == ["Grace Hopper"]
+
+    def test_nothing_is_called_stale_that_was_already_empty(self, course,
+                                                            monkeypatch):
+        """The count is reported to the instructor, so it has to mean
+        "a choice was thrown away" and not "somebody was silent"."""
+        responding(monkeypatch, answer("ada@example.edu"))
+        out = responses_mod.pull_for_course(course)
+        assert out.pulled.silent and not out.pulled.stale
+
+    def test_a_dropped_student_is_left_exactly_as_they_are(self, course,
+                                                            monkeypatch):
+        """`silent` is the people who could have answered, so it skips
+        the dropped -- and the clearing has to skip them too. Their
+        row is a record of a term that happened, and the print record
+        still refers to it.
+
+        Found by mutation: changing the guard to clear *everyone* who
+        did not answer broke nothing, because every student in the
+        fixture was active and so the two populations were the same.
+        """
+        people = Roster([
+            Student(name="Ada Lovelace", skills=[], sid="806001",
+                    email="ada@example.edu"),
+            Student(name="Grace Hopper", skills=["W5", "W6"], sid="806002",
+                    email="grace@example.edu", dropped=True),
+        ])
+        with open(course_mod.file_in(course, "roster"), "w",
+                  encoding="utf-8") as f:
+            f.write(roster_mod.to_toml(people, "test"))
+
+        responding(monkeypatch, answer("ada@example.edu"))
+        out = responses_mod.pull_for_course(course)
+        assert skills_now(course)["Grace Hopper"] == ["W5", "W6"]
+        assert [s.display for s in out.pulled.silent] == []
+
+    def test_the_dry_run_clears_nothing(self, course, monkeypatch):
+        stale = Roster([
+            Student(name="Ada Lovelace", skills=[], sid="806001",
+                    email="ada@example.edu"),
+            Student(name="Grace Hopper", skills=["W5"], sid="806002",
+                    email="grace@example.edu"),
+        ])
+        with open(course_mod.file_in(course, "roster"), "w",
+                  encoding="utf-8") as f:
+            f.write(roster_mod.to_toml(stale, "test"))
+        responding(monkeypatch, answer("ada@example.edu"))
+        responses_mod.pull_for_course(course, write=False)
+        assert skills_now(course)["Grace Hopper"] == ["W5"]
+
+
+class TestAPullThatMatchesNobody:
+    """Now that a pull clears the silent, a date nobody confirmed
+    would empty every choice on the roster at once. The likeliest
+    cause is the wrong date and the likeliest moment is the morning
+    of, so it is refused rather than performed."""
+
+    def test_it_refuses_to_write(self, course, monkeypatch):
+        responding(monkeypatch, answer("ada@example.edu", when="9/18"))
+        with pytest.raises(responses_mod.ResponseError, match="cleared"):
+            responses_mod.pull_for_course(course)
+
+    def test_the_roster_is_untouched_by_the_refusal(self, course,
+                                                    monkeypatch):
+        stale = Roster([
+            Student(name="Ada Lovelace", skills=["W1"], sid="806001",
+                    email="ada@example.edu"),
+            Student(name="Grace Hopper", skills=["W5"], sid="806002",
+                    email="grace@example.edu"),
+        ])
+        with open(course_mod.file_in(course, "roster"), "w",
+                  encoding="utf-8") as f:
+            f.write(roster_mod.to_toml(stale, "test"))
+        responding(monkeypatch, answer("ada@example.edu", when="9/18"))
+        with pytest.raises(responses_mod.ResponseError):
+            responses_mod.pull_for_course(course)
+        assert skills_now(course)["Ada Lovelace"] == ["W1"]
+        assert skills_now(course)["Grace Hopper"] == ["W5"]
+
+    def test_force_goes_through(self, course, monkeypatch):
+        """Because clearing everybody is occasionally what is wanted
+        -- a cancelled assessment -- and the refusal must be an
+        obstacle, not a wall."""
+        stale = Roster([
+            Student(name="Ada Lovelace", skills=["W1"], sid="806001",
+                    email="ada@example.edu"),
+        ])
+        with open(course_mod.file_in(course, "roster"), "w",
+                  encoding="utf-8") as f:
+            f.write(roster_mod.to_toml(stale, "test"))
+        responding(monkeypatch, answer("ada@example.edu", when="9/18"))
+        responses_mod.pull_for_course(course, force=True)
+        assert skills_now(course)["Ada Lovelace"] == []
+
+    def test_the_dry_run_is_not_refused(self, course, monkeypatch):
+        """It writes nothing, so there is nothing to protect -- and
+        seeing what a wrong date would do is exactly how somebody
+        finds out it is the wrong date."""
+        responding(monkeypatch, answer("ada@example.edu", when="9/18"))
+        out = responses_mod.pull_for_course(course, write=False)
+        assert out.pulled.out_of_scope == 1
 
     def test_the_counts_come_off_the_outcome(self, course, monkeypatch):
         """Every number the CLI used to compute inline, so the web app does

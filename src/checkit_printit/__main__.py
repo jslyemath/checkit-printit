@@ -372,6 +372,9 @@ def form_pull(space, dry_run, force):
     if pulled.silent:
         click.echo(f"  {len(pulled.silent)} did not answer; they will get "
                    f"[selection] default_when_missing")
+    if pulled.stale:
+        click.echo(f"  {len(pulled.stale)} of them still had a choice from "
+                   f"an earlier assessment, which is cleared")
 
     # Everything below is a reason a student might not get the paper they
     # asked for, so none of it is allowed to be quiet.
