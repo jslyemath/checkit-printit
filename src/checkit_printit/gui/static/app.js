@@ -12,13 +12,17 @@ const TOKEN = window.PRINTIT_TOKEN;
    usual fixes hide tabs behind a gesture. Nothing here is hidden; the
    words just get smaller. */
 const VIEWS = [
-  { id: "overview", label: "Overview", short: "Home" },
-  { id: "roster", label: "Roster", short: "Roster" },
-  { id: "form", label: "Update form", short: "Form" },
-  { id: "print", label: "Print job", short: "Print" },
-  { id: "record", label: "Record", short: "Record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
-  { id: "seating", label: "Seating", short: "Seats" },
-  { id: "setup", label: "Setup", short: "Setup" },
+  // No Overview. It was eight identical boxes in which the largest word
+  // on screen was "yes" -- a dashboard for a tool nobody opens to read
+  // statistics. Its counts belong beside the thing they count, and
+  // anything actually wrong belongs on the rail and at the top of the
+  // page that owns it.
+  { id: "roster", label: "Roster", short: "Roster", icon: "roster" },
+  { id: "form", label: "Update form", short: "Form", icon: "form" },
+  { id: "print", label: "Print job", short: "Print", icon: "print" },
+  { id: "record", label: "Record", short: "Record", icon: "record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
+  { id: "seating", label: "Seating", short: "Seats", icon: "seating" },
+  { id: "setup", label: "Setup", short: "Setup", icon: "setup", foot: true },
   // No Cold call tab. It is Seating's Up Next mode: the chart is
   // already on the projector, so picking somebody should light a chair
   // rather than replace the screen with a list of names.
@@ -131,25 +135,111 @@ function toast(message, bad) {
 
 // ----------------------------------------------------------------- nav --
 
+/* The rail's icons.
+
+   Its own set, deliberately: `seating.js` has a richer one, and the
+   shell must not depend on the sub-app -- Seating is written to be
+   liftable out, which it would not be if the chrome imported from it.
+   The direction to unify these, when they are unified, is the other
+   way round: the shell owns the builder and Seating takes it. */
+const NAV_ICON = {
+  roster: "M9 11.5a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2"
+    + "M2.5 20c0-3.4 2.9-5.8 6.5-5.8s6.5 2.4 6.5 5.8"
+    + "M16.2 4.7a3.6 3.6 0 0 1 0 6.6M17.4 14.6c2.5.6 4.1 2.5 4.1 5.4",
+  form: "M9.2 4.2h5.6v2.6H9.2zM7.6 5.4H6.2A1.7 1.7 0 0 0 4.5 7.1v11.4"
+    + "A1.7 1.7 0 0 0 6.2 20.2h11.6a1.7 1.7 0 0 0 1.7-1.7V7.1"
+    + "a1.7 1.7 0 0 0-1.7-1.7h-1.4M8.4 11.2h7.2M8.4 15.1h4.3",
+  print: "M7.2 9.4V4.2h9.6v5.2M7.2 17.8H5.6a1.6 1.6 0 0 1-1.6-1.6v-4.8"
+    + "a1.6 1.6 0 0 1 1.6-1.6h12.8a1.6 1.6 0 0 1 1.6 1.6v4.8"
+    + "a1.6 1.6 0 0 1-1.6 1.6h-1.6M7.2 14.2h9.6v5.6H7.2z",
+  record: "M12 7.4v4.9l3.1 2M3.6 12a8.4 8.4 0 1 0 2.6-6.1M6.2 3.2v2.9H3.3",
+  seating: "M4.2 4.2h6.3v6.3H4.2zM13.5 4.2h6.3v6.3h-6.3"
+    + "M4.2 13.5h6.3v6.3H4.2zM13.5 13.5h6.3v6.3h-6.3",
+  setup: "M4 7.4h9.2M17.2 7.4h2.8M4 16.6h3.6M11.6 16.6h8.4"
+    + "M15.2 5.2v4.4M9.2 14.4v4.4",
+  collapse: "M14.5 7.5 9.5 12l5 4.5",
+};
+
+function navIcon(name) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", NAV_ICON[name] || "");
+  svg.appendChild(path);
+  return svg;
+}
+
+/* Collapsed is remembered, because it is a statement about this
+   screen rather than about this visit. */
+function railCollapsed() {
+  try { return localStorage.getItem("railCollapsed") === "1"; }
+  catch (err) { return false; }
+}
+
+function setRailCollapsed(on) {
+  document.getElementById("navrail").classList.toggle("tight", on);
+  try { localStorage.setItem("railCollapsed", on ? "1" : "0"); }
+  catch (err) { /* a private window still gets a working rail */ }
+}
+
 function buildNav() {
-  const nav = document.getElementById("views");
+  const rail = document.getElementById("navrail");
+  rail.textContent = "";
+  rail.classList.toggle("tight", railCollapsed());
+
+  /* The course, where the product name used to be. A tool is opened
+     to work on one course and the name of the program is the least
+     useful thing on screen; the mark keeps it identifiable. */
+  const brand = document.createElement("div");
+  brand.className = "brand";
+  const mark = document.createElement("span");
+  mark.className = "mark";
+  mark.title = "checkit-printit";
+  const who = document.createElement("span");
+  who.className = "who";
+  who.id = "course-name";
+  who.textContent = "loading\u2026";
+  brand.append(mark, who);
+  rail.appendChild(brand);
+
+  const list = document.createElement("nav");
+  list.id = "views";
+  const foot = document.createElement("nav");
+  foot.className = "railfoot";
+
   for (const view of VIEWS) {
     const b = document.createElement("button");
-    // Both spellings, and CSS picks. The full one carries the title so
-    // the short form is never the only thing a person can read.
-    const full = document.createElement("span");
-    full.className = "wide-only";
-    full.textContent = view.label;
-    const brief = document.createElement("span");
-    brief.className = "narrow-only";
-    brief.textContent = view.short || view.label;
-    b.append(full, brief);
+    b.type = "button";
+    b.appendChild(navIcon(view.icon));
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = view.label;
+    b.appendChild(label);
+    // The title is the whole label, so a collapsed rail is never the
+    // only place a name exists.
     b.title = view.label;
     if (view.soon) b.classList.add("soon");
     b.onclick = () => show(view.id);
     b.dataset.view = view.id;
-    nav.appendChild(b);
+    (view.foot ? foot : list).appendChild(b);
   }
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "railtoggle";
+  toggle.appendChild(navIcon("collapse"));
+  const tlabel = document.createElement("span");
+  tlabel.className = "label";
+  tlabel.textContent = "Collapse";
+  toggle.appendChild(tlabel);
+  toggle.title = "Narrow the rail to icons";
+  toggle.onclick = () => setRailCollapsed(
+    !document.getElementById("navrail").classList.contains("tight"));
+  foot.appendChild(toggle);
+
+  rail.append(list, foot);
 }
 
 function show(id) {
@@ -192,7 +282,11 @@ function renderOverview(summary) {
     { className: "wide-only",
       textContent: ` — ${summary.active} active of ${summary.students}` }));
 
-  const cards = document.getElementById("overview");
+  // The cards are gone with the tab. What this function still does is
+  // name the course on the rail, which is the one thing from the old
+  // Overview that somebody actually read.
+  const cards = null;
+  if (!cards) return;
   cards.textContent = "";
   const add = (n, label, missing) => {
     const d = document.createElement("div");
@@ -2010,7 +2104,7 @@ async function boot() {
   }
 
   show(VIEWS.some(v => v.id === location.hash.slice(1))
-       ? location.hash.slice(1) : "overview");
+       ? location.hash.slice(1) : "roster");
 }
 
 boot();
