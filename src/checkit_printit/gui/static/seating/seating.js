@@ -399,8 +399,13 @@ const ICON = {
      across the back: drawn as a line the two shapes merge into a box
      with a stroke through it, which at 15px read as an H. */
   chair: "R7.5,2.5,9,7,2|R4,11,16,3.2,1.6|M7 21v-6.8M17 21v-6.8",
-  // A printer: the sheet going in, the body, the sheet coming out.
-  printer: "M6.5 9V2.5h11V9|R2,9,20,8,2.5|R6.5,14,11,7.5,1",
+  /* A printer: the sheet going in, the body, the sheet coming out.
+     Redrawn to match the navigation rail's, which reads better at
+     this size -- the body is a single outline rather than a filled
+     slab, so the two sheets stay legible against it. */
+  printer: "M7.2 9.4V4.2h9.6v5.2|M7.2 17.8H5.6a1.6 1.6 0 0 1-1.6-1.6v-4.8"
+    + "a1.6 1.6 0 0 1 1.6-1.6h12.8a1.6 1.6 0 0 1 1.6 1.6v4.8"
+    + "a1.6 1.6 0 0 1-1.6 1.6H17|M7.2 14.2h9.6v5.6H7.2z",
   // Points the way the menu opens.
   chev: "M6 14.5l6-6 6 6",
   back: "M14.5 5l-6 7 6 7",

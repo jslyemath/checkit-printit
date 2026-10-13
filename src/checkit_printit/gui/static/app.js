@@ -153,21 +153,44 @@ const NAV_ICON = {
     + "a1.6 1.6 0 0 1 1.6-1.6h12.8a1.6 1.6 0 0 1 1.6 1.6v4.8"
     + "a1.6 1.6 0 0 1-1.6 1.6h-1.6M7.2 14.2h9.6v5.6H7.2z",
   record: "M12 7.4v4.9l3.1 2M3.6 12a8.4 8.4 0 1 0 2.6-6.1M6.2 3.2v2.9H3.3",
-  seating: "M4.2 4.2h6.3v6.3H4.2zM13.5 4.2h6.3v6.3h-6.3"
-    + "M4.2 13.5h6.3v6.3H4.2zM13.5 13.5h6.3v6.3h-6.3",
+  /* Three tables seen from above, not four equal squares: it is the
+     shape of the room it opens, and the same arrangement as Seating's
+     own Groups glyph, so the rail and the mode agree. Rounded, like
+     everything else here. */
+  seating: [{ r: [3, 4, 18, 7, 1.8] },
+            { r: [3, 14, 8, 6, 1.8] },
+            { r: [14, 14, 7, 6, 1.8] }],
   setup: "M4 7.4h9.2M17.2 7.4h2.8M4 16.6h3.6M11.6 16.6h8.4"
     + "M15.2 5.2v4.4M9.2 14.4v4.4",
   collapse: "M14.5 7.5 9.5 12l5 4.5",
 };
 
 function navIcon(name) {
+  /* A glyph is a path string, or a list of parts. A part is either a
+     path (`{d}`) or a rounded rect (`{r: [x, y, w, h, radius]}`),
+     because a square drawn as path data is unreadable and a square
+     with sharp corners does not belong beside the rest of these. */
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
-  const path = document.createElementNS(ns, "path");
-  path.setAttribute("d", NAV_ICON[name] || "");
-  svg.appendChild(path);
+  const spec = NAV_ICON[name];
+  for (const part of (Array.isArray(spec) ? spec : [{ d: spec || "" }])) {
+    if (part.r) {
+      const [x, y, w, h, radius] = part.r;
+      const rect = document.createElementNS(ns, "rect");
+      rect.setAttribute("x", x);
+      rect.setAttribute("y", y);
+      rect.setAttribute("width", w);
+      rect.setAttribute("height", h);
+      rect.setAttribute("rx", radius);
+      svg.appendChild(rect);
+    } else {
+      const path = document.createElementNS(ns, "path");
+      path.setAttribute("d", part.d);
+      svg.appendChild(path);
+    }
+  }
   return svg;
 }
 
@@ -275,12 +298,12 @@ function renderOverview(summary) {
   // The count is dropped at a narrow window: it is the Overview's own
   // first card, so losing it from the banner costs nothing, and the
   // banner is competing with the canvas for the same pixels.
+  /* The name alone. "MAT 106 - 45 active of 45" is three facts run
+     together with a dash, which is the tic section 13.4 bans, and in a
+     188px rail it truncated to "MAT 106 - 45 activ...". The counts are
+     on the Roster, beside the people they count. */
   const where = document.getElementById("course-name");
-  where.textContent = "";
-  where.append(summary.name, Object.assign(
-    document.createElement("span"),
-    { className: "wide-only",
-      textContent: ` — ${summary.active} active of ${summary.students}` }));
+  where.textContent = summary.name;
 
   // The cards are gone with the tab. What this function still does is
   // name the course on the rail, which is the one thing from the old

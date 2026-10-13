@@ -220,8 +220,11 @@ h2 { font-size: 18px; margin: 0 0 12px; font-weight: 600; }
   background: var(--accent);
 }
 
+/* Matched to Seating's section toggle, which is the same kind of
+   thing in the same kind of place: the name of what you are working
+   on. `.ibtn` is `font: inherit`, so that is the body size. */
 .brand .who {
-  font-size: var(--t-md);
+  font-size: var(--t-base);
   color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
@@ -249,21 +252,27 @@ h2 { font-size: 18px; margin: 0 0 12px; font-weight: 600; }
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: var(--t-md);
+  /* Body size, not small print. This is the app's primary navigation
+     and it was set two steps below the content it navigates to. */
+  font-size: var(--t-base);
   text-align: left;
   cursor: pointer;
 }
 
 .navrail button svg {
   flex: 0 0 auto;
-  width: 19px;
-  height: 19px;
+  /* Sized against the label beside it: a 19px glyph next to 15px text
+     read as a small picture with a big word. */
+  width: 21px;
+  height: 21px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+.navrail button svg rect { fill: none; }
 
 .navrail button .label {
   white-space: nowrap;
