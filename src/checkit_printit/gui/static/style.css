@@ -170,44 +170,141 @@ body {
   font: var(--t-base)/1.5 var(--font);
 }
 
-header {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
-  position: sticky;
-  top: 0;
-  z-index: 5;
-}
+/* The shell: a rail beside the work, not a bar above it.
+
+   Seven destinations at a desktop width is a rail by both Material's
+   and Fluent's own rules, and Material has since dropped the drawer
+   in favour of exactly this -- a rail that collapses to icons.
+
+   It also removes a bug nobody had named: the old bar was `position:
+   sticky`, so the first row of a scrolled table sat underneath it and
+   `elementFromPoint` there returned the bar. Clicks landed on nothing
+   while the row looked perfectly clickable. */
+body { display: flex; align-items: stretch; min-height: 100vh; }
 
 h1 { font-size: 16px; margin: 0; letter-spacing: .01em; }
 h2 { font-size: 18px; margin: 0 0 12px; font-weight: 600; }
 
 .course { color: var(--muted); font-variant-numeric: tabular-nums; }
 
-nav { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; }
+.navrail {
+  flex: 0 0 auto;
+  width: 188px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding: var(--s3) var(--s2);
+  background: var(--surface-1);
+  border-right: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+}
 
-nav button {
-  border: 1px solid transparent;
+.navrail.tight { width: 56px; }
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2) var(--s3);
+  min-width: 0;
+}
+
+.brand .mark {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+}
+
+.brand .who {
+  font-size: var(--t-md);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#views { display: flex; flex-direction: column; gap: 2px; }
+.railfoot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: var(--s2);
+  border-top: 1px solid var(--line);
+}
+
+.navrail button {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  padding: var(--s2) var(--s2);
+  border: 0;
+  border-radius: var(--r-sm);
   background: none;
   color: var(--muted);
-  padding: 5px 10px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
   font: inherit;
+  font-size: var(--t-md);
+  text-align: left;
+  cursor: pointer;
 }
-nav button:hover { color: var(--ink); border-color: var(--line); }
-nav button[aria-current="page"] {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: var(--accent);
-}
-nav button.soon { opacity: .55; }
 
-main { padding: 20px 16px 60px; max-width: 1100px; margin: 0 auto; }
+.navrail button svg {
+  flex: 0 0 auto;
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.navrail button .label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.navrail button:hover { background: var(--surface-2); color: var(--ink); }
+
+/* The current place is tinted, not filled. A solid accent block on a
+   rail is a button that looks pressed rather than a location that
+   looks current, and the accent is wanted for the one action a page
+   is offering. */
+.navrail button[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.navrail button.soon { opacity: .5; }
+
+.navrail.tight .label,
+.navrail.tight .who { display: none; }
+.navrail.tight .brand { justify-content: center; padding-inline: 0; }
+.navrail.tight button { justify-content: center; padding-inline: 0; }
+.navrail.tight .railtoggle svg { transform: scaleX(-1); }
+
+main {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--s5) var(--s4) 60px;
+  max-width: 1100px;
+}
+
+/* Too narrow to spell the destinations out: the rail keeps its icons
+   and gives the width back to the work. */
+@media (max-width: 900px) {
+  .navrail { width: 56px; }
+  .navrail .label, .navrail .who { display: none; }
+  .navrail .brand { justify-content: center; padding-inline: 0; }
+  .navrail button { justify-content: center; padding-inline: 0; }
+}
 
 /* The page is older than the server. Not a toast: a toast fades, and
    this is a condition rather than an event -- nothing will work until
