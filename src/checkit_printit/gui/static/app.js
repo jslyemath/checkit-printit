@@ -825,9 +825,9 @@ function renderSkills() {
     slug.textContent = s.slug;
     const desc = document.createElement("span");
     desc.className = "desc";
-    desc.textContent = s.inBank ? s.description
+    desc.textContent = s.inBank ? (s.title || s.slug)
       : "not in the bank any more — untick to remove it";
-    desc.title = desc.textContent;
+    desc.title = s.inBank ? (s.description || "") : desc.textContent;
     label.append(box, slug, desc);
     list.appendChild(label);
   }
@@ -1373,8 +1373,10 @@ function skillPicker(selected, onChange) {
     slug.textContent = s.slug;
     const desc = document.createElement("span");
     desc.className = "desc";
-    desc.textContent = s.description;
-    desc.title = s.description;
+    // The name is what a row is for; the definition is what
+    // hovering it is for. See 13.4.
+    desc.textContent = s.title || s.slug;
+    desc.title = s.description || "";
     label.append(tick, slug, desc);
     box.appendChild(label);
   }
