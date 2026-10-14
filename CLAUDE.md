@@ -200,6 +200,19 @@ feature in the docs and going to check whether the sentence was true --
 which no test did, because the tests passed, and no use did, because nobody
 pinches a desktop browser.
 
+### Grep `seating.css` before naming a class in the shell
+
+The navigation rail shipped as `.rail`, and Seating has had a `.rail`
+since its own stage A -- the mode rail inside `.bottomstack`. `height:
+100vh` landed on both, stretched the stack to the whole viewport, and
+`freeBand` measured 80px of usable height, so the room fitted at 20%.
+
+Nothing failed. No test covered it. The Print and Roster tabs were
+perfect. It was caught only because Seats is opened after every change
+to the shell, which is now the habit: **the two stylesheets share a
+document, so a class name in `style.css` is a claim about `seating.css`
+too.** The rail is `.navrail`.
+
 ### A change with reasoning gets a dated section in the notes
 
 `../checkit/CODEBASE_NOTES.md`, a `##` heading with today's date. The commit
@@ -290,6 +303,51 @@ Built: **8a** the shell, **8b** Roster, **8c** Update form, **8d** Print job.
 The other four views are listed in the nav and say what they will do and
 which CLI command does it today. Order and rationale:
 `../checkit/PRINT_TOOL_DESIGN.md` 12.6, and "Where things stand" below.
+
+### How it looks, and where the rules are
+
+**`../checkit/PRINT_TOOL_DESIGN.md` section 13 is the design document.**
+It says what is settled, what is open, and which open questions are the
+instructor's rather than yours. Read it before changing anything
+visual. The short version:
+
+* **Everything is a token.** `style.css` carries a `:root` of surfaces,
+  spacing on a 4px grid, radii, and a type scale. **Nothing should
+  carry a raw hex, a raw radius or a raw gap** -- a value that is not a
+  token is a value nothing else agrees with.
+* **One hue: OKLCH 260**, which is Seating's. `--surface-1`, `--line`,
+  `--ink`, `--muted` and both accent values are lifted from
+  `seating.css` unchanged, so chrome and canvas are the same material.
+  Green is the accent and means "the thing to do here"; amber means
+  "something needs your attention" and nothing else.
+* **Figtree is vendored**, two subsets in `static/fonts`, not a CDN
+  link: that would be a network request on every load from a tool that
+  keeps names and emails off the network, and the app would look
+  different in a classroom with no wifi.
+* **Navigation is a left rail** (`.navrail`), collapsible to icons and
+  remembered. There is no top bar and no Overview tab.
+* **Rows with air, not boxes with gaps.** Cards are for a group that
+  genuinely needs a boundary; a section does not get one for being a
+  section.
+* **Never run facts together with separators.** `45 students - 22 in
+  820 - 23 in 830` is the most recognisable tic in this codebase and is
+  banned; it is the writer reaching for a separator because no layout
+  was designed.
+* **Explanations live behind a `?`**, not in the open. A short subtitle
+  is allowed; a paragraph is not.
+
+### A skill has two names, and they are not interchangeable
+
+Every outcome in `bank.xml` carries a short `<title>` ("Analyzing
+Student Work") and a long `<description>`, the "I can..." statement.
+**Titles belong in tables and headers; descriptions belong in
+tooltips.** `Bank.skill_title(slug)` reads the first and falls back to
+the slug; `Bank.description(slug)` reads the second.
+
+`api_skills` and `api_print` each build their own `{slug: ...}` maps,
+which is two copies of one loop and has already drifted once -- a patch
+that added titles to one payload and built them in the other raised
+NameError on the second endpoint, found by a test on its first run.
 
 ## The course
 
