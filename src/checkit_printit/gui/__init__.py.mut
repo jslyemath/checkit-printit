@@ -1,0 +1,1415 @@
+"""A local web front end for one course.
+
+Stage 8a (the shell) and 8b (the roster table). The rest of the views are
+planned in `../checkit/PRINT_TOOL_DESIGN.md` section 12.6.
+
+**Every handler calls the same function the CLI calls.** Nothing here
+reimplements a rule -- dropping a student goes through `roster.set_dropped`,
+the same call `checkit-printit roster drop` makes. On 2026-09-21 one fix had
+to be applied three times in a day because three code paths did the same job;
+a GUI that duplicates a rule makes that permanent rather than occasional.
+
+Bound to 127.0.0.1, never 0.0.0.0. This serves names, student ids and email
+addresses off a laptop that sits on university wifi.
+
+Also token-guarded. Binding to loopback stops another machine, but not another
+*page*: any website open in the same browser can POST to http://127.0.0.1 in
+the background. A random token is minted per run, injected into the page, and
+required on every API call as a header a cross-origin form cannot set.
+"""
+
+import dataclasses
+import http.server
+import json
+import mimetypes
+import os
+import secrets
+import socketserver
+import sys
+import threading
+import traceback
+import urllib.parse
+import webbrowser
+
+from .. import course as course_mod
+from .. import availability as availability_mod
+from .. import provision as provision_mod
+from .. import room as room_mod
+from .. import responses as responses_mod
+from .. import clasp as clasp_mod
+from .. import boilerplate as boilerplate_mod
+from .. import classlist as classlist_mod
+from .. import printjob as printjob_mod
+from .. import runner as runner_mod
+from .. import form as form_mod
+from ..bank import Bank, BankError
+from .. import roster as roster_mod
+from .. import seating as seating_mod
+
+STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+TOKEN_HEADER = "X-Printit-Token"
+
+
+class GuiError(Exception):
+    pass
+
+
+# ------------------------------------------------------------------- data --
+
+def _sort_names(student):
+    """Keys for sorting by surname or by given name. Never stored.
+
+    The roster carries one full name, because that is what prints and what
+    the seating chart matches on. `last` and `first` exist but are empty on
+    every real roster here: those came from a single "Full Name" column.
+
+    So the two orders are derived, on the way out, and written nowhere. The
+    splitter is only reliable on the `Last, First` comma form -- from
+    `First Last` it guesses, and it guesses wrong on at least one real
+    student, whose compound surname comes back as its last word alone. A
+    wrong guess therefore puts a row in an odd position in a sort, which you
+    can see, instead of putting a wrong surname in a file, which you cannot.
+
+    `classlist.split_full_name` does the work, so the rule has one
+    implementation and the browser has none of it.
+    """
+    if student.last or student.first:
+        return student.last, student.first        # a real import filled these
+    last, first, _ = classlist_mod.split_full_name(student.name)
+    return last, first
+
+
+def _student_json(student, index):
+    """One row of the roster table.
+
+    `index` is the identity the browser sends back. Not the name -- the row
+    exists to be renamed -- and not the SID, which some class lists do not
+    carry.
+    """
+    sort_last, sort_first = _sort_names(student)
+    return {
+        "index": index,
+        "name": student.name,
+        # Derived for sorting only; see _sort_names. Not editable, not saved.
+        "sort_last": sort_last,
+        "sort_first": sort_first,
+        "last": student.last,
+        "first": student.first,
+        "preferred": student.preferred,
+        "section": student.section,
+        "email": student.email,
+        "emails": [e for e in student.all_emails() if e != student.email.strip().lower()],
+        "sid": student.sid,
+        "alt_id": student.alt_id,
+        "dropped": bool(student.dropped),
+        "dropped_by": student.dropped_by,
+        # Not shown in the roster table: what a student chose belongs to
+        # one assessment, and the roster is the course. The assessment
+        # staging view reads it. See 12.6.
+        "skills": list(student.skills),
+    }
+
+
+#: What the table may change. Everything else -- ids, the dropped flag, the
+#: accumulated addresses -- is set by an import, a drop or a pull, each of
+#: which has rules of its own that a text box would quietly bypass.
+EDITABLE = ("name", "preferred", "section", "email")
+
+
+class Course:
+    """One course's files, read fresh each time. No cache to go stale."""
+
+    def __init__(self, name):
+        self.name = name
+        if not course_mod.exists(name):
+            raise GuiError(
+                f"no course named {name!r}. Make one with "
+                f"`checkit-printit course init {name!r}`.")
+        self.path = course_mod.path_for(name)
+
+    def file(self, which):
+        return course_mod.file_in(self.name, which)
+
+    def roster(self):
+        path = self.file("roster")
+        if not os.path.isfile(path):
+            return None
+        return roster_mod.load(path)
+
+    def summary(self):
+        people = self.roster()
+        counts = {}
+        if people is not None:
+            for student in people:
+                if not student.dropped:
+                    counts[student.section or "(none)"] = counts.get(
+                        student.section or "(none)", 0) + 1
+        return {
+            "name": self.name,
+            "path": self.path,
+            "students": 0 if people is None else len(people),
+            "active": 0 if people is None else
+                      sum(1 for s in people if not s.dropped),
+            "sections": counts,
+            "files": {
+                which: os.path.isfile(self.file(which))
+                for which in ("roster", "seating", "availability", "form",
+                              "record")
+            },
+        }
+
+    def bank(self):
+        """The bank this course prints from, or None. See
+        `course.bank_for` -- this used to be a second copy of it."""
+        return course_mod.bank_for(self.name)
+
+    def availability(self):
+        return availability_mod.load(self.file("availability"))
+
+    def save_roster(self, people):
+        with open(self.file("roster"), "w", encoding="utf-8") as f:
+            f.write(roster_mod.to_toml(people, "checkit-printit gui"))
+
+
+# --------------------------------------------------------------- handlers --
+
+def api_course(course, _body):
+    return course.summary()
+
+
+def api_roster(course, _body):
+    people = course.roster()
+    if people is None:
+        raise GuiError(
+            f"{course.file('roster')} does not exist yet. Import a class list "
+            f"with `checkit-printit roster import`.")
+    return {"students": [_student_json(s, i) for i, s in enumerate(people)]}
+
+
+def api_roster_save(course, body):
+    """Apply a batch of edits. All or nothing.
+
+    The browser holds changes until Save, so one request carries them all;
+    a half-applied batch would leave the file disagreeing with the table
+    still on screen.
+    """
+    edits = body.get("edits") or []
+    people = course.roster()
+    if people is None:
+        raise GuiError("there is no roster to save.")
+    students = list(people)
+
+    # Validate everything, then apply. The guarantee that actually holds the
+    # file together is narrower than it looks: nothing is written until every
+    # edit has passed, so an early `setattr` would be equally safe and a
+    # mutation test cannot tell the two apart. Kept because reading it in two
+    # phases is what makes the guarantee obvious to the next person.
+    staged = []
+    for edit in edits:
+        try:
+            index = int(edit["index"])
+            student = students[index]
+        except (KeyError, ValueError, IndexError):
+            raise GuiError(
+                f"an edit names row {edit.get('index')!r}, which is not on "
+                f"the roster. Reload the page -- it has changed underneath "
+                f"you.") from None
+        field = edit.get("field")
+        if field not in EDITABLE:
+            raise GuiError(
+                f"{field!r} is not editable here. The table may change "
+                f"{', '.join(EDITABLE)}; everything else is set by an import, "
+                f"a drop or a pull, which have rules a text box would bypass.")
+        value = str(edit.get("value", "")).strip()
+        if field == "name" and not value:
+            raise GuiError(
+                "a student needs a name: it is what the seating chart matches "
+                "on and what prints on the paper.")
+        staged.append((student, field, value))
+
+    if staged:
+        for student, field, value in staged:
+            setattr(student, field, value)
+        course.save_roster(people)
+    # An empty batch writes nothing at all. It used to rewrite the whole file
+    # anyway, which changed its timestamp and reformatted it for no reason --
+    # and made "which action last wrote this roster?" unanswerable, which is
+    # the question you ask when a value is not what you expected.
+    return {"saved": len(staged), "students":
+            [_student_json(s, i) for i, s in enumerate(people)]}
+
+
+def api_roster_drop(course, body):
+    """Drop or restore. Goes through the same call the CLI makes."""
+    who = str(body.get("who", "")).strip()
+    dropped = bool(body.get("dropped", True))
+    if not who:
+        raise GuiError("no student was named.")
+    seating_path = course.file("seating")
+    room_path = course.file("room")
+    try:
+        done = roster_mod.set_dropped(
+            course.file("roster"), who, dropped,
+            seating_path if os.path.isfile(seating_path) else None,
+            room_path if os.path.isfile(room_path) else None)
+    except roster_mod.RosterError as exc:
+        raise GuiError(str(exc)) from None
+
+    if not done.changed:
+        note = f"{done.student.name} was already " + (
+            "dropped" if dropped else "on the roster")
+    elif dropped:
+        note = f"dropped {done.student.name}"
+        if done.seating_checked:
+            note += (f", emptied {done.seats_emptied} seat(s)"
+                     if done.seats_emptied else ", no seat to empty")
+        if done.room_emptied:
+            note += " and their chair in the room"
+    else:
+        note = (f"restored {done.student.name} -- they have no seat until you "
+                f"give them one")
+    people = course.roster()
+    return {"note": note, "changed": done.changed,
+            "students": [_student_json(s, i) for i, s in enumerate(people)]}
+
+
+# --------------------------------------------------------------- google --
+
+class Google:
+    """Whether clasp holds a usable session, and starting one that does.
+
+    Google expires a session holding sensitive scopes after a week or two
+    whether or not it is used, so "logged in once" is not a durable answer
+    and the app has to keep asking.
+    """
+
+    #: Asking costs an npx invocation and several seconds, so the answer is
+    #: reused briefly. Short enough that signing in shows up promptly.
+    TTL = 45
+
+    def __init__(self):
+        self.checked_at = 0.0
+        self.ok = None
+        self.error = ""
+        self.signing_in = False
+        self.last_attempt = ""
+
+    def status(self, force=False):
+        import time
+        stale = (time.time() - self.checked_at) > self.TTL
+        if force or self.ok is None or stale:
+            try:
+                self.ok = clasp_mod.logged_in()
+                self.error = ""
+            except clasp_mod.ClaspError as exc:
+                # Not the same as "signed out": something else is wrong, and
+                # offering a sign-in button would send the instructor round a
+                # loop that cannot fix it.
+                self.ok = None
+                self.error = str(exc)
+            self.checked_at = time.time()
+        return {"loggedIn": self.ok, "error": self.error,
+                "signingIn": self.signing_in,
+                "lastAttempt": self.last_attempt}
+
+    def sign_in(self):
+        """Start clasp's browser sign-in. Returns at once.
+
+        clasp opens the browser itself. Waiting for it here would hold the
+        request open for as long as someone takes to find their password,
+        and the page would look hung.
+        """
+        if self.signing_in:
+            return {"started": False, "note": "already waiting for the browser"}
+        self.signing_in = True
+        self.last_attempt = ""
+
+        def run():
+            try:
+                clasp_mod.login()
+                self.last_attempt = "done"
+            except clasp_mod.ClaspError as exc:
+                self.last_attempt = str(exc)
+            finally:
+                self.signing_in = False
+                self.ok = None          # force a fresh check
+                self.checked_at = 0.0
+
+        threading.Thread(target=run, daemon=True).start()
+        return {"started": True}
+
+
+GOOGLE = Google()
+
+
+def api_google(_course, body):
+    return GOOGLE.status(force=bool(body.get("force")))
+
+
+def api_google_login(_course, _body):
+    return GOOGLE.sign_in()
+
+
+def _wording(course, av):
+    """Exactly what the form will say, worded by the same code that pushes it.
+
+    `payload_for` is what `form push` sends, so a preview that used anything
+    else would be a second implementation of the wording -- and the one
+    place a difference would show up is on a form students are already
+    looking at.
+    """
+    bank = course.bank()
+    descriptions = {}
+    if bank is not None:
+        for slug in av.skills:
+            try:
+                descriptions[slug] = bank.description(slug)
+            except BankError:
+                descriptions[slug] = ""
+    conn = form_mod.load(course.path)
+    return form_mod.payload_for(av, conn, descriptions)
+
+
+def _preview(course, av):
+    """The whole form as a student meets it: the boilerplate parts and the
+    derived ones, in order."""
+    return boilerplate_mod.preview(_wording(course, av))
+
+
+def api_skills(course, _body):
+    """Everything the Skills view draws: the bank, the open list, the
+    assessment, and the wording those produce."""
+    try:
+        av = course.availability()
+    except availability_mod.AvailabilityError as exc:
+        raise GuiError(str(exc)) from None
+
+    bank = course.bank()
+    open_now = list(av.skills)
+    if bank is None:
+        slugs = open_now
+        descriptions = {s: "" for s in slugs}
+        # Left empty on purpose: the payload below falls back to the
+        # slug, and a second mechanism saying the same thing is one
+        # that can rot without any test going red.
+        titles = {}
+    else:
+        slugs = list(bank.slugs())
+        descriptions = {}
+        titles = {}
+        for slug in slugs:
+            try:
+                descriptions[slug] = bank.description(slug)
+                titles[slug] = bank.skill_title(slug)
+            except BankError:
+                descriptions[slug] = ""
+                titles[slug] = slug
+        # A slug that is open but no longer in the bank still has to appear,
+        # or it could not be turned off from here.
+        for slug in open_now:
+            if slug not in descriptions:
+                slugs.append(slug)
+                descriptions[slug] = ""
+
+    conn = form_mod.load(course.path)
+    return {
+        "hasBank": bank is not None,
+        "skills": [{"slug": s, "description": descriptions.get(s, ""),
+                    "title": titles.get(s, s),
+                    "open": s in open_now,
+                    "inBank": bank is None or s in set(bank.slugs())}
+                   for s in slugs],
+        "open": open_now,
+        "assessment": {
+            "name": av.name, "date": str(av.date or ""),
+            "due": str(av.due or ""), "choose": av.choose, "limit": av.limit,
+        },
+        "limits": list(availability_mod.LIMITS),
+        "wording": _wording(course, av),
+        "preview": _preview(course, av),
+        "form": {"connected": conn.ready,
+                 "mapped": sorted(conn.items),
+                 "missing": conn.missing() if hasattr(conn, "missing") else []},
+    }
+
+
+def api_skills_preview(course, body):
+    """The wording for values that have not been saved.
+
+    Being able to see "Choose At Most TWO Skills" before committing to it is
+    most of the point of the view. It builds an Availability in memory and
+    hands it to the same `_wording` the push uses -- nothing is written, and
+    there is still only one implementation of the wording.
+    """
+    try:
+        saved = course.availability()
+    except availability_mod.AvailabilityError as exc:
+        raise GuiError(str(exc)) from None
+
+    fields = body.get("assessment") or {}
+    try:
+        proposed = dataclasses.replace(
+            saved,
+            name=fields.get("name", saved.name),
+            date=(availability_mod.as_date(fields["date"]) if fields.get("date")
+                  else (None if "date" in fields else saved.date)),
+            due=(availability_mod.as_datetime(fields["due"]) if fields.get("due")
+                 else (None if "due" in fields else saved.due)),
+            choose=int(fields.get("choose", saved.choose) or 0),
+            limit=fields.get("limit", saved.limit),
+            skills=tuple(body.get("open", saved.skills)),
+        )
+    except (availability_mod.AvailabilityError, ValueError, TypeError) as exc:
+        raise GuiError(f"that is not a usable value: {exc}") from None
+    return {"wording": _wording(course, proposed),
+            "preview": _preview(course, proposed)}
+
+
+def api_skills_save(course, body):
+    """Apply the open list and the assessment fields, then report the wording.
+
+    Both go through the functions `skills open` and `skills set` call.
+    """
+    path = course.file("availability")
+    bank = course.bank()
+    try:
+        if "open" in body:
+            availability_mod.set_open(
+                path, list(body["open"]), add=False,
+                known=set(bank.slugs()) if bank is not None else None)
+        fields = body.get("assessment") or {}
+        if fields:
+            availability_mod.set_assessment(
+                path,
+                name=fields.get("name"), date=fields.get("date"),
+                due=fields.get("due"), choose=fields.get("choose"),
+                limit=fields.get("limit"))
+    except availability_mod.AvailabilityError as exc:
+        raise GuiError(str(exc)) from None
+    return api_skills(course, {})
+
+
+def api_form_push(course, _body):
+    """Send it. The same call `form push` makes."""
+    conn = form_mod.load(course.path)
+    if not conn.ready:
+        raise GuiError("this course is not connected to a form yet.")
+    if not conn.items:
+        raise GuiError("no items are mapped yet -- run "
+                       "`checkit-printit form map`.")
+    try:
+        av = course.availability()
+        # The same question the command asks. There is no dry run
+        # behind a button, so this is the only thing between one click
+        # and a form that has lost its wording.
+        empty = av.nothing_to_say()
+        if empty:
+            raise GuiError(empty + ".")
+        answer = form_mod.call(conn, "push", _wording(course, av))
+    except (availability_mod.AvailabilityError, form_mod.FormError) as exc:
+        raise GuiError(str(exc)) from None
+    return {"changed": answer.get("changed", [])}
+
+
+# ------------------------------------------------------------ print job --
+
+def _variants_in(bank, slugs):
+    """{slug: [case, ...]} for the skills that declare any.
+
+    There is no declaration to read: the generator wrapper writes the label
+    into each version's data, so the only way to know is to look. Walking
+    the whole print tier for 29 outcomes is slow, so a slice is enough to
+    find every case -- a variant that appears in none of sixty versions is
+    not one an instructor can be offered anyway.
+    """
+    out = {}
+    for slug in slugs:
+        seen = []
+        for seed in range(400, 460):
+            try:
+                case = bank.variant(slug, seed)
+            except Exception:
+                break
+            if case and case not in seen:
+                seen.append(case)
+        if seen:
+            out[slug] = sorted(seen)
+    return out
+
+
+def _course_identity(course):
+    import tomllib
+    config = os.path.join(course.path, course_mod.CONFIG)
+    if not os.path.isfile(config):
+        return {}
+    with open(config, "rb") as f:
+        return tomllib.load(f)
+
+
+def api_setup(course, _body):
+    """What the Setup view draws: the Google session and the connection."""
+    # Deliberately does not ask whether Google is signed in. That is an
+    # `npx` invocation taking seconds, and this is a file read; behind it,
+    # the view spent ten seconds showing "Make a new form" on a course
+    # that already had one. The view asks `/api/google` separately.
+    conn = form_mod.load(course.path)
+    return {
+        "connected": bool(conn.url),
+        "url": conn.url,
+        "scriptId": conn.script_id,
+        "formId": conn.form_id,
+        "items": dict(conn.items),
+        "missing": conn.missing_slots(),
+        "slots": dict(form_mod.SLOTS),
+    }
+
+
+def _provisioning(course, work, title=""):
+    """Run a step that talks to Google, and keep "not authorized" apart.
+
+    It is not a failure: the form and the web app exist by then, and the
+    way on is for the instructor to grant permissions and come back. A 400
+    would read as "that did not work", and the obvious response to that is
+    to try the whole thing again -- which would make a second form.
+    """
+    try:
+        said = work()
+    except provision_mod.NeedsAuthorization as needs:
+        state = api_setup(course, {})
+        state["said"] = []
+        state["needsAuthorization"] = {
+            "url": needs.url,
+            # The notes, not the terminal's paragraph: the page puts the
+            # URL on a button, so repeating it as text is noise.
+            "notes": list(provision_mod.AUTHORIZE_NOTES),
+            "title": title,
+        }
+        return state
+    except provision_mod.ProvisionError as exc:
+        raise GuiError(str(exc)) from None
+    state = api_setup(course, {})
+    state["said"] = list(said)
+    return state
+
+
+def api_setup_create(course, body):
+    """Make a new form and wire it up. The same call `form create` makes."""
+    title = str(body.get("title") or "Skill Selection Form").strip()
+    folder = str(body.get("folder") or "").strip()
+    return _provisioning(
+        course,
+        lambda: provision_mod.create_form(course.name, title, folder),
+        title=title)
+
+
+def api_setup_inspect(course, body):
+    """What attaching would overwrite in an existing script project.
+
+    Asked before attaching, not discovered after. printit stages `Code.gs`
+    and `appsscript.json`, which are the names most Apps Script projects
+    already use, and the push replaces them -- so a form still driven by
+    something else loses that something.
+    """
+    script_id = str(body.get("scriptId") or "").strip()
+    if not script_id:
+        raise GuiError("paste the bound script's id first.")
+    try:
+        return provision_mod.what_the_clone_would_replace(course.name,
+                                                          script_id)
+    except provision_mod.ProvisionError as exc:
+        raise GuiError(str(exc)) from None
+
+
+def api_setup_attach(course, body):
+    """Wire up an existing form, changing nothing on the form itself."""
+    script_id = str(body.get("scriptId") or "").strip()
+    if not script_id:
+        raise GuiError("paste the bound script's id first.")
+    return _provisioning(
+        course,
+        lambda: provision_mod.attach_form(course.name, script_id))
+
+
+def api_setup_authorize(course, _body):
+    """Open this course's script in the instructor's own browser.
+
+    Not `window.open`: the page may be running in the desktop app's
+    browser pane, which has no Google session, while clasp's sign-in opens
+    the operating system's default browser. Two halves of one flow landing
+    in two browsers is how the authorization step became impossible to
+    complete.
+
+    The URL comes from `form.toml`, never from the request. An endpoint on
+    localhost that opened whatever it was handed would let any page in any
+    browser launch arbitrary URLs on this machine.
+    """
+    conn = form_mod.load(course.path)
+    if not conn.url:
+        raise GuiError("this course has no deployed script to authorize yet.")
+    webbrowser.open(conn.url)
+    return {"opened": conn.url}
+
+
+def api_setup_finish(course, body):
+    """Carry on after Google authorizes the script.
+
+    Every step inside is safe to repeat, which is why coming back here is
+    the way on rather than starting over.
+    """
+    title = str(body.get("title") or "").strip()
+    return _provisioning(
+        course,
+        lambda: provision_mod.finish(course.name, rename_to=title),
+        title=title)
+
+
+def _seating_json(course):
+    """Everything the canvas draws.
+
+    The room holds student ids; the names are sent beside it rather than
+    baked in, so a rename shows up on the next load without the room file
+    being touched. Split into two lines here because the card is two lines
+    -- squarer than one long one, and legible from the back of a room when
+    this is on the projector.
+
+    `seated` is which section each student belongs to and whether they
+    already have a chair, so the tab can offer the people who are still
+    standing without a second request.
+    """
+    people = course.roster()
+    names, sections = {}, {}
+    if people is not None:
+        for student in people:
+            if student.dropped:
+                # A dropped student keeps their place in the record and
+                # loses their chair; offering them one here would put them
+                # back on the paper.
+                continue
+            shown = student.display
+            cut = shown.find(" ")
+            key = roster_mod.key_of(student)
+            names[key] = {
+                "full": shown,
+                "top": shown[:cut] if cut > 0 else shown,
+                "bottom": shown[cut + 1:] if cut > 0 else "",
+            }
+            sections[key] = student.section or ""
+    room = room_mod.load(course.file("room"))
+    chart = course.file("seating")
+    return {
+        "room": room,
+        "names": names,
+        "sections": sections,
+        # `seats` goes too, so the canvas can build a new desk from the
+        # palette without carrying its own copy of where the chairs go.
+        # The definition stays in `room.SHAPES`; the browser reads it.
+        "shapes": {kind: {"label": spec["label"], "w": spec["w"],
+                          "h": spec["h"], "css": spec["css"],
+                          "seats": [list(s) for s in spec["seats"]]}
+                   for kind, spec in room_mod.SHAPES.items()},
+        "hasRoster": people is not None,
+        # Whether saving here will also rewrite the chart the build reads.
+        # Sent so the save bar can say what the button does before it is
+        # pressed, rather than reporting it afterwards.
+        "chartIsOurs": (not os.path.isfile(chart)
+                        or seating_mod.was_generated(chart)),
+        "chartName": os.path.basename(chart),
+    }
+
+
+def api_seating(course, _body):
+    return _seating_json(course)
+
+
+def api_seating_versions(course, body):
+    """Hand out version letters again, by the real coloring.
+
+    `room.assign_versions` -- the same function the CLI uses, with the
+    same graph coloring and the same heuristics about who can see
+    whom. The rule in this project is that a button calls the function
+    the command does, and a second implementation of the coloring
+    living in JavaScript would be exactly the kind of drift that rule
+    exists to stop: the browser's answer and the printed answer would
+    agree until one of them was improved.
+
+    Nothing is written. The room comes back changed and the canvas
+    holds it as an unsaved edit, so an instructor who dislikes the
+    shuffle presses Discard and nothing happened. Reshuffling is not a
+    decision anybody should have to take permanently to look at.
+    """
+    incoming = body.get("room")
+    if not isinstance(incoming, dict):
+        raise GuiError("that request carried no room.")
+    at = body.get("section")
+    sections = incoming.get("sections") or []
+    if not isinstance(at, int) or not 0 <= at < len(sections):
+        raise GuiError("that request did not say which room.")
+
+    letters = body.get("versions") or incoming.get("versions")
+    if not isinstance(letters, list) or not letters:
+        raise GuiError("no version letters to hand out.")
+
+    section = sections[at]
+    try:
+        chosen, clashes = room_mod.assign_versions(
+            room_mod.seats_of(section), room_mod.group_of(section), letters)
+    except room_mod.RoomError as exc:
+        raise GuiError(str(exc)) from None
+    room_mod.apply_versions(section, chosen)
+    incoming["versions"] = list(letters)
+
+    note = f"Versions spread over {len(letters)} letters."
+    if clashes:
+        # Said plainly rather than hidden: with fewer letters than a
+        # table has seats there is no coloring without a repeat, and
+        # the instructor is the one who chose how many letters.
+        note += (f" {len(clashes)} pair"
+                 f"{'s' if len(clashes) != 1 else ''} of neighbours had "
+                 f"to share -- there are not enough letters to keep "
+                 f"every pair apart.")
+    return {"room": incoming, "note": note, "clashes": len(clashes)}
+
+
+def api_seating_start(course, body):
+    """Draw the first room for a course that has none.
+
+    **Server-side so `room.new_section` stays one definition.** The
+    canvas could build the dict itself in four lines, and then there
+    would be two answers to "what is a section" -- which is the shape
+    of bug this codebase keeps finding. The rule here is that a button
+    calls the function a command would.
+
+    **One room per section the roster names.** Not one room, and not a
+    name typed into a box: `standing` filters the unseated rail by
+    comparing the section's name to the roster's `section` field, so a
+    name that does not match a roster value silently turns the filter
+    off and shows every student in both sections. The names are
+    therefore taken from the roster rather than invented. A roster with
+    no sections at all is one room, not none.
+
+    Nothing is written, like the shuffle: the room comes back as an
+    unsaved edit for the canvas to hold, so Discard still works and an
+    empty room is not committed to disk by looking at it.
+    """
+    incoming = body.get("room")
+    if not isinstance(incoming, dict):
+        raise GuiError("that request carried no room.")
+    if incoming.get("sections"):
+        raise GuiError("this course already has a room drawn.")
+
+    people = course.roster()
+    names = sorted({s.section for s in people if s.section}) if people else []
+    if not names:
+        names = [""]
+    incoming["sections"] = [room_mod.new_section(name, i + 1)
+                            for i, name in enumerate(names)]
+
+    shown = ", ".join(n or "unnamed" for n in names)
+    note = (f"Started {len(names)} rooms: {shown}. Add some furniture."
+            if len(names) > 1 else "Room started. Add some furniture.")
+    return {"room": incoming, "note": note}
+
+
+def api_seating_shuffle(course, body):
+    """Deal the seated people into different chairs.
+
+    Server-side for the same reason the coloring is: the rule in this
+    project is that a button calls the function a command would, and
+    the rule a shuffle has to keep -- step round the pinned, leave the
+    rail alone, leave the letters on the chairs -- is the kind of thing
+    that is worth a test, which a shuffle living in the canvas could
+    not have.
+
+    Nothing is written. The room comes back changed and the canvas
+    holds it as an unsaved edit, so an instructor who does not like
+    where everyone landed presses Discard and the morning's seating is
+    still there. A reshuffle is not a decision anybody should have to
+    commit to in order to look at it.
+    """
+    incoming = body.get("room")
+    if not isinstance(incoming, dict):
+        raise GuiError("that request carried no room.")
+    at = body.get("section")
+    sections = incoming.get("sections") or []
+    if not isinstance(at, int) or not 0 <= at < len(sections):
+        raise GuiError("that request did not say which room.")
+
+    section = sections[at]
+    # `live_seats`, not `seats_of`. The latter is a view that builds a
+    # fresh dict per seat and carries only id, shape, student, version
+    # and position -- so asking it about pins answers none, every
+    # time, and the note quietly stopped mentioning them.
+    held = sum(1 for seat in room_mod.live_seats(section)
+               if seat.get("pinned"))
+    moved = room_mod.shuffle_seats(section)
+
+    if not moved:
+        note = ("Nobody moved. There has to be more than one unpinned "
+                "chair with somebody in it.")
+    else:
+        note = f"{moved} moved."
+        if held:
+            chairs = "chair" if held == 1 else "chairs"
+            note += f" {held} pinned {chairs} stayed put."
+    return {"room": incoming, "note": note, "moved": moved, "pinned": held}
+
+
+def api_seating_fill(course, body):
+    """Seat everybody who is standing, or stand everybody up.
+
+    One handler for both, because they are the same request with the
+    sign flipped and they share every rule -- pinned chairs are
+    exempt, nothing is written, the room comes back for the canvas to
+    hold as an unsaved edit.
+
+    **The canvas says who is standing.** It is the only thing that
+    knows: the rail is filtered by section when the roster's section
+    names match the room's and shown whole when they do not, and a
+    second copy of that rule living here would answer differently the
+    first time somebody renamed a section.
+    """
+    incoming = body.get("room")
+    if not isinstance(incoming, dict):
+        raise GuiError("that request carried no room.")
+    at = body.get("section")
+    sections = incoming.get("sections") or []
+    if not isinstance(at, int) or not 0 <= at < len(sections):
+        raise GuiError("that request did not say which room.")
+
+    section = sections[at]
+    held = sum(1 for seat in room_mod.live_seats(section)
+               if seat.get("pinned"))
+    pinned_note = ""
+    if held:
+        chairs = "chair" if held == 1 else "chairs"
+        pinned_note = f" {held} pinned {chairs} left as they were."
+
+    if body.get("clear"):
+        gone = room_mod.clear_seats(section)
+        note = (f"{gone} stood up." + pinned_note) if gone \
+            else "Nobody was sitting in an unpinned chair."
+        return {"room": incoming, "note": note, "moved": gone}
+
+    students = body.get("students")
+    if not isinstance(students, list):
+        raise GuiError("that request did not say who is standing.")
+    sat = room_mod.seat_students(section, students)
+    left = len(students) - sat
+    if not sat:
+        note = ("Nobody sat down. There are no empty chairs that are not "
+                "pinned.") if students else "Everybody already has a chair."
+    else:
+        note = f"{sat} seated." + pinned_note
+        if left:
+            note += (f" {left} still standing -- the room ran out of "
+                     f"chairs.")
+    return {"room": incoming, "note": note, "moved": sat, "left": left}
+
+
+def api_seating_save(course, body):
+    """Write the room the canvas is showing, and the chart if it is ours.
+
+    The whole document rather than a diff. A room is one small file read
+    whole and written whole -- that is the reason it is JSON -- and a diff
+    would need a conflict story that a single-user local app has no use
+    for.
+
+    **Checked, not trusted.** See `room.check`. This is the only door a
+    room arrives by that printit did not write itself, and every rule
+    there guards a failure that is silent further down.
+
+    **The chart as well, when that is safe.** A room nothing reads is a
+    toy: the file the build opens is `seating.toml`, so saving here
+    rewrites it. Two conditions, because overwriting a chart is how a
+    term's seating disappears:
+
+    * somebody has to be seated, so an untouched course cannot replace a
+      real chart with an empty one; and
+    * the chart on disk has to be one this tab wrote, or absent. A chart
+      that came from an import or a text editor is left exactly alone and
+      the answer says so. That is the 10-02 mistake in different clothes:
+      a file that carries an instruction is not a file to reach past.
+    """
+    incoming = body.get("room")
+    if not isinstance(incoming, dict):
+        raise GuiError("that request carried no room.")
+
+    # Every key the roster answers to, not just the preferred one, so a
+    # room written before a student gained an SID still loads.
+    people = course.roster()
+    known, name_of = None, {}
+    if people is not None:
+        known = set()
+        for student in people:
+            for key in roster_mod.keys_of(student):
+                known.add(key)
+                name_of.setdefault(key, student.name)
+
+    try:
+        room_mod.check(incoming, known)
+    except room_mod.RoomError as exc:
+        raise GuiError(str(exc)) from None
+
+    room_mod.save(course.file("room"), incoming)
+
+    seated = sum(1 for section in incoming.get("sections") or []
+                 for seat in room_mod.seats_of(section) if seat["student"])
+    chart = course.file("seating")
+    name = os.path.basename(chart)
+    if not seated:
+        note = (f"Room saved. Nobody is sitting anywhere yet, so {name} is "
+                f"left as it is.")
+    elif os.path.isfile(chart) and not seating_mod.was_generated(chart):
+        note = (f"Room saved. {name} was not written by this tab -- it was "
+                f"imported or typed -- so it has been left alone, and the "
+                f"build still reads it rather than this room.")
+    else:
+        with open(chart, "w", encoding="utf-8") as f:
+            f.write(seating_mod.to_toml(
+                incoming, lambda key: name_of.get(key, "")))
+        note = f"Room saved, and {name} rewritten from it."
+        # The one thing a saved room can be silently missing.
+        #
+        # With no letters on the seats the chart carries none, and a
+        # build alternates A B C D along each table instead -- safe
+        # within a table, and knowing nothing about who sits near whom
+        # across the room. The Print view shows those invented letters
+        # in a column headed "Version", which is where an instructor
+        # reasonably believes their seating has been read. Said here
+        # because this is the moment the file is written.
+        lettered = any(
+            (seat.get("version") or "").strip()
+            for section in incoming.get("sections") or []
+            for seat in room_mod.live_seats(section)
+            if (seat.get("student") or "").strip()
+        )
+        if seated and not lettered:
+            note += (" No seat has a version yet, so the build will "
+                     "alternate them. Printing \u22ef Shuffle versions.")
+
+    out = _seating_json(course)
+    out["note"] = note
+    return out
+
+
+def api_print(course, _body):
+    """Everything the staging view draws."""
+    draft = printjob_mod.load_draft(course.name)
+    people = course.roster()
+    bank = course.bank()
+
+    slugs = list(bank.slugs()) if bank is not None else []
+    # Two endpoints need this and they are not the same loop. The
+    # first attempt added titles to the payload here and built them
+    # only in `api_skills`, so this one raised NameError -- caught by
+    # a test, not by reading, which is the usual way round.
+    descriptions = {}
+    titles = {}
+    if bank is not None:
+        for slug in slugs:
+            try:
+                descriptions[slug] = bank.description(slug)
+                titles[slug] = bank.skill_title(slug)
+            except BankError:
+                descriptions[slug] = ""
+                titles[slug] = slug
+
+    # The letter each seat gives, so the table can show what a student will
+    # get before anything is drawn. Read from the chart rather than guessed:
+    # it comes from a seat's position within its table, and a lone seat or a
+    # table of three is not the same arithmetic as a table of four.
+    seat_version, versions_available = {}, []
+    seating_path = course.file("seating")
+    if os.path.isfile(seating_path):
+        try:
+            chart = seating_mod.load(seating_path)
+            versions_available = list(chart.versions)
+            for seat in chart.seats:
+                if str(seat.name).strip():
+                    seat_version[seat.name] = seat.version
+        except (OSError, seating_mod.SeatingError):
+            pass
+
+    students = []
+    if people is not None:
+        for i, s in enumerate(people):
+            if s.dropped:
+                continue
+            key = roster_mod.key_of(s)
+            students.append({
+                "index": i, "key": key, "name": s.name,
+                # What prints, and so what this view shows. One
+                # definition, on the Student. See `Student.display`.
+                "display": s.display,
+                "section": s.section,
+                "chose": list(s.skills),
+                "override": list(draft["overrides"].get(key, []))
+                            if key in draft["overrides"] else None,
+                "seatVersion": seat_version.get(s.name, ""),
+                "version": draft["versions"].get(key, ""),
+            })
+
+    identity = _course_identity(course)
+    return {
+        "draft": draft,
+        "students": students,
+        "skills": [{"slug": s, "description": descriptions.get(s, ""),
+                    "title": titles.get(s, s)}
+                   for s in slugs],
+        "variants": _variants_in(bank, slugs) if bank is not None else {},
+        "hasBank": bank is not None,
+        "hasRoster": people is not None,
+        "course": {"name": identity.get("code") or identity.get("name", ""),
+                   "semester": identity.get("semester", ""),
+                   "professor": identity.get("professor", "")},
+        # Whether to offer the pull at all. A course can print happily
+        # without ever having had a form.
+        "hasForm": os.path.isfile(course.file("form")),
+        "jobFolder": printjob_mod.folder_for(draft),
+        "versionsAvailable": versions_available,
+        # So "Reset this print job" is an ordinary edit that Discard can
+        # undo, rather than a second way to write the file.
+        "defaults": dict(printjob_mod.DEFAULTS),
+    }
+
+
+def api_print_save(course, body):
+    """Save the draft, refusing anything the build would refuse later.
+
+    A slug typed into an override reaches the build as
+    "X asked for 'W9', which is not in the bank" -- after the job folder has
+    been written. Caught here instead, while the box is still on screen.
+    """
+    draft = body.get("draft") or {}
+    bank = course.bank()
+    if bank is not None:
+        known = set(bank.slugs())
+        bad = {}
+        for key, slugs in (draft.get("overrides") or {}).items():
+            missing = [s for s in slugs if s not in known]
+            if missing:
+                bad[key] = missing
+        for field in ("simply_print", "default_when_missing",
+                      "append_for_everyone"):
+            missing = [s for s in (draft.get(field) or []) if s not in known]
+            if missing:
+                bad[field] = missing
+        for extra in (draft.get("extras") or []):
+            if extra.get("skill") and extra["skill"] not in known:
+                bad.setdefault("extras", []).append(extra["skill"])
+        if bad:
+            named = "; ".join(f"{k}: {', '.join(v)}" for k, v in bad.items())
+            raise GuiError(f"not in the bank -- {named}")
+
+    mode = draft.get("mode", "chose")
+    if mode not in printjob_mod.MODES:
+        raise GuiError(
+            f"{mode!r} is not a mode. It is one of "
+            f"{', '.join(printjob_mod.MODES)}.")
+
+    # A letter beyond the chart's is allowed: that is how a version is
+    # added from the app, and `assemble` draws seeds for whatever the pins
+    # name. It still has to be a version letter and not prose, because the
+    # value ends up in a filename and on a paper.
+    for key, letter in (draft.get("versions") or {}).items():
+        if not (isinstance(letter, str) and len(letter) == 1
+                and "A" <= letter <= "Z"):
+            raise GuiError(
+                f"{letter!r} is not a version letter. Versions are a single "
+                f"capital, A to Z.")
+
+    printjob_mod.save_draft(course.name, draft)
+    return api_print(course, {})
+
+
+def _build(course, preview, seed=None):
+    draft = printjob_mod.load_draft(course.name)
+    identity = _course_identity(course)
+    try:
+        folder = printjob_mod.write_job(
+            course.name, draft,
+            course_name=identity.get("code") or identity.get("name", ""),
+            semester=identity.get("semester", ""),
+            professor=identity.get("professor", ""))
+    except printjob_mod.PrintJobError as exc:
+        raise GuiError(str(exc)) from None
+
+    try:
+        result = runner_mod.run(
+            os.path.join(folder, "publication.toml"),
+            do_compile=not preview, seed=seed, preview=preview)
+    except runner_mod.BuildError as exc:
+        raise GuiError(str(exc)) from None
+
+    report = result.report
+    return {
+        "folder": folder,
+        "out": result.out,
+        "seed": result.run_seed,
+        "preview": preview,
+        "students": report["students"],
+        "extras": report["extras"],
+        "skills": list(report["skills"]),
+        "versions": report["versions"],
+        "keys": report["keys"],
+        # (version, skill) -> seed. Different skills have unrelated pools, so
+        # "version A" is one seed per skill rather than one seed.
+        "seeds": [{"version": v, "slug": s, "seed": n}
+                  for (v, s), n in sorted(report["seeds"].items(),
+                                          key=lambda kv: (kv[0][1], kv[0][0]))
+                  if s in report["skills"]],
+        # Triples since the collision check started reading the paper
+        # rather than the chart: the letter printed is not the seat's.
+        "collisions": [f"{a.name} and {b.name} were both printed version "
+                       f"{version} at table {a.group}"
+                       for a, b, version in report["collisions"]],
+        "unseated": list(report["unseated"]),
+        "unmatchedOverrides": list(result.unmatched_overrides),
+        "missingFields": {k: list(v) for k, v in report["missing_fields"].items()},
+        "pdf": result.pdf,
+        "recorded": result.recorded,
+        "recordError": result.record_error,
+        "themeInstalled": result.theme_installed,
+    }
+
+
+def _pull_json(outcome):
+    """One shape for both the dry run and the real thing.
+
+    Every count comes off `PullOutcome` rather than being re-derived here;
+    a second derivation of "how many were out of scope" is a second thing
+    to get wrong.
+    """
+    pulled = outcome.pulled
+    return {
+        "total": outcome.total,
+        "assessment": outcome.assessment,
+        "date": str(outcome.date or ""),
+        "spokenDate": (availability_mod.spoken_date(outcome.date)
+                       or str(outcome.date or "")),
+        "knownFromBank": outcome.known_from_bank,
+        "written": outcome.written,
+        "trouble": outcome.trouble,
+        "answered": pulled.answered,
+        "silent": sorted(s.display for s in pulled.silent),
+        "unknownEmails": list(pulled.unknown_emails),
+        "unrecognised": [{"email": e, "option": o}
+                         for e, o in pulled.unrecognised],
+        "unconfirmed": pulled.unconfirmed,
+        "outOfScope": pulled.out_of_scope,
+        "superseded": pulled.superseded,
+    }
+
+
+def api_print_pull(course, body):
+    """Read this assessment's responses, from the Print job view.
+
+    `write` false is the dry run. `force` is the instructor saying "write
+    the rest anyway" after seeing what could not be placed -- which is why
+    the card shows the detail first and offers that button second.
+
+    Returns the refreshed Print job payload alongside, because a pull
+    rewrites the roster and the table underneath is showing it.
+    """
+    try:
+        outcome = responses_mod.pull_for_course(
+            course.name,
+            write=bool(body.get("write", True)),
+            force=bool(body.get("force")))
+    except responses_mod.ResponseError as exc:
+        raise GuiError(str(exc)) from None
+    return {"pull": _pull_json(outcome), "print": api_print(course, {})}
+
+
+def api_print_preview(course, body):
+    """Draw and report, writing nothing.
+
+    The seed it reports is **not** a prediction: a build draws again unless
+    given the same one. The view carries it across, which is the whole
+    reason every run has a seed.
+    """
+    return _build(course, preview=True, seed=body.get("seed"))
+
+
+def api_print_build(course, body):
+    return _build(course, preview=False, seed=body.get("seed"))
+
+
+def api_print_reveal(_course, body):
+    """Show a finished run in the file manager.
+
+    Opening the PDF itself would hand the instructor one file; the folder
+    holds the manifest and the per-skill .tex too, which is what you want
+    when something looks wrong.
+    """
+    import subprocess
+    path = str(body.get("path", ""))
+    root = runner_mod.default_output_root()
+    if not path or not os.path.abspath(path).startswith(os.path.abspath(root)):
+        # Only ever somewhere printit wrote. This opens a window on the
+        # instructor's machine, so it does not take an arbitrary path.
+        raise GuiError("that is not a printit output folder.")
+    if not os.path.exists(path):
+        raise GuiError(f"{path} is not there any more.")
+    try:
+        if sys.platform == "win32":
+            os.startfile(path)                      # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.run(["open", path], check=False)
+        else:
+            subprocess.run(["xdg-open", path], check=False)
+    except OSError as exc:
+        raise GuiError(f"could not open it: {exc}") from None
+    return {"opened": path}
+
+
+ROUTES = {
+    "/api/course": api_course,
+    "/api/roster": api_roster,
+    "/api/roster/save": api_roster_save,
+    "/api/roster/drop": api_roster_drop,
+    "/api/google": api_google,
+    "/api/google/login": api_google_login,
+    "/api/setup": api_setup,
+    "/api/setup/create": api_setup_create,
+    "/api/setup/inspect": api_setup_inspect,
+    "/api/setup/attach": api_setup_attach,
+    "/api/setup/authorize": api_setup_authorize,
+    "/api/setup/finish": api_setup_finish,
+    "/api/seating": api_seating,
+    "/api/seating/save": api_seating_save,
+    "/api/seating/versions": api_seating_versions,
+    "/api/seating/start": api_seating_start,
+    "/api/seating/shuffle": api_seating_shuffle,
+    "/api/seating/fill": api_seating_fill,
+    "/api/print": api_print,
+    "/api/print/save": api_print_save,
+    "/api/print/pull": api_print_pull,
+    "/api/print/preview": api_print_preview,
+    "/api/print/build": api_print_build,
+    "/api/print/reveal": api_print_reveal,
+    "/api/skills": api_skills,
+    "/api/skills/preview": api_skills_preview,
+    "/api/skills/save": api_skills_save,
+    "/api/form/push": api_form_push,
+}
+
+
+# ---------------------------------------------------------------- serving --
+
+def make_handler(course, token):
+    class Handler(http.server.BaseHTTPRequestHandler):
+        server_version = "checkit-printit"
+
+        def log_message(self, fmt, *args):
+            pass                      # the terminal is the instructor's
+
+        # -- helpers --
+        def _send(self, code, payload, ctype="application/json"):
+            body = (json.dumps(payload).encode("utf-8")
+                    if ctype == "application/json" else payload)
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            # Nothing here should ever be embedded in another page.
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            # Never cached. Everything is read from disk per request, so an
+            # upgraded printit takes effect on reload. Without this the
+            # browser keeps running yesterday's script against today's
+            # server, and the mismatch is invisible -- it cost a confused
+            # minute the first time the roster table changed shape. There is
+            # no network here to save.
+            self.send_header("Cache-Control", "no-store, must-revalidate")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _authorised(self):
+            return secrets.compare_digest(
+                self.headers.get(TOKEN_HEADER, ""), token)
+
+        def _static(self, path):
+            name = os.path.normpath(path.lstrip("/")).replace("\\", "/")
+            if name in ("", "."):
+                name = "index.html"
+            full = os.path.normpath(os.path.join(STATIC, name))
+            # A traversal check, not a formality: this process can read the
+            # instructor's whole home directory.
+            if not full.startswith(STATIC) or not os.path.isfile(full):
+                self._send(404, b"not found", "text/plain; charset=utf-8")
+                return
+            with open(full, "rb") as f:
+                body = f.read()
+            if name == "index.html":
+                body = body.replace(b"__TOKEN__", token.encode())
+            ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+            self._send(200, body, f"{ctype}; charset=utf-8")
+
+        # -- routes --
+        def do_GET(self):
+            path = urllib.parse.urlparse(self.path).path
+            if path.startswith("/api/"):
+                self._api(path, {})
+            else:
+                self._static(path)
+
+        def do_POST(self):
+            path = urllib.parse.urlparse(self.path).path
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                body = json.loads(raw or b"{}")
+            except ValueError:
+                self._send(400, {"error": "the request was not JSON"})
+                return
+            self._api(path, body)
+
+        def _api(self, path, body):
+            if not self._authorised():
+                self._send(403, {"error":
+                                 "wrong or missing token -- reload the page"})
+                return
+            handler = ROUTES.get(path)
+            if handler is None:
+                self._send(404, {"error": f"no such endpoint: {path}"})
+                return
+            try:
+                self._send(200, {"ok": True, "data": handler(course, body)})
+            except (GuiError, roster_mod.RosterError) as exc:
+                # A rule said no. That is an answer, not a crash.
+                self._send(400, {"error": str(exc)})
+            except OSError as exc:
+                self._send(500, {"error": f"could not read or write a file: {exc}"})
+            except Exception as exc:                      # noqa: BLE001
+                # Anything else is a bug, and a bug must still answer. Left
+                # uncaught, the handler dies without writing a response and
+                # the browser can only say "failed to fetch" -- which is
+                # what a missing `import sys` looked like for a week. The
+                # traceback goes to the terminal, where it is useful.
+                traceback.print_exc()
+                self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
+
+    return Handler
+
+
+class Server(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def serve(course_name, port=8765, open_browser=True, forever=True):
+    """Start the local app. Returns (server, url, token)."""
+    course = Course(course_name)
+    token = secrets.token_urlsafe(24)
+    httpd = Server(("127.0.0.1", port), make_handler(course, token))
+    url = f"http://127.0.0.1:{httpd.server_address[1]}/"
+    if open_browser:
+        threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+    if forever:
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            httpd.server_close()
+    return httpd, url, token

@@ -319,3 +319,56 @@ class TestThePrintDraftIsChecked:
             gui_mod.api_print_save(printable, {"draft": {
                 "simply_print": ["NOPE"]}})
         assert printjob.load_draft("P") == before
+
+
+class TestASkillShowsItsName:
+    """Every outcome in `bank.xml` carries two strings: a short
+    `<title>` and a long `<description>`, the "I can..." statement.
+
+    Nothing in printit could ask for the first until 2026-10-13, so
+    every list of skills in the GUI was a column of truncated
+    sentences -- fifteen of them on the Print tab, each clipped at the
+    same width, which is unreadable and was visible in a screenshot
+    the whole time. Section 13.4: titles in tables, descriptions in
+    tooltips.
+    """
+
+    @pytest.fixture
+    def banked(self, tmp_path, monkeypatch, bank_dir):
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(tmp_path))
+        course_mod.init("B", bank=bank_dir, adopt=None)
+        return gui_mod.Course("B")
+
+    def test_the_bank_can_be_asked_for_a_short_name(self, banked):
+        assert banked.bank().skill_title("AD") == "Adding"
+
+    def test_it_is_not_the_description(self, banked):
+        bank = banked.bank()
+        assert bank.skill_title("AD") != bank.description("AD")
+        assert bank.description("AD").startswith("I can")
+
+    def test_a_nameless_outcome_falls_back_to_its_slug(self, banked,
+                                                       monkeypatch):
+        """A row with no name is worse than a terse one."""
+        bank = banked.bank()
+        real = bank.outcome("AD")
+        monkeypatch.setattr(
+            type(real), "title", property(lambda self: "  "), raising=False)
+        assert bank.skill_title("AD") == "AD"
+
+    def test_the_view_sends_both(self, banked):
+        rows = {s["slug"]: s for s in gui_mod.api_skills(banked, {})["skills"]}
+        assert rows["AD"]["title"] == "Adding"
+        assert rows["AD"]["description"].startswith("I can")
+
+    def test_without_a_bank_the_slug_is_the_name(self, course):
+        """The Skills view loads before a course is pointed at a bank,
+        and a row still has to be identifiable."""
+        for row in gui_mod.api_skills(course, {})["skills"]:
+            assert row["title"] == row["slug"]
+
+    def test_the_print_view_sends_both_too(self, banked):
+        """Two endpoints build this list and they used to drift."""
+        rows = {s["slug"]: s for s in gui_mod.api_print(banked, {})["skills"]}
+        assert rows["AD"]["title"] == "Adding"
+        assert rows["AD"]["description"].startswith("I can")

@@ -389,14 +389,21 @@ def api_skills(course, _body):
     if bank is None:
         slugs = open_now
         descriptions = {s: "" for s in slugs}
+        # Left empty on purpose: the payload below falls back to the
+        # slug, and a second mechanism saying the same thing is one
+        # that can rot without any test going red.
+        titles = {}
     else:
         slugs = list(bank.slugs())
         descriptions = {}
+        titles = {}
         for slug in slugs:
             try:
                 descriptions[slug] = bank.description(slug)
+                titles[slug] = bank.skill_title(slug)
             except BankError:
                 descriptions[slug] = ""
+                titles[slug] = slug
         # A slug that is open but no longer in the bank still has to appear,
         # or it could not be turned off from here.
         for slug in open_now:
@@ -408,6 +415,7 @@ def api_skills(course, _body):
     return {
         "hasBank": bank is not None,
         "skills": [{"slug": s, "description": descriptions.get(s, ""),
+                    "title": titles.get(s, s),
                     "open": s in open_now,
                     "inBank": bank is None or s in set(bank.slugs())}
                    for s in slugs],
@@ -991,13 +999,20 @@ def api_print(course, _body):
     bank = course.bank()
 
     slugs = list(bank.slugs()) if bank is not None else []
+    # Two endpoints need this and they are not the same loop. The
+    # first attempt added titles to the payload here and built them
+    # only in `api_skills`, so this one raised NameError -- caught by
+    # a test, not by reading, which is the usual way round.
     descriptions = {}
+    titles = {}
     if bank is not None:
         for slug in slugs:
             try:
                 descriptions[slug] = bank.description(slug)
+                titles[slug] = bank.skill_title(slug)
             except BankError:
                 descriptions[slug] = ""
+                titles[slug] = slug
 
     # The letter each seat gives, so the table can show what a student will
     # get before anything is drawn. Read from the chart rather than guessed:
@@ -1038,7 +1053,8 @@ def api_print(course, _body):
     return {
         "draft": draft,
         "students": students,
-        "skills": [{"slug": s, "description": descriptions.get(s, "")}
+        "skills": [{"slug": s, "description": descriptions.get(s, ""),
+                    "title": titles.get(s, s)}
                    for s in slugs],
         "variants": _variants_in(bank, slugs) if bank is not None else {},
         "hasBank": bank is not None,

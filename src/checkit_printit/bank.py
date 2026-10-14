@@ -60,6 +60,20 @@ class Bank:
     def description(self, slug):
         return (self.outcome(slug).description or "").strip()
 
+    def skill_title(self, slug):
+        """The outcome's short name, as `bank.xml` gives it.
+
+        Not `title`, which is the *bank's* name. An outcome has both a
+        title ("Analyzing Student Work") and a description (the "I
+        can..." statement), and until 2026-10-13 nothing here could ask
+        for the first -- so every list of skills in the app was a
+        column of truncated sentences.
+
+        Falls back to the slug, because a nameless row is worse than a
+        terse one.
+        """
+        return (self.outcome(slug).title or "").strip() or slug
+
     def color(self, slug):
         """The xcolor name for this outcome's box, or None for the default.
 
