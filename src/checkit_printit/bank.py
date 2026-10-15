@@ -139,14 +139,26 @@ class Bank:
         """
         return self.data(slug, seed).get("__variant__")
 
+    def variant_labels(self, slug):
+        """Every variant this skill's printable versions carry, sorted.
+
+        Empty for a generator that declares none, which is how a caller
+        tells "has no variants" from "has variants nobody chose". There is
+        no declaration to read from out here: the wrapper writes
+        `__variant__` into each version's data, so the labels are only
+        discoverable by looking at the versions themselves.
+        """
+        return sorted({label for label in
+                       (self.variant(slug, s) for s in self.printable_seeds(slug))
+                       if label})
+
     def seeds_with_variant(self, slug, variant):
         if variant is None:
             return self.printable_seeds(slug)
         found = [s for s in self.printable_seeds(slug)
                  if self.variant(slug, s) == variant]
         if not found:
-            labels = sorted({self.variant(slug, s) or "(none)"
-                             for s in self.printable_seeds(slug)})
+            labels = self.variant_labels(slug) or ["(none)"]
             raise BankError(
                 f"{slug} has no printable version with variant {variant!r}. "
                 f"It has: {', '.join(labels)}"

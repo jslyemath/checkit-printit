@@ -200,6 +200,42 @@ feature in the docs and going to check whether the sentence was true --
 which no test did, because the tests passed, and no use did, because nobody
 pinches a desktop browser.
 
+### A hand-built run is not the run he set up
+
+When something breaks he will ask you to skip the UI and do it yourself.
+Do that, but **start from `courses/<name>/job.toml`, not from what he
+said in chat.** It is the live draft: selection modes, variants,
+overrides, version letters, all of it, carried between visits.
+
+The 2026-10-12 Extravaganza was built by hand from a publication
+transcribed out of the conversation. The draft already said
+`W5 = "multiplication"` and `W7 = "terminating"`; the transcription did
+not, and ten students got a W5 with no multiplication on it. Nothing
+failed. `manifest.toml` recorded `variant = "no_multiplication"` for
+every one and was not read.
+
+`printjob.publication_text(space, draft, ...)` is the function that turns
+the draft into a publication, and `write_job` puts it in a job folder.
+Use them. Hand-writing the TOML means hand-copying state you did not
+know was there.
+
+### An unchosen variant is now refused, and nine skills have them
+
+`check_variants_chosen` stops a build that would print a **dealt** paper
+from a variant-bearing skill with nothing in `[variants]`. Without it,
+`seeds_with_variant(slug, None)` returns the whole printable tier and
+the letters split evenly across variants -- half the class at the wrong
+level, silently.
+
+R1, R2, W4, W4-E, W5, W7, N3, N4 and D2 declare variants in mat-106, so
+most runs now need a `[variants]` line. It is scoped so that only papers
+that actually print and were actually drawn are asked about: a replay
+pins every seed and passes, and a skill nobody takes is never mentioned.
+
+`Bank.variant_labels(slug)` is the single answer to "does this skill have
+variants". There were four copies of that scan; three are gone, and the
+GUI keeps a 60-seed slice on purpose, documented where it lives.
+
 ### Grep `seating.css` before naming a class in the shell
 
 The navigation rail shipped as `.rail`, and Seating has had a `.rail`

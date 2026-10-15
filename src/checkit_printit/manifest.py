@@ -83,9 +83,7 @@ def write(out_dir, publication, run_seed, seeds, bank, slugs):
 
     # Enough of the bank to notice it moved under a replay.
     for slug in sorted(slugs):
-        labels = sorted({bank.variant(slug, s) or ""
-                         for s in bank.printable_seeds(slug)})
-        labels = [x for x in labels if x]
+        labels = bank.variant_labels(slug)
         try:
             generator = file_digest(bank.outcome(slug).generator_path())
         except Exception:
@@ -153,12 +151,10 @@ def check(raw, bank, publication):
     for entry in raw.get("skill", []):
         slug = entry["slug"]
         try:
-            labels = sorted({bank.variant(slug, s) or ""
-                             for s in bank.printable_seeds(slug)})
+            labels = bank.variant_labels(slug)
         except Exception as exc:
             refusals.append(f"{slug}: {exc}")
             continue
-        labels = [x for x in labels if x]
         if labels != list(entry.get("variants", [])):
             notes.append(f"{slug} declared {entry.get('variants')} and now "
                          f"declares {labels}")

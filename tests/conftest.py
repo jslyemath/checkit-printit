@@ -33,11 +33,34 @@ BANK_XML = """<?xml version='1.0' encoding='UTF-8'?>
             <path>outcomes/SU</path>
             <description>I can subtract two numbers.</description>
         </outcome>
+        <outcome>
+            <title>Varying</title>
+            <slug>VR</slug>
+            <path>outcomes/VR</path>
+            <description>I can do it at two different sizes.</description>
+        </outcome>
     </outcomes>
 </bank>
 """
 
+# Most outcomes declare no variants, which is what the real bank looks like:
+# four of its twenty-nine do. The fixture used to put variants on every skill,
+# so every assembly test exercised the variant path whether it meant to or
+# not -- and once an unchosen variant became a refusal, all of them failed for
+# a reason none of them was about.
 GENERATOR = textwrap.dedent("""
+    import random
+
+
+    class Generator(BaseGenerator):
+        def data(self):
+            a, b = random.randint(1, 99), random.randint(1, 99)
+            return {"a": a, "b": b, "answer": a + b}
+""")
+
+# VR is the one that does. No roster here prints it unless a test asks, so
+# the variant path has somewhere to live without being in everyone's way.
+VARIANT_GENERATOR = textwrap.dedent("""
     import random
 
 
@@ -72,10 +95,11 @@ Compute the following.
 @pytest.fixture(scope="session")
 def bank_dir(tmp_path_factory):
     root = tmp_path_factory.mktemp("bank")
-    for slug in ("AD", "SU"):
+    for slug in ("AD", "SU", "VR"):
         d = root / "outcomes" / slug
         d.mkdir(parents=True)
-        (d / "generator.py").write_text(GENERATOR, encoding="utf-8")
+        (d / "generator.py").write_text(
+            VARIANT_GENERATOR if slug == "VR" else GENERATOR, encoding="utf-8")
         (d / "template.xml").write_text(TEMPLATE, encoding="utf-8")
         # AD has a print template; SU deliberately does not, so the SpaTeXt
         # fallback is exercised by every test that touches it. An outcome
