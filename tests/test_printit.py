@@ -36,18 +36,25 @@ class TestBank:
 
     def test_variant_labels_are_readable(self, bank_dir):
         bank = Bank(bank_dir)
-        labels = {bank.variant("AD", s) for s in bank.printable_seeds("AD")}
+        labels = {bank.variant("VR", s) for s in bank.printable_seeds("VR")}
         assert labels == {"small", "large"}
+
+    def test_a_skill_without_variants_reports_none(self, bank_dir):
+        """How every caller tells "declares none" from "declares some, and
+        nobody chose": the first is a skill the question does not apply to."""
+        bank = Bank(bank_dir)
+        assert bank.variant_labels("AD") == []
+        assert bank.variant_labels("VR") == ["large", "small"]
 
     def test_asking_for_a_variant_narrows_the_pool(self, bank_dir):
         bank = Bank(bank_dir)
-        small = bank.seeds_with_variant("AD", "small")
+        small = bank.seeds_with_variant("VR", "small")
         assert small
-        assert all(bank.variant("AD", s) == "small" for s in small)
+        assert all(bank.variant("VR", s) == "small" for s in small)
 
     def test_an_unknown_variant_says_what_exists(self, bank_dir):
         with pytest.raises(BankError, match="small"):
-            Bank(bank_dir).seeds_with_variant("AD", "enormous")
+            Bank(bank_dir).seeds_with_variant("VR", "enormous")
 
     def test_a_directory_that_is_not_a_bank_says_so(self, tmp_path):
         with pytest.raises(BankError, match="bank.xml"):
@@ -1061,6 +1068,97 @@ class TestVersionsAreDistinct:
         with pytest.raises(assemble_mod.AssemblyError, match="distinct"):
             assemble_mod.choose_seeds(
                 bank, too_many, self.publication(bank_dir), random.Random(0))
+
+
+class TestAnUnchosenVariantIsRefused:
+    """The 2026-10-12 Extravaganza printed ten students a W5 with no
+    multiplication on it, and nine a W7 that did not terminate.
+
+    `seeds_with_variant(slug, None)` returns the whole printable tier, so
+    four version letters dealt roughly two of each. The instructor had
+    chosen `W5 = "multiplication"` and `W7 = "terminating"` in the draft;
+    the run was built by hand from a publication carrying neither, and the
+    only thing that noticed was `manifest.toml`, which recorded
+    `variant = "no_multiplication"` and was not read.
+
+    So the draw may no longer decide how far the course has got.
+    """
+
+    def roster(self):
+        return roster_mod.Roster([
+            roster_mod.Student(name="Ada", section="1", skills=["VR"]),
+            roster_mod.Student(name="Bo", section="1", skills=["AD", "VR"]),
+        ])
+
+    def build(self, bank_dir, tmp_path, publication, dry_run=False):
+        source, _ = theme.load(bank_dir)
+        out = str(tmp_path / "out")
+        assemble_mod.assemble(
+            publication, self.roster(), chart_for(tmp_path, ["Ada", "Bo"]),
+            out, source, rng=random.Random(1), dry_run=dry_run)
+        return out
+
+    def test_printing_a_variant_skill_without_choosing_is_refused(
+            self, bank_dir, tmp_path):
+        with pytest.raises(assemble_mod.AssemblyError) as exc:
+            self.build(bank_dir, tmp_path, make_publication(bank_dir))
+        assert "VR" in str(exc.value)
+
+    def test_the_refusal_says_what_to_write(self, bank_dir, tmp_path):
+        """A refusal nobody can act on is a refusal that gets worked around,
+        and this one arrives in the middle of printing for a class."""
+        with pytest.raises(assemble_mod.AssemblyError) as exc:
+            self.build(bank_dir, tmp_path, make_publication(bank_dir))
+        text = str(exc.value)
+        assert "[variants]" in text
+        assert 'VR = ""' in text, "no line to fill in"
+        assert "large" in text and "small" in text, "the choices are not listed"
+        assert 'VR = "large"' not in text, (
+            "a pre-filled guess gets pasted unread, and alphabetically first "
+            "is the wrong level as often as the right one")
+
+    def test_choosing_one_builds_and_every_paper_is_it(self, bank_dir, tmp_path):
+        out = self.build(bank_dir, tmp_path,
+                         make_publication(bank_dir, variants={"VR": "small"}))
+        bank = Bank(bank_dir)
+        printed = [int(f.split(" v")[1][:-len(".tex")])
+                   for f in os.listdir(os.path.join(out, "VR"))
+                   if f.endswith(".tex")]
+        assert printed, "nothing was printed, so the assertion below is vacuous"
+        assert all(bank.variant("VR", s) == "small" for s in printed)
+
+    def test_a_blank_choice_is_not_a_choice(self, bank_dir, tmp_path):
+        """The refusal hands over a template with blanks in it, so a blank
+        has to be refused too or the instructor pastes it and loops."""
+        with pytest.raises(assemble_mod.AssemblyError):
+            self.build(bank_dir, tmp_path,
+                       make_publication(bank_dir, variants={"VR": ""}))
+
+    def test_a_skill_nobody_prints_needs_no_choice(self, bank_dir, tmp_path):
+        """VR declares variants and this roster does not take it. Asking
+        about a paper that will not exist is noise, and noise is what gets
+        a guard switched off."""
+        source, _ = theme.load(bank_dir)
+        assemble_mod.assemble(
+            make_publication(bank_dir), two_students(),
+            chart_for(tmp_path, ["Ada", "Bo"]), str(tmp_path / "out"), source,
+            rng=random.Random(1))
+
+    def test_a_pinned_seed_does_not_need_a_variant(self, bank_dir, tmp_path):
+        """Which is what a replay is: every paper named outright, so the draw
+        had no say and there is nothing left for a variant to decide."""
+        printable = Bank(bank_dir).printable_seeds("VR")
+        pins = dict(zip(("A", "B"), printable))
+        self.build(bank_dir, tmp_path,
+                   make_publication(bank_dir, skill_seeds={"VR": pins}))
+
+    def test_the_preview_refuses_too(self, bank_dir, tmp_path):
+        """A preview that passes and a build that refuses would be this
+        project's own "verify the artifact, not the dry run", backwards."""
+        with pytest.raises(assemble_mod.AssemblyError):
+            self.build(bank_dir, tmp_path, make_publication(bank_dir),
+                       dry_run=True)
+
 
 class TestTheRunSeed:
     """A replay must not invent a seed.

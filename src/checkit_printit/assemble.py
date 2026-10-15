@@ -45,6 +45,77 @@ class Handout:
     version: str = ""
 
 
+def variant_for(publication, slug):
+    """The variant chosen for one skill, or None if none was.
+
+    A blank is not a choice. TOML has no way to say "unset" but leaving the
+    key out, and the refusal below hands over a template with blanks in it,
+    so `W5 = ""` arrives as a matter of course -- and reached
+    `seeds_with_variant`, which answered that the bank has no variant named
+    `''`. True, and no help at all.
+    """
+    return (publication.variants.get(slug) or "").strip() or None
+
+
+def pins_for(publication, slug):
+    """The seed pins that apply to one skill.
+
+    A per-skill table wins; the flat form is the single-skill shorthand.
+    Shared so the draw and `check_variants_chosen` cannot disagree about
+    which papers were named outright and which were dealt.
+    """
+    return publication.skill_seeds.get(slug) or publication.seeds
+
+
+def check_variants_chosen(bank, publication, handouts, extras):
+    """Refuse a run that prints a dealt paper from an unchosen variant.
+
+    `seeds_with_variant(slug, None)` returns the whole printable tier, so
+    a skill with two variants and four letters deals roughly two of each.
+    That is harmless where the variants are interchangeable and wrong
+    here, because a variant is how far the course has got.
+
+    The 2026-10-12 Extravaganza is why this exists. The instructor had
+    set `W5 = "multiplication"` and `W7 = "terminating"` in the draft,
+    the run was built by hand from a publication that carried neither,
+    and ten students got a W5 with no multiplication on it. Nothing
+    failed; `manifest.toml` recorded `variant = "no_multiplication"` and
+    was not read.
+
+    Scoped to papers that actually print and were actually drawn, so a
+    replay (every seed pinned) and a skill nobody received both pass:
+    asking for a choice that could not change a paper is noise, and a
+    refusal nobody can act on gets worked around.
+    """
+    unchosen = {}
+    for handout in list(handouts) + list(extras):
+        for slug, seed in handout.versions:
+            if slug in unchosen or variant_for(publication, slug):
+                continue
+            if seed in set(pins_for(publication, slug).values()):
+                continue
+            labels = bank.variant_labels(slug)
+            if labels:
+                unchosen[slug] = labels
+    if not unchosen:
+        return
+
+    # Left blank rather than pre-filled with a suggestion. The first label
+    # alphabetically is `no_terminating` for W7 and `multiplication` for W5,
+    # so a filled-in template would be right by luck half the time and
+    # pasted without reading all of it.
+    width = max(len(slug) for slug in unchosen)
+    table = "\n".join(
+        f'{slug:<{width}} = ""    # {", ".join(labels)}'
+        for slug, labels in sorted(unchosen.items()))
+    raise AssemblyError(
+        f"{len(unchosen)} skill(s) in this run have variants and none was "
+        f"chosen, so every version letter would draw at random from all of "
+        f"them -- half the papers at the wrong level, silently. Fill in the "
+        f"one the course has reached; a blank is not a choice:\n\n"
+        f"[variants]\n" + table)
+
+
 def choose_seeds(bank, versions, publication, rng):
     """One seed per (version, skill).
 
@@ -65,10 +136,9 @@ def choose_seeds(bank, versions, publication, rng):
     """
     chosen = {}
     for slug in publication_skills(publication, bank):
-        wanted = publication.variants.get(slug)
+        wanted = variant_for(publication, slug)
         available = bank.seeds_with_variant(slug, wanted)
-        # A per-skill table wins; the flat form is the single-skill shorthand.
-        pins = publication.skill_seeds.get(slug) or publication.seeds
+        pins = pins_for(publication, slug)
 
         pinned = {}
         for version in versions:
@@ -404,6 +474,9 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None,
 
     handouts, unseated = build_handouts(roster, chart, publication, seeds)
     extras = build_extras(publication, seeds, versions, rng)
+    # Before the dry-run return, so a preview that passes and a build that
+    # refuses is not a thing that can happen.
+    check_variants_chosen(bank, publication, handouts, extras)
 
     keys = None
     if publication.keys:
