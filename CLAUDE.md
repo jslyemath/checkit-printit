@@ -372,6 +372,56 @@ visual. The short version:
 * **Explanations live behind a `?`**, not in the open. A short subtitle
   is allowed; a paragraph is not.
 
+### A section on the Print tab is a `.annot`, not a `.panel`
+
+    <section class="annot">
+      <div class="annot-head">
+        <h3>Name</h3>
+        <button class="hint" type="button" aria-expanded="false">?</button>
+        <span class="sec-count"></span>
+      </div>
+      <div class="annot-body"> ...controls... </div>
+    </section>
+
+A 200px gutter holds the name, its `?` and its count; the controls sit
+to the right; a hairline separates sections and there is no card. Add
+`annot-full` to drop the gutter where the content wants the width --
+on this tab that is the table and nothing else, and it is worth 220px
+to it. Below 860px the gutter collapses on its own.
+
+The `?` reveals the `.hint-text` in the same section, wired by **one
+delegated listener** in `boot()`, so a new section needs no JS. A
+section still built as a `.panel` can borrow `.sec-row` to get a
+counter out of its heading without being restructured.
+
+Roster, Update form and Setup are still `.panel`; they are stages 3c
+and 3d.
+
+### The markup has tests now, and they are the only ones that do
+
+`tests/test_gui_markup.py`. Until 2026-10-19 **nothing in the suite
+read `index.html`** -- the entire Print tab was rewritten and 768 tests
+passed without noticing. A mistyped id fails silently in the browser:
+`getElementById` returns null, the handler never binds, the control is
+simply inert.
+
+It checks the only contract between the two files -- that every id
+`app.js` reaches for is either declared in the HTML or assigned by the
+script -- plus no duplicate ids, every `?` having something behind it,
+and no counter inside a heading. **Run it after any markup change**;
+it is instant, and it caught a real 13.5 violation on the Update form
+the first time it ran.
+
+### A stale `index.html` will convince you Seats is broken
+
+Seats measured 0x0 with an empty canvas after a markup change, which is
+exactly the `.rail` collapse below. It was the browser serving a cached
+page, and `ctrl+shift+r` and `location.reload(true)` both kept serving
+it. **Append a query string -- `http://localhost:8767/?cb=1#seating` --
+and compare stashed against not** before believing a regression. The
+server reads the static files from disk per request, so it is never the
+one that is stale.
+
 ### A skill has two names, and they are not interchangeable
 
 Every outcome in `bank.xml` carries a short `<title>` ("Analyzing

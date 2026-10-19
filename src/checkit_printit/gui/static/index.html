@@ -63,7 +63,14 @@
     </div>
 
     <div class="panel">
-      <h3>Open for retake <span id="open-count" class="muted"></span></h3>
+      <!-- The count rides the header row, not the heading. A `.panel`
+           rather than an annotated section because the Update form is
+           stage 3d; only the counter moves here, which is the rule this
+           tab was already breaking. -->
+      <div class="sec-row">
+        <h3>Open for retake</h3>
+        <span id="open-count" class="sec-count"></span>
+      </div>
       <div class="toolbar">
         <button id="skills-none" class="link">clear all</button>
         <span class="spacer"></span>
@@ -87,92 +94,139 @@
   </section>
 
   <section id="view-print" class="view" hidden>
-    <div class="toolbar">
-      <h2>Print job</h2>
+    <!-- The page title *is* the job. It used to be a read-only
+         "Extravaganza - 12 Oct" in the old top bar, with the editable
+         copy buried in a panel called "This run" -- so the one that
+         looked authoritative was the one you could not change, and the
+         panel's name was true of the entire tab. Both are gone: the
+         heading is the field. -->
+    <header class="pagehead">
+      <input id="p-title" class="pagetitle" type="text" spellcheck="false"
+             placeholder="Name this run" aria-label="What this run is called"
+             title="Prints at the top of every paper, and names the job folder.">
+      <input id="p-date" class="pagedate" type="date"
+             aria-label="The day it happens"
+             title="Prints on the paper, names the job folder, and is how a response is matched to an assessment.">
       <span class="spacer"></span>
       <button id="print-reset" class="link"
               title="Empty every field on this tab, ready for the next run. Save to keep it; Discard puts it back.">Reset this print job</button>
-    </div>
-    <p class="muted">Everything on this tab is one job. The bar at the
-      bottom saves all of it.</p>
+    </header>
     <p id="print-blocked" class="banner warn" hidden></p>
 
-    <div class="panel" id="pull-panel">
-      <h3>Responses</h3>
-      <p id="pull-why" class="muted" hidden></p>
-      <p class="muted">Scoped by the date each student confirmed, not by
-        when they answered: a form collects all term, and the confirmation
-        is what says which assessment an answer is for. Where somebody
-        answered twice, the later answer wins.</p>
-      <div class="toolbar">
-        <button id="pull-run" class="primary">Pull responses</button>
-        <button id="pull-dry">Check without writing</button>
+    <!-- Annotated sections: the name and its `?` in a left gutter, the
+         controls to the right, separated by a rule rather than boxed.
+         Polaris's settings layout -- the header is distinguished by
+         position instead of by shouting. `annot-full` drops the gutter
+         for content that wants the width, which is the table. -->
+    <section class="annot" id="pull-panel">
+      <div class="annot-head">
+        <h3>Responses</h3>
+        <button class="hint" type="button" aria-expanded="false"
+                aria-label="How responses are matched">?</button>
       </div>
-      <div id="pull-out"></div>
-    </div>
-
-    <div class="panel">
-      <h3>This run</h3>
-      <div class="fields">
-        <label title="Prints at the top of every paper, and names the job folder.">Title
-          <input id="p-title" type="text" spellcheck="false"></label>
-        <label title="Prints on the paper and names the job folder.">Date
-          <input id="p-date" type="date"></label>
-        <label title="Print an answer key for each distinct paper.">Keys
-          <span class="tickwrap"><input id="p-keys" type="checkbox"></span></label>
-        <label title="How many copies of each key." id="p-keycopies-wrap">Key copies
-          <input id="p-key-copies" type="number" min="1" max="9"></label>
-        <label title="Print each student's name on their paper. Turn off for an anonymous set.">Names
-          <span class="tickwrap"><input id="p-names" type="checkbox"></span></label>
+      <div class="annot-body">
+        <p class="hint-text" hidden>Scoped by the date each student
+          confirmed, not by when they answered: a form collects all term,
+          and the confirmation is what says which assessment an answer is
+          for. Where somebody answered twice, the later answer wins.</p>
+        <p id="pull-why" class="muted" hidden></p>
+        <div class="toolbar">
+          <button id="pull-run" class="primary">Pull responses</button>
+          <button id="pull-dry">Check without writing</button>
+        </div>
+        <div id="pull-out"></div>
       </div>
-    </div>
+    </section>
 
-    <div class="panel">
-      <h3>What this run prints</h3>
-      <div id="modes"></div>
-    </div>
-
-    <div class="panel" id="variants-panel" hidden>
-      <h3>Variants</h3>
-      <p class="muted">Only skills that offer a choice appear here, and only
-        once they are in the run.</p>
-      <div id="variants" class="fields"></div>
-    </div>
-
-    <div class="panel">
-      <h3>Extras <span id="extras-count" class="muted"></span></h3>
-      <p class="muted">Spare copies, printed after the class set with a blank
-        name line.</p>
-      <div id="extras"></div>
-      <button id="extras-add" class="link">add a spare</button>
-    </div>
-
-    <div class="panel">
-      <h3>Who gets what <span id="who-count" class="muted"></span></h3>
-      <div class="scroller">
-        <table id="who">
-          <thead><tr><th>Name</th><th>Section</th>
-            <th>Version <button id="reset-versions" type="button" class="reset off"
-                title="Put every student back on their seat's version.">&#8634;</button></th>
-            <th>Will get</th>
-            <th>Override <button id="reset-overrides" type="button" class="reset off"
-                title="Clear every override; use what each student chose.">&#8634;</button></th>
-          </tr></thead>
-          <tbody></tbody>
-        </table>
+    <section class="annot">
+      <div class="annot-head">
+        <h3>Paper</h3>
       </div>
-    </div>
-
-    <div class="panel">
-      <h3>Build</h3>
-      <div class="toolbar">
-        <button id="p-preview">Preview the draw</button>
-        <button id="p-build" class="primary">Build the PDF</button>
-        <span class="spacer"></span>
-        <button id="p-reveal" class="link" hidden>open the folder</button>
+      <div class="annot-body">
+        <div class="fields">
+          <label title="Print an answer key for each distinct paper.">Keys
+            <span class="tickwrap"><input id="p-keys" type="checkbox"></span></label>
+          <label title="How many copies of each key." id="p-keycopies-wrap">Key copies
+            <input id="p-key-copies" type="number" min="1" max="9"></label>
+          <label title="Print each student's name on their paper. Turn off for an anonymous set.">Names
+            <span class="tickwrap"><input id="p-names" type="checkbox"></span></label>
+        </div>
       </div>
-      <div id="build-out"></div>
-    </div>
+    </section>
+
+    <section class="annot">
+      <div class="annot-head">
+        <h3>What this run prints</h3>
+      </div>
+      <div class="annot-body"><div id="modes"></div></div>
+    </section>
+
+    <section class="annot" id="variants-panel" hidden>
+      <div class="annot-head">
+        <h3>Variants</h3>
+        <button class="hint" type="button" aria-expanded="false"
+                aria-label="Which skills appear here">?</button>
+      </div>
+      <div class="annot-body">
+        <p class="hint-text" hidden>Only skills that offer a choice appear
+          here, and only once they are in the run. A run that leaves one
+          unchosen is refused rather than drawn at random.</p>
+        <div id="variants" class="fields"></div>
+      </div>
+    </section>
+
+    <section class="annot">
+      <div class="annot-head">
+        <h3>Extras</h3>
+        <button class="hint" type="button" aria-expanded="false"
+                aria-label="What a spare is">?</button>
+        <span id="extras-count" class="sec-count"></span>
+      </div>
+      <div class="annot-body">
+        <p class="hint-text" hidden>Spare copies, printed after the class
+          set with a blank name line.</p>
+        <div id="extras"></div>
+        <button id="extras-add" class="link">add a spare</button>
+      </div>
+    </section>
+
+    <!-- No gutter: five columns and 45 rows want every pixel. Drawn with
+         one, the skill column went from a real name to a bare digit. -->
+    <section class="annot annot-full">
+      <div class="annot-head">
+        <h3>Who gets what</h3>
+        <span id="who-count" class="sec-count"></span>
+      </div>
+      <div class="annot-body">
+        <div class="scroller">
+          <table id="who">
+            <thead><tr><th>Name</th><th>Section</th>
+              <th>Version <button id="reset-versions" type="button" class="reset off"
+                  title="Put every student back on their seat's version.">&#8634;</button></th>
+              <th>Will get</th>
+              <th>Override <button id="reset-overrides" type="button" class="reset off"
+                  title="Clear every override; use what each student chose.">&#8634;</button></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="annot">
+      <div class="annot-head">
+        <h3>Build</h3>
+      </div>
+      <div class="annot-body">
+        <div class="toolbar">
+          <button id="p-preview">Preview the draw</button>
+          <button id="p-build" class="primary">Build the PDF</button>
+          <span class="spacer"></span>
+          <button id="p-reveal" class="link" hidden>open the folder</button>
+        </div>
+        <div id="build-out"></div>
+      </div>
+    </section>
 
     <div class="savebar">
       <span id="print-news" class="news" hidden></span>

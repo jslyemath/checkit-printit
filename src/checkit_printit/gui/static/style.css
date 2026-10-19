@@ -515,6 +515,148 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   font-weight: 600;
 }
 
+/* ---- the page title, which is a field ------------------------------
+   Not a heading with the real control further down the page: on the
+   Print tab the name and date of the run *are* the page, so they are
+   what the page is titled with. Chromeless until you reach for it. */
+.pagehead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  margin-bottom: var(--s5);
+}
+.pagetitle, .pagedate {
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: var(--s1) var(--s2);
+}
+.pagetitle {
+  font-size: var(--t-xl);
+  font-weight: 600;
+  margin-left: calc(var(--s2) * -1);   /* the text, not the box, sets the margin */
+  /* The box hugs the text, so the date sits beside the *title* rather
+     than beside the right edge of an input that is mostly empty -- at
+     26ch the two looked unrelated. Unsupported browsers keep the flex
+     basis below and lose only that nicety. */
+  field-sizing: content;
+  min-width: 12ch;
+  max-width: 100%;
+  flex: 0 1 26ch;
+}
+@supports (field-sizing: content) {
+  .pagetitle { flex: 0 0 auto; }
+}
+.pagedate {
+  font-size: var(--t-md);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.pagetitle:hover, .pagedate:hover { border-color: var(--line); }
+.pagetitle:focus, .pagedate:focus {
+  outline: none;
+  background: var(--surface-1);
+  border-color: var(--accent);
+}
+.pagetitle::placeholder { color: var(--dim); font-weight: 500; }
+
+/* ---- annotated sections --------------------------------------------
+   Rows with air, not boxes with gaps: a hairline and generous padding
+   instead of a card, because a section does not earn a boundary just
+   for being a section. The name and its `?` sit in a left gutter, so a
+   header reads as one by position rather than by shouting.
+
+   The gutter costs ~200px permanently. A form does not miss it and a
+   table does, so `annot-full` opts out. */
+.annot {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--s5);
+  padding: var(--s5) 0;
+  border-top: 1px solid var(--line);
+}
+.annot:first-of-type { border-top: 0; padding-top: 0; }
+
+.annot-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  /* Without this the head stretches to the row's height, and the `?`,
+     centred in its flex line, drifts to the middle of however tall the
+     section happens to be -- it slid 29px down the moment it was used,
+     so the second click missed it. */
+  align-self: start;
+}
+.annot-head h3 {
+  font-size: var(--t-base);
+  font-weight: 600;
+  margin: 0;
+  color: var(--ink);
+}
+/* A count never lives inside a heading: the name is the name, and the
+   number is right-aligned on the same row. */
+.sec-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.annot-body { min-width: 0; }
+.annot-body > :last-child { margin-bottom: 0; }
+
+/* The same header row for a section that is still a `.panel`, so a
+   counter can leave its heading before that tab gets its own stage. */
+.sec-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  margin-bottom: 10px;
+}
+.sec-row h3 { margin: 0; }
+
+/* Full width: the header becomes a row above its own content. */
+.annot-full { grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
+
+/* ---- the `?` --------------------------------------------------------
+   An explanation belongs behind one of these, not in the open. */
+.hint {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-xs);
+  line-height: 1;
+  cursor: pointer;
+  align-self: center;
+}
+.hint:hover { color: var(--ink); border-color: var(--ink-2); }
+.hint[aria-expanded="true"] {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+.hint-text {
+  color: var(--muted);
+  font-size: var(--t-md);
+  line-height: 1.5;
+  max-width: 62ch;
+  margin: 0 0 var(--s3);
+}
+
+/* Below this the gutter costs more than it gives, so the header goes
+   back above its controls. */
+@media (max-width: 860px) {
+  .annot { grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
+}
+
 .fields { display: flex; flex-wrap: wrap; gap: 12px; }
 .fields label {
   display: flex;

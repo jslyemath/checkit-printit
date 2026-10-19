@@ -691,8 +691,10 @@ function refreshSkillsDirty() {
   document.getElementById("skills-dirty").textContent = "unsaved changes";
   document.getElementById("skills-save").disabled = !dirty;
   document.getElementById("skills-revert").disabled = !dirty;
+  // No dash: the count is its own thing on the header row, not a
+  // continuation of the heading's sentence.
   document.getElementById("open-count").textContent =
-    `— ${openNow.size} of ${skills ? skills.skills.length : 0}`;
+    `${openNow.size} of ${skills ? skills.skills.length : 0}`;
 }
 
 // "any number" is a choice in the dropdown rather than a zero typed into
@@ -1518,8 +1520,11 @@ function renderExtras() {
     row.append(sel, n, document.createTextNode(" copies"), rm);
     box.appendChild(row);
   });
+  // The count rides the header row, right-aligned, with no dash joining
+  // it to the name: a heading is a name, not a sentence.
+  const sheets = draft.extras.reduce((a, e) => a + Number(e.copies || 0), 0);
   document.getElementById("extras-count").textContent =
-    draft.extras.length ? `— ${draft.extras.reduce((a, e) => a + Number(e.copies || 0), 0)} sheets` : "";
+    sheets ? `${sheets} sheet${sheets === 1 ? "" : "s"}` : "";
 }
 
 function willGet(student) {
@@ -1543,9 +1548,11 @@ function renderWho() {
   const body = document.querySelector("#who tbody");
   body.textContent = "";
   let papers = 0;
+  let getting = 0;
   for (const student of printState.students) {
     const gets = willGet(student);
     papers += gets.length;
+    if (gets.length) getting += 1;
     const tr = document.createElement("tr");
     const add = (text, cls) => {
       const td = document.createElement("td");
@@ -1665,11 +1672,20 @@ function renderWho() {
                                                   draft.mode === "same");
   const movedCount = Object.keys(draft.versions).length;
   const overrideCount = Object.keys(draft.overrides).length;
+  // One fact, not three run together: what prints, and for how many.
+  // The moved-version count went to the Version column's own reset,
+  // which is the thing it is about.
   document.getElementById("who-count").textContent =
-    `— ${printState.students.length} students, ${papers} papers`
-    + (movedCount ? `, ${movedCount} moved to another version` : "");
+    papers ? `${papers} paper${papers === 1 ? "" : "s"} for ${getting} `
+             + `student${getting === 1 ? "" : "s"}`
+           : "nothing to print yet";
   // One reset per column, shown on the same condition as the row ones.
-  document.getElementById("reset-versions").classList.toggle("off", !movedCount);
+  const vreset = document.getElementById("reset-versions");
+  vreset.title = movedCount
+    ? `${movedCount} student${movedCount === 1 ? " is" : "s are"} not on `
+      + `their seat's version. Put them all back.`
+    : "Put every student back on their seat's version.";
+  vreset.classList.toggle("off", !movedCount);
   document.getElementById("reset-overrides").classList.toggle("off", !overrideCount);
 }
 
@@ -2106,6 +2122,19 @@ async function boot() {
     showDropped = e.target.checked;
     renderRoster();
   };
+  // Every `?` works the same way, so one delegated listener rather than
+  // one per section -- a section added later gets the behaviour for
+  // free instead of needing to be remembered here.
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".hint");
+    if (!btn) return;
+    const text = btn.closest(".annot")?.querySelector(".hint-text");
+    if (!text) return;
+    const open = btn.getAttribute("aria-expanded") === "true";
+    btn.setAttribute("aria-expanded", String(!open));
+    text.hidden = open;
+  });
+
   window.onbeforeunload = (e) => { if (edits.size) e.preventDefault(); };
 
   // Back and forward change the hash without reloading, so without this
