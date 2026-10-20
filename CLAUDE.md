@@ -475,10 +475,22 @@ Measured against the real course, from the page:
 | `/api/skills` | 1194ms | 710ms |
 | `/api/google` | **6072ms** | 395ms |
 
-`/api/google` shells out to clasp. `/api/skills` rebuilds a `Bank` per
-request (128ms of it), and **that is deliberate**: one `Course` lives
-for the server's lifetime, so a cached `Bank` would hold stale seed
-data after a `checkit generate` -- which the variant guard reads.
+`/api/google` shells out to clasp. `/api/skills` reads `bank.xml` and
+`availability.toml` and **makes no network call at all** -- Open for
+retake has nothing to do with Google.
+
+Its cost was that it built the bank **three times for one request**:
+once itself, once in `_wording`, and once more because `_preview`
+called `_wording` again. Both helpers take a `bank` now, with a
+sentinel default because `None` already means "no bank", and
+`_preview` takes the wording the caller already computed. 710ms to a
+265ms median. `api_skills_preview` had the same shape and fires on
+every keystroke.
+
+Building a `Bank` per *request* is still right and is not the bug: one
+`Course` lives for the server's lifetime, so a `Bank` held between
+requests would hold stale seed data after a `checkit generate` --
+which is what the variant guard reads.
 
 Both start at boot (`fetchSkills`, `fetchGoogle` in `boot()`),
 unawaited, after the Roster is drawn. They are kept as **promises, not

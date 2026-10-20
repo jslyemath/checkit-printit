@@ -1100,9 +1100,15 @@ table.seeds td {
    happening, about this big", so the page has its layout before it has
    its content and nothing jumps when the answer lands.
 
-   Deliberately still and quiet -- a shimmer animating down the side of
-   a settings page is decoration, and decoration is what this redesign
-   has been removing. */
+   **They move.** A still grey bar is indistinguishable from a real
+   empty row, which is the one wrong reading available here -- "nothing
+   is open for retake" instead of "this has not arrived". The movement
+   is what carries the difference, so it is doing a job rather than
+   decorating. Slow and low-contrast: it should be noticeable when you
+   look at it and not when you are reading the rest of the page.
+
+   Honoured for people who ask for less motion, who then get the still
+   version and the same layout. */
 .ghostrow {
   background: var(--surface-1);
   pointer-events: none;
@@ -1114,6 +1120,21 @@ table.seeds td {
   border-radius: var(--r-pill);
   background: var(--surface-3);
   vertical-align: middle;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--surface-1) 70%, transparent) 50%,
+    transparent 100%);
+  background-size: 180% 100%;
+  background-repeat: no-repeat;
+  animation: ghostsweep 1.6s ease-in-out infinite;
+}
+@keyframes ghostsweep {
+  from { background-position: -40% 0; }
+  to   { background-position: 140% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ghostbar { animation: none; background-image: none; }
 }
 .wording.loading .ghostbar { margin: 0 0 var(--s3); height: 11px; }
 

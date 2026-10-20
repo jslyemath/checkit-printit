@@ -350,15 +350,32 @@ def api_google_login(_course, _body):
     return GOOGLE.sign_in()
 
 
-def _wording(course, av):
+#: "Not given", because `None` already means "this course has no bank".
+_UNSET = object()
+
+
+def _wording(course, av, bank=_UNSET):
     """Exactly what the form will say, worded by the same code that pushes it.
 
     `payload_for` is what `form push` sends, so a preview that used anything
     else would be a second implementation of the wording -- and the one
     place a difference would show up is on a form students are already
     looking at.
+
+    `bank` is handed in by a caller that already built one. Building one
+    costs ~130ms: it parses `bank.xml` and every outcome, and `bank_for`
+    makes a fresh one each call. `api_skills` was paying that **three
+    times for one request** -- once itself, once here, and once more
+    because `_preview` called this again -- which was most of why opening
+    the Update form tab took the better part of a second.
+
+    Within one request, not across them: a `Bank` held between requests
+    would also hold its lazily-loaded seed data, and a `checkit generate`
+    mid-term would leave the app describing versions that no longer
+    exist.
     """
-    bank = course.bank()
+    if bank is _UNSET:
+        bank = course.bank()
     descriptions = {}
     if bank is not None:
         for slug in av.skills:
@@ -370,10 +387,17 @@ def _wording(course, av):
     return form_mod.payload_for(av, conn, descriptions)
 
 
-def _preview(course, av):
+def _preview(course, av, bank=_UNSET, wording=None):
     """The whole form as a student meets it: the boilerplate parts and the
-    derived ones, in order."""
-    return boilerplate_mod.preview(_wording(course, av))
+    derived ones, in order.
+
+    `wording` is the payload when the caller has already worked it out;
+    this view shows both, and deriving one from the other is cheap while
+    computing it twice is not.
+    """
+    if wording is None:
+        wording = _wording(course, av, bank)
+    return boilerplate_mod.preview(wording)
 
 
 def api_skills(course, _body):
@@ -412,12 +436,16 @@ def api_skills(course, _body):
                 descriptions[slug] = ""
 
     conn = form_mod.load(course.path)
+    # The bank built at the top of this function, reused: these two used
+    # to build their own, so one request parsed the bank three times.
+    wording = _wording(course, av, bank)
+    in_bank = set(bank.slugs()) if bank is not None else None
     return {
         "hasBank": bank is not None,
         "skills": [{"slug": s, "description": descriptions.get(s, ""),
                     "title": titles.get(s, s),
                     "open": s in open_now,
-                    "inBank": bank is None or s in set(bank.slugs())}
+                    "inBank": in_bank is None or s in in_bank}
                    for s in slugs],
         "open": open_now,
         "assessment": {
@@ -425,8 +453,8 @@ def api_skills(course, _body):
             "due": str(av.due or ""), "choose": av.choose, "limit": av.limit,
         },
         "limits": list(availability_mod.LIMITS),
-        "wording": _wording(course, av),
-        "preview": _preview(course, av),
+        "wording": wording,
+        "preview": _preview(course, av, bank, wording),
         "form": {"connected": conn.ready,
                  "mapped": sorted(conn.items),
                  "missing": conn.missing() if hasattr(conn, "missing") else []},
@@ -461,8 +489,12 @@ def api_skills_preview(course, body):
         )
     except (availability_mod.AvailabilityError, ValueError, TypeError) as exc:
         raise GuiError(f"that is not a usable value: {exc}") from None
-    return {"wording": _wording(course, proposed),
-            "preview": _preview(course, proposed)}
+    # One bank, one wording. This endpoint fires on every keystroke in
+    # the assessment fields, so it was three bank parses per character.
+    bank = course.bank()
+    wording = _wording(course, proposed, bank)
+    return {"wording": wording,
+            "preview": _preview(course, proposed, bank, wording)}
 
 
 def api_skills_save(course, body):
