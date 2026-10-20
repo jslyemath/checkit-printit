@@ -56,6 +56,58 @@ def wanted_ids(js):
     return set(re.findall(r'getElementById\("([^"]+)"\)', js))
 
 
+def strip_comments(css):
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+
+def bare_classes(css):
+    """Class names used as a selector on their own, e.g. `.band {`.
+
+    `.skill.on` does not count for either name: a compound selector can
+    only match an element that already carries the other class, so it
+    cannot reach across into markup it was not written for. A bare one
+    claims every element with that class in the whole document -- and
+    the two stylesheets share a document.
+    """
+    css = strip_comments(css)
+    out = set()
+    for m in re.finditer(r"(^|[^\w\-.\]\)])\.([A-Za-z][\w-]*)", css):
+        if css[m.end():m.end() + 1] not in (".", "["):
+            out.add(m.group(2))
+    return out
+
+
+def test_no_bare_class_is_defined_in_both_stylesheets():
+    """The two stylesheets share one document, so a bare class name in
+    `style.css` is a claim about `seating.css` too.
+
+    This has shipped twice. `.rail` in stage 2 hit Seating's mode rail and
+    fitted the room at 20%; `.band` in stage 3c hit its selection
+    rectangle, whose `position: absolute` turned a `<tr>` into a block and
+    dropped it out of the table. Neither failed a test, and the second was
+    committed one stage after the rule was written down -- so the rule is
+    a test now rather than a paragraph.
+    """
+    shared = sorted(bare_classes(read("style.css"))
+                    & bare_classes(read("seating/seating.css")))
+    assert not shared, (
+        "defined bare in both style.css and seating/seating.css: "
+        + ", ".join(shared)
+        + ". Rename, or qualify it so it cannot match on its own.")
+
+
+def test_the_collision_check_would_have_caught_the_two_that_shipped():
+    """A check that cannot fail is not a check. `.rail` and `.band` are
+    still bare in seating.css, so adding either bare to style.css must be
+    flagged -- and `.on`, which is shared today, must not be."""
+    seating = bare_classes(read("seating/seating.css"))
+    assert "rail" in seating and "band" in seating, (
+        "seating.css no longer defines the two that collided; pick live "
+        "examples or this test proves nothing")
+    assert "on" not in seating, "`.on` is compound-only and must stay allowed"
+    assert not bare_classes(".skill.on { color: red }")
+
+
 def test_the_fixtures_actually_read_something(html, js):
     """A check that examined nothing passes for the wrong reason."""
     assert len(html) > 2000, "index.html looks empty"
@@ -91,8 +143,23 @@ def test_the_print_tab_still_has_what_the_draft_round_trips_through(html):
 
 
 def test_every_hint_button_has_something_to_reveal(html):
-    """A `?` whose section carries no `.hint-text` is a button that does
-    nothing when pressed."""
+    """One `?` to one explanation, counted across the whole page.
+
+    A button with nothing behind it does nothing when pressed; an
+    explanation with no button is unreachable. Counting both ways catches
+    each, and it keeps working for a `?` in a page header, which is not
+    inside an annotated section at all.
+    """
+    buttons = len(re.findall(r'class="hint"', html))
+    texts = len(re.findall(r'class="hint-text"', html))
+    assert buttons, "no `?` buttons found; did the class change?"
+    assert buttons == texts, (
+        f"{buttons} `?` button(s) but {texts} explanation(s)")
+
+
+def test_each_annotated_sections_hint_is_its_own(html):
+    """Scope, not just arithmetic: a `?` inside a section must find its
+    explanation there, because that is where the click handler looks."""
     sections = re.findall(r'<section class="annot[^"]*"(.*?)</section>',
                           html, re.S)
     assert sections, "no annotated sections found; did the class change?"
