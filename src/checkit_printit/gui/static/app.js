@@ -82,8 +82,10 @@ const COLUMNS = [
     floor: 76, rank: 6,
     text: s => s.sid || s.alt_id || "—",
     value: s => s.sid || s.alt_id || "" },
-  { key: "_actions",  label: "",         sortable: false, min: 48, max: 48,
-    floor: 48, rank: 2, pin: "right" },
+  // Wide enough for a 28px chip plus the cell's own 8px either side,
+  // or the button is clipped by `td { overflow: hidden }`.
+  { key: "_actions",  label: "",         sortable: false, min: 52, max: 52,
+    floor: 52, rank: 2, pin: "right" },
 ];
 
 let students = [];
@@ -224,6 +226,12 @@ function icon(name) {
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
+  // Carries its own class, so "these are drawn as strokes, not fills"
+  // is stated once. It used to live on `.navrail button svg`, and the
+  // first glyph used outside the rail came out as a solid black blob --
+  // an SVG path with no `fill: none` is filled, and `currentColor` was
+  // never reaching the stroke.
+  svg.setAttribute("class", "glyph");
   const spec = GLYPH[name];
   for (const part of (Array.isArray(spec) ? spec : [{ d: spec || "" }])) {
     if (part.r) {
