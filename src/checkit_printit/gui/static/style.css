@@ -430,6 +430,47 @@ th {
   letter-spacing: .04em;
   color: var(--muted);
   font-weight: 600;
+  /* 13.5: a header row has its own surface, so it reads as a header
+     without needing extra spacing to separate it. */
+  background: var(--surface-2);
+}
+
+/* ---- section bands --------------------------------------------------
+   Where the per-section counts live. `45 students - 22 in 820 - 23 in
+   830` was three facts run together at the top because no layout
+   existed for them; this is the layout. The count sits beside the rows
+   it is true of, and only the whole-table total stays in the header.
+
+   Drawn only while the rows are actually grouped by section -- see
+   `sectionRuns` -- because a band every few rows is noise. */
+/* `secband`, not `band`: seating.css has had a `.band` since its own
+   stage A -- the rubber-band selection rectangle -- and it carries
+   `position: absolute`. On a `<tr>` that computes to `display: block`,
+   which drops the row out of the table: 58px wide, no height, sitting
+   on top of the first student. Identical in kind to the `.rail`
+   collision in stage 2, committed one stage after writing down the
+   rule that prevents it.
+
+   No `position: sticky` either, however tempting it is to keep the
+   label in view while scrolling sideways: a sticky cell leaves a fixed
+   table layout the same way. */
+tr.secband td {
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: var(--s1) var(--s2);
+}
+.secband-name {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--ink-2);
+}
+.secband-count {
+  float: right;
+  font-size: var(--t-sm);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 tr:last-child td { border-bottom: none; }
 tr.dropped { background: var(--dropped); }
@@ -562,6 +603,14 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   border-color: var(--accent);
 }
 .pagetitle::placeholder { color: var(--dim); font-weight: 500; }
+
+/* A page whose name is not a field: Roster is called Roster. Same size
+   and weight as an editable one, so the two tabs read as the same app. */
+.pagename {
+  font-size: var(--t-xl);
+  font-weight: 600;
+  margin: 0;
+}
 
 /* ---- annotated sections --------------------------------------------
    Rows with air, not boxes with gaps: a hairline and generous padding

@@ -437,8 +437,7 @@ function sizeColumns(rows) {
   if (group) group.remove();
   group = document.createElement("colgroup");
 
-  let total = 0;
-  for (const column of COLUMNS) {
+  const want = COLUMNS.map(column => {
     let widest = textWidth(column.label.toUpperCase(), headFont) + 18;
     for (const student of rows) {
       const value = column.value ? column.value(student)
@@ -446,10 +445,40 @@ function sizeColumns(rows) {
                   : (student[column.key] || "");
       widest = Math.max(widest, textWidth(value, bodyFont) + CELL_PADDING);
     }
+    return Math.round(Math.min(column.max, Math.max(column.min, widest)));
+  });
+
+  // **Shrink to fit before deciding to scroll.** The content widths came
+  // to 884px in an 875px scroller, so the table overflowed by nine
+  // pixels: a scrollbar appeared across the whole roster and scrolling
+  // it moved the rows almost not at all, which reads as broken rather
+  // than as "there is more to the right".
+  //
+  // Nine pixels were available -- every column was at its content width,
+  // above its own `min`. So give the slack back before overflowing, and
+  // only scroll when the columns genuinely cannot fit.
+  const room = table.parentElement.clientWidth;
+  let excess = want.reduce((a, b) => a + b, 0) - room;
+  if (excess > 0) {
+    // Widest first: taking 9px off Email is invisible, and taking it off
+    // Section is a third of that column.
+    const order = want
+      .map((px, i) => ({ i, slack: px - COLUMNS[i].min }))
+      .filter(c => c.slack > 0)
+      .sort((a, b) => b.slack - a.slack);
+    for (const c of order) {
+      if (excess <= 0) break;
+      const give = Math.min(c.slack, excess);
+      want[c.i] -= give;
+      excess -= give;
+    }
+  }
+
+  let total = 0;
+  for (let i = 0; i < COLUMNS.length; i += 1) {
     const col = document.createElement("col");
-    const px = Math.round(Math.min(column.max, Math.max(column.min, widest)));
-    col.style.width = px + "px";
-    total += px;
+    col.style.width = want[i] + "px";
+    total += want[i];
     group.appendChild(col);
   }
   table.insertBefore(group, table.firstChild);
@@ -519,6 +548,57 @@ function isDefaultSort() {
                           && s.desc === DEFAULT_SORT[i].desc);
 }
 
+/* Runs of one section, in the order the rows are already in.
+ *
+ * `45 students - 22 in 820 - 23 in 830` is the banned shape, and the
+ * reason it was reached for is that no layout existed for the facts. The
+ * layout is this: a section's count belongs beside that section's rows,
+ * so each run of rows gets a band carrying its name and its size, and
+ * only the whole-table total stays in the page header.
+ *
+ * Returns null when the rows are not grouped by section -- sorted by
+ * email, 820 and 830 interleave, and a band every few rows would be
+ * noise rather than structure. Tested on the sorted rows themselves
+ * rather than on `sorts[0].key`, so it stays right for a descending
+ * section sort, for one section, and for a sort that happens to group
+ * them anyway.
+ */
+function sectionRuns(rows) {
+  if (!rows.length) return null;
+  const runs = [];
+  for (const student of rows) {
+    const name = student.section || "";
+    const last = runs[runs.length - 1];
+    if (last && last.section === name) last.count += 1;
+    else runs.push({ section: name, count: 1, start: runs.reduce(
+      (a, r) => a + r.count, 0) });
+  }
+  // One run is the whole table, so the band would say what the header
+  // already says. A section appearing twice means the rows are not
+  // grouped, and the bands would be lying about structure.
+  const names = runs.map(r => r.section);
+  if (runs.length < 2 || new Set(names).size !== names.length) return null;
+  return runs;
+}
+
+function sectionBand(run) {
+  const tr = document.createElement("tr");
+  // `secband`, not `band`: seating.css owns `.band` for its selection
+  // rectangle, and `position: absolute` on a <tr> drops it out of the table.
+  tr.className = "secband";
+  const td = document.createElement("td");
+  td.colSpan = COLUMNS.length;
+  const name = document.createElement("span");
+  name.className = "secband-name";
+  name.textContent = run.section || "no section";
+  const count = document.createElement("span");
+  count.className = "secband-count";
+  count.textContent = run.count;
+  td.append(name, count);
+  tr.appendChild(td);
+  return tr;
+}
+
 function renderRoster() {
   renderHeader();
   const body = document.querySelector("#roster tbody");
@@ -541,7 +621,16 @@ function renderRoster() {
     });
   }
 
-  for (const student of shown) {
+  // Where a section band goes, and whether to draw any. See `sectionRuns`.
+  const runs = sectionRuns(shown);
+  let runAt = 0;
+
+  for (let i = 0; i < shown.length; i += 1) {
+    const student = shown[i];
+    if (runs && runAt < runs.length && runs[runAt].start === i) {
+      body.appendChild(sectionBand(runs[runAt]));
+      runAt += 1;
+    }
     const tr = document.createElement("tr");
     if (student.dropped) tr.className = "dropped";
 
@@ -574,6 +663,14 @@ function renderRoster() {
 
   // After the rows exist, so the measurements use the real fonts.
   sizeColumns(shown);
+
+  // The one count that is about the whole table. The per-section numbers
+  // are on the bands, beside the rows they describe.
+  const dropped = shown.filter(s => s.dropped).length;
+  document.getElementById("roster-count").textContent = shown.length
+    ? `${shown.length} student${shown.length === 1 ? "" : "s"}`
+      + (dropped ? `, ${dropped} dropped` : "")
+    : "";
 
   const empty = document.getElementById("roster-empty");
   empty.hidden = shown.length > 0;
@@ -2128,7 +2225,10 @@ async function boot() {
   document.addEventListener("click", (e) => {
     const btn = e.target.closest(".hint");
     if (!btn) return;
-    const text = btn.closest(".annot")?.querySelector(".hint-text");
+    // An annotated section scopes its own explanation; a page header's
+    // belongs to the whole view, which has only one. `.annot` is listed
+    // first so the Print tab's three do not all find each other.
+    const text = btn.closest(".annot, .view")?.querySelector(".hint-text");
     if (!text) return;
     const open = btn.getAttribute("aria-expanded") === "true";
     btn.setAttribute("aria-expanded", String(!open));

@@ -13,7 +13,24 @@
 <main>
 
   <section id="view-roster" class="view" hidden>
-    <h2>Roster</h2>
+    <!-- No gutter here: five columns and 45 rows want every pixel, and the
+         Roster is not a settings page. So the page header is a plain row --
+         name, its `?`, and the one count that is about the whole table.
+         The per-section counts are not up here; they ride the section
+         bands in the table, beside the rows they are true of. -->
+    <header class="pagehead">
+      <h2 class="pagename">Roster</h2>
+      <button class="hint" type="button" aria-expanded="false"
+              aria-label="What can be edited here">?</button>
+      <span id="roster-count" class="sec-count"></span>
+    </header>
+    <p class="hint-text" hidden>
+      Name, section and email are editable, and so is <b>Prints as</b> &mdash;
+      fill that in and it replaces the name on the paper, the seating chart
+      and every list here. Leave it blank and Name is used. Ids and the
+      dropped flag are not editable: those are set by an import, a drop or a
+      pull, each of which has rules a text box would bypass.
+    </p>
     <div class="toolbar">
       <label><input type="checkbox" id="show-dropped"> show dropped students</label>
       <span class="spacer"></span>
@@ -21,13 +38,6 @@
       <button id="save" class="primary" disabled>Save</button>
       <button id="revert" disabled>Discard</button>
     </div>
-    <p class="muted">
-      Name, section and email are editable, and so is <b>Prints as</b> &mdash;
-      fill that in and it replaces the name on the paper, the seating chart
-      and every list here. Leave it blank and Name is used. Ids and the
-      dropped flag are not editable: those are set by an import, a drop or a
-      pull, each of which has rules a text box would bypass.
-    </p>
     <!-- Header and body are both built from COLUMNS in app.js. They used to
          be two lists -- this one in markup, the cells in script -- and they
          drifted: a rule hid the SID cell on a narrow window without hiding

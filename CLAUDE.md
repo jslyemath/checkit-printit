@@ -236,18 +236,28 @@ pins every seed and passes, and a skill nobody takes is never mentioned.
 variants". There were four copies of that scan; three are gone, and the
 GUI keeps a 60-seed slice on purpose, documented where it lives.
 
-### Grep `seating.css` before naming a class in the shell
+### A class name in `style.css` is a claim about `seating.css` too
 
-The navigation rail shipped as `.rail`, and Seating has had a `.rail`
-since its own stage A -- the mode rail inside `.bottomstack`. `height:
-100vh` landed on both, stretched the stack to the whole viewport, and
-`freeBand` measured 80px of usable height, so the room fitted at 20%.
+The two stylesheets share one document. This has shipped twice:
 
-Nothing failed. No test covered it. The Print and Roster tabs were
-perfect. It was caught only because Seats is opened after every change
-to the shell, which is now the habit: **the two stylesheets share a
-document, so a class name in `style.css` is a claim about `seating.css`
-too.** The rail is `.navrail`.
+* **`.rail`** (stage 2). Seating has had one since its own stage A --
+  the mode rail inside `.bottomstack`. `height: 100vh` landed on both,
+  so `freeBand` measured 80px and the room fitted at 20%.
+* **`.band`** (stage 3c). Seating's selection marquee, carrying
+  `position: absolute`, which on a `<tr>` computes to `display: block`
+  and drops the row out of the table -- 58px wide, no height, on top of
+  the first student.
+
+Nothing failed either time, and **the second was committed one stage
+after this very section was written.** Writing it down did not work, so
+`tests/test_gui_markup.py` now fails on any class defined *bare* in
+both files. Bare, not shared: `.skill.on` and `.banner.waiting` share
+their second word with Seating harmlessly, because a compound selector
+cannot reach an element that lacks the other class.
+
+The names are `.navrail` and `.secband`. Run the markup tests after
+touching either stylesheet, and still open Seats afterwards -- the test
+catches the name, not every way a rule can reach too far.
 
 ### A change with reasoning gets a dated section in the notes
 
