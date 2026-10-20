@@ -46,19 +46,44 @@ const VIEWS = [
 // into two editable columns would put a guessed surname in the file beside
 // the name that actually prints, and the two could then disagree. The server
 // derives the keys; nothing is stored. See `_sort_names`.
+/* `rank` is what survives a squeeze, lowest dropped first. It is not the
+ * reading order and it is not width: it is "if only one column could be
+ * on screen, which".
+ *
+ * The thing this gets wrong by default is that **data outranks
+ * controls**, because data is what a table looks like it is for. It
+ * isn't: Email and SID are reference, and dropping a student is the one
+ * thing this tab does. So the actions rank above everything but the
+ * name, and `pin` keeps both on screen however far you scroll sideways.
+ *
+ * `grow` marks the columns that may take spare width when the window is
+ * wider than the table needs. A fixed-width Section stretched to 300px
+ * is a worse table, not a bigger one.
+ */
 const COLUMNS = [
-  { key: "name",      label: "Name",     edit: true, min: 200, max: 330,
+  { key: "name",      label: "Name",     edit: true, min: 200, max: 360,
+    floor: 150, rank: 1, pin: "left", grow: true,
+    // Measured as it is shown, or the column is sized for a string the
+    // table is not displaying.
+    value: s => displayName(s),
     sortKeys: [["sort_last", "last"], ["sort_first", "first"]] },
   // Not "Nickname": that invites "Matt", and this replaces the whole
-  // printed name. Same widths as Name, because it holds the same thing.
+  // printed name. Same widths as Name, because it holds the same thing
+  // -- when it holds anything; its floor is the heading, because on a
+  // roster where nobody has one it was 200px of blank boxes.
   { key: "preferred", label: "Prints as", edit: true, min: 200, max: 330,
+    floor: 96, rank: 3, grow: true,
     placeholder: s => s.name },
-  { key: "section",   label: "Section",  edit: true, min: 74,  max: 110 },
-  { key: "email",     label: "Email",    edit: true, min: 215, max: 340 },
+  { key: "section",   label: "Section",  edit: true, min: 74,  max: 110,
+    floor: 74, rank: 4 },
+  { key: "email",     label: "Email",    edit: true, min: 215, max: 360,
+    floor: 150, rank: 5, grow: true },
   { key: "sid",       label: "SID",      cls: "ro",  min: 86,  max: 140,
+    floor: 76, rank: 6,
     text: s => s.sid || s.alt_id || "—",
     value: s => s.sid || s.alt_id || "" },
-  { key: "_actions",  label: "",         sortable: false, min: 92, max: 92 },
+  { key: "_actions",  label: "",         sortable: false, min: 48, max: 48,
+    floor: 48, rank: 2, pin: "right" },
 ];
 
 let students = [];
@@ -142,7 +167,15 @@ function toast(message, bad) {
    liftable out, which it would not be if the chrome imported from it.
    The direction to unify these, when they are unified, is the other
    way round: the shell owns the builder and Seating takes it. */
-const NAV_ICON = {
+/* One glyph set for the shell, not one per place that wants a picture.
+   It started as the rail's and grew a row action; a second table of
+   paths would be the "is there a second copy" failure in picture form.
+
+   `GLYPH`, not `ICON`: seating.js already declares a top-level `ICON`,
+   and the two scripts share one global scope, so the second `const` of
+   that name is a SyntaxError that stops the *other* file loading. Same
+   collision as `.rail` and `.band`, in JavaScript rather than CSS. */
+const GLYPH = {
   roster: "M9 11.5a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2"
     + "M2.5 20c0-3.4 2.9-5.8 6.5-5.8s6.5 2.4 6.5 5.8"
     + "M16.2 4.7a3.6 3.6 0 0 1 0 6.6M17.4 14.6c2.5.6 4.1 2.5 4.1 5.4",
@@ -163,9 +196,26 @@ const NAV_ICON = {
   setup: "M4 7.4h9.2M17.2 7.4h2.8M4 16.6h3.6M11.6 16.6h8.4"
     + "M15.2 5.2v4.4M9.2 14.4v4.4",
   collapse: "M14.5 7.5 9.5 12l5 4.5",
+
+  /* Row actions. Not a bin: dropping a student deletes nothing -- they
+     stay on the roster, greyed, and simply stop printing. A person with
+     a line through them says that; a bin says the opposite and would be
+     the control lying about what it does.
+
+     `restore` is the same person without the line and with the arrow
+     that undoes it, so the pair reads as one toggle rather than two
+     unrelated glyphs. */
+  drop: "M10 11.2a3.3 3.3 0 1 1 0-6.6 3.3 3.3 0 0 1 0 6.6"
+    + "M3.6 19.4c0-3.1 2.7-5.3 6.4-5.3 1.2 0 2.3.2 3.2.6"
+    + "M14.6 17.4h6.2",
+  restore: "M10 11.2a3.3 3.3 0 1 1 0-6.6 3.3 3.3 0 0 1 0 6.6"
+    + "M3.6 19.4c0-3.1 2.7-5.3 6.4-5.3 1.2 0 2.3.2 3.2.6"
+    + "M21 17.4h-5.6M17.6 14.8l-2.6 2.6 2.6 2.6",
+  /* An arrow coming back round to where it started. */
+  reset: "M19.4 12a7.4 7.4 0 1 1-2.2-5.3M19.6 4.4v4.2h-4.2",
 };
 
-function navIcon(name) {
+function icon(name) {
   /* A glyph is a path string, or a list of parts. A part is either a
      path (`{d}`) or a rounded rect (`{r: [x, y, w, h, radius]}`),
      because a square drawn as path data is unreadable and a square
@@ -174,7 +224,7 @@ function navIcon(name) {
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
-  const spec = NAV_ICON[name];
+  const spec = GLYPH[name];
   for (const part of (Array.isArray(spec) ? spec : [{ d: spec || "" }])) {
     if (part.r) {
       const [x, y, w, h, radius] = part.r;
@@ -192,6 +242,73 @@ function navIcon(name) {
     }
   }
   return svg;
+}
+
+/* How a name reads in the first column.
+ *
+ * A display choice, not a sort: the Name heading already cycles last
+ * and first each way, which is four states, and a fifth meaning
+ * something else entirely would make the one control answer two
+ * questions. It sits with "show dropped" instead -- both are about how
+ * this view is drawn rather than about the data.
+ *
+ * Remembered, like the rail: a statement about how this person reads a
+ * roster, not about this visit.
+ */
+function filedNames() {
+  try { return localStorage.getItem("filedNames") === "1"; }
+  catch (err) { return false; }
+}
+
+function setFiledNames(on) {
+  try { localStorage.setItem("filedNames", on ? "1" : "0"); }
+  catch (err) { /* a private window still gets a working roster */ }
+  renderNameFormat();
+  renderRoster();
+}
+
+function renderNameFormat() {
+  const on = filedNames();
+  document.getElementById("name-natural")
+    .setAttribute("aria-pressed", String(!on));
+  document.getElementById("name-filed")
+    .setAttribute("aria-pressed", String(on));
+}
+
+/* "Lynott, Kilah", from the server's split and never from one done here.
+ *
+ * **The split is a guess on most rosters, and it is sometimes wrong.**
+ * `_sort_names` says so: the roster carries one full name, because that
+ * is what prints; `last` and `first` are empty on every real roster
+ * here. From the `First Last` form the splitter guesses, and it gets a
+ * compound surname wrong by taking only its last word -- this class has
+ * one such student.
+ *
+ * That guess was deliberately confined to *sorting*, where being wrong
+ * puts a row in an odd place, which you can see. Showing it as the name
+ * raises the stakes, so: the stored name stays in the cell's tooltip,
+ * and the choice is off by default. Making a wrong split correctable is
+ * a roster feature, not a display toggle, and is not built.
+ */
+function displayName(student) {
+  const full = student.name || "";
+  if (!filedNames()) return full;
+  const last = (student.sort_last || student.last || "").trim();
+  const first = (student.sort_first || student.first || "").trim();
+  if (!last || !first) return full;
+  // **The two parts must add up to the whole name, or they are not it.**
+  // This class's one compound surname is three words, and the splitter
+  // returns one word for the surname and one for the given name -- so
+  // the filed form would have dropped a word of a student's name
+  // without saying so. A sort put in an odd place is recoverable; a name
+  // shown wrong in front of the class is not. When the parts do not
+  // reconstruct the name, the name is what gets shown.
+  const asWords = s => s.toLowerCase().split(/\s+/).filter(Boolean).sort();
+  const parts = asWords(`${last} ${first}`);
+  const whole = asWords(full);
+  if (parts.length !== whole.length
+      || parts.some((w, i) => w !== whole[i])) return full;
+  return `${last}, ${first}`;
 }
 
 /* Collapsed is remembered, because it is a statement about this
@@ -235,7 +352,7 @@ function buildNav() {
   for (const view of VIEWS) {
     const b = document.createElement("button");
     b.type = "button";
-    b.appendChild(navIcon(view.icon));
+    b.appendChild(icon(view.icon));
     const label = document.createElement("span");
     label.className = "label";
     label.textContent = view.label;
@@ -252,7 +369,7 @@ function buildNav() {
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "railtoggle";
-  toggle.appendChild(navIcon("collapse"));
+  toggle.appendChild(icon("collapse"));
   const tlabel = document.createElement("span");
   tlabel.className = "label";
   tlabel.textContent = "Collapse";
@@ -272,12 +389,21 @@ function show(id) {
     else b.removeAttribute("aria-current");
   }
   for (const s of document.querySelectorAll(".view")) s.hidden = true;
+  // A tab whose job is one long table gives the table the window and
+  // scrolls inside it, instead of making the page 2158px tall and
+  // parking the horizontal scrollbar below the fold. Set before the
+  // branch below, which returns early for a not-yet-built tab and would
+  // have left the class on from the previous view.
+  document.body.classList.toggle("tall", id === "roster");
   if (view.soon) {
     document.getElementById("soon-title").textContent = view.label;
     document.getElementById("soon-body").textContent = view.soon;
     document.getElementById("view-soon").hidden = false;
   } else {
     document.getElementById("view-" + id).hidden = false;
+    // Column widths depend on how much room there is, and there is none
+    // to measure until the tab is on screen.
+    if (id === "roster" && students.length) renderRoster();
     // Loaded the first time it is opened rather than at boot: the Skills
     // view reads the bank, and a course with no bank should still show a
     // roster without waiting for one.
@@ -437,33 +563,72 @@ function sizeColumns(rows) {
   if (group) group.remove();
   group = document.createElement("colgroup");
 
-  const want = COLUMNS.map(column => {
-    let widest = textWidth(column.label.toUpperCase(), headFont) + 18;
+  // A column holding nothing needs room for its heading and no more.
+  // `Prints as` is empty for every student on this roster and was
+  // reserving 200px -- a fifth of the table -- to display nothing, while
+  // Email was clipped and the drop button was off the right-hand edge.
+  // So `min` is the comfortable width for a column *with* content, and
+  // `floor` is what it may be squeezed to; an empty column starts at its
+  // floor rather than being padded up to a width it has no use for.
+  const heads = COLUMNS.map(c => textWidth(c.label.toUpperCase(), headFont) + 18);
+  const floors = COLUMNS.map((c, i) => Math.max(heads[i], c.floor ?? c.min));
+
+  const want = COLUMNS.map((column, i) => {
+    let widest = heads[i];
+    let anyContent = false;
     for (const student of rows) {
       const value = column.value ? column.value(student)
                   : column.text ? column.text(student)
                   : (student[column.key] || "");
+      if (value) anyContent = true;
       widest = Math.max(widest, textWidth(value, bodyFont) + CELL_PADDING);
     }
-    return Math.round(Math.min(column.max, Math.max(column.min, widest)));
+    const low = anyContent ? Math.max(column.min, floors[i]) : floors[i];
+    return Math.round(Math.min(column.max, Math.max(low, widest)));
   });
 
-  // **Shrink to fit before deciding to scroll.** The content widths came
-  // to 884px in an 875px scroller, so the table overflowed by nine
-  // pixels: a scrollbar appeared across the whole roster and scrolling
-  // it moved the rows almost not at all, which reads as broken rather
-  // than as "there is more to the right".
-  //
-  // Nine pixels were available -- every column was at its content width,
-  // above its own `min`. So give the slack back before overflowing, and
-  // only scroll when the columns genuinely cannot fit.
+  // A hidden view measures zero, and zero is not a narrow window. Sized
+  // at boot while the tab was still hidden, every column came out at its
+  // floor and stayed there once the tab was shown -- 594px of table in a
+  // 704px scroller, which is the ragged right edge this pass set out to
+  // fix. `show()` re-renders on reveal; this is the belt.
   const room = table.parentElement.clientWidth;
-  let excess = want.reduce((a, b) => a + b, 0) - room;
-  if (excess > 0) {
-    // Widest first: taking 9px off Email is invisible, and taking it off
-    // Section is a third of that column.
+  let gap = room > 0 ? room - want.reduce((a, b) => a + b, 0) : 0;
+
+  if (gap > 0) {
+    // **Spare room goes into the table, not beside it.** A 1100px header
+    // with an 867px table under it looked like the table had failed to
+    // load. Only `grow` columns take it: stretching Section to 300px
+    // makes a worse table, not a bigger one.
+    const growers = COLUMNS.map((c, i) => i).filter(i => COLUMNS[i].grow);
+    for (let pass = 0; pass < 3 && gap > 0; pass += 1) {
+      const room_left = growers.filter(i => want[i] < COLUMNS[i].max);
+      if (!room_left.length) break;
+      const each = Math.floor(gap / room_left.length) || 1;
+      for (const i of room_left) {
+        if (gap <= 0) break;
+        const give = Math.min(each, COLUMNS[i].max - want[i], gap);
+        want[i] += give;
+        gap -= give;
+      }
+    }
+    // Everything is at its max and there is still room. Rather than
+    // leave a ragged right edge, the last growing column takes the rest,
+    // so the table's edge lines up with the heading above it.
+    if (gap > 0 && growers.length) want[growers[growers.length - 1]] += gap;
+  } else if (gap < 0) {
+    // **Shrink to fit before deciding to scroll.** The content widths
+    // came to 884px in an 875px scroller, so a scrollbar ran the width
+    // of the roster and moved it nine pixels -- which reads as broken
+    // rather than as "there is more to the right".
+    //
+    // Widest slack first: nine pixels off an email is invisible, off
+    // Section it is a third of the column. Down to `floor` and no
+    // further; past that the table genuinely does not fit and scrolls,
+    // which is survivable now that Name and the actions are pinned.
+    let excess = -gap;
     const order = want
-      .map((px, i) => ({ i, slack: px - COLUMNS[i].min }))
+      .map((px, i) => ({ i, slack: px - floors[i] }))
       .filter(c => c.slack > 0)
       .sort((a, b) => b.slack - a.slack);
     for (const c of order) {
@@ -501,12 +666,13 @@ function renderHeader() {
       // over the column it belongs beside, rather than in the toolbar where
       // it sat next to controls it has nothing to do with. Right-aligned so
       // it does not read as a heading for the drop links beneath it.
-      th.className = "actions-head";
+      th.className = "actions-head pinright";
       const reset = document.createElement("button");
-      reset.className = "link";
+      reset.className = "iconbtn undo";
       reset.id = "reset-sort";
-      reset.textContent = "reset";
+      reset.appendChild(icon("reset"));
       reset.title = "Back to section, then surname.";
+      reset.setAttribute("aria-label", reset.title);
       reset.hidden = isDefaultSort();
       reset.onclick = clearSort;
       th.appendChild(reset);
@@ -518,14 +684,18 @@ function renderHeader() {
     const note = entry && (cycle.find(([k]) => k === entry.key) || [])[2];
     const rank = entry ? rankOf(entry.key) : null;
 
+    if (column.pin) th.classList.add("pin" + column.pin);
     const b = document.createElement("button");
     b.className = "sort";
     // A column with two orders has to say which one it is on: "Name" alone
     // would not tell you whether it sorted by surname or given name. The
     // rank appears only when more than one key is in play, because a lone
     // "1" would be noise.
-    b.textContent = column.label
-      + (note ? " · " + note : "")
+    // The note names the key rather than being bolted on with a dot:
+    // "LAST NAME" says the same thing as "NAME · LAST" in the same room
+    // and without the separator this codebase keeps reaching for.
+    b.textContent = (note ? note + " " + column.label.toLowerCase()
+                          : column.label)
       + (entry ? (entry.desc ? " ↓" : " ↑") : "")
       + (entry && sorts.length > 1 ? " " + rank : "");
     if (entry) b.classList.add("sorted");
@@ -637,12 +807,32 @@ function renderRoster() {
     for (const column of COLUMNS) {
       const td = document.createElement("td");
       if (column.cls) td.className = column.cls;
+      if (column.pin) td.classList.add("pin" + column.pin);
       if (column.key === "_actions") {
+        // An icon, not the word: 45 rows of "drop" is 45 words of the
+        // same instruction, and the column it needed was wider than the
+        // window had to spare. Grey until you point at it, so the column
+        // is quiet and the accent says which row you are on.
         const b = document.createElement("button");
-        b.className = "link";
-        b.textContent = student.dropped ? "restore" : "drop";
+        b.className = "iconbtn" + (student.dropped ? " undo" : "");
+        b.appendChild(icon(student.dropped ? "restore" : "drop"));
+        b.title = student.dropped
+          ? "Put this student back on the roster."
+          : "Drop this student. They stay on the roster, greyed out, and "
+            + "print nothing.";
+        b.setAttribute("aria-label", b.title);
         b.onclick = () => drop(student, !student.dropped);
         td.appendChild(b);
+      } else if (column.key === "name" && filedNames()) {
+        // **Derived things are not editable** -- 13.6, taken from Seats.
+        // "Lynott, Kilah" is built from `last` and `first`; typing into
+        // it would write the filed form back into `name`, and the stored
+        // value would become a rendering of itself. So while names read
+        // this way the column shows text, and `First Last` is where you
+        // edit one.
+        td.classList.add("cell-name", "ro");
+        td.textContent = displayName(student);
+        td.title = `${student.name} — switch to “First Last” to edit`;
       } else if (column.edit) {
         td.classList.add("cell-" + column.key);
         const input = cellInput(student, column.key, column);
@@ -1047,7 +1237,7 @@ async function refreshGoogle(force) {
     bar.className = "banner waiting";
     bar.textContent = "Waiting for the Google sign-in in your browser… ";
     const again = document.createElement("button");
-    again.className = "link";
+    again.className = "act";
     again.textContent = "check now";
     again.onclick = () => refreshGoogle(true);
     bar.appendChild(again);
@@ -1069,7 +1259,7 @@ async function refreshGoogle(force) {
     "Not signed in to Google, so pushing will fail. Sessions expire after a "
     + "week or two whether or not you use them. "));
   const go = document.createElement("button");
-  go.className = "link";
+  go.className = "act";
   go.textContent = "Sign in";
   go.onclick = signInToGoogle;
   bar.appendChild(go);
@@ -1611,7 +1801,7 @@ function renderExtras() {
     n.type = "number"; n.min = "1"; n.max = "99"; n.value = extra.copies;
     n.onchange = () => { extra.copies = Number(n.value || 1); refreshPrintDirty(); };
     const rm = document.createElement("button");
-    rm.className = "link";
+    rm.className = "act";
     rm.textContent = "remove";
     rm.onclick = () => { draft.extras.splice(i, 1); renderExtras(); renderVariants(); refreshPrintDirty(); };
     row.append(sel, n, document.createTextNode(" copies"), rm);
@@ -1804,7 +1994,7 @@ function renderPullState() {
     // Was two CLI commands, which is the thing this app exists to stop
     // anyone having to know.
     const go = document.createElement("button");
-    go.className = "link";
+    go.className = "act";
     go.textContent = "Connect one in Setup";
     go.onclick = () => show("setup");
     why.appendChild(go);
@@ -2219,6 +2409,20 @@ async function boot() {
     showDropped = e.target.checked;
     renderRoster();
   };
+  document.getElementById("name-natural").onclick = () => setFiledNames(false);
+  document.getElementById("name-filed").onclick = () => setFiledNames(true);
+  renderNameFormat();
+
+  // The table resizes with the window, and `sizeColumns` only runs on a
+  // render. Without this, widening the window left the old widths and
+  // the spare room stayed spare.
+  let resizing = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizing);
+    resizing = setTimeout(() => {
+      if (!document.getElementById("view-roster").hidden) renderRoster();
+    }, 120);
+  });
   // Every `?` works the same way, so one delegated listener rather than
   // one per section -- a section added later gets the behaviour for
   // free instead of needing to be remembered here.

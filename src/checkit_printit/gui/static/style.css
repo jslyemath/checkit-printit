@@ -397,14 +397,90 @@ button.primary:not(:disabled) {
   color: var(--accent-ink);
   border-color: var(--accent);
 }
-button.link {
-  border: none;
+/* ---- actions ---------------------------------------------------------
+   **Underlined text is not how a function looks here.** An underline
+   says "this navigates"; every one of these does something instead, and
+   a row of them reads as a paragraph that has been marked up rather
+   than as a set of controls. The class was called `.link` for exactly
+   as long as it looked like one.
+
+   A quiet button: no border at rest, a surface on hover, so it reads as
+   pressable without competing with the primary action. */
+button.act {
+  border: 1px solid transparent;
   background: none;
   color: var(--muted);
-  padding: 2px 6px;
-  text-decoration: underline;
+  font: inherit;
+  font-size: var(--t-md);
+  padding: var(--s1) var(--s2);
+  border-radius: var(--r-sm);
+  cursor: pointer;
 }
-button.link:hover { color: var(--ink); }
+button.act:hover {
+  color: var(--ink);
+  background: var(--surface-3);
+}
+button.act:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+/* ---- a segmented choice ----------------------------------------------
+   Two or three states of one setting, shown rather than hidden behind a
+   dropdown, because the alternative is one word long. */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.segbtn {
+  font: inherit;
+  font-size: var(--t-sm);
+  color: var(--muted);
+  background: var(--surface-1);
+  border: none;
+  padding: var(--s1) var(--s3);
+  cursor: pointer;
+}
+.segbtn + .segbtn { border-left: 1px solid var(--line); }
+.segbtn:hover { color: var(--ink); background: var(--surface-3); }
+.segbtn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---- icon actions ----------------------------------------------------
+   For a control that repeats down every row, where a word 45 times is
+   45 words. Grey at rest so the column is quiet; the accent only on the
+   row you are pointing at, which is also what says which row it is. */
+button.iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+button.iconbtn svg { width: 15px; height: 15px; display: block; }
+button.iconbtn:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+button.iconbtn:focus-visible {
+  outline: none;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+/* Restoring is the undo, so it is not the colour of a thing to do. */
+button.iconbtn.undo:hover { color: var(--ink); background: var(--surface-3); }
 
 table {
   /* `auto`, not 100%: the widths come from a <colgroup> that app.js sizes to
@@ -412,11 +488,19 @@ table {
      stretched table made Prints as and Section as wide as Email. */
   width: auto;
   table-layout: fixed;
-  border-collapse: collapse;
+  /* `separate`, not `collapse`. A collapsed table cannot have sticky
+     cells: Chrome computes `position: sticky` on a <td> and then
+     ignores it, so the heading row and the pinned Name column both
+     scrolled away while reporting themselves as stuck. With spacing at
+     zero and the borders drawn per cell it looks identical. */
+  border-collapse: separate;
+  border-spacing: 0;
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  overflow: hidden;
+  /* The frame and its rounding live on `.scroller` now. They were here,
+     with `overflow: hidden` to clip the corners -- and a clipping
+     ancestor between a sticky cell and the scrollport is what sticky
+     resolves against, so nothing stuck. The scroller is the scrollport,
+     so the frame belongs on it anyway. */
 }
 th, td {
   text-align: left;
@@ -526,12 +610,80 @@ th button.sort.primary-sort { opacity: 1; font-weight: 700; }
 /* The reset sits over the drop column's empty heading, pushed right so
    it does not read as a label for the links beneath it. */
 th.actions-head { text-align: right; }
-th.actions-head button.link { text-transform: none; letter-spacing: 0; }
+th.actions-head button.act { text-transform: none; letter-spacing: 0; }
 
-/* A narrow window scrolls the table sideways. It used to hide the SID
+/* ---- the table's own window -----------------------------------------
+   A narrow window scrolls the table sideways. It used to hide the SID
    column instead, which shifted every heading after it one place left --
-   silently dropping a column is worse than a scrollbar. */
-.scroller { overflow-x: auto; }
+   silently dropping a column is worse than a scrollbar.
+
+   But the scrollbar has to be *reachable*. With 45 rows the scroller was
+   2158px tall, so its horizontal bar sat 1362px below the fold: the only
+   way to move sideways was shift-and-wheel, and the drop button -- the
+   rightmost column -- could not be seen at all. The table now scrolls
+   inside the window instead of making the page tall, which puts the
+   horizontal bar at the bottom of the screen where it belongs and keeps
+   the headings in view down all 45 rows. */
+.scroller {
+  overflow-x: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+body.tall main {
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--s5);
+}
+body.tall .view { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+body.tall .scroller { flex: 1 1 auto; min-height: 0; overflow: auto; }
+
+/* Both bars always drawn, never the overlay kind: a bar that appears
+   only once you are already scrolling cannot tell you there is more to
+   the right, which was the whole complaint. */
+body.tall .scroller { scrollbar-width: auto; scrollbar-gutter: stable; }
+body.tall .scroller::-webkit-scrollbar { width: 12px; height: 12px; }
+body.tall .scroller::-webkit-scrollbar-track { background: var(--surface-2); }
+body.tall .scroller::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--r-pill);
+  border: 3px solid var(--surface-2);
+}
+body.tall .scroller::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* The headings stay put while the rows move under them. */
+body.tall #roster thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+/* Pinned columns. Name is what tells you which row you are on, and the
+   actions are what you came to press -- neither may be the thing that
+   scrolls out of sight, so they are the two that stay. */
+#roster td.pinleft, #roster th.pinleft {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--panel);
+}
+#roster td.pinright, #roster th.pinright {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: var(--panel);
+}
+body.tall #roster thead th.pinleft,
+body.tall #roster thead th.pinright { z-index: 4; background: var(--surface-2); }
+tr.dropped td.pinleft, tr.dropped td.pinright { background: var(--dropped); }
+tr.secband td { z-index: 1; }
+
+/* A hairline so a pinned column reads as held rather than overlapping. */
+#roster .pinleft { box-shadow: 1px 0 0 var(--line); }
+#roster .pinright { box-shadow: -1px 0 0 var(--line); }
 
 /* Columns are capped, so a long email is clipped rather than allowed to take
    over the table. The whole value is still in the cell's tooltip. */
@@ -822,7 +974,7 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   border-color: var(--dirty);
   background: color-mix(in srgb, var(--dirty) 12%, transparent);
 }
-.banner button.link { text-transform: none; }
+.banner button.act { text-transform: none; }
 
 /* The form's own title and description, above the items -- as a student
    meets them, before any question. */

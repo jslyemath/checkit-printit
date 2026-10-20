@@ -96,6 +96,36 @@ def test_no_bare_class_is_defined_in_both_stylesheets():
         + ". Rename, or qualify it so it cannot match on its own.")
 
 
+def top_level_names(js):
+    """`const X`, `let X`, `function X`, `class X` at column zero.
+
+    Indentation is the test for top level, which is crude and right for
+    these two files: both are written flat, and anything nested is
+    indented by the project's own style.
+    """
+    return set(re.findall(r"^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)",
+                          js, re.M))
+
+
+def test_the_two_scripts_declare_no_name_twice():
+    """`app.js` and `seating/seating.js` are two plain <script> tags, so
+    they share one global scope.
+
+    Renaming `NAV_ICON` to `ICON` collided with seating.js's own `ICON`.
+    A duplicate `const` at top level is a SyntaxError, and the file that
+    loses is the *other* one -- the Roster rendered perfectly while Seats
+    failed to load at all, with nothing on the Roster to suggest why.
+
+    Same failure as the two CSS collisions, in a second language, so it
+    gets the same treatment.
+    """
+    shared = sorted(top_level_names(read("app.js"))
+                    & top_level_names(read("seating/seating.js")))
+    assert not shared, (
+        "declared at top level in both app.js and seating/seating.js: "
+        + ", ".join(shared) + ". One of the two files will not load.")
+
+
 def test_the_collision_check_would_have_caught_the_two_that_shipped():
     """A check that cannot fail is not a check. `.rail` and `.band` are
     still bare in seating.css, so adding either bare to style.css must be
@@ -106,6 +136,30 @@ def test_the_collision_check_would_have_caught_the_two_that_shipped():
         "examples or this test proves nothing")
     assert "on" not in seating, "`.on` is compound-only and must stay allowed"
     assert not bare_classes(".skill.on { color: red }")
+
+
+def test_no_control_is_styled_as_underlined_text():
+    """A standing rule from the instructor: **plain underlined text is
+    not how a function looks here.**
+
+    An underline says "this navigates". Every one of these does
+    something instead, and a row of them reads as a marked-up paragraph
+    rather than as a set of controls. The class was literally called
+    `.link` for as long as it looked like one.
+    """
+    css = strip_comments(read("style.css"))
+    # Underlines on a :hover of a real anchor are fine; a button is not.
+    offenders = []
+    for block in re.finditer(r"([^{}]+)\{([^}]*)\}", css):
+        selector, body = block.group(1).strip(), block.group(2)
+        if "text-decoration" not in body:
+            continue
+        if not re.search(r"underline", body):
+            continue
+        if "button" in selector or ".act" in selector or ".iconbtn" in selector:
+            offenders.append(selector)
+    assert not offenders, (
+        "styled as underlined text: " + "; ".join(offenders))
 
 
 def test_the_fixtures_actually_read_something(html, js):
