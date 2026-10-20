@@ -466,6 +466,46 @@ a stale SyntaxError reads exactly like a live one.
 * **A hidden element measures zero, and zero is not "no room".** Sizing
   at boot, while the tab was hidden, pinned every column to its floor.
 
+### What is slow, and where the waiting happens
+
+Measured against the real course, from the page:
+
+| call | cold | warm |
+|---|---|---|
+| `/api/skills` | 1194ms | 710ms |
+| `/api/google` | **6072ms** | 395ms |
+
+`/api/google` shells out to clasp. `/api/skills` rebuilds a `Bank` per
+request (128ms of it), and **that is deliberate**: one `Course` lives
+for the server's lifetime, so a cached `Bank` would hold stale seed
+data after a `checkit generate` -- which the variant guard reads.
+
+Both start at boot (`fetchSkills`, `fetchGoogle` in `boot()`),
+unawaited, after the Roster is drawn. They are kept as **promises, not
+data**, so a second caller joins the first request: Setup and the Form
+banner both want the Google answer and were making a six-second call
+each.
+
+Two traps if you touch this:
+
+* **"Data arrived" is not "tab drawn".** `show()` used to draw the Form
+  tab `if (skills === null)`, and prefetching makes that false before
+  the tab is ever opened -- it came up blank. `skillsDrawn` is the
+  second flag, set after a successful render, and drawing stays once
+  per session because `fillAssessment` would otherwise discard edits.
+* **`show()` writes `location.hash`, which fires `hashchange`, which
+  called `show()` again.** Every tab switch ran its loader twice. The
+  handler now ignores a hash matching `shownView`; back and forward
+  still work and should be re-checked if you touch it.
+
+### A surprising timing is the harness until proven otherwise
+
+A warm tab switch measured 4997ms. The browser pane was hidden,
+`requestAnimationFrame` is throttled in a hidden document, and the
+polling loop was timing its own throttle. `document.hidden` said so;
+a stamp inside the render said 3.1ms. Same family as the stale
+`index.html` and the integer-truncated pointer coordinates.
+
 ### The markup has tests now, and they are the only ones that do
 
 `tests/test_gui_markup.py`. Until 2026-10-19 **nothing in the suite

@@ -390,6 +390,15 @@ function buildNav() {
   rail.append(list, foot);
 }
 
+/* Which view `show` last drew. Only `hashchange` reads it, and only to
+   ignore the hash `show` just wrote itself: setting `location.hash`
+   fires `hashchange`, which called `show` again -- so **every tab
+   switch ran its loader twice**. Two `/api/setup` calls for one click
+   on Setup, two renders of a 45-row table for one click on Roster.
+   Back and forward still work: those change the hash to something this
+   is not already showing. */
+let shownView = null;
+
 function show(id) {
   const view = VIEWS.find(v => v.id === id);
   for (const b of document.querySelectorAll("nav button")) {
@@ -412,10 +421,11 @@ function show(id) {
     // Column widths depend on how much room there is, and there is none
     // to measure until the tab is on screen.
     if (id === "roster" && students.length) renderRoster();
-    // Loaded the first time it is opened rather than at boot: the Skills
-    // view reads the bank, and a course with no bank should still show a
-    // roster without waiting for one.
-    if (id === "form" && skills === null) loadSkills();
+    // Fetching starts at boot; *drawing* happens the first time the tab
+    // is opened. The two were one thing when the condition was `skills
+    // === null`, and prefetching made that condition false before the
+    // tab had ever been drawn, so it came up empty.
+    if (id === "form" && !skillsDrawn) loadSkills();
     // Reloaded every time, not only the first. It used to load once, so a
     // name edited in Roster and saved never reached this table until the
     // print job itself was saved -- which read as the table being stale.
@@ -423,6 +433,7 @@ function show(id) {
     if (id === "setup") loadSetup();
     if (id === "seating") loadSeating();
   }
+  shownView = id;
   location.hash = id;
 }
 
@@ -1025,6 +1036,7 @@ function renderWording(parts) {
      meets them. */
   const box = document.getElementById("wording");
   box.textContent = "";
+  box.classList.remove("loading");
 
   for (const part of parts) {
     if (part.kind === "form-title") {
@@ -1104,6 +1116,7 @@ async function refreshPreview() {
 function renderSkills() {
   const list = document.getElementById("skill-list");
   list.textContent = "";
+  list.classList.remove("loading");
   for (const s of skills.skills) {
     const label = document.createElement("label");
     label.className = "skill" + (s.inBank ? "" : " orphan");
@@ -1178,16 +1191,102 @@ function renderPushState() {
   }
 }
 
+/* ---- waiting happens before the click, not after ---------------------
+ *
+ * Measured on this course: `/api/skills` is ~700ms warm and 1.2s cold,
+ * and `/api/google` is **six seconds** the first time -- it shells out
+ * to clasp. Both used to start when the Update form tab was opened, so
+ * the tab was empty for about a second every time and the Google banner
+ * arrived whenever it arrived.
+ *
+ * Both now start at boot, and the tab awaits a request that is usually
+ * already finished. The promise is kept rather than the data, so a
+ * second caller joins the first request instead of making another --
+ * Setup and the Form banner both want the Google answer, and that was
+ * two six-second calls.
+ */
+let skillsRequest = null;
+let googleRequest = null;
+
+function fetchSkills({ fresh = false } = {}) {
+  if (fresh || !skillsRequest) {
+    skillsRequest = api("/api/skills").then(data => {
+      skills = data;
+      openNow = new Set(data.open);
+      return data;
+    }, err => { skillsRequest = null; throw err; });
+  }
+  return skillsRequest;
+}
+
+function fetchGoogle({ force = false } = {}) {
+  if (force || !googleRequest) {
+    googleRequest = api("/api/google", { force: Boolean(force) })
+      .catch(err => { googleRequest = null; throw err; });
+  }
+  return googleRequest;
+}
+
+/* Whether the tab has been drawn, which is not the same as whether the
+ * data has arrived -- and once the data is prefetched at boot, `skills
+ * !== null` stopped meaning "already on screen" and the tab came up
+ * blank. Drawing is also once per visit on purpose: `fillAssessment`
+ * refills the fields from the server, so re-running it on every visit
+ * would throw away edits made before stepping over to the Roster. */
+let skillsDrawn = false;
+
 async function loadSkills() {
+  // Placeholders the size of what is coming, so the tab has its shape
+  // before it has its content and nothing jumps when the data lands.
+  if (skills === null) showSkillsPlaceholders();
   try {
-    skills = await api("/api/skills");
-  } catch (err) { toast(err.message, true); return; }
-  openNow = new Set(skills.open);
+    await fetchSkills();
+  } catch (err) { toast(err.message, true); clearSkillsPlaceholders(); return; }
+  skillsDrawn = true;
   fillAssessment();
   renderSkills();
   renderWording(skills.preview);
   renderPushState();
   refreshGoogle();
+}
+
+/* Rows the height of real ones, and as many as this bank has, so the
+   list does not grow under the pointer when the answer arrives. */
+function showSkillsPlaceholders() {
+  const list = document.getElementById("skill-list");
+  list.textContent = "";
+  list.classList.add("loading");
+  for (let i = 0; i < 8; i += 1) {
+    const row = document.createElement("div");
+    row.className = "skill ghostrow";
+    const slug = document.createElement("span");
+    slug.className = "slug";
+    slug.appendChild(bar(34));
+    const desc = document.createElement("span");
+    desc.className = "desc";
+    // Uneven, because a column of identical bars reads as a pattern
+    // rather than as text that has not arrived.
+    desc.appendChild(bar([180, 240, 150, 210][i % 4]));
+    row.append(slug, desc);
+    list.appendChild(row);
+  }
+  const wording = document.getElementById("wording");
+  wording.textContent = "";
+  wording.classList.add("loading");
+  for (const w of [260, 420, 340]) wording.appendChild(bar(w, true));
+}
+
+function clearSkillsPlaceholders() {
+  document.getElementById("skill-list").classList.remove("loading");
+  document.getElementById("wording").classList.remove("loading");
+}
+
+function bar(width, block) {
+  const b = document.createElement("span");
+  b.className = "ghostbar";
+  b.style.width = typeof width === "number" ? width + "px" : width;
+  if (block) b.style.display = "block";
+  return b;
 }
 
 async function saveSkills() {
@@ -1237,7 +1336,7 @@ async function refreshGoogle(force) {
   const bar = document.getElementById("google-bar");
   let state;
   try {
-    state = await api("/api/google", { force: Boolean(force) });
+    state = await fetchGoogle({ force: Boolean(force) });
   } catch { bar.hidden = true; return; }
 
   bar.textContent = "";
@@ -1500,9 +1599,12 @@ async function loadSetup() {
   // form is the thing that decides which buttons exist.
   renderSetup();
 
+  // The same request the Form tab's banner uses. These were two calls
+  // of six seconds each the first time the app was opened.
   googleState = { checking: true };
+  renderSetup();
   try {
-    googleState = await api("/api/google", {});
+    googleState = await fetchGoogle();
   } catch (err) {
     googleState = { error: err.message };
   }
@@ -2454,6 +2556,7 @@ async function boot() {
   // not, which reads as the app being stuck.
   window.addEventListener("hashchange", () => {
     const id = location.hash.slice(1);
+    if (id === shownView) return;          // our own write, echoing back
     if (VIEWS.some(v => v.id === id)) show(id);
   });
 
@@ -2468,6 +2571,22 @@ async function boot() {
     document.getElementById("roster-empty").hidden = false;
     document.getElementById("roster-empty").textContent = err.message;
   }
+
+  // **Both slow calls start now, and neither is awaited.** The Roster is
+  // already on screen above, so this costs the opening view nothing, and
+  // by the time Update form or Setup is clicked the answers are usually
+  // in. Failures are deliberately swallowed here: the tab that needs the
+  // answer reports it, and a toast at boot about a tab nobody has opened
+  // is noise.
+  fetchSkills().then(() => {
+    // Opened via #form before the fetch finished: draw it now.
+    if (!skillsDrawn && !document.getElementById("view-form").hidden) {
+      loadSkills();
+    }
+  }).catch(() => {});
+  fetchGoogle().then(() => {
+    if (!document.getElementById("view-form").hidden) refreshGoogle();
+  }).catch(() => {});
 
   show(VIEWS.some(v => v.id === location.hash.slice(1))
        ? location.hash.slice(1) : "roster");
