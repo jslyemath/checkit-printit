@@ -31,7 +31,15 @@
       dropped flag are not editable: those are set by an import, a drop or a
       pull, each of which has rules a text box would bypass.
     </p>
+    <!-- How the name reads is a property of this view, like "show
+         dropped" -- not a fifth state on the Name heading, which
+         already cycles last and first each way and has no room to say
+         a display choice as well. -->
     <div class="toolbar">
+      <div class="seg" role="group" aria-label="How names are written">
+        <button type="button" id="name-natural" class="segbtn">First Last</button>
+        <button type="button" id="name-filed" class="segbtn">Last, First</button>
+      </div>
       <label><input type="checkbox" id="show-dropped"> show dropped students</label>
       <span class="spacer"></span>
       <span id="dirty" class="dirty" hidden></span>
@@ -82,7 +90,7 @@
         <span id="open-count" class="sec-count"></span>
       </div>
       <div class="toolbar">
-        <button id="skills-none" class="link">clear all</button>
+        <button id="skills-none" class="act">clear all</button>
         <span class="spacer"></span>
         <span id="skills-dirty" class="dirty" hidden></span>
         <button id="skills-save" class="primary" disabled>Save</button>
@@ -118,7 +126,7 @@
              aria-label="The day it happens"
              title="Prints on the paper, names the job folder, and is how a response is matched to an assessment.">
       <span class="spacer"></span>
-      <button id="print-reset" class="link"
+      <button id="print-reset" class="act"
               title="Empty every field on this tab, ready for the next run. Save to keep it; Discard puts it back.">Reset this print job</button>
     </header>
     <p id="print-blocked" class="banner warn" hidden></p>
@@ -196,7 +204,7 @@
         <p class="hint-text" hidden>Spare copies, printed after the class
           set with a blank name line.</p>
         <div id="extras"></div>
-        <button id="extras-add" class="link">add a spare</button>
+        <button id="extras-add" class="act">add a spare</button>
       </div>
     </section>
 
@@ -232,7 +240,7 @@
           <button id="p-preview">Preview the draw</button>
           <button id="p-build" class="primary">Build the PDF</button>
           <span class="spacer"></span>
-          <button id="p-reveal" class="link" hidden>open the folder</button>
+          <button id="p-reveal" class="act" hidden>open the folder</button>
         </div>
         <div id="build-out"></div>
       </div>
@@ -429,7 +437,7 @@
         <button id="setup-authorize" class="primary">Open the permissions
           page</button>
         <button id="setup-authed">I have done it</button>
-        <button id="setup-copy" class="link">copy the link instead</button>
+        <button id="setup-copy" class="act">copy the link instead</button>
         <span id="setup-authwait" class="muted" hidden></span>
       </div>
       <div id="setup-auth-notes"></div>

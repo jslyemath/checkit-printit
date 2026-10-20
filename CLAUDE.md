@@ -407,6 +407,43 @@ counter out of its heading without being restructured.
 Roster, Update form and Setup are still `.panel`; they are stages 3c
 and 3d.
 
+### `app.js` and `seating.js` share one global scope
+
+Two plain `<script>` tags, so a top-level `const` declared in both is a
+SyntaxError -- and the file that fails is **the other one**. Renaming
+`NAV_ICON` to `ICON` collided with seating.js's own `ICON`: the Roster
+rendered perfectly and Seats did not load at all, with nothing on the
+Roster to say why. The shell's set is `GLYPH`.
+
+Same rule as the stylesheets, same remedy: the markup tests fail on any
+name declared at top level in both files. And when a console error
+persists after you have fixed it, check `typeof` for the globals --
+`read_console_messages` returns a buffer that survives navigation, and
+a stale SyntaxError reads exactly like a live one.
+
+### How the Roster table behaves, and why
+
+* **It scrolls inside the window, not the page** (`body.tall`, set in
+  `show()`). With 45 rows the scroller was 2158px tall and its
+  horizontal bar sat 1362px below the fold, so sideways movement was
+  shift-and-wheel only and the drop column could not be reached.
+* **Name is pinned left, the actions pinned right.** For sticky cells
+  to work the table needs `border-collapse: separate` *and* no
+  `overflow: hidden` on the `<table>` -- a clipping ancestor between a
+  sticky cell and the scrollport is what it resolves against. The frame
+  and rounding live on `.scroller` for that reason; do not move them
+  back.
+* **`rank` is what survives a squeeze, and an action outranks data.**
+  Email and SID are reference; dropping a student is what the tab is
+  for.
+* **`min` is what a column wants, `floor` is what it may be squeezed
+  to**, and a column empty for every row starts at its floor. `Prints
+  as` was reserving 200px on a roster where nobody has one.
+* **Spare width goes to the `grow` columns**, so the table's right edge
+  meets the heading above it.
+* **A hidden element measures zero, and zero is not "no room".** Sizing
+  at boot, while the tab was hidden, pinned every column to its floor.
+
 ### The markup has tests now, and they are the only ones that do
 
 `tests/test_gui_markup.py`. Until 2026-10-19 **nothing in the suite
