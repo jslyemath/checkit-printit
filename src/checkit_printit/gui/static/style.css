@@ -259,20 +259,26 @@ h2 { font-size: 18px; margin: 0 0 12px; font-weight: 600; }
   cursor: pointer;
 }
 
-.navrail button svg {
-  flex: 0 0 auto;
-  /* Sized against the label beside it: a 19px glyph next to 15px text
-     read as a small picture with a big word. */
-  width: 21px;
-  height: 21px;
+/* Every glyph `glyph()` builds, wherever it is used. Said once: a path
+   with no `fill: none` is a filled shape, and the colour never reaches
+   the stroke -- which is how the first icon outside the rail arrived as
+   a solid black blob. Size belongs to the context, not here. */
+.glyph {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.glyph rect { fill: none; }
 
-.navrail button svg rect { fill: none; }
+.navrail button svg {
+  flex: 0 0 auto;
+  /* Sized against the label beside it: a 19px glyph next to 15px text
+     read as a small picture with a big word. */
+  width: 21px;
+  height: 21px;
+}
 
 .navrail button .label {
   white-space: nowrap;
@@ -460,19 +466,23 @@ button.iconbtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border: 1px solid transparent;
+  /* A grey chip at rest, not a bare glyph on the row: with no surface
+     of its own it read as an icon printed on the table rather than as
+     something to press. */
+  border: 1px solid var(--line);
   border-radius: var(--r-sm);
-  background: none;
-  color: var(--dim);
+  background: var(--surface-2);
+  color: var(--muted);
   cursor: pointer;
 }
-button.iconbtn svg { width: 15px; height: 15px; display: block; }
+button.iconbtn svg { width: 16px; height: 16px; display: block; }
 button.iconbtn:hover {
   color: var(--accent);
   background: var(--accent-soft);
+  border-color: var(--accent);
 }
 button.iconbtn:focus-visible {
   outline: none;
@@ -480,7 +490,11 @@ button.iconbtn:focus-visible {
   border-color: var(--accent);
 }
 /* Restoring is the undo, so it is not the colour of a thing to do. */
-button.iconbtn.undo:hover { color: var(--ink); background: var(--surface-3); }
+button.iconbtn.undo:hover {
+  color: var(--ink);
+  background: var(--surface-3);
+  border-color: var(--line-strong);
+}
 
 table {
   /* `auto`, not 100%: the widths come from a <colgroup> that app.js sizes to
@@ -776,10 +790,17 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
   gap: var(--s5);
-  padding: var(--s5) 0;
-  border-top: 1px solid var(--line);
+  padding: 0 0 var(--s5);
 }
-.annot:first-of-type { border-top: 0; padding-top: 0; }
+/* The rule and the space above it belong to a section that *follows*
+   another, and `:first-of-type` could not say that: Setup and Print
+   both hide sections depending on state, so the first one on screen is
+   often not the first one in the markup, and it was drawing a stray
+   rule across the top of the page. */
+.annot:not([hidden]) ~ .annot:not([hidden]) {
+  border-top: 1px solid var(--line);
+  padding-top: var(--s5);
+}
 
 .annot-head {
   display: flex;

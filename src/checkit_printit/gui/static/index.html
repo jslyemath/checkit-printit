@@ -60,12 +60,23 @@
   </section>
 
   <section id="view-form" class="view" hidden>
-    <h2>Update form</h2>
+    <header class="pagehead">
+      <h2 class="pagename">Update form</h2>
+      <button class="hint" type="button" aria-expanded="false"
+              aria-label="What this tab does">?</button>
+    </header>
+    <p class="hint-text" hidden>This tab writes the Google Form students
+      choose from: what the next assessment is called, when it is, how
+      many skills they may pick, and which skills are open. Nothing
+      reaches the form until you push it.</p>
 
     <div id="google-bar" class="banner" hidden></div>
 
-    <div class="panel">
-      <h3>The next assessment</h3>
+    <section class="annot">
+      <div class="annot-head">
+        <h3>The next assessment</h3>
+      </div>
+      <div class="annot-body">
       <div class="fields">
         <label title="What this sitting is called. It prints on the paper and appears in the form's wording.">Name
           <input id="a-name" type="text" spellcheck="false"></label>
@@ -78,37 +89,50 @@
         <label id="choose-wrap" title="How many skills that limit refers to.">Skills
           <input id="a-choose" type="number" min="1" max="40"></label>
       </div>
-    </div>
+      </div>
+    </section>
 
-    <div class="panel">
-      <!-- The count rides the header row, not the heading. A `.panel`
-           rather than an annotated section because the Update form is
-           stage 3d; only the counter moves here, which is the rule this
-           tab was already breaking. -->
-      <div class="sec-row">
+    <section class="annot">
+      <div class="annot-head">
         <h3>Open for retake</h3>
         <span id="open-count" class="sec-count"></span>
       </div>
-      <div class="toolbar">
-        <button id="skills-none" class="act">clear all</button>
-        <span class="spacer"></span>
-        <span id="skills-dirty" class="dirty" hidden></span>
-        <button id="skills-save" class="primary" disabled>Save</button>
-        <button id="skills-revert" disabled>Discard</button>
+      <div class="annot-body">
+        <div class="toolbar">
+          <button id="skills-none" class="act">clear all</button>
+          <span class="spacer"></span>
+          <span id="skills-dirty" class="dirty" hidden></span>
+          <button id="skills-save" class="primary" disabled>Save</button>
+          <button id="skills-revert" disabled>Discard</button>
+        </div>
+        <div id="skill-list" class="skill-list"></div>
       </div>
-      <div id="skill-list" class="skill-list"></div>
-    </div>
+    </section>
 
-    <div class="panel">
-      <h3>Form preview</h3>
-      <div id="wording" class="wording"></div>
-    </div>
+    <section class="annot">
+      <div class="annot-head">
+        <h3>Form preview</h3>
+        <button class="hint" type="button" aria-expanded="false"
+                aria-label="What this preview is">?</button>
+      </div>
+      <div class="annot-body">
+        <p class="hint-text" hidden>The wording students will see, built
+          from the settings above. Read it back before pushing: it is the
+          only place the form&rsquo;s own sentences appear outside the
+          form.</p>
+        <div id="wording" class="wording"></div>
+      </div>
+    </section>
 
-    <div class="panel">
-      <h3>Push to the form</h3>
-      <p class="muted" id="push-state"></p>
-      <button id="form-push" class="primary">Push it</button>
-    </div>
+    <section class="annot">
+      <div class="annot-head">
+        <h3>Push to the form</h3>
+      </div>
+      <div class="annot-body">
+        <p class="muted" id="push-state"></p>
+        <button id="form-push" class="primary">Push it</button>
+      </div>
+    </section>
   </section>
 
   <section id="view-print" class="view" hidden>
@@ -415,19 +439,31 @@
   </section>
 
   <section id="view-setup" class="view" hidden>
-    <h2>Setup</h2>
-    <p class="muted">Start-of-semester work: connecting this course to a
-      Google Form, so students can choose skills and printit can read what
-      they chose.</p>
+    <header class="pagehead">
+      <h2 class="pagename">Setup</h2>
+      <button class="hint" type="button" aria-expanded="false"
+              aria-label="What this tab is for">?</button>
+    </header>
+    <p class="hint-text" hidden>Start-of-semester work: connecting this
+      course to a Google Form, so students can choose skills and printit
+      can read what they chose. Once it is connected you should not need
+      this tab again.</p>
 
-    <div class="panel">
-      <h3>Google</h3>
-      <p id="setup-google" class="muted"></p>
-      <div class="toolbar">
-        <button id="setup-signin">Sign in to Google</button>
+    <section class="annot">
+      <div class="annot-head">
+        <h3>Google</h3>
       </div>
-    </div>
+      <div class="annot-body">
+        <p id="setup-google" class="muted"></p>
+        <div class="toolbar">
+          <button id="setup-signin">Sign in to Google</button>
+        </div>
+      </div>
+    </section>
 
+    <!-- Still a card, deliberately. A section does not get a boundary
+         for being a section, but this is not a section: it is something
+         blocking you, and a boundary is what says so. -->
     <div class="panel attention" id="setup-auth" hidden>
       <h3>One step left: grant the script permission</h3>
       <p>The form and the script exist and are recorded. Google will not let
@@ -443,17 +479,25 @@
       <div id="setup-auth-notes"></div>
     </div>
 
-    <div class="panel" id="setup-have" hidden>
-      <h3>This course's form</h3>
-      <div id="setup-conn"></div>
-    </div>
+    <section class="annot" id="setup-have" hidden>
+      <div class="annot-head">
+        <h3>This course&rsquo;s form</h3>
+      </div>
+      <div class="annot-body"><div id="setup-conn"></div></div>
+    </section>
 
     <p id="setup-checking" class="muted">Looking at this course…</p>
 
-    <div class="panel" id="setup-new" hidden>
-      <h3>Make a new form</h3>
-      <p class="muted">Creates the form and its script, deploys it, and adds
-        the four things printit writes to. Nothing to paste afterwards.</p>
+    <section class="annot" id="setup-new" hidden>
+      <div class="annot-head">
+        <h3>Make a new form</h3>
+        <button class="hint" type="button" aria-expanded="false"
+                aria-label="What making a form does">?</button>
+      </div>
+      <div class="annot-body">
+      <p class="hint-text" hidden>Creates the form and its script, deploys
+        it, and adds the four things printit writes to. Nothing to paste
+        afterwards.</p>
       <div class="fields">
         <label>Title
           <input id="setup-title" type="text" spellcheck="false"
@@ -464,25 +508,33 @@
       <div class="toolbar">
         <button id="setup-create" class="primary">Create the form</button>
       </div>
-    </div>
+      </div>
+    </section>
 
-    <div class="panel" id="setup-existing" hidden>
-      <h3>Use a form I already have</h3>
-      <p class="muted">Keeps the form exactly as it is &mdash; its banner, its
-        title, its questions. It does change the form's <b>bound Apps
-        Script</b>: printit's files are pushed over that project, and the
-        names it uses are the ones most projects already use. If something
-        else still drives this form, that something is what gets replaced.</p>
-      <div class="fields">
-        <label title="On the form: three-dot menu, Apps Script, then Project Settings.">Bound script id
-          <input id="setup-script" type="text" spellcheck="false"></label>
+    <section class="annot" id="setup-existing" hidden>
+      <div class="annot-head">
+        <h3>Use a form I already have</h3>
+        <button class="hint" type="button" aria-expanded="false"
+                aria-label="What attaching replaces">?</button>
       </div>
-      <div class="toolbar">
-        <button id="setup-inspect">What would this replace?</button>
-        <button id="setup-attach" disabled>Attach it</button>
+      <div class="annot-body">
+        <p class="hint-text" hidden>Keeps the form exactly as it is &mdash;
+          its banner, its title, its questions. It does change the form&rsquo;s
+          <b>bound Apps Script</b>: printit&rsquo;s files are pushed over that
+          project, and the names it uses are the ones most projects already
+          use. If something else still drives this form, that something is
+          what gets replaced.</p>
+        <div class="fields">
+          <label title="On the form: three-dot menu, Apps Script, then Project Settings.">Bound script id
+            <input id="setup-script" type="text" spellcheck="false"></label>
+        </div>
+        <div class="toolbar">
+          <button id="setup-inspect">What would this replace?</button>
+          <button id="setup-attach" disabled>Attach it</button>
+        </div>
+        <div id="setup-inspected"></div>
       </div>
-      <div id="setup-inspected"></div>
-    </div>
+    </section>
 
     <div id="setup-out"></div>
   </section>

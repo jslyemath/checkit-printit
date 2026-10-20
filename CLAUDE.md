@@ -404,8 +404,30 @@ delegated listener** in `boot()`, so a new section needs no JS. A
 section still built as a `.panel` can borrow `.sec-row` to get a
 counter out of its heading without being restructured.
 
-Roster, Update form and Setup are still `.panel`; they are stages 3c
-and 3d.
+Roster, Print, Update form and Setup all use this now. Record is the
+one left (3e). Setup's `attention` panel is deliberately still a card:
+it is not a section, it is something blocking you, and a boundary is
+what says so.
+
+The rule between sections is `.annot:not([hidden]) ~ .annot:not([hidden])`,
+not `:first-of-type` -- Setup and Print both hide sections depending on
+state, and a structural selector drew a stray rule across the top of
+the page whenever the first section in the markup was not the first on
+screen.
+
+### A glyph strokes itself; the button gives it a surface
+
+`glyph(name)` builds the SVG and puts `class="glyph"` on it, which is
+where `fill: none; stroke: currentColor` lives. **Do not move that to a
+context selector.** It used to be on `.navrail button svg`, and the
+first glyph used anywhere else rendered as a solid black blob -- a path
+with no fill rule is filled, and the colour never reaches a stroke that
+is not drawn.
+
+`.iconbtn` is the chip around it: grey surface and border at rest, the
+accent on hover, which is the instructor's rule for a row action. A
+glyph with no chip reads as a picture printed on the row rather than as
+something to press.
 
 ### `app.js` and `seating.js` share one global scope
 
