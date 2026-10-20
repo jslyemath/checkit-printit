@@ -1094,6 +1094,33 @@ table.seeds td {
    list, just shorter. */
 .skill-list.short { max-height: 190px; margin-top: 4px; }
 
+/* ---- waiting ---------------------------------------------------------
+   Placeholders the shape of what is coming. Not a spinner: a spinner
+   says "something is happening" and these say "a list of skills is
+   happening, about this big", so the page has its layout before it has
+   its content and nothing jumps when the answer lands.
+
+   Deliberately still and quiet -- a shimmer animating down the side of
+   a settings page is decoration, and decoration is what this redesign
+   has been removing. */
+.ghostrow {
+  background: var(--surface-1);
+  pointer-events: none;
+}
+.ghostbar {
+  display: inline-block;
+  height: 9px;
+  max-width: 100%;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  vertical-align: middle;
+}
+.wording.loading .ghostbar { margin: 0 0 var(--s3); height: 11px; }
+
+/* Nothing in here is pressable yet, and a cursor that says otherwise is
+   the page lying about being ready. */
+.loading { cursor: progress; }
+
 select.vpick {
   font: inherit;
   color: var(--ink);
