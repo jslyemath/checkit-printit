@@ -165,6 +165,88 @@ def bank_for(name, root=None):
         return None
 
 
+#: The scalars at the top of `course.toml`, in the order written.
+IDENTITY = ("name", "code", "semester", "professor")
+
+
+def identity(name, root=None):
+    """The four header scalars, each defaulting to "".
+
+    `semester` and `professor` print in the top right corner of every
+    paper, via `\\date` and `\\author`, and the template creates them
+    empty.
+    """
+    import tomllib
+    config = os.path.join(path_for(name, root), CONFIG)
+    if not os.path.isfile(config):
+        return {k: "" for k in IDENTITY}
+    with open(config, "rb") as f:
+        raw = tomllib.load(f)
+    return {k: str(raw.get(k, "") or "") for k in IDENTITY}
+
+
+def save_identity(name, fields, root=None):
+    """Set the header scalars, leaving the rest of the file alone.
+
+    A line rewrite rather than a dump, because `course.toml` is mostly a
+    comment explaining itself, with `[bank]` underneath. Regenerating the
+    file from its values would throw both away.
+
+    This exists because there was no way to set these at all. The
+    template writes `semester = ""` and `professor = ""`, nothing ever
+    filled them, and the first run built entirely through the web app --
+    2026-10-19 -- printed with an empty corner. The runs before it only
+    had a semester and a professor because those were typed into a
+    publication by hand.
+    """
+    config = os.path.join(path_for(name, root), CONFIG)
+    if not os.path.isfile(config):
+        raise CourseError(f"{config} does not exist.")
+    with open(config, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+
+    wanted = {k: str(fields.get(k, "")).strip()
+              for k in IDENTITY if k in fields}
+    if not wanted:
+        return identity(name, root)
+
+    seen = set()
+    out = []
+    for line in lines:
+        key = line.split("=", 1)[0].strip() if "=" in line else ""
+        # Column zero only, so a key sitting inside some other table is
+        # left where it is: rewriting it would un-indent it and hand it
+        # to whichever table it was under.
+        #
+        # A `#` test used to be here too and was dead -- a mutation pass
+        # showed no test could tell whether it was there. The commented
+        # example in the header is `#     name   = "MAT 106"`, whose key
+        # splits as `#     name` and never matches anything in IDENTITY.
+        if key in wanted and not line.startswith((" ", "\t")):
+            out.append(f'{key:<9} = "{_escape(wanted[key])}"')
+            seen.add(key)
+        else:
+            out.append(line)
+
+    missing = [k for k in IDENTITY if k in wanted and k not in seen]
+    if missing:
+        # Nothing to rewrite, so insert above `[bank]` -- where the
+        # template puts them -- rather than at the end, underneath it,
+        # where they would belong to that table instead.
+        at = next((i for i, l in enumerate(out) if l.startswith("[bank]")),
+                  len(out))
+        for k in reversed(missing):
+            out.insert(at, f'{k:<9} = "{_escape(wanted[k])}"')
+
+    with open(config, "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+    return identity(name, root)
+
+
+def _escape(value):
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def init(name, bank="", root=None, adopt=None):
     """Create a course. Returns (path, notes).
 

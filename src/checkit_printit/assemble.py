@@ -491,7 +491,7 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None,
         for handout in list(handouts) + list(extras):
             written.update(handout.versions)
         return _report_dict(handouts, extras, keys, written, unseated, chart,
-                            seeds, {}, roster)
+                            seeds, {}, roster, publication)
 
     # -- write ------------------------------------------------------------
     os.makedirs(out_dir, exist_ok=True)
@@ -549,7 +549,7 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None,
         manifest.write(out_dir, publication, run_seed, seeds, bank, slugs_used)
 
     return _report_dict(handouts, extras, keys, written, unseated, chart,
-                        seeds, missing, roster)
+                        seeds, missing, roster, publication)
 
 
 def printed_collisions(chart, roster, handouts):
@@ -593,8 +593,28 @@ def printed_collisions(chart, roster, handouts):
     return found
 
 
+def header_gaps(publication):
+    """Header fields that will print as nothing.
+
+    `\\date` and `\\author` take whatever the publication carries, so an
+    unset one is a blank top-right corner on every page of the run. The
+    course template creates both empty and there was nowhere to fill them
+    in, so the first run built entirely in the web app printed without
+    either and the only way to notice was to look at the paper.
+
+    Reported, not refused: a course that genuinely wants no semester in
+    the corner is allowed to have one.
+    """
+    gaps = []
+    if not str(getattr(publication, "semester", "") or "").strip():
+        gaps.append("semester")
+    if not str(getattr(publication, "professor", "") or "").strip():
+        gaps.append("instructor")
+    return gaps
+
+
 def _report_dict(handouts, extras, keys, written, unseated, chart, seeds,
-                 missing, roster):
+                 missing, roster, publication):
     return {
         "students": len(handouts),
         "extras": len(extras),
@@ -607,6 +627,11 @@ def _report_dict(handouts, extras, keys, written, unseated, chart, seeds,
         "collisions": printed_collisions(chart, roster, handouts),
         "seeds": seeds,
         "missing_fields": {k: sorted(v) for k, v in sorted(missing.items())},
+        # Which header fields will print blank. `\date` and `\author` take
+        # whatever the publication carries, so an unset one is an empty
+        # corner on every page and nothing says so -- which is how the
+        # 2026-10-19 run shipped without a semester or an instructor.
+        "header_gaps": header_gaps(publication),
         # Enough for the print record, which is written by the caller rather
         # than here: assemble does not know which course it is serving, and
         # a build that also wrote to a database would be two jobs in one.

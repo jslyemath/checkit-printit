@@ -578,6 +578,23 @@ def _course_identity(course):
         return tomllib.load(f)
 
 
+def api_course_identity(course, body):
+    """Set the four header scalars in `course.toml`.
+
+    There was no way to set these from anywhere: the course template
+    writes `semester` and `professor` empty, `init` is the only command
+    that touches the file, and the web app never offered a field. They
+    print in the top right corner of every page, so a course that had
+    never been hand-edited printed with a blank corner and said nothing.
+    """
+    fields = {k: str(body.get(k, "")).strip()
+              for k in course_mod.IDENTITY if k in body}
+    try:
+        return {"identity": course_mod.save_identity(course.name, fields)}
+    except course_mod.CourseError as exc:
+        raise GuiError(str(exc)) from None
+
+
 def api_setup(course, _body):
     """What the Setup view draws: the Google session and the connection."""
     # Deliberately does not ask whether Google is signed in. That is an
@@ -593,6 +610,8 @@ def api_setup(course, _body):
         "items": dict(conn.items),
         "missing": conn.missing_slots(),
         "slots": dict(form_mod.SLOTS),
+        # The header scalars, so the view has somewhere to set them.
+        "identity": course_mod.identity(course.name),
     }
 
 
@@ -1192,6 +1211,7 @@ def _build(course, preview, seed=None):
                   if s in report["skills"]],
         # Triples since the collision check started reading the paper
         # rather than the chart: the letter printed is not the seat's.
+        "headerGaps": report.get("header_gaps", []),
         "collisions": [f"{a.name} and {b.name} were both printed version "
                        f"{version} at table {a.group}"
                        for a, b, version in report["collisions"]],
@@ -1302,6 +1322,7 @@ ROUTES = {
     "/api/roster/drop": api_roster_drop,
     "/api/google": api_google,
     "/api/google/login": api_google_login,
+    "/api/course/identity": api_course_identity,
     "/api/setup": api_setup,
     "/api/setup/create": api_setup_create,
     "/api/setup/inspect": api_setup_inspect,

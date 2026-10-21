@@ -1052,6 +1052,12 @@ def _report(result):
         for version, slug, seed in used:
             click.echo(f"    {version}  {slug:6} v{seed}")
 
+    if report.get("header_gaps"):
+        click.echo(f"  NOTE     this course has no "
+                   f"{' and no '.join(report['header_gaps'])}, so the top "
+                   f"right corner of every page prints blank. Set them on "
+                   f"the Setup tab, or in course.toml.")
+
     for slug, fields in report["missing_fields"].items():
         click.echo(f"  NOTE     {slug}'s template asked for "
                    f"{', '.join(fields)}, which its generator does not set. "

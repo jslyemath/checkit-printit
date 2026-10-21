@@ -175,7 +175,7 @@ class TestItReachesThePaper:
         s = Student(name="Augusta Lovelace", skills=["AD"], sid="806001",
                     preferred="Ada Lovelace")
         report = assemble._report_dict(self._handouts(s), [], None, [("AD", 401)],
-                                       [], None, {}, {}, Roster([s]))
+                                       [], None, {}, {}, Roster([s]), Pub())
         assert report["handouts"][0]["name"] == "Ada Lovelace"
         assert report["handouts"][0]["sid"] == "806001"
 
@@ -386,7 +386,7 @@ class TestTheCollisionWarningLooksAtThePaper:
         seeds = {("A", "AD"): 401, ("B", "AD"): 402}
         handouts, unseated = assemble.build_handouts(people, chart, P(), seeds)
         report = assemble._report_dict(handouts, [], None, [("AD", 402)],
-                                       unseated, chart, {}, {}, people)
+                                       unseated, chart, {}, {}, people, P())
         assert len(report["collisions"]) == 1
         assert report["collisions"][0][2] == "B"
 
