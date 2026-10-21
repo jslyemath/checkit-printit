@@ -466,6 +466,25 @@ a stale SyntaxError reads exactly like a live one.
 * **A hidden element measures zero, and zero is not "no room".** Sizing
   at boot, while the tab was hidden, pinned every column to its floor.
 
+### What prints in the corner comes from `course.toml`
+
+`\date` is the semester and `\author` is the instructor, both read
+from `course.toml` by way of the publication. The template creates them
+empty, and for a long time **nothing could set them**: `course init`
+was the only writer and the web app had no field. Every run that had a
+semester had it typed into a `publication.toml` by hand, so the first
+run built entirely in the app printed a blank corner.
+
+`course.save_identity` writes them now, Setup has the fields, and
+`assemble.header_gaps` reports after a build which of them will print
+blank -- a note, not a refusal, because a course may genuinely want an
+empty corner.
+
+`save_identity` is a **line rewrite, not a TOML dump**: that file is
+mostly a comment explaining itself, with `[bank]` underneath. It
+anchors on column zero so a key indented under another table is left
+alone.
+
 ### What is slow, and where the waiting happens
 
 Measured against the real course, from the page:

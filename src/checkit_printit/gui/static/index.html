@@ -449,6 +449,41 @@
       can read what they chose. Once it is connected you should not need
       this tab again.</p>
 
+    <!-- Semester and instructor print in the top right corner of every
+         page. Until now there was nowhere to set them: the course
+         template creates them empty and only `course init` ever wrote
+         the file, so the first run built entirely in here came out with
+         a blank corner. -->
+    <section class="annot">
+      <div class="annot-head">
+        <h3>This course</h3>
+        <button class="hint" type="button" aria-expanded="false"
+                aria-label="Where these appear">?</button>
+      </div>
+      <div class="annot-body">
+        <p class="hint-text" hidden>Name and code identify the course.
+          <b>Semester</b> and <b>instructor</b> print in the top right
+          corner of every page &mdash; leave them empty and that corner is
+          empty.</p>
+        <div class="fields">
+          <label title="What this course is called.">Name
+            <input id="course-name" type="text" spellcheck="false"></label>
+          <label title="The course code, as it prints.">Code
+            <input id="course-code" type="text" spellcheck="false"></label>
+          <label title="Prints in the top right corner of every page.">Semester
+            <input id="course-semester" type="text" spellcheck="false"
+                   placeholder="Fall 26"></label>
+          <label title="Prints in the top right corner of every page.">Instructor
+            <input id="course-professor" type="text" spellcheck="false"
+                   placeholder="Slye"></label>
+        </div>
+        <div class="toolbar">
+          <span id="course-dirty" class="dirty" hidden></span>
+          <button id="course-save" class="primary" disabled>Save</button>
+        </div>
+      </div>
+    </section>
+
     <section class="annot">
       <div class="annot-head">
         <h3>Google</h3>

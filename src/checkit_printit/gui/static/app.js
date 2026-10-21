@@ -1590,10 +1590,49 @@ async function openAuthorizationPage() {
   } catch (err) { toast(err.message, true); }
 }
 
+/* The four scalars at the top of `course.toml`. Two of them print in the
+   corner of every page and there was nowhere at all to set them, which
+   is how a whole run shipped with a blank corner. */
+const IDENTITY_FIELDS = ["name", "code", "semester", "professor"];
+
+function identityInputs() {
+  return IDENTITY_FIELDS.map(k => [k, document.getElementById(
+    "course-" + k)]);
+}
+
+function fillIdentity(identity) {
+  for (const [key, input] of identityInputs()) {
+    input.value = (identity || {})[key] || "";
+    input.dataset.saved = input.value;
+    input.oninput = refreshIdentityDirty;
+  }
+  refreshIdentityDirty();
+}
+
+function refreshIdentityDirty() {
+  const dirty = identityInputs().some(
+    ([, i]) => i.value !== (i.dataset.saved || ""));
+  document.getElementById("course-save").disabled = !dirty;
+  const mark = document.getElementById("course-dirty");
+  mark.hidden = !dirty;
+  mark.textContent = dirty ? "unsaved" : "";
+}
+
+async function saveIdentity() {
+  const body = {};
+  for (const [key, input] of identityInputs()) body[key] = input.value.trim();
+  try {
+    const out = await api("/api/course/identity", body);
+    fillIdentity(out.identity);
+    toast("Saved");
+  } catch (err) { toast(err.message, true); }
+}
+
 async function loadSetup() {
   try {
     setupState = await api("/api/setup", {});
   } catch (err) { toast(err.message, true); return; }
+  fillIdentity(setupState.identity);
   setupState.said = setupState.said || [];
   // Drawn at once, from a file read: whether this course already has a
   // form is the thing that decides which buttons exist.
@@ -2261,6 +2300,11 @@ function renderBuild(out) {
   }
   box.appendChild(table);
 
+  if (out.headerGaps && out.headerGaps.length) {
+    line(`This course has no ${out.headerGaps.join(" and no ")}, so the top `
+         + `right corner of every page prints blank. Set them in Setup.`,
+         "warnline");
+  }
   for (const c of out.collisions) line("⚠ " + c, "warnline");
   if (out.unmatchedOverrides && out.unmatchedOverrides.length)
     line("⚠ override(s) for " + out.unmatchedOverrides.join(", ")
@@ -2456,6 +2500,7 @@ async function boot() {
   document.getElementById("print-revert").onclick = revertPrint;
   document.getElementById("print-reset").onclick = resetPrint;
   document.getElementById("setup-signin").onclick = signInToGoogle;
+  document.getElementById("course-save").onclick = saveIdentity;
   document.getElementById("setup-create").onclick = () =>
     runSetup("/api/setup/create", {
       title: document.getElementById("setup-title").value,
