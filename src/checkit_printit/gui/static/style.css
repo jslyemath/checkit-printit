@@ -327,8 +327,10 @@ h2 { font-size: 18px; margin: 0 0 12px; font-weight: 600; }
    glyph's top right corner, and smaller to suit the smaller target. */
 .navrail.tight button.unsaved::after {
   position: absolute;
-  top: 5px;
-  right: 11px;
+  /* The same inset from both edges, so it sits on the corner rather
+     than near it. */
+  top: 6px;
+  right: 6px;
   width: 6px;
   height: 6px;
   margin: 0;
@@ -346,12 +348,10 @@ main {
 
 /* Too narrow to spell the destinations out: the rail keeps its icons
    and gives the width back to the work. */
-@media (max-width: 900px) {
-  .navrail { width: 56px; }
-  .navrail .label, .navrail .who { display: none; }
-  .navrail .brand { justify-content: center; padding-inline: 0; }
-  .navrail button { justify-content: center; padding-inline: 0; }
-}
+/* The width rules all hang off `.tight`, which `applyRail()` sets for
+   both reasons the rail can be narrow -- folded by hand, or a window
+   too small for it. The media query used to set them for the second
+   case only, so anything keyed to the class was right half the time. */
 
 /* The page is older than the server. Not a toast: a toast fades, and
    this is a condition rather than an event -- nothing will work until
@@ -640,8 +640,11 @@ tr.secband.shut .bandtoggle .glyph { transform: rotate(180deg); }
   font-variant-numeric: tabular-nums;
 }
 tr:last-child td { border-bottom: none; }
-tr.dropped { background: var(--dropped); }
-tr.dropped td.cell-name input { text-decoration: line-through; }
+/* Dropped rows look like rows. They used to carry their own grey and
+   a line through the name, from when they were mixed in with everyone
+   else and had to shout about it. They are under a band that says
+   "Dropped" now, so the formatting was saying it twice -- and a line
+   through a person's name is not a kind way to say it once. */
 
 td input {
   width: 100%;
@@ -774,7 +777,6 @@ body.tall #roster thead th {
 }
 body.tall #roster thead th.pinleft,
 body.tall #roster thead th.pinright { z-index: 4; background: var(--surface-2); }
-tr.dropped td.pinleft, tr.dropped td.pinright { background: var(--dropped); }
 tr.secband td { z-index: 1; }
 
 /* A hairline so a pinned column reads as held rather than overlapping. */
@@ -1377,7 +1379,6 @@ tr.warnrow td { color: var(--dirty); }
   box-shadow: 0 -10px 24px rgba(0, 0, 0, .18);
 }
 body.railtight .savebar { left: 56px; }
-@media (max-width: 900px) { .savebar { left: 56px; } }
 
 /* Room for it, only while one is up. */
 body.hasbar main { padding-bottom: 72px; }
