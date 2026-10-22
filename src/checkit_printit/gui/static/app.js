@@ -202,23 +202,25 @@ const GLYPH = {
   // Two ways round, from Seating, where it already means exactly this.
   swapby: "M4 8h13l-3-3M20 16H7l3 3",
 
-  /* Row actions: Seating's own `unseatall` and `seatall`, a chair with
-     an arrow leaving it and the same chair with the arrow coming back.
+  /* A doorway with an arrow through it: leaving the class to drop,
+     coming back in to restore. The frame and the door panel stay put
+     and only the arrow turns, so the pair is one idea with a
+     direction.
 
-     The first attempt was a person with a minus sign, which at 16px
-     read as a person next to a dash -- the minus is the whole meaning
-     and it is the part that disappears. A bin was the obvious
-     alternative and is wrong twice over: dropping deletes nobody, and
-     a bin is an unkind picture of a person.
+     Two earlier attempts were worse. A person with a minus sign loses
+     the minus at this size, and the minus is the whole meaning. A
+     chair with an arrow -- Seating's own, so at least honest about
+     emptying a seat -- was too many strokes in 18px and read as a
+     shape with an arrow.
 
-     **What dropping actually does is empty their seat.** Seating had
-     already drawn that, and taking it means the two tabs say the same
-     thing with the same picture. Only the arrow turns between them, so
-     the pair reads as one idea with a direction. */
-  drop: [{ r: [5, 8, 10, 5.5, 1.7] }, { r: [3, 14.5, 14, 2.6, 1.3] },
-         { d: "M5.5 21v-3.9M14.5 21v-3.9M17 7L21.8 2.2M19 2.2h2.8v2.8" }],
-  restore: [{ r: [5, 8, 10, 5.5, 1.7] }, { r: [3, 14.5, 14, 2.6, 1.3] },
-            { d: "M5.5 21v-3.9M14.5 21v-3.9M21.8 2.2L17 7M17 4.2V7h2.8" }],
+     Not a bin, ever: dropping deletes nobody, and it is an unkind
+     picture of a person. */
+  drop: [{ r: [13.5, 3, 7.5, 18, 1.6] },
+         { d: "M10.5 3H5.2A1.2 1.2 0 0 0 4 4.2v15.6A1.2 1.2 0 0 0 5.2 21h5.3"
+              + "M6.5 12h6.2M10 8.8l3.2 3.2-3.2 3.2" }],
+  restore: [{ r: [13.5, 3, 7.5, 18, 1.6] },
+            { d: "M10.5 3H5.2A1.2 1.2 0 0 0 4 4.2v15.6A1.2 1.2 0 0 0 5.2 21h5.3"
+                 + "M12.7 12H6.5M9.7 8.8L6.5 12l3.2 3.2" }],
   /* An arrow coming back round to where it started. */
   reset: "M19.4 12a7.4 7.4 0 1 1-2.2-5.3M19.6 4.4v4.2h-4.2",
 };
@@ -323,19 +325,39 @@ function railCollapsed() {
   catch (err) { return false; }
 }
 
-function setRailCollapsed(on) {
-  document.getElementById("navrail").classList.toggle("tight", on);
+/* The rail is narrow for two unrelated reasons -- you folded it, or the
+ * window is too small for it -- and they used to be decided in two
+ * places: a class for the first, a CSS media query for the second.
+ * Anything keyed to only one of them was right half the time. The
+ * unsaved dot was: it moved to the glyph's corner when the rail was
+ * folded by hand and stayed on the row's edge when the window did it.
+ *
+ * So JavaScript owns the question. The media query is read here rather
+ * than acted on in the stylesheet, and `tight` / `body.railtight` are
+ * the one answer everything else keys to.
+ */
+const NARROW_RAIL = window.matchMedia("(max-width: 900px)");
+
+function railIsTight() { return railCollapsed() || NARROW_RAIL.matches; }
+
+function applyRail() {
+  const tight = railIsTight();
+  document.getElementById("navrail").classList.toggle("tight", tight);
   // The save bar is fixed and has to start where the rail ends, and it
   // is not inside the rail to read the class from there.
-  document.body.classList.toggle("railtight", on);
+  document.body.classList.toggle("railtight", tight);
+}
+
+function setRailCollapsed(on) {
   try { localStorage.setItem("railCollapsed", on ? "1" : "0"); }
   catch (err) { /* a private window still gets a working rail */ }
+  applyRail();
 }
 
 function buildNav() {
   const rail = document.getElementById("navrail");
   rail.textContent = "";
-  rail.classList.toggle("tight", railCollapsed());
+  applyRail();
 
   /* The course, where the product name used to be. A tool is opened
      to work on one course and the name of the program is the least
@@ -2738,6 +2760,8 @@ async function boot() {
   // The table resizes with the window, and `sizeColumns` only runs on a
   // render. Without this, widening the window left the old widths and
   // the spare room stayed spare.
+  NARROW_RAIL.addEventListener("change", applyRail);
+
   let resizing = null;
   window.addEventListener("resize", () => {
     clearTimeout(resizing);
