@@ -41,10 +41,6 @@
         <button type="button" id="name-filed" class="segbtn">Last, First</button>
       </div>
       <label><input type="checkbox" id="show-dropped"> show dropped students</label>
-      <span class="spacer"></span>
-      <span id="dirty" class="dirty" hidden></span>
-      <button id="save" class="primary" disabled>Save</button>
-      <button id="revert" disabled>Discard</button>
     </div>
     <!-- Header and body are both built from COLUMNS in app.js. They used to
          be two lists -- this one in markup, the cells in script -- and they
@@ -57,6 +53,17 @@
       </table>
     </div>
     <p id="roster-empty" class="muted" hidden></p>
+
+    <!-- One save bar per tab, and it is not on screen when there is
+         nothing to save. Four tabs had three different arrangements of
+         the same two buttons; this is the one of the three placements
+         that was chosen. -->
+    <div class="savebar" id="roster-bar" hidden>
+      <span class="dirty"></span>
+      <span class="spacer"></span>
+      <button id="save" class="primary">Save</button>
+      <button id="revert">Discard</button>
+    </div>
   </section>
 
   <section id="view-form" class="view" hidden>
@@ -98,12 +105,12 @@
         <span id="open-count" class="sec-count"></span>
       </div>
       <div class="annot-body">
+        <!-- Save and Discard used to live here, which said they belonged
+             to this section. They never did: the same save writes the
+             assessment fields above too. They are in the tab's own bar
+             now, where their scope is honest. -->
         <div class="toolbar">
-          <button id="skills-none" class="act">clear all</button>
-          <span class="spacer"></span>
-          <span id="skills-dirty" class="dirty" hidden></span>
-          <button id="skills-save" class="primary" disabled>Save</button>
-          <button id="skills-revert" disabled>Discard</button>
+          <button id="skills-none" class="act">Clear all</button>
         </div>
         <div id="skill-list" class="skill-list"></div>
       </div>
@@ -133,6 +140,13 @@
         <button id="form-push" class="primary">Push it</button>
       </div>
     </section>
+
+    <div class="savebar" id="form-bar" hidden>
+      <span class="dirty"></span>
+      <span class="spacer"></span>
+      <button id="skills-save" class="primary">Save</button>
+      <button id="skills-revert">Discard</button>
+    </div>
   </section>
 
   <section id="view-print" class="view" hidden>
@@ -154,6 +168,11 @@
               title="Empty every field on this tab, ready for the next run. Save to keep it; Discard puts it back.">Reset this print job</button>
     </header>
     <p id="print-blocked" class="banner warn" hidden></p>
+    <!-- "The roster changed since you last opened this tab" is news, not
+         a saving matter. It lived in the save bar until that bar learned
+         to hide itself when clean -- which is exactly when this notice
+         is worth reading. -->
+    <p id="print-news" class="banner" hidden></p>
 
     <!-- Annotated sections: the name and its `?` in a left gutter, the
          controls to the right, separated by a rule rather than boxed.
@@ -228,7 +247,7 @@
         <p class="hint-text" hidden>Spare copies, printed after the class
           set with a blank name line.</p>
         <div id="extras"></div>
-        <button id="extras-add" class="act">add a spare</button>
+        <button id="extras-add" class="act">Add a spare</button>
       </div>
     </section>
 
@@ -264,18 +283,17 @@
           <button id="p-preview">Preview the draw</button>
           <button id="p-build" class="primary">Build the PDF</button>
           <span class="spacer"></span>
-          <button id="p-reveal" class="act" hidden>open the folder</button>
+          <button id="p-reveal" class="act" hidden>Open the folder</button>
         </div>
         <div id="build-out"></div>
       </div>
     </section>
 
-    <div class="savebar">
-      <span id="print-news" class="news" hidden></span>
+    <div class="savebar" id="print-bar" hidden>
+      <span class="dirty"></span>
       <span class="spacer"></span>
-      <span id="print-dirty" class="dirty" hidden></span>
-      <button id="print-save" class="primary" disabled>Save</button>
-      <button id="print-revert" disabled>Discard</button>
+      <button id="print-save" class="primary">Save</button>
+      <button id="print-revert">Discard</button>
     </div>
   </section>
 
@@ -477,10 +495,6 @@
             <input id="course-professor" type="text" spellcheck="false"
                    placeholder="Slye"></label>
         </div>
-        <div class="toolbar">
-          <span id="course-dirty" class="dirty" hidden></span>
-          <button id="course-save" class="primary" disabled>Save</button>
-        </div>
       </div>
     </section>
 
@@ -507,8 +521,8 @@
       <div class="toolbar">
         <button id="setup-authorize" class="primary">Open the permissions
           page</button>
-        <button id="setup-authed">I have done it</button>
-        <button id="setup-copy" class="act">copy the link instead</button>
+        <button id="setup-authed">I have authorised it</button>
+        <button id="setup-copy" class="act">Copy the link instead</button>
         <span id="setup-authwait" class="muted" hidden></span>
       </div>
       <div id="setup-auth-notes"></div>
@@ -564,7 +578,7 @@
             <input id="setup-script" type="text" spellcheck="false"></label>
         </div>
         <div class="toolbar">
-          <button id="setup-inspect">What would this replace?</button>
+          <button id="setup-inspect">Check what this replaces</button>
           <button id="setup-attach" disabled>Attach it</button>
         </div>
         <div id="setup-inspected"></div>
@@ -572,6 +586,15 @@
     </section>
 
     <div id="setup-out"></div>
+
+    <!-- Discard is new. Save stood alone here, which left no way back
+         from a half-typed change except retyping what was there. -->
+    <div class="savebar" id="setup-bar" hidden>
+      <span class="dirty"></span>
+      <span class="spacer"></span>
+      <button id="course-save" class="primary">Save</button>
+      <button id="course-revert">Discard</button>
+    </div>
   </section>
 
   <section id="view-soon" class="view" hidden>

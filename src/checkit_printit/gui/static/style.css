@@ -1065,7 +1065,22 @@ table.seeds td {
   border: none; padding: 1px 12px 1px 0;
   font-variant-numeric: tabular-nums; font-size: 13px;
 }
-.warnline { color: var(--warn); }
+/* One shape for "this needs your attention", wherever it is reported.
+   The mark used to be typed into some of the sentences and not others
+   -- two of eight -- so warnings in the same report did not look like
+   each other. It belongs to the class, and then nobody has to remember
+   it. */
+.warnline {
+  color: var(--warn);
+  display: flex;
+  gap: var(--s2);
+  align-items: baseline;
+}
+.warnline::before {
+  content: "\26A0";
+  flex: 0 0 auto;
+  font-size: var(--t-sm);
+}
 #build-out p { margin: 4px 0; }
 
 /* A checkbox is shorter than a text input, so in a row of fields it sat on
@@ -1093,6 +1108,43 @@ table.seeds td {
 /* The pickers inside Print job are the same control as the Update form's
    list, just shorter. */
 .skill-list.short { max-height: 190px; margin-top: 4px; }
+
+/* ---- empty states ----------------------------------------------------
+   **A door, not a sign.** "This roster is empty" is a fact the screen
+   already made obvious; what the reader needs is the way out of it.
+   So: one line saying what is missing, and underneath it the thing to
+   do about it.
+
+   `emptystate`, not `empty`: seating.css has had an `.empty` since its
+   own stage A. */
+.emptystate {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  padding: var(--s6) var(--s5);
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--t-md);
+}
+.emptystate .lead {
+  display: block;
+  color: var(--ink-2);
+  font-size: var(--t-base);
+  font-weight: 600;
+  margin-bottom: var(--s2);
+}
+.emptystate code {
+  display: inline-block;
+  margin-top: var(--s2);
+  padding: var(--s1) var(--s2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  color: var(--ink);
+  white-space: pre-wrap;
+  text-align: left;
+}
 
 /* ---- waiting ---------------------------------------------------------
    Placeholders the shape of what is coming. Not a spinner: a spinner
