@@ -415,6 +415,27 @@ state, and a structural selector drew a stray rule across the top of
 the page whenever the first section in the markup was not the first on
 screen.
 
+### Never `confirm`, `alert` or `prompt`
+
+The desktop app's browser pane **suppresses native modal dialogs**.
+The drop button called `confirm()` and looked dead for weeks: the
+handler ran, the dialog never appeared, and the code waited for an
+answer nobody could give. Proved by stubbing `window.confirm` and
+watching it be called while the screen did nothing.
+
+Where an action needs a way back, give it a visible one instead of a
+question. Drop acts at once and the student lands in a Dropped band on
+the same screen, with restore in the same column.
+
+### Test a destructive action on a throwaway course
+
+Dropping a student from the live course empties their seat, and
+restoring deliberately does not give it back. `room.json` is the
+source of truth and `seating.toml` is generated from it, so fixing
+only the toml is undone by the next save from Seating. Putting one
+seat back took three independent signatures to identify it safely.
+`Scratch 48` exists for this.
+
 ### What a new tab inherits, and must not reinvent
 
 Stage 4 made these four shared. A tab added later uses them; it does

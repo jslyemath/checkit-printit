@@ -25,7 +25,7 @@
       <span id="roster-count" class="sec-count"></span>
     </header>
     <p class="hint-text" hidden>
-      Name, section and email are editable, and so is <b>Prints as</b> &mdash;
+      Name, section and email are editable, and so is <b>Print as</b> &mdash;
       fill that in and it replaces the name on the paper, the seating chart
       and every list here. Leave it blank and Name is used. Ids and the
       dropped flag are not editable: those are set by an import, a drop or a
@@ -35,13 +35,11 @@
          dropped" -- not a fifth state on the Name heading, which
          already cycles last and first each way and has no room to say
          a display choice as well. -->
-    <div class="toolbar">
-      <div class="seg" role="group" aria-label="How names are written">
-        <button type="button" id="name-natural" class="segbtn">First Last</button>
-        <button type="button" id="name-filed" class="segbtn">Last, First</button>
-      </div>
-      <label><input type="checkbox" id="show-dropped"> show dropped students</label>
-    </div>
+    <!-- The toolbar is gone. It held two controls that both belonged to
+         the table: the name format, which is now a swap button in the
+         Name heading, and "show dropped students", which is now a band
+         at the bottom you can open. -->
+
     <!-- Header and body are both built from COLUMNS in app.js. They used to
          be two lists -- this one in markup, the cells in script -- and they
          drifted: a rule hid the SID cell on a narrow window without hiding
