@@ -439,49 +439,53 @@ function show(id) {
 
 // ------------------------------------------------------------- overview --
 
+/* The course's name, for the one or two places that need to say it in
+   a sentence -- the Roster's empty state puts it in the `-c` flag of
+   the command it offers. */
+let courseName = "";
+
 function renderOverview(summary) {
-  // The count is dropped at a narrow window: it is the Overview's own
-  // first card, so losing it from the banner costs nothing, and the
-  // banner is competing with the canvas for the same pixels.
   /* The name alone. "MAT 106 - 45 active of 45" is three facts run
      together with a dash, which is the tic section 13.4 bans, and in a
      188px rail it truncated to "MAT 106 - 45 activ...". The counts are
-     on the Roster, beside the people they count. */
-  const where = document.getElementById("course-name");
-  where.textContent = summary.name;
+     on the Roster, beside the people they count.
 
-  // The cards are gone with the tab. What this function still does is
-  // name the course on the rail, which is the one thing from the old
-  // Overview that somebody actually read.
-  const cards = null;
-  if (!cards) return;
-  cards.textContent = "";
-  const add = (n, label, missing) => {
-    const d = document.createElement("div");
-    d.className = "card" + (missing ? " missing" : "");
-    d.innerHTML = `<div class="n"></div><div class="label"></div>`;
-    d.querySelector(".n").textContent = n;
-    d.querySelector(".label").textContent = label;
-    cards.appendChild(d);
-  };
-  add(summary.active, "students");
-  for (const [section, n] of Object.entries(summary.sections)) add(n, "in " + section);
-  for (const [file, there] of Object.entries(summary.files)) {
-    add(there ? "yes" : "—", file, !there);
-  }
+     Everything else this function did drew the Overview's eight cards.
+     That tab went in stage 2, and the code stayed behind a
+     `const cards = null; if (!cards) return;` -- thirteen unreachable
+     lines, which is how a reader learns to distrust the file. */
+  courseName = summary.name || "";
+  document.getElementById("course-name").textContent = courseName;
 }
 
 // --------------------------------------------------------------- roster --
 
 function key(index, field) { return index + ":" + field; }
 
+/* One save bar per tab, and it is not on screen when there is nothing
+ * to save.
+ *
+ * Four tabs had grown three arrangements of the same two buttons: the
+ * Roster's in its toolbar, the Update form's inside one section (which
+ * said they belonged to that section, and they did not -- the same save
+ * writes the assessment fields above), Setup's with no Discard at all,
+ * and the Print tab's in a bar that was always there, including when
+ * both its buttons were disabled.
+ *
+ * A bar that appears only when dirty is the placement that was chosen,
+ * and a disabled Save is a control that cannot say why it is disabled.
+ * So the bar is absent instead.
+ */
+function saveBar(view, dirty, what) {
+  const bar = document.getElementById(view + "-bar");
+  bar.hidden = !dirty;
+  bar.querySelector(".dirty").textContent = dirty ? what : "";
+}
+
 function refreshDirty() {
   const n = edits.size;
-  const bar = document.getElementById("dirty");
-  bar.hidden = n === 0;
-  bar.textContent = n === 1 ? "1 unsaved change" : `${n} unsaved changes`;
-  document.getElementById("save").disabled = n === 0;
-  document.getElementById("revert").disabled = n === 0;
+  saveBar("roster", n > 0,
+          n === 1 ? "1 unsaved change" : `${n} unsaved changes`);
 }
 
 function cellInput(student, field, column) {
@@ -737,6 +741,55 @@ function isDefaultSort() {
                           && s.desc === DEFAULT_SORT[i].desc);
 }
 
+/* The Roster with nothing in it, or nothing left after a filter.
+ *
+ * Three states and three different ways out, which is the point of
+ * writing them separately: "this roster is empty" told the reader a
+ * thing the blank screen had already said.
+ *
+ * Importing is still a command rather than a button, so the command is
+ * what it offers -- with the course name already in it, because the
+ * `-c` flag is the part people get wrong. When the class-list import
+ * becomes a screen (see section 14.6 -- the LMS id arrives the same
+ * way), this becomes a button and the command goes.
+ */
+function renderRosterEmpty(hasRows) {
+  const box = document.getElementById("roster-empty");
+  box.hidden = hasRows;
+  box.textContent = "";
+  if (hasRows) return;
+  box.className = "emptystate";
+
+  const lead = document.createElement("strong");
+  lead.className = "lead";
+  const say = (text) => box.appendChild(document.createTextNode(text));
+
+  if (!students.length) {
+    lead.textContent = "No students yet";
+    box.append(lead);
+    say("A class list from the registrar or the LMS fills this in. ");
+    const cmd = document.createElement("code");
+    cmd.textContent =
+      `checkit-printit roster import -c "${courseName || "<course>"}" `
+      + `classlist.csv`;
+    box.appendChild(cmd);
+    return;
+  }
+
+  lead.textContent = "Everyone here is dropped";
+  box.append(lead);
+  say("Nothing will print. ");
+  const show = document.createElement("button");
+  show.className = "act";
+  show.textContent = "Show dropped students";
+  show.onclick = () => {
+    const tick = document.getElementById("show-dropped");
+    tick.checked = true;
+    tick.dispatchEvent(new Event("change"));
+  };
+  box.appendChild(show);
+}
+
 /* Runs of one section, in the order the rows are already in.
  *
  * `45 students - 22 in 820 - 23 in 830` is the banned shape, and the
@@ -881,11 +934,7 @@ function renderRoster() {
       + (dropped ? `, ${dropped} dropped` : "")
     : "";
 
-  const empty = document.getElementById("roster-empty");
-  empty.hidden = shown.length > 0;
-  empty.textContent = students.length
-    ? "Every student on this roster is dropped. Tick “show dropped” to see them."
-    : "This roster is empty.";
+  renderRosterEmpty(shown.length > 0);
 }
 
 async function drop(student, dropped) {
@@ -993,10 +1042,7 @@ function skillsDirty() {
 
 function refreshSkillsDirty() {
   const dirty = skillsDirty();
-  document.getElementById("skills-dirty").hidden = !dirty;
-  document.getElementById("skills-dirty").textContent = "unsaved changes";
-  document.getElementById("skills-save").disabled = !dirty;
-  document.getElementById("skills-revert").disabled = !dirty;
+  saveBar("form", dirty, "unsaved changes to this assessment");
   // No dash: the count is its own thing on the header row, not a
   // continuation of the heading's sentence.
   document.getElementById("open-count").textContent =
@@ -1345,7 +1391,7 @@ async function refreshGoogle(force) {
     bar.textContent = "Waiting for the Google sign-in in your browser… ";
     const again = document.createElement("button");
     again.className = "act";
-    again.textContent = "check now";
+    again.textContent = "Check now";
     again.onclick = () => refreshGoogle(true);
     bar.appendChild(again);
     bar.hidden = false;
@@ -1612,10 +1658,14 @@ function fillIdentity(identity) {
 function refreshIdentityDirty() {
   const dirty = identityInputs().some(
     ([, i]) => i.value !== (i.dataset.saved || ""));
-  document.getElementById("course-save").disabled = !dirty;
-  const mark = document.getElementById("course-dirty");
-  mark.hidden = !dirty;
-  mark.textContent = dirty ? "unsaved" : "";
+  saveBar("setup", dirty, "unsaved changes to this course");
+}
+
+/* Put the fields back to what is on disk. Setup had Save alone, so the
+   only way out of a half-typed change was to remember what was there. */
+function revertIdentity() {
+  for (const [, input] of identityInputs()) input.value = input.dataset.saved || "";
+  refreshIdentityDirty();
 }
 
 async function saveIdentity() {
@@ -1778,11 +1828,7 @@ function printDirty() {
 }
 
 function refreshPrintDirty() {
-  const d = printDirty();
-  document.getElementById("print-dirty").hidden = !d;
-  document.getElementById("print-dirty").textContent = "unsaved changes";
-  document.getElementById("print-save").disabled = !d;
-  document.getElementById("print-revert").disabled = !d;
+  saveBar("print", printDirty(), "unsaved changes to this run");
 }
 
 function skillPicker(selected, onChange) {
@@ -1951,7 +1997,7 @@ function renderExtras() {
     n.onchange = () => { extra.copies = Number(n.value || 1); refreshPrintDirty(); };
     const rm = document.createElement("button");
     rm.className = "act";
-    rm.textContent = "remove";
+    rm.textContent = "Remove";
     rm.onclick = () => { draft.extras.splice(i, 1); renderExtras(); renderVariants(); refreshPrintDirty(); };
     row.append(sel, n, document.createTextNode(" copies"), rm);
     box.appendChild(row);
@@ -2186,14 +2232,14 @@ function renderPull(data) {
          + `"Default when nobody chose" says.`, "muted");
 
   if (data.unknownEmails.length) {
-    line(`⚠ ${data.unknownEmails.length} response(s) came from an address `
+    line(`${data.unknownEmails.length} response(s) came from an address `
          + `nobody on the roster has:`, "warnline");
     for (const address of data.unknownEmails) line("    " + address, "muted");
     line("Add the address to that student on the Roster tab, or check for "
          + "a typo.", "muted");
   }
   if (data.unrecognised.length) {
-    line(`⚠ ${data.unrecognised.length} answer(s) name a skill the bank `
+    line(`${data.unrecognised.length} answer(s) name a skill the bank `
          + `does not have:`, "warnline");
     for (const r of data.unrecognised)
       line(`    ${r.email}: ${r.option.slice(0, 60)}`, "muted");
@@ -2305,13 +2351,13 @@ function renderBuild(out) {
          + `right corner of every page prints blank. Set them in Setup.`,
          "warnline");
   }
-  for (const c of out.collisions) line("⚠ " + c, "warnline");
+  for (const c of out.collisions) line(c, "warnline");
   if (out.unmatchedOverrides && out.unmatchedOverrides.length)
-    line("⚠ override(s) for " + out.unmatchedOverrides.join(", ")
+    line("override(s) for " + out.unmatchedOverrides.join(", ")
          + " matched nobody in the roster, so nothing changed for them",
          "warnline");
   if (out.unseated.length)
-    line("⚠ not in the seating chart, printed last: " + out.unseated.join(", "),
+    line("not in the seating chart, printed last: " + out.unseated.join(", "),
          "warnline");
   for (const [slug, fields] of Object.entries(out.missingFields))
     line(`note: ${slug}'s template asked for ${fields.join(", ")}, which its `
@@ -2501,6 +2547,7 @@ async function boot() {
   document.getElementById("print-reset").onclick = resetPrint;
   document.getElementById("setup-signin").onclick = signInToGoogle;
   document.getElementById("course-save").onclick = saveIdentity;
+  document.getElementById("course-revert").onclick = revertIdentity;
   document.getElementById("setup-create").onclick = () =>
     runSetup("/api/setup/create", {
       title: document.getElementById("setup-title").value,

@@ -162,6 +162,37 @@ def test_no_control_is_styled_as_underlined_text():
         "styled as underlined text: " + "; ".join(offenders))
 
 
+def test_the_warning_mark_is_not_typed_into_sentences(js):
+    """`.warnline` draws its own mark.
+
+    It used to be typed into the message -- two of eight had it -- so
+    warnings in the same report did not look alike. A mark that has to
+    be remembered is a mark that gets forgotten.
+    """
+    typed = [l.strip()[:60] for l in js.splitlines() if "⚠" in l]
+    assert not typed, (
+        "a warning mark is written into the text; `.warnline::before` "
+        "draws it: " + "; ".join(typed))
+
+
+def test_every_tab_with_a_save_bar_has_exactly_one(html):
+    """One scope per tab. The Update form had its Save inside a section,
+    which said the button belonged to that section when the same save
+    also wrote the fields above it."""
+    bars = re.findall(r'class="savebar" id="([\w-]+)"', html)
+    assert sorted(bars) == sorted(set(bars)), f"duplicate save bars: {bars}"
+    assert len(bars) >= 4, f"expected a bar per editable tab, found {bars}"
+    for view in bars:
+        assert view.endswith("-bar"), view
+
+
+def test_no_save_button_lives_outside_its_bar(html):
+    """A Save loose in a toolbar is the arrangement this replaced."""
+    for block in re.findall(r'<div class="toolbar">(.*?)</div>', html, re.S):
+        assert "Save</button>" not in block, (
+            "a Save button is still in a toolbar: " + block.strip()[:80])
+
+
 def test_the_fixtures_actually_read_something(html, js):
     """A check that examined nothing passes for the wrong reason."""
     assert len(html) > 2000, "index.html looks empty"

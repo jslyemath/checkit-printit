@@ -415,6 +415,26 @@ state, and a structural selector drew a stray rule across the top of
 the page whenever the first section in the markup was not the first on
 screen.
 
+### What a new tab inherits, and must not reinvent
+
+Stage 4 made these four shared. A tab added later uses them; it does
+not grow its own.
+
+* **`<div class="savebar" id="<view>-bar" hidden>`** with a
+  `.dirty` span, then `Save` and `Discard`. Drive it with
+  `saveBar(view, dirty, what)`, which hides the bar when clean. **One
+  bar per tab, and nothing else in it** -- `#print-news` was in there
+  and would have been hidden exactly when it mattered. A disabled Save
+  is not the pattern; an absent bar is.
+* **`.warnline` draws its own `⚠`.** Never type one into a message; a
+  test fails on the character appearing in `app.js`.
+* **`.emptystate`** -- a `.lead` line saying what is missing, then the
+  way out: a button, or a `<code>` command with `-c "<course>"`
+  already filled in. Not a sentence restating that the screen is
+  blank.
+* **Sentence case on every control label.** Prominence comes from
+  `.primary` versus `.act`, not from capitalisation.
+
 ### A glyph strokes itself; the button gives it a surface
 
 `glyph(name)` builds the SVG and puts `class="glyph"` on it, which is
