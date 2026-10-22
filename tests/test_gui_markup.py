@@ -14,6 +14,8 @@ exactly that.
 
 import os
 import re
+import shutil
+import subprocess
 
 import pytest
 
@@ -136,6 +138,28 @@ def test_the_collision_check_would_have_caught_the_two_that_shipped():
         "examples or this test proves nothing")
     assert "on" not in seating, "`.on` is compound-only and must stay allowed"
     assert not bare_classes(".skill.on { color: red }")
+
+
+@pytest.mark.parametrize("name", ["app.js", "seating/seating.js"])
+def test_the_scripts_parse(name):
+    """`node --check`, because a SyntaxError is invisible from here.
+
+    Nothing in this suite runs the browser's JavaScript, so a duplicate
+    `const` in one function is a blank tab and a green test run. It has
+    happened twice: `ICON` against seating.js's own, and `dropped`
+    declared twice inside `renderRoster`.
+
+    Skipped where node is missing rather than failing -- the suite has
+    to run on a machine that only has Python.
+    """
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+    path = os.path.join(STATIC, *name.split("/"))
+    done = subprocess.run([node, "--check", path],
+                          capture_output=True, text=True)
+    assert done.returncode == 0, (
+        f"{name} does not parse:\n{done.stderr.strip()}")
 
 
 def test_no_control_is_styled_as_underlined_text():

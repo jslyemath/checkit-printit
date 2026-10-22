@@ -305,6 +305,38 @@ h2 { font-size: 18px; margin: 0 0 12px; font-weight: 600; }
 .navrail.tight button { justify-content: center; padding-inline: 0; }
 .navrail.tight .railtoggle svg { transform: scaleX(-1); }
 
+/* ---- unsaved work, from the rail -------------------------------------
+   A save bar that hides itself when clean also hides itself when you
+   are on another tab, so the rail has to carry the fact instead. One
+   dot per destination with something unsaved in it.
+
+   `--dirty` is the same yellow the save bar's own text uses, so the
+   dot and the bar are visibly the same claim. */
+.navrail button { position: relative; }
+.navrail button.unsaved::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--dirty);
+  /* Expanded: on the row's right edge, on the text's line. */
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+/* Narrow: there is no row to sit at the end of, so it rides the
+   glyph's top right corner, and smaller to suit the smaller target. */
+.navrail.tight button.unsaved::after {
+  position: absolute;
+  top: 5px;
+  right: 11px;
+  width: 6px;
+  height: 6px;
+  margin: 0;
+  /* A ring in the rail's own colour, so the dot reads as on top of the
+     glyph rather than as part of it. */
+  box-shadow: 0 0 0 2px var(--surface-2);
+}
+
 main {
   flex: 1 1 auto;
   min-width: 0;
@@ -466,8 +498,8 @@ button.iconbtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   /* A grey chip at rest, not a bare glyph on the row: with no surface
      of its own it read as an icon printed on the table rather than as
@@ -478,7 +510,10 @@ button.iconbtn {
   color: var(--muted);
   cursor: pointer;
 }
-button.iconbtn svg { width: 16px; height: 16px; display: block; }
+/* 18, not 16. The chair's legs are 3.9 units of a 24-unit box, which
+   at 16px is under three pixels of stroke and reads as noise rather
+   than as a chair. */
+button.iconbtn svg { width: 18px; height: 18px; display: block; }
 button.iconbtn:hover {
   color: var(--accent);
   background: var(--accent-soft);
@@ -489,6 +524,15 @@ button.iconbtn:focus-visible {
   color: var(--accent);
   border-color: var(--accent);
 }
+/* In a heading, beside a word rather than alone in a cell. */
+button.iconbtn.tiny {
+  width: 20px;
+  height: 20px;
+  vertical-align: middle;
+}
+button.iconbtn.tiny svg { width: 13px; height: 13px; }
+th .namefmt { float: right; margin-top: -1px; }
+
 /* Restoring is the undo, so it is not the colour of a thing to do. */
 button.iconbtn.undo:hover {
   color: var(--ink);
@@ -499,7 +543,7 @@ button.iconbtn.undo:hover {
 table {
   /* `auto`, not 100%: the widths come from a <colgroup> that app.js sizes to
      the content, so the table is as wide as it needs to be and no wider. A
-     stretched table made Prints as and Section as wide as Email. */
+     stretched table made Print as and Section as wide as Email. */
   width: auto;
   table-layout: fixed;
   /* `separate`, not `collapse`. A collapsed table cannot have sticky
@@ -556,16 +600,41 @@ tr.secband td {
   background: var(--surface-2);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  padding: var(--s1) var(--s2);
+  padding: 0;
 }
+/* The whole band is the control that opens and shuts its group. */
+.bandtoggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s2) var(--s3);
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.bandtoggle:hover { background: var(--surface-3); }
+.bandtoggle .glyph {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  color: var(--muted);
+  transition: transform .12s ease;
+}
+tr.secband.shut .bandtoggle .glyph { transform: rotate(180deg); }
 .secband-name {
   font-size: var(--t-sm);
   font-weight: 600;
   letter-spacing: .04em;
   color: var(--ink-2);
 }
+/* `margin-left: auto`, not `float: right`. Floated out of the flow it
+   sat above the name's baseline, which read as misaligned. */
 .secband-count {
-  float: right;
+  margin-left: auto;
   font-size: var(--t-sm);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -586,6 +655,13 @@ td input {
 td input:hover { border-color: var(--line); }
 td input:focus { border-color: var(--accent); outline: none; background: var(--bg); }
 td input.changed { border-color: var(--dirty); background: var(--bg); }
+/* A filed name needs one comma. Until it has one there is nothing to
+   save, so the cell says so rather than the save bar staying quiet
+   about a change it is refusing to take. */
+td input.invalid {
+  border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
 
 td.ro { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
 
@@ -622,8 +698,14 @@ th button.sort.sorted { opacity: .75; }
 th button.sort.primary-sort { opacity: 1; font-weight: 700; }
 
 /* The reset sits over the drop column's empty heading, pushed right so
-   it does not read as a label for the links beneath it. */
+   it does not read as a label for the links beneath it.
+
+   No left edge: the column has no heading, so a rule between SID's
+   heading and nothing at all read as a stray mark. Written with the
+   id, because `#roster .pinright` draws that edge and a bare class
+   loses to it. */
 th.actions-head { text-align: right; }
+#roster th.actions-head { box-shadow: none; }
 th.actions-head button.act { text-transform: none; letter-spacing: 0; }
 
 /* ---- the table's own window -----------------------------------------
@@ -1262,25 +1344,44 @@ tr.warnrow td { color: var(--dirty); }
 /* What the Roster changed while this tab was away. */
 .news { font-size: 12px; color: var(--muted); }
 
-/* Save covers the whole tab, so it is pinned to the bottom of the view
-   rather than sitting in one of its six cards. Sticky to the bottom
-   instead of under the header, because the header wraps to two rows at a
-   narrow width and a fixed offset would be wrong at one of them. */
+/* ---- the save bar ----------------------------------------------------
+   Save covers the whole tab, so the bar does too: it spans the work
+   area from the rail to the window's right edge and sits on the
+   bottom. It used to be a rounded box the width of the content column,
+   which at a narrow window looked like one more card that happened to
+   have buttons in it.
+
+   A floating pill was the other candidate and was rejected: the Roster
+   is a fixed-height pane whose last row goes right to the bottom, and
+   a pill would have covered it. A bar in the layout **makes room**
+   instead -- `body.hasbar` pays for it in `main`'s padding.
+
+   Fixed rather than sticky because it has to escape `main`, which is
+   capped at 1100px and would otherwise stop the bar short of the
+   right-hand edge. */
 .savebar {
-  position: sticky;
+  position: fixed;
+  left: 188px;
+  right: 0;
   bottom: 0;
-  z-index: 4;
+  z-index: 20;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--s2);
   flex-wrap: wrap;
-  margin-top: 14px;
-  padding: 10px 12px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  box-shadow: 0 -8px 20px rgba(0, 0, 0, .3);
+  padding: var(--s3) var(--s4);
+  background: var(--surface-2);
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: 0 -10px 24px rgba(0, 0, 0, .18);
 }
+body.railtight .savebar { left: 56px; }
+@media (max-width: 900px) { .savebar { left: 56px; } }
+
+/* Room for it, only while one is up. */
+body.hasbar main { padding-bottom: 72px; }
+body.hasbar.tall main { padding-bottom: 68px; }
 
 #who td input.bad {
   border-color: var(--warn);

@@ -71,7 +71,7 @@ const COLUMNS = [
   // printed name. Same widths as Name, because it holds the same thing
   // -- when it holds anything; its floor is the heading, because on a
   // roster where nobody has one it was 200px of blank boxes.
-  { key: "preferred", label: "Prints as", edit: true, min: 200, max: 330,
+  { key: "preferred", label: "Print as", edit: true, min: 200, max: 330,
     floor: 96, rank: 3, grow: true,
     placeholder: s => s.name },
   { key: "section",   label: "Section",  edit: true, min: 74,  max: 110,
@@ -82,15 +82,14 @@ const COLUMNS = [
     floor: 76, rank: 6,
     text: s => s.sid || s.alt_id || "—",
     value: s => s.sid || s.alt_id || "" },
-  // Wide enough for a 28px chip plus the cell's own 8px either side,
+  // Wide enough for a 30px chip plus the cell's own 8px either side,
   // or the button is clipped by `td { overflow: hidden }`.
-  { key: "_actions",  label: "",         sortable: false, min: 52, max: 52,
-    floor: 52, rank: 2, pin: "right" },
+  { key: "_actions",  label: "",         sortable: false, min: 54, max: 54,
+    floor: 54, rank: 2, pin: "right" },
 ];
 
 let students = [];
 let edits = new Map();          // "index:field" -> value
-let showDropped = false;
 // Sorts stack, the way a spreadsheet's do: the most recent click is the
 // primary key and the ones before it survive as tiebreakers. Sorting by
 // surname and then by section gives 820 A-Z, then 830 A-Z.
@@ -188,31 +187,38 @@ const GLYPH = {
     + "a1.6 1.6 0 0 1 1.6-1.6h12.8a1.6 1.6 0 0 1 1.6 1.6v4.8"
     + "a1.6 1.6 0 0 1-1.6 1.6h-1.6M7.2 14.2h9.6v5.6H7.2z",
   record: "M12 7.4v4.9l3.1 2M3.6 12a8.4 8.4 0 1 0 2.6-6.1M6.2 3.2v2.9H3.3",
-  /* Three tables seen from above, not four equal squares: it is the
-     shape of the room it opens, and the same arrangement as Seating's
-     own Groups glyph, so the rail and the mode agree. Rounded, like
-     everything else here. */
-  seating: [{ r: [3, 4, 18, 7, 1.8] },
-            { r: [3, 14, 8, 6, 1.8] },
-            { r: [14, 14, 7, 6, 1.8] }],
+  /* Seating's own chair, front on, lifted from `seating.js`. It was
+     three rectangles -- the Groups glyph -- which is a picture of one
+     mode inside the tab rather than of the tab, and too nondescript to
+     read as anything at 21px. */
+  seating: [{ r: [7.5, 2.5, 9, 7, 2] },
+            { r: [4, 11, 16, 3.2, 1.6] },
+            { d: "M7 21v-6.8M17 21v-6.8" }],
   setup: "M4 7.4h9.2M17.2 7.4h2.8M4 16.6h3.6M11.6 16.6h8.4"
     + "M15.2 5.2v4.4M9.2 14.4v4.4",
   collapse: "M14.5 7.5 9.5 12l5 4.5",
+  // Points up while a group is open; CSS turns it when it closes.
+  chev: "M6 14.5l6-6 6 6",
+  // Two ways round, from Seating, where it already means exactly this.
+  swapby: "M4 8h13l-3-3M20 16H7l3 3",
 
-  /* Row actions. Not a bin: dropping a student deletes nothing -- they
-     stay on the roster, greyed, and simply stop printing. A person with
-     a line through them says that; a bin says the opposite and would be
-     the control lying about what it does.
+  /* Row actions: Seating's own `unseatall` and `seatall`, a chair with
+     an arrow leaving it and the same chair with the arrow coming back.
 
-     `restore` is the same person without the line and with the arrow
-     that undoes it, so the pair reads as one toggle rather than two
-     unrelated glyphs. */
-  drop: "M10 11.2a3.3 3.3 0 1 1 0-6.6 3.3 3.3 0 0 1 0 6.6"
-    + "M3.6 19.4c0-3.1 2.7-5.3 6.4-5.3 1.2 0 2.3.2 3.2.6"
-    + "M14.6 17.4h6.2",
-  restore: "M10 11.2a3.3 3.3 0 1 1 0-6.6 3.3 3.3 0 0 1 0 6.6"
-    + "M3.6 19.4c0-3.1 2.7-5.3 6.4-5.3 1.2 0 2.3.2 3.2.6"
-    + "M21 17.4h-5.6M17.6 14.8l-2.6 2.6 2.6 2.6",
+     The first attempt was a person with a minus sign, which at 16px
+     read as a person next to a dash -- the minus is the whole meaning
+     and it is the part that disappears. A bin was the obvious
+     alternative and is wrong twice over: dropping deletes nobody, and
+     a bin is an unkind picture of a person.
+
+     **What dropping actually does is empty their seat.** Seating had
+     already drawn that, and taking it means the two tabs say the same
+     thing with the same picture. Only the arrow turns between them, so
+     the pair reads as one idea with a direction. */
+  drop: [{ r: [5, 8, 10, 5.5, 1.7] }, { r: [3, 14.5, 14, 2.6, 1.3] },
+         { d: "M5.5 21v-3.9M14.5 21v-3.9M17 7L21.8 2.2M19 2.2h2.8v2.8" }],
+  restore: [{ r: [5, 8, 10, 5.5, 1.7] }, { r: [3, 14.5, 14, 2.6, 1.3] },
+            { d: "M5.5 21v-3.9M14.5 21v-3.9M21.8 2.2L17 7M17 4.2V7h2.8" }],
   /* An arrow coming back round to where it started. */
   reset: "M19.4 12a7.4 7.4 0 1 1-2.2-5.3M19.6 4.4v4.2h-4.2",
 };
@@ -271,16 +277,7 @@ function filedNames() {
 function setFiledNames(on) {
   try { localStorage.setItem("filedNames", on ? "1" : "0"); }
   catch (err) { /* a private window still gets a working roster */ }
-  renderNameFormat();
   renderRoster();
-}
-
-function renderNameFormat() {
-  const on = filedNames();
-  document.getElementById("name-natural")
-    .setAttribute("aria-pressed", String(!on));
-  document.getElementById("name-filed")
-    .setAttribute("aria-pressed", String(on));
 }
 
 /* "Lynott, Kilah", from the server's split and never from one done here.
@@ -328,6 +325,9 @@ function railCollapsed() {
 
 function setRailCollapsed(on) {
   document.getElementById("navrail").classList.toggle("tight", on);
+  // The save bar is fixed and has to start where the rail ends, and it
+  // is not inside the rail to read the class from there.
+  document.body.classList.toggle("railtight", on);
   try { localStorage.setItem("railCollapsed", on ? "1" : "0"); }
   catch (err) { /* a private window still gets a working rail */ }
 }
@@ -480,6 +480,17 @@ function saveBar(view, dirty, what) {
   const bar = document.getElementById(view + "-bar");
   bar.hidden = !dirty;
   bar.querySelector(".dirty").textContent = dirty ? what : "";
+  /* The bar is on one tab; the fact belongs to the app. A bar that
+     hides itself when clean also hides itself when you have stepped
+     over to another tab, so the rail carries a dot for every
+     destination holding something unsaved. */
+  const tab = document.querySelector(`.navrail button[data-view="${view}"]`);
+  if (tab) tab.classList.toggle("unsaved", dirty);
+  // The bar is fixed to the bottom of the window, so the page has to
+  // pay for the space it covers -- otherwise it sits on the last row
+  // of whatever is open.
+  document.body.classList.toggle(
+    "hasbar", Boolean(document.querySelector(".savebar:not([hidden])")));
 }
 
 function refreshDirty() {
@@ -488,17 +499,52 @@ function refreshDirty() {
           n === 1 ? "1 unsaved change" : `${n} unsaved changes`);
 }
 
+/* "Lynott, Kilah" back into "Kilah Lynott".
+ *
+ * The comma is the whole specification, and it has to be exactly one:
+ * without it there is no way to know where the surname stops, and with
+ * two there is no way to know which half is which. A name is not
+ * guessable -- that is the lesson of the one compound surname on this
+ * roster -- so the rule is stated to the typist rather than inferred
+ * from what they typed.
+ *
+ * Returns null when the text is not a filed name, which the caller
+ * shows as an invalid cell rather than saving a wrong name.
+ */
+function unfileName(text) {
+  const parts = String(text).split(",");
+  if (parts.length !== 2) return null;
+  const last = parts[0].trim();
+  const first = parts[1].trim();
+  if (!last || !first) return null;
+  return `${first} ${last}`;
+}
+
 function cellInput(student, field, column) {
   const input = document.createElement("input");
-  input.value = student[field] || "";
+  // The Name cell shows what the column is showing. It is editable in
+  // either order: read-only was the first answer and the wrong one,
+  // since the roster is the one place a name gets corrected.
+  const filed = field === "name" && filedNames();
+  input.value = filed ? displayName(student) : (student[field] || "");
   input.spellcheck = false;
-  // An empty "Prints as" is not missing data -- it means the roster name is
+  if (filed) input.title = "Surname, then given name, separated by one comma.";
+  // An empty "Print as" is not missing data -- it means the roster name is
   // used -- so the box shows that name greyed rather than sitting blank.
   if (column && column.placeholder) input.placeholder = column.placeholder(student);
   input.oninput = () => {
     const k = key(student.index, field);
-    if (input.value === (student[field] || "")) edits.delete(k);
-    else edits.set(k, input.value);
+    const stored = filed ? unfileName(input.value) : input.value;
+    input.classList.toggle("invalid", filed && stored === null);
+    if (stored === null) {
+      // Half-typed is not an edit to save. The cell says so and the
+      // save bar does not offer to write it.
+      edits.delete(k);
+    } else if (stored === (student[field] || "")) {
+      edits.delete(k);
+    } else {
+      edits.set(k, stored);
+    }
     input.classList.toggle("changed", edits.has(k));
     refreshDirty();
   };
@@ -587,7 +633,7 @@ function sizeColumns(rows) {
   group = document.createElement("colgroup");
 
   // A column holding nothing needs room for its heading and no more.
-  // `Prints as` is empty for every student on this roster and was
+  // `Print as` is empty for every student on this roster and was
   // reserving 200px -- a fifth of the table -- to display nothing, while
   // Email was clipped and the drop button was off the right-hand edge.
   // So `min` is the comfortable width for a column *with* content, and
@@ -708,6 +754,25 @@ function renderHeader() {
     const rank = entry ? rankOf(entry.key) : null;
 
     if (column.pin) th.classList.add("pin" + column.pin);
+    /* The name format lives in the Name heading, not in a box above the
+       table. It is a property of this column, so it belongs on it --
+       and a segmented pair floating in a toolbar was, in the
+       instructor's words, butt ugly.
+
+       Seating's "two ways round" arrows, because that is exactly what
+       it does and the glyph already means that elsewhere. */
+    if (column.key === "name") {
+      const swap = document.createElement("button");
+      swap.className = "iconbtn tiny namefmt";
+      swap.type = "button";
+      swap.appendChild(icon("swapby"));
+      swap.title = filedNames()
+        ? "Showing surname first. Switch to First Last."
+        : "Showing given name first. Switch to Last, First.";
+      swap.setAttribute("aria-label", swap.title);
+      swap.onclick = (e) => { e.stopPropagation(); setFiledNames(!filedNames()); };
+      th.appendChild(swap);
+    }
     const b = document.createElement("button");
     b.className = "sort";
     // A column with two orders has to say which one it is on: "Name" alone
@@ -781,12 +846,8 @@ function renderRosterEmpty(hasRows) {
   say("Nothing will print. ");
   const show = document.createElement("button");
   show.className = "act";
-  show.textContent = "Show dropped students";
-  show.onclick = () => {
-    const tick = document.getElementById("show-dropped");
-    tick.checked = true;
-    tick.dispatchEvent(new Event("change"));
-  };
+  show.textContent = "Open the dropped list";
+  show.onclick = () => { shutBands.delete(DROPPED_BAND); renderRoster(); };
   box.appendChild(show);
 }
 
@@ -805,6 +866,39 @@ function renderRosterEmpty(hasRows) {
  * section sort, for one section, and for a sort that happens to group
  * them anyway.
  */
+/* Sorting only reorders what is displayed. Edits are keyed to each
+   student's own index, not to a row position, so they survive it.
+   Applied to each group separately -- see `renderRoster`. */
+function sortRoster(rows) {
+  if (!sorts.length) return rows;
+  const keys = sorts
+    .map(s => ({ ...s, column: columnOwning(s.key) }))
+    .filter(s => s.column);
+  if (!keys.length) return rows;
+  return [...rows].sort((a, b) => {
+    for (const { key, desc, column } of keys) {
+      const cmp = sortValue(key, column, a).localeCompare(
+        sortValue(key, column, b), undefined, { numeric: true });
+      if (cmp) return desc ? -cmp : cmp;
+    }
+    return 0;
+  });
+}
+
+/* Which bands are shut. Dropped starts shut, because it is a list of
+   people who are not in the class any more and it should not be the
+   first thing the roster shows. */
+const DROPPED_BAND = "\u0000dropped";
+let shutBands = new Set([DROPPED_BAND]);
+
+function bandShut(key) { return shutBands.has(key); }
+
+function toggleBand(key) {
+  if (shutBands.has(key)) shutBands.delete(key);
+  else shutBands.add(key);
+  renderRoster();
+}
+
 function sectionRuns(rows) {
   if (!rows.length) return null;
   const runs = [];
@@ -812,8 +906,8 @@ function sectionRuns(rows) {
     const name = student.section || "";
     const last = runs[runs.length - 1];
     if (last && last.section === name) last.count += 1;
-    else runs.push({ section: name, count: 1, start: runs.reduce(
-      (a, r) => a + r.count, 0) });
+    else runs.push({ section: name, key: "section:" + name, count: 1,
+                     start: runs.reduce((a, r) => a + r.count, 0) });
   }
   // One run is the whole table, so the band would say what the header
   // already says. A section appearing twice means the rows are not
@@ -823,6 +917,11 @@ function sectionRuns(rows) {
   return runs;
 }
 
+/* A band: the whole row is the control that opens and shuts its group.
+ *
+ * The count used to be a floated span, which put it above the name's
+ * baseline. The row is a flex line now, so the two sit on one.
+ */
 function sectionBand(run) {
   const tr = document.createElement("tr");
   // `secband`, not `band`: seating.css owns `.band` for its selection
@@ -830,13 +929,28 @@ function sectionBand(run) {
   tr.className = "secband";
   const td = document.createElement("td");
   td.colSpan = COLUMNS.length;
+
+  const shut = bandShut(run.key);
+  const button = document.createElement("button");
+  button.className = "bandtoggle";
+  button.type = "button";
+  button.setAttribute("aria-expanded", String(!shut));
+  button.appendChild(icon("chev"));
+
   const name = document.createElement("span");
   name.className = "secband-name";
   name.textContent = run.section || "no section";
+
   const count = document.createElement("span");
   count.className = "secband-count";
-  count.textContent = run.count;
-  td.append(name, count);
+  // "22 students", not "22": the bare number was ambiguous against a
+  // table whose other numbers are ids and seeds.
+  count.textContent = `${run.count} student${run.count === 1 ? "" : "s"}`;
+
+  button.append(name, count);
+  button.onclick = () => toggleBand(run.key);
+  if (shut) tr.classList.add("shut");
+  td.appendChild(button);
   tr.appendChild(td);
   return tr;
 }
@@ -846,33 +960,40 @@ function renderRoster() {
   const body = document.querySelector("#roster tbody");
   body.textContent = "";
 
-  let shown = students.filter(s => showDropped || !s.dropped);
-  if (sorts.length) {
-    // Sorting only reorders what is displayed. Edits are keyed to each
-    // student's own index, not to a row position, so they survive it.
-    const keys = sorts
-      .map(s => ({ ...s, column: columnOwning(s.key) }))
-      .filter(s => s.column);
-    shown = [...shown].sort((a, b) => {
-      for (const { key, desc, column } of keys) {
-        const cmp = sortValue(key, column, a).localeCompare(
-          sortValue(key, column, b), undefined, { numeric: true });
-        if (cmp) return desc ? -cmp : cmp;
-      }
-      return 0;
-    });
-  }
+  /* **Two groups, and a sort never mixes them.** Dropped students are
+     not part of the class any more, so they do not belong interleaved
+     with it however the table is sorted -- they are their own band at
+     the bottom, sorted inside itself by the same keys. That replaced
+     the "show dropped students" tick, which could only hide them or
+     scatter them through everyone else. */
+  const active = sortRoster(students.filter(s => !s.dropped));
+  const dropped = sortRoster(students.filter(s => s.dropped));
 
-  // Where a section band goes, and whether to draw any. See `sectionRuns`.
-  const runs = sectionRuns(shown);
+  const runs = sectionRuns(active) || [];
   let runAt = 0;
+  let shutNow = false;
 
-  for (let i = 0; i < shown.length; i += 1) {
-    const student = shown[i];
-    if (runs && runAt < runs.length && runs[runAt].start === i) {
-      body.appendChild(sectionBand(runs[runAt]));
+  const rows = [];
+  for (let i = 0; i < active.length; i += 1) {
+    if (runAt < runs.length && runs[runAt].start === i) {
+      rows.push({ band: runs[runAt] });
+      shutNow = bandShut(runs[runAt].key);
       runAt += 1;
     }
+    if (!shutNow) rows.push({ student: active[i] });
+  }
+  if (dropped.length) {
+    rows.push({ band: { section: "Dropped", count: dropped.length,
+                        key: DROPPED_BAND } });
+    if (!bandShut(DROPPED_BAND)) {
+      for (const s of dropped) rows.push({ student: s });
+    }
+  }
+
+  const shown = rows.filter(r => r.student).map(r => r.student);
+  for (const row of rows) {
+    if (row.band) { body.appendChild(sectionBand(row.band)); continue; }
+    const student = row.student;
     const tr = document.createElement("tr");
     if (student.dropped) tr.className = "dropped";
 
@@ -895,16 +1016,6 @@ function renderRoster() {
         b.setAttribute("aria-label", b.title);
         b.onclick = () => drop(student, !student.dropped);
         td.appendChild(b);
-      } else if (column.key === "name" && filedNames()) {
-        // **Derived things are not editable** -- 13.6, taken from Seats.
-        // "Lynott, Kilah" is built from `last` and `first`; typing into
-        // it would write the filed form back into `name`, and the stored
-        // value would become a rendering of itself. So while names read
-        // this way the column shows text, and `First Last` is where you
-        // edit one.
-        td.classList.add("cell-name", "ro");
-        td.textContent = displayName(student);
-        td.title = `${student.name} — switch to “First Last” to edit`;
       } else if (column.edit) {
         td.classList.add("cell-" + column.key);
         const input = cellInput(student, column.key, column);
@@ -926,12 +1037,15 @@ function renderRoster() {
   // After the rows exist, so the measurements use the real fonts.
   sizeColumns(shown);
 
-  // The one count that is about the whole table. The per-section numbers
-  // are on the bands, beside the rows they describe.
-  const dropped = shown.filter(s => s.dropped).length;
-  document.getElementById("roster-count").textContent = shown.length
-    ? `${shown.length} student${shown.length === 1 ? "" : "s"}`
-      + (dropped ? `, ${dropped} dropped` : "")
+  /* The class, which is the one count about the whole table. The
+     per-section numbers are on their bands and the dropped count is on
+     its own, each beside the rows it describes.
+
+     Counting `active` rather than what is on screen: `shown` shrinks
+     when a band is shut, and a total that changes because you folded
+     something away is not a total. */
+  document.getElementById("roster-count").textContent = active.length
+    ? `${active.length} student${active.length === 1 ? "" : "s"}`
     : "";
 
   renderRosterEmpty(shown.length > 0);
@@ -942,17 +1056,30 @@ async function drop(student, dropped) {
     toast("Save or discard your edits first — dropping rewrites the file.", true);
     return;
   }
-  const verb = dropped ? "Drop" : "Restore";
-  const extra = dropped
-    ? "\n\nThey stay on the roster (the print record refers to them) and their seat is emptied."
-    : "\n\nThis does not give them a seat back.";
-  if (!confirm(`${verb} ${student.name}?${extra}`)) return;
+  /* **No `confirm()`.** It is a blocking native dialog, and the desktop
+     app's browser pane suppresses it: the handler ran, the dialog never
+     appeared, and the button looked dead. Verified by stubbing
+     `window.confirm` and watching it be called with the right message
+     while nothing happened on screen.
+
+     Nothing replaced it, because the action no longer needs one. Drop
+     moves the student into the Dropped band, which is on the same
+     screen with a restore button in the same column -- the undo is
+     visible rather than promised. The one thing restore does not give
+     back is the seat, so the toast says so. */
   try {
     const data = await api("/api/roster/drop",
                            { who: student.name, dropped });
     students = data.students;
+    // Opened so the student is visible where they have just gone,
+    // rather than vanishing into a band that is shut by default.
+    if (dropped) shutBands.delete(DROPPED_BAND);
     renderRoster();
-    toast(data.note);
+    toast(dropped
+      ? `${student.name} dropped. Their seat is now empty — restoring `
+        + `them does not give it back.`
+      : `${student.name} restored. They have no seat; give them one in `
+        + `Seating.`);
   } catch (err) { toast(err.message, true); }
 }
 
@@ -2607,13 +2734,6 @@ async function boot() {
     draft.extras.push({ skill: printState.skills[0].slug, copies: 1 });
     renderExtras(); renderVariants(); refreshPrintDirty();
   };
-  document.getElementById("show-dropped").onchange = (e) => {
-    showDropped = e.target.checked;
-    renderRoster();
-  };
-  document.getElementById("name-natural").onclick = () => setFiledNames(false);
-  document.getElementById("name-filed").onclick = () => setFiledNames(true);
-  renderNameFormat();
 
   // The table resizes with the window, and `sizeColumns` only runs on a
   // render. Without this, widening the window left the old widths and
