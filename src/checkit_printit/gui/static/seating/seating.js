@@ -4754,10 +4754,16 @@ async function askVersionCount(section) {
      in the strip would be a control that is only ever used twice a
      term sitting on the edge for the rest of it. */
   const now = ((seatingRoom && seatingRoom.versions) || []).length;
-  const said = window.prompt(
-    "How many different versions of the paper?\n\n"
-    + "A table with more seats than there are versions will have to "
-    + "repeat one.", String(now));
+  // `askFor`, not `window.prompt`. The pane suppresses the native one,
+  // which returned null, which this function reads as "cancelled" --
+  // so the control did nothing at all and said nothing about it.
+  const said = await askFor({
+    title: "How many different versions of the paper?",
+    body: ["A table with more seats than there are versions will have "
+           + "to repeat one."],
+    value: String(now),
+    yes: "Set versions",
+  });
   if (said === null) return;
   const want = parseInt(said, 10);
   if (!Number.isFinite(want) || want < 1 || want > 26) {

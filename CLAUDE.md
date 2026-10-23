@@ -427,6 +427,29 @@ Where an action needs a way back, give it a visible one instead of a
 question. Drop acts at once and the student lands in a Dropped band on
 the same screen, with restore in the same column.
 
+### `askFor()` when the answer is text, and a test forbids the natives
+
+`window.prompt` is suppressed here exactly as `confirm` is, and returns
+null, which a caller reads as "cancelled". Two controls shipped dead
+that way and nobody could tell, because a suppressed modal makes a
+button do nothing *silently*:
+
+- **Push it**, on Update form -- the one control that changes what
+  students see.
+- **How many versions**, on Seating.
+
+`askBox` is the one dialog. `ask({title, body})` resolves true/false;
+`askFor({title, body, value})` shows the field and resolves to the text
+or null, the same shape `prompt` had. app.js loads before seating.js,
+so seating can call it.
+
+`test_no_native_modal_is_used` holds the line now. A paragraph in this
+file did not: it already said never to use them, and the second one
+shipped anyway. The check scans both scripts for bare calls **and** for
+`window.`/`globalThis.`/`self.`-qualified ones -- the first version
+checked only bare calls and let `window.prompt` straight through, which
+is how the Seating one was still there after the Push one was fixed.
+
 ### `ask()` is how the app asks, and `okDespitePending` is why
 
 `window.confirm` is suppressed here, so `ask({title, body, yes, no})`

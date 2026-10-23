@@ -384,6 +384,79 @@ def rules_only():
     return re.sub(r"/\*.*?\*/", "", read("style.css"), flags=re.S)
 
 
+def without_comments(source):
+    """Comments removed, line numbers preserved.
+
+    A block comment is replaced by its own newlines rather than by
+    nothing. Collapsing them shifts every line below, and the first
+    version of this check reported `seating.js:3585` for a call that
+    is on line 4757 -- which cost a search through unrelated code
+    before the number was doubted.
+    """
+    source = re.sub(r"/\*.*?\*/",
+                    lambda m: "\n" * m.group(0).count("\n"),
+                    source, flags=re.S)
+    return re.sub(r"//[^\n]*", "", source)
+
+
+def native_modals(source):
+    """Every `confirm`/`alert`/`prompt` that reaches the real global.
+
+    Two patterns, not one. A single "not preceded by a dot" rule misses
+    `window.confirm(...)`, which is the same suppressed global wearing a
+    qualifier -- and a rule that allows a leading dot flags
+    `dialog.confirm(...)`, which is somebody's own method. So: bare
+    calls, plus calls qualified by the global object by name.
+    """
+    bare = re.finditer(r"(?:^|[^.\w$])(confirm|alert|prompt)\s*\(", source)
+    qualified = re.finditer(
+        r"\b(?:window|globalThis|self)\.(confirm|alert|prompt)\s*\(",
+        source)
+    return list(bare) + list(qualified)
+
+
+def test_no_native_modal_is_used():
+    """`confirm`, `alert` and `prompt` do nothing in the desktop pane.
+
+    They are suppressed, and a suppressed `confirm` returns falsy -- so
+    `if (!confirm(...)) return;` is a control that silently does
+    nothing. That shipped twice: the Roster's drop button, and then the
+    form's Push it button, which is the one control in the app that
+    changes what students see.
+
+    `ask()` is the replacement: a promise over a `<dialog>`, which is an
+    element on the page rather than browser chrome. CLAUDE.md has said
+    "never confirm, alert or prompt" since the first time; a paragraph
+    did not stop the second time, so here is a test.
+    """
+    bad = []
+    for name in ("app.js", "seating/seating.js"):
+        source = without_comments(read(name))
+        for call in native_modals(source):
+            line = source[:call.start()].count("\n") + 1
+            bad.append(f"{name}:{line} {call.group(1)}(")
+    assert not bad, ("native modal(s), which the desktop pane suppresses -- "
+                     "use ask(): " + "; ".join(bad))
+
+
+def test_that_check_would_have_caught_the_push_button():
+    """Watched failing against the line that actually shipped, and
+    against `window.confirm`, which the first version of this check
+    let straight through -- found by mutation, not by reading."""
+    for source in ('  if (!confirm("Push this to the form?")) return;',
+                   '  if (window.confirm("x")) return;',
+                   "  globalThis.alert(1);",
+                   "  self.prompt(2);"):
+        assert native_modals(source), f"not caught: {source.strip()}"
+
+
+def test_the_modal_check_allows_a_method_named_confirm():
+    """`thing.confirm(...)` is a method call, not the global. Narrow
+    enough not to flag one, or the next person deletes the test."""
+    source = "dialog.confirm(x); this.alert(y); obj.prompt(z); d.alert(1);"
+    assert not native_modals(source), "false positive on a method call"
+
+
 def test_every_glyph_size_comes_with_its_own_variable():
     """One optical line weight across the whole app, enforced here.
 
