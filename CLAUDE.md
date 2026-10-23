@@ -523,6 +523,26 @@ diagnosis down the wrong path. What actually stops a push or a pull is
 `conn.ready`: a web app URL and a secret. `renderFormBar` says that,
 and both working tabs call it.
 
+### The draft carries only what its mode uses
+
+`save_draft` writes `simply_print` in `same` mode, and
+`default_when_missing` / `append_for_everyone` in `chose` mode. Never
+both. The same rule `write_job` applies to `publication.toml`, for the
+reason stated there: a file carrying a setting the run does not use is
+a file that will be read back later and believed.
+
+The draft was the exception, and on 2026-10-23 it held
+`mode = "chose"` beside `simply_print = ["N2"]`, four days old. One
+click on the mode toggle would have printed N2 for all 43 students.
+
+The kept keys are written **even when empty**, unlike in `write_job`:
+this file is hand-edited, and a key that vanishes when you clear it is
+a key you cannot find again. It is the *other* mode's keys that go.
+
+The cost, stated so nobody treats it as a bug: set up a `same` run,
+switch to `chose`, save, and the list is gone. Within one session the
+page holds both in memory; it is the save that drops one.
+
 ### A seat carries the student id, and the two files are checked
 
 `seating.toml` holds the print order and the version letters;
