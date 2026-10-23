@@ -1043,6 +1043,47 @@ def api_seating_save(course, body):
     return out
 
 
+def _form_brief(course):
+    """Whether this course can reach its form at all.
+
+    **Not a Google session.** `form push` and `form pull` both go through
+    `form.call`, an HTTPS POST to the deployed Apps Script web app
+    carrying the shared secret from `secrets/form-secret.toml`. No OAuth
+    token, no clasp, no browser. A course whose clasp sign-in has lapsed
+    pushes and pulls perfectly well, which is why the Form tab's old
+    banner -- "Not signed in to Google, so pushing will fail" -- was
+    false, and said so on a morning when a pull was in fact succeeding.
+
+    clasp is needed by `provision.py` alone, to deploy or redeploy the
+    script. That belongs on Settings, not on either working tab.
+    """
+    try:
+        conn = form_mod.load(course.path)
+    except Exception:
+        return {"connected": False, "hasFile": False}
+    return {"connected": bool(conn.ready),
+            "hasFile": os.path.isfile(course.file("form"))}
+
+
+def _assessment_brief(course):
+    """The next assessment's name and date, or empty when unreadable.
+
+    Never raises. The Print tab has to draw on a course whose
+    `availability.toml` is missing or malformed -- that is a Setup
+    problem, and a blank staging view is a bad way to report it.
+    """
+    try:
+        av = availability_mod.load(course.file("availability"))
+    except Exception:
+        return {"name": "", "date": "", "spoken": ""}
+    day = availability_mod.as_date(av.date)
+    return {
+        "name": av.name or "",
+        "date": day.isoformat() if day else "",
+        "spoken": availability_mod.spoken_date(av.date),
+    }
+
+
 def api_print(course, _body):
     """Everything the staging view draws."""
     draft = printjob_mod.load_draft(course.name)
@@ -1094,6 +1135,10 @@ def api_print(course, _body):
                 "display": s.display,
                 "section": s.section,
                 "chose": list(s.skills),
+                # Which assessment those choices were made for, ISO, or
+                # "" when the roster does not say. "" is *unknown*, not
+                # agreement -- the view must not colour it as current.
+                "choseFor": (s.chose_for.isoformat() if s.chose_for else ""),
                 "override": list(draft["overrides"].get(key, []))
                             if key in draft["overrides"] else None,
                 "seatVersion": seat_version.get(s.name, ""),
@@ -1116,6 +1161,17 @@ def api_print(course, _body):
         # Whether to offer the pull at all. A course can print happily
         # without ever having had a form.
         "hasForm": os.path.isfile(course.file("form")),
+        # The same shape `api_skills` returns, so one banner in the page
+        # reads both tabs' answers. `connected` is the real precondition
+        # for push and pull: a deployed web app and the shared secret.
+        # It is *not* the Google sign-in -- see `_form_brief`.
+        "form": _form_brief(course),
+        # What the course believes the next assessment is. The job has
+        # its own date, and the two being different is exactly the
+        # failure this view now reports: on 2026-10-23 the job said
+        # 10/23 and the assessment still said 10/16, so the pull kept
+        # re-fetching last week and every row read as current.
+        "assessment": _assessment_brief(course),
         "jobFolder": printjob_mod.folder_for(draft),
         "versionsAvailable": versions_available,
         # So "Reset this print job" is an ordinary edit that Discard can

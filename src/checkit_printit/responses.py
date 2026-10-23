@@ -314,12 +314,19 @@ def pull_for_course(space, *, write=True, force=False):
 
     updated = []
     silent = {roster_mod.key_of(s) for s in out.pulled.silent}
+    # Which assessment every choice written here is for. Stamped onto the
+    # answers and cleared along with the silent, so `skills` is never left
+    # holding a date it has stopped belonging to. Without it an undated
+    # choice reads exactly like a current one, which is how 10/16's answers
+    # were still being presented as "will get" a week later.
+    day = availability_mod.as_date(out.date)
     for student in people:
         key = roster_mod.key_of(student)
         if key in out.pulled.chosen:
             updated.append(dataclasses.replace(
-                student, skills=list(out.pulled.chosen[key])))
-        elif key in silent and student.skills:
+                student, skills=list(out.pulled.chosen[key]),
+                chose_for=day))
+        elif key in silent and (student.skills or student.chose_for):
             # **Cleared, not kept.** `skills` means "what this student
             # chose for the assessment being prepared", and somebody
             # who did not answer chose nothing. Keeping the previous
@@ -327,7 +334,8 @@ def pull_for_course(space, *, write=True, force=False):
             # exactly the students it exists for -- and the pull said
             # they would get it, which is how it went unnoticed into a
             # real print run.
-            updated.append(dataclasses.replace(student, skills=[]))
+            updated.append(dataclasses.replace(
+                student, skills=[], chose_for=None))
         else:
             updated.append(student)
     with open(roster_path, "w", encoding="utf-8") as f:

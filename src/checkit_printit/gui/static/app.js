@@ -1507,6 +1507,10 @@ function fillAssessment() {
 }
 
 function renderPushState() {
+  // The same bar the Print tab shows, from the same field. Both tabs
+  // reach Google the same way, so they say the same thing about it.
+  renderFormBar("form-conn-bar",
+                { hasFile: true, connected: skills.form.connected });
   const note = document.getElementById("push-state");
   const push = document.getElementById("form-push");
   if (!skills.form.connected) {
@@ -1668,45 +1672,50 @@ async function pushForm() {
 
 // --------------------------------------------------------------- google --
 
-async function refreshGoogle(force) {
-  const bar = document.getElementById("google-bar");
-  let state;
-  try {
-    state = await fetchGoogle({ force: Boolean(force) });
-  } catch { bar.hidden = true; return; }
-
+/* ---- what actually stops a push or a pull ---------------------------
+ *
+ * Not the Google sign-in. `form push` and `form pull` both go through
+ * `form.call`, which is an HTTPS POST to the deployed Apps Script web
+ * app carrying the shared secret from `secrets/form-secret.toml`. No
+ * OAuth, no clasp, no browser. clasp is used by `provision.py` alone,
+ * to deploy or redeploy the script, and that lives on Settings.
+ *
+ * This bar used to say "Not signed in to Google, so pushing will fail"
+ * and was driven by `clasp login` state. It was showing on the morning
+ * of 2026-10-23 while a pull was in fact succeeding, which sent an hour
+ * of diagnosis down the wrong path. The check was real; the conclusion
+ * drawn from it was invented.
+ *
+ * One function for both tabs, because "Update form and Print job should
+ * both have the same Google sign in mechanisms and warnings" -- and the
+ * only honest way to make them the same is to make them both true. */
+function renderFormBar(barId, form) {
+  const bar = document.getElementById(barId);
+  if (!bar) return;
   bar.textContent = "";
-  if (state.signingIn) {
-    bar.className = "banner waiting";
-    bar.textContent = "Waiting for the Google sign-in in your browser… ";
-    const again = document.createElement("button");
-    again.className = "act";
-    again.textContent = "Check now";
-    again.onclick = () => refreshGoogle(true);
-    bar.appendChild(again);
-    bar.hidden = false;
-    setTimeout(() => refreshGoogle(true), 4000);
-    return;
-  }
-  if (state.loggedIn) { bar.hidden = true; return; }
+  // A course that never had a form is not missing one. The tabs that
+  // need a form hide their own controls in that case.
+  if (!form || !form.hasFile || form.connected) { bar.hidden = true; return; }
 
   bar.className = "banner warn";
-  if (state.error) {
-    // Not "signed out" -- something else is wrong, and a sign-in button
-    // would send you round a loop that cannot fix it.
-    bar.textContent = "Could not check the Google sign-in: " + state.error;
-    bar.hidden = false;
-    return;
-  }
   bar.append(document.createTextNode(
-    "Not signed in to Google, so pushing will fail. Sessions expire after a "
-    + "week or two whether or not you use them. "));
+    "No form is connected to this course, so pushing and pulling will "
+    + "fail. This is not the Google sign-in \u2014 it is the web app "
+    + "address and its secret. "));
   const go = document.createElement("button");
   go.className = "act";
-  go.textContent = "Sign in";
-  go.onclick = signInToGoogle;
+  go.textContent = "Open Settings";
+  go.onclick = () => show("setup");
   bar.appendChild(go);
   bar.hidden = false;
+}
+
+async function refreshGoogle(force) {
+  /* Settings needs the clasp answer; no working tab does. Kept as a
+     plain state refresh so `loadSetup` has something to draw. */
+  try {
+    await fetchGoogle({ force: Boolean(force) });
+  } catch { /* Settings reports it; a working tab has no use for it. */ }
 }
 
 
@@ -1753,15 +1762,21 @@ function renderSetup() {
   } else if (g.loggedIn) {
     google.textContent = "Signed in. printit uses clasp's own sign-in and "
       + "never sees your password. Google expires these after a week or "
-      + "two whether or not you use them.";
+      + "two whether or not you use them \u2014 which matters only for "
+      + "the steps on this page.";
     signin.disabled = true;
     signin.textContent = "Signed in";
   } else if (g.error) {
     google.textContent = "Could not check the sign-in: " + g.error;
     signin.disabled = true;
   } else {
-    google.textContent = "Not signed in, so nothing here can reach Google "
-      + "yet.";
+    // Says what it actually blocks. It used to say "nothing here can
+    // reach Google yet", which is false: pushing and pulling go
+    // through the deployed web app and its secret, not through clasp.
+    google.textContent = "Not signed in. Creating a form, deploying the "
+      + "script and re-authorizing it all need this. Pushing and pulling "
+      + "do not \u2014 those go through the web app address and its "
+      + "secret, which do not expire.";
     signin.disabled = false;
     signin.textContent = "Sign in to Google";
   }
@@ -2311,9 +2326,91 @@ function willGet(student) {
   return out;
 }
 
+/* Which day a student's choices were made for, against the day this job
+   prints.
+
+   `chose` on its own cannot be told from last week's `chose`. On
+   2026-10-23 the roster still held 10/16's answers -- identical to what
+   had printed that day -- because the assessment date had not been moved
+   on, so every pull re-fetched the same responses and this table showed
+   them with complete confidence. The same thing had happened on 10/16.
+
+   "unknown" is its own answer and is never drawn as agreement: a roster
+   written before `chose_for` existed has choices and no date, and
+   colouring those as current would make the whole thing decorative. */
+function choiceAge(student) {
+  if (!student.chose.length) return "none";
+  if (!student.choseFor) return "unknown";
+  return student.choseFor === (draft.date || "") ? "current" : "stale";
+}
+
+function spokenDay(iso) {
+  // Matches the form's own phrasing, `Friday, 10/16`, because that is
+  // the wording on the confirmation the student actually ticked.
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday",
+                "Friday", "Saturday"];
+  return `${days[new Date(y, m - 1, d).getDay()]}, ${m}/${d}`;
+}
+
 function badSlugs(slugs) {
   const known = new Set(printState.skills.map(s => s.slug));
   return slugs.filter(s => !known.has(s));
+}
+
+function renderStale() {
+  /* Two different wrongnesses, reported separately because they are
+     fixed differently.
+
+     The assessment date disagreeing with the job date is the *cause*:
+     a pull scopes by the assessment, so while those differ it keeps
+     fetching the wrong week however many times you press it. Fixing
+     that is a Setup edit, and it comes first.
+
+     Rows carrying another day's answers are the *symptom*, and can
+     outlive the cause -- the date can be corrected and 26 people still
+     hold last week's picks until the next pull lands. */
+  const strip = document.getElementById("who-stale");
+  strip.textContent = "";
+  const lines = [];
+
+  const av = (printState.assessment || {}).date || "";
+  if (av && draft.date && av !== draft.date) {
+    lines.push(`This job is for ${spokenDay(draft.date)}, but the course `
+               + `says the next assessment is ${spokenDay(av)}. A pull `
+               + `scopes by the assessment, so it will keep fetching `
+               + `${spokenDay(av)} until that is changed on Update form.`);
+  }
+
+  const counts = { stale: 0, unknown: 0 };
+  for (const student of printState.students) {
+    if (draft.overrides[student.key]) continue;
+    const age = choiceAge(student);
+    if (age in counts) counts[age] += 1;
+  }
+  if (counts.stale) {
+    lines.push(`${counts.stale} student${counts.stale === 1 ? "'s" : "s'"} `
+               + `choices were made for another day.`);
+  }
+  if (counts.unknown) {
+    lines.push(`${counts.unknown} student${counts.unknown === 1 ? "" : "s"} `
+               + `${counts.unknown === 1 ? "has" : "have"} choices the `
+               + `roster cannot date. They were written before printit `
+               + `recorded this; pull again to date them.`);
+  }
+
+  // Silent when nothing is at stake -- the rule the cross-tab warning
+  // had to learn. In "same" mode nobody's own choices are used at all,
+  // so none of this applies.
+  if (!lines.length || draft.mode === "same") { strip.hidden = true; return; }
+  for (const text of lines) {
+    const p = document.createElement("span");
+    p.textContent = text;
+    strip.appendChild(p);
+  }
+  strip.hidden = false;
 }
 
 function renderWho() {
@@ -2392,7 +2489,31 @@ function renderWho() {
     vtd.appendChild(vwrap);
     tr.appendChild(vtd);
 
-    add(gets.join(", ") || "—");
+    // The cell says what they get; its mark says whether that is this
+    // run's answer. An override is the instructor's own decision for
+    // this job, so it is never stale whatever the roster holds.
+    const getsCell = add(gets.join(", ") || "—");
+    const age = draft.overrides[student.key] ? "current" : choiceAge(student);
+    if (age === "stale" || age === "unknown") {
+      // Not `age` itself: `stale` is already the page-is-older-than-the-
+      // server banner, `position: fixed` with a warn background, so
+      // `td.aged.stale` lifted one table cell out of the table and
+      // parked it at the bottom of the window. Fourth class collision
+      // in this app and the first inside a single stylesheet.
+      getsCell.classList.add("aged", age === "stale" ? "otherday" : "nodate");
+      getsCell.appendChild(document.createTextNode(" "));
+      const mark = document.createElement("span");
+      mark.className = "agemark";
+      mark.textContent = age === "stale"
+        ? spokenDay(student.choseFor) : "undated";
+      getsCell.appendChild(mark);
+      getsCell.title = age === "stale"
+        ? `Chosen for ${spokenDay(student.choseFor)}, not `
+          + `${spokenDay(draft.date) || "this run"}. Pull again, or `
+          + `override.`
+        : `The roster does not say which assessment this was chosen `
+          + `for. Pull again to date it.`;
+    }
 
     const td = document.createElement("td");
     const owrap = document.createElement("div");
@@ -2461,6 +2582,7 @@ function renderWho() {
       count.appendChild(chip);
     }
   }
+  renderStale();
   // One reset per column, shown on the same condition as the row ones.
   const vreset = document.getElementById("reset-versions");
   vreset.title = movedCount
@@ -2756,6 +2878,7 @@ async function loadPrint() {
   document.getElementById("p-preview").disabled = Boolean(why);
   document.getElementById("p-build").disabled = Boolean(why);
 
+  renderFormBar("print-conn-bar", printState.form);
   renderPrintFields();
   renderModes();
   renderPullState();
