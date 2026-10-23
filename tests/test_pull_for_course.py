@@ -12,6 +12,7 @@ is the behaviour being checked.
 No real student appears here.
 """
 
+import datetime
 import os
 import sys
 
@@ -19,6 +20,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from checkit_printit import availability as availability_mod
 from checkit_printit import course as course_mod
 from checkit_printit import form as form_mod
 from checkit_printit import responses as responses_mod
@@ -30,6 +32,16 @@ CONFIRM, CHOOSE = "111", "222"
 
 class FakeConn:
     items = {"confirm_date": CONFIRM, "choose_skills": CHOOSE}
+    # The real Conn has these, and the print view reads `ready` to decide
+    # whether to warn that the form is unreachable. A fake missing an
+    # attribute the boundary has is how that warning would have shipped
+    # untested -- see "a fake built from your own vocabulary".
+    url = "https://script.example/exec"
+    secret = "s3cret"
+
+    @property
+    def ready(self):
+        return bool(self.url and self.secret)
 
 
 def answer(email, when="10/2", picked=("AD",), at="2026-10-01T09:00:00Z"):
@@ -71,6 +83,12 @@ def responding(monkeypatch, *answers):
 
 def skills_now(space):
     return {s.display: list(s.skills)
+            for s in roster_mod.load(course_mod.file_in(space, "roster"))}
+
+
+def dates_now(space):
+    """What each student's choices are recorded as being *for*."""
+    return {s.display: s.chose_for
             for s in roster_mod.load(course_mod.file_in(space, "roster"))}
 
 
@@ -180,6 +198,95 @@ class TestTheHappyPull:
         responding(monkeypatch, answer("ada@example.edu"))
         responses_mod.pull_for_course(course, write=False)
         assert skills_now(course)["Grace Hopper"] == ["W5"]
+
+
+class TestAChoiceCarriesItsDate:
+    """`skills` alone cannot be told from last week's `skills`.
+
+    On 2026-10-23 the roster still held 10/16's answers, byte-identical
+    to what had printed that day, because the assessment date had not
+    been moved on and the pull re-fetched the same responses. Every
+    surface read them as current. The same thing had happened on 10/16.
+    `chose_for` is what makes the difference visible.
+    """
+
+    def test_a_pull_dates_what_it_writes(self, course, monkeypatch):
+        responding(monkeypatch, answer("ada@example.edu", picked=["AD"]))
+        responses_mod.pull_for_course(course)
+        assert dates_now(course)["Ada Lovelace"] == datetime.date(2026, 10, 2)
+
+    def test_every_written_choice_carries_the_scoped_date(self, course,
+                                                          monkeypatch):
+        """The invariant the Print tab leans on: after a pull, nobody
+        holds skills without a date, and no date disagrees with the
+        assessment that was pulled."""
+        responding(monkeypatch,
+                   answer("ada@example.edu", picked=["AD"]),
+                   answer("grace@example.edu", picked=["SU"]))
+        out = responses_mod.pull_for_course(course)
+        day = availability_mod.as_date(out.date)
+        people = roster_mod.load(course_mod.file_in(course, "roster"))
+        for student in people:
+            if student.skills:
+                assert student.chose_for == day, student.display
+
+    def test_clearing_a_silent_student_clears_the_date_too(self, course,
+                                                           monkeypatch):
+        """Otherwise the roster grows a student with no skills and a
+        date saying those absent skills are current, which is worse
+        than either piece of it alone."""
+        responding(monkeypatch, answer("grace@example.edu", picked=["SU"]))
+        responses_mod.pull_for_course(course)
+        assert dates_now(course)["Grace Hopper"] == datetime.date(2026, 10, 2)
+
+        # Grace goes quiet; Ada answers instead.
+        responding(monkeypatch, answer("ada@example.edu", picked=["AD"]))
+        responses_mod.pull_for_course(course)
+        assert skills_now(course)["Grace Hopper"] == []
+        assert dates_now(course)["Grace Hopper"] is None
+
+    def test_answering_and_picking_nothing_is_still_dated(self, course,
+                                                          monkeypatch):
+        """Different from silence, and the date is what says so: this
+        student did answer, for this assessment, and chose nothing."""
+        responding(monkeypatch,
+                   answer("ada@example.edu", picked=[]),
+                   answer("grace@example.edu", picked=["SU"]))
+        responses_mod.pull_for_course(course)
+        assert skills_now(course)["Ada Lovelace"] == []
+        assert dates_now(course)["Ada Lovelace"] == datetime.date(2026, 10, 2)
+
+
+class TestTheDateSurvivesTheFile:
+    def test_it_round_trips_through_toml(self, tmp_path):
+        people = Roster([Student(name="Ada", skills=["AD"],
+                                 chose_for=datetime.date(2026, 10, 23))])
+        path = tmp_path / "r.toml"
+        path.write_text(roster_mod.to_toml(people, "test"), encoding="utf-8")
+        assert "chose_for = 2026-10-23" in path.read_text(encoding="utf-8")
+        back = list(roster_mod.load(str(path)))[0]
+        assert back.chose_for == datetime.date(2026, 10, 23)
+
+    def test_a_roster_written_before_the_field_existed_reads_as_unknown(
+            self, tmp_path):
+        """None, not today. Every roster on disk the day this shipped
+        had choices and no date, and reading those as current would
+        have made the whole field decorative."""
+        path = tmp_path / "r.toml"
+        path.write_text('[[student]]\nname = "Ada"\nskills = ["AD"]\n',
+                        encoding="utf-8")
+        student = list(roster_mod.load(str(path)))[0]
+        assert student.skills == ["AD"]
+        assert student.chose_for is None
+
+    def test_an_unreadable_date_is_refused_not_ignored(self, tmp_path):
+        """Absent means unknown and is reported as such. Unreadable
+        would otherwise collapse into the same thing and hide a typo."""
+        path = tmp_path / "r.toml"
+        path.write_text('[[student]]\nname = "Ada"\nskills = []\n'
+                        'chose_for = "last tuesday"\n', encoding="utf-8")
+        with pytest.raises(roster_mod.RosterError, match="chose_for"):
+            roster_mod.load(str(path))
 
 
 class TestAPullThatMatchesNobody:

@@ -481,6 +481,59 @@ not grow its own.
 * **Sentence case on every control label.** Prominence comes from
   `.primary` versus `.act`, not from capitalisation.
 
+### Pushing and pulling do NOT need the Google sign-in
+
+`form push` and `form pull` both go through `form.call`, which is an
+HTTPS POST to the deployed Apps Script web app carrying the shared
+secret from `secrets/form-secret.toml`. No OAuth token, no clasp, no
+browser. **A course whose clasp sign-in lapsed pushes and pulls
+perfectly well.**
+
+clasp is used by `provision.py` alone -- creating the form, deploying
+or redeploying the script, re-authorizing it. Those live on Settings.
+
+The Form tab used to carry "Not signed in to Google, so pushing will
+fail", driven by `clasp.logged_in()`. The check was real and the
+conclusion was invented, and it was on screen on the morning of
+2026-10-23 while a pull was in fact succeeding -- it sent an hour of
+diagnosis down the wrong path. What actually stops a push or a pull is
+`conn.ready`: a web app URL and a secret. `renderFormBar` says that,
+and both working tabs call it.
+
+### A choice carries the day it was made for
+
+`Student.chose_for` is a date, or None. `form pull` stamps it with the
+assessment it scoped to, and clears it along with the skills when it
+clears a silent student. None means "written before this field existed,
+or set by hand" and is reported as **unknown**, never as agreement.
+
+Why it exists: `skills` alone cannot be told from last week's `skills`.
+On 2026-10-23 the roster still held the 10/16 answers -- verified
+byte-identical against the 10/16 run in `record.db` -- because
+`availability.toml` still said 10/16, so every pull re-fetched the same
+responses and the Print tab showed them as current. The same failure
+had happened on 10/16. Twice in eight days, silent both times.
+
+The Print tab now reports two things separately, because they are fixed
+differently: the **cause** (the job's date and the assessment's date
+disagree, so a pull will keep fetching the wrong week however often you
+press it) and the **symptom** (rows holding another day's answers, which
+outlive the cause until the next pull lands).
+
+### A bare class that takes an element out of flow is never a modifier
+
+`.stale` is the page-is-older-than-the-server banner: `position: fixed`,
+warn background, bottom-centre of the window. A Print tab cell was given
+`class="aged stale"` and one table cell left the table and parked itself
+over the page. All 805 tests passed; it took a screenshot.
+
+This is the fourth class collision here and the first *inside* one
+stylesheet, so the cross-file check did not apply.
+`test_a_class_that_escapes_the_page_is_never_a_modifier` holds it now,
+narrowly on purpose: sharing a word is not by itself wrong
+(`.vcircle.badge.editing` wants the bare `.badge` rule), but sharing one
+with a rule that takes an element out of flow always is.
+
 ### A glyph strokes itself; the button gives it a surface
 
 `glyph(name)` builds the SVG and puts `class="glyph"` on it, which is

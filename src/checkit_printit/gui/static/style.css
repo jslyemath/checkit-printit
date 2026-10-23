@@ -1207,6 +1207,30 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 }
 .banner button.act { text-transform: none; }
 
+/* Up to three sentences, each its own line. A `.banner` is laid out for
+   one, so the stacking is stated here rather than by reaching for a
+   second banner class. */
+#who-stale span { display: block; }
+#who-stale span + span { margin-top: var(--s2); }
+
+/* "Will get", when what they will get was not chosen for this run.
+   Deliberately not red: nothing is broken, the papers would simply be
+   last week's answers, and the instructor may well mean to print them.
+   The mark names the day rather than saying "stale", because the day is
+   the thing you check against. */
+#who td.aged { color: var(--warn); }
+#who td.aged.nodate { color: var(--muted); }
+.agemark {
+  display: inline-block;
+  margin-left: var(--s2);
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: var(--r-pill);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
 /* The form's own title and description, above the items -- as a student
    meets them, before any question. */
 /* The title card, which on a real form carries a coloured bar across

@@ -7,6 +7,7 @@ way nothing downstream should inherit.
 """
 
 import csv
+import datetime
 import os
 import dataclasses
 import tomllib
@@ -74,6 +75,22 @@ class Student:
     #: registrar is often behind the room. A drop inferred from an import is
     #: undone by an import that disagrees.
     dropped_by: str = ""
+
+    #: Which assessment `skills` was chosen for, as a date, or None when
+    #: nothing is recorded.
+    #:
+    #: `skills` on its own is undated, and an undated choice cannot be
+    #: told from a current one. On 2026-10-23 the roster still held the
+    #: 10/16 answers -- byte-identical to what printed that day -- because
+    #: the assessment date had not been moved on and the pull therefore
+    #: re-fetched the same responses. Every surface said "will get" with
+    #: complete confidence. Twice in eight days.
+    #:
+    #: Written by `form pull` from the assessment it scoped to. None means
+    #: "arrived before this field existed, or set by hand", which is
+    #: reported as unknown rather than as current -- an empty value must
+    #: never read as agreement.
+    chose_for: object = None
 
     #: Set by seating, not by the roster.
     version: str = ""
@@ -162,8 +179,30 @@ def load(path):
                     for e in (entry.get("emails") or []) if str(e).strip()],
             dropped=bool(entry.get("dropped", False)),
             dropped_by=str(entry.get("dropped_by", "")).strip(),
+            chose_for=_as_date(entry.get("chose_for"), name, path),
         ))
     return Roster(students)
+
+
+def _as_date(value, name, path):
+    """A TOML date, an ISO string, or None. Anything else is an error.
+
+    Deliberately strict. A `chose_for` nobody can read is worse than one
+    that is absent, because absent is reported as unknown and unreadable
+    would otherwise be silently treated the same way as absent.
+    """
+    if value in ("", None):
+        return None
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+    try:
+        return datetime.date.fromisoformat(str(value).strip()[:10])
+    except ValueError:
+        raise RosterError(
+            f"{name} in {path}: `chose_for` is {value!r}, which is not a "
+            f"date. Use 2026-10-23, or remove the line.") from None
 
 
 class NotFound(RosterError):
@@ -478,6 +517,11 @@ def to_toml(roster, written_by="checkit-printit"):
             if s.dropped_by:
                 lines.append(f"dropped_by = {quote(s.dropped_by)}")
         lines.append("skills    = [" + ", ".join(quote(k) for k in s.skills) + "]")
+        if s.chose_for:
+            # A bare TOML date, the same shape `availability.toml` uses for
+            # the assessment it came from, so the two can be read side by
+            # side without converting either.
+            lines.append(f"chose_for = {s.chose_for.isoformat()}")
         lines.append("")
     return "\n".join(lines)
 

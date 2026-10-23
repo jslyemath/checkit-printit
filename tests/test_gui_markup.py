@@ -109,6 +109,95 @@ def top_level_names(js):
                           js, re.M))
 
 
+def compounds(css):
+    """Every selector split into per-element compounds.
+
+    `.a .b.c` is two elements: `.a`, then `.b.c`. Splitting on the
+    combinators first is the whole point -- a descendant selector is
+    ordinary, and an earlier version of this test flagged all 40 of
+    them.
+    """
+    out = []
+    for chunk in re.findall(r"([^{}]*)\{", css):
+        for selector in chunk.split(","):
+            out += _split(selector.strip())
+    return out
+
+
+def _split(selector):
+    """One selector into compounds, descending into `:has()` and friends.
+
+    What is inside a functional pseudo-class is its own selector, so
+    `.deskwrap:has(.shape.tocount)` is two compounds and not one
+    element with three classes. Without this the check read `.shape` as
+    a modifier of `.deskwrap` and reported a collision that is not
+    there -- `.shape` is the head of its own compound and `.tocount`
+    qualifies it.
+    """
+    inner = []
+    def lift(match):
+        inner.extend(_split(match.group(1)))
+        return ""
+    while True:
+        after = re.sub(r":(?:has|not|is|where)\(([^()]*)\)", lift, selector)
+        if after == selector:
+            break
+        selector = after
+    return [p for p in re.split(r"[\s>+~]+", selector) if p] + inner
+
+
+def test_a_class_that_escapes_the_page_is_never_a_modifier():
+    """`position: fixed` or `absolute` on a bare `.foo` means `.foo`
+    cannot also qualify something else: whatever you attach it to is
+    lifted out of the document.
+
+    `.stale` is the page-is-older-than-the-server banner -- fixed, warn
+    background, drop shadow, bottom-centre of the window. The Print
+    tab's "chosen for another day" cell was given `class="aged stale"`,
+    and one table cell left the table and parked itself over the page.
+    Every one of the 805 tests passed. It took a screenshot.
+
+    Narrow on purpose. Sharing a word is not by itself wrong --
+    `.vcircle.badge.editing` wants the bare `.badge` rule to apply.
+    Sharing a word with a rule that takes an element out of flow always
+    is, because nothing downstream can put it back.
+    """
+    escapes, used_as_modifier = {}, {}
+    for name in ("style.css", "seating/seating.css"):
+        css = re.sub(r"/\*.*?\*/", "", read(name), flags=re.S)
+        for block in re.findall(r"([^{}]*)\{([^{}]*)\}", css):
+            selector, body = block
+            if not re.search(r"position:\s*(fixed|absolute)", body):
+                continue
+            for part in compounds(selector + "{"):
+                if re.fullmatch(r"\.[\w-]+", part):
+                    escapes[part[1:]] = name
+        for part in compounds(css):
+            classes = re.findall(r"\.([\w-]+)", part)
+            for word in classes[1:]:
+                used_as_modifier.setdefault(word, set()).add(part)
+
+    clashes = {w: used_as_modifier[w] for w in escapes if w in used_as_modifier}
+    assert not clashes, "takes an element out of flow and also qualifies one: " \
+        + "; ".join(f"`.{w}` ({escapes[w]}) is attached in {sorted(where)}"
+                    for w, where in sorted(clashes.items()))
+
+
+def test_that_check_would_have_caught_the_one_that_shipped():
+    """Green on a clean stylesheet proves nothing. This is the real
+    pair, fed to the same helpers."""
+    css = ".stale { position: fixed; bottom: 18px; }\n" \
+          "#who td.aged.stale { color: red; }"
+    escaping = {p[1:] for block in re.findall(r"([^{}]*)\{([^{}]*)\}", css)
+                if re.search(r"position:\s*(fixed|absolute)", block[1])
+                for p in compounds(block[0] + "{")
+                if re.fullmatch(r"\.[\w-]+", p)}
+    assert escaping == {"stale"}
+    attached = {w for p in compounds(css)
+                for w in re.findall(r"\.([\w-]+)", p)[1:]}
+    assert "stale" in attached, "the check would not have noticed"
+
+
 def test_the_two_scripts_declare_no_name_twice():
     """`app.js` and `seating/seating.js` are two plain <script> tags, so
     they share one global scope.
