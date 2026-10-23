@@ -427,6 +427,31 @@ Where an action needs a way back, give it a visible one instead of a
 question. Drop acts at once and the student lands in a Dropped band on
 the same screen, with restore in the same column.
 
+### `ask()` is how the app asks, and `okDespitePending` is why
+
+`window.confirm` is suppressed here, so `ask({title, body, yes, no})`
+does it instead -- a promise over a `<dialog>`, which is an element on
+the page. Escape is a cancel.
+
+`pendingElsewhere(saving)` lists unsaved work on tabs *other* than the
+one saving, and `okDespitePending` asks about it and is silent when
+the list is empty. Seating's save calls it, because the chart is where
+the print order and every seat's version come from.
+
+**Only warn when something is at stake.** The first version fired on
+every seating save, because `skillsDirty()` compared the server's
+assessment against an `assessment` object that is only filled when the
+Update form is *drawn* -- and the prefetch loads `skills` at boot. Any
+new "is this tab dirty" predicate must be false for a tab that has
+never been opened.
+
+### Nothing on the Roster writes before Save
+
+Including drop, which used to write the file on the press. It is held
+in `pendingDrops` and applied by `save()`, **before** the field edits,
+because the drop call matches on name and a rename applied first would
+leave it hunting for somebody who is gone.
+
 ### Test a destructive action on a throwaway course
 
 Dropping a student from the live course empties their seat, and
