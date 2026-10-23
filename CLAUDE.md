@@ -523,6 +523,35 @@ diagnosis down the wrong path. What actually stops a push or a pull is
 `conn.ready`: a web app URL and a secret. `renderFormBar` says that,
 and both working tabs call it.
 
+### A seat carries the student id, and the two files are checked
+
+`seating.toml` holds the print order and the version letters;
+`room.json` holds the room itself -- shapes, positions -- and who sits
+in it. They are **not** duplicates, and should not be merged: they
+overlap in one fact, who sits where with which version, and the same
+save writes both.
+
+Each seat now carries `sid` beside the name, and `Chart.order` matches
+on it first, falling back to the name. Before that, the chart was the
+one join in the tool made on a name -- and `api_roster_save` writes the
+roster and nothing else, so renaming a student in the Roster tab left
+the chart naming somebody who no longer existed. They lost their seat,
+their place in the stack and their version letter, silently, because an
+unmatched seat is skipped. `room.json` keyed by id all along and
+survived the same edit. The error message in that very handler says a
+name "is what the seating chart matches on".
+
+A chart with no ids -- hand-written, imported, or written before the
+key existed -- still matches by name and is untouched.
+
+`seating.disagrees_with_room(chart, room)` names every divergence, and
+`_build` refuses on one. Only the web app can run it: the CLI build
+reads `seating.toml` and knows nothing about `room.json`. It compares
+by id only, so a hand-written chart produces no noise.
+
+**The ids reach an existing course on its next Seats save.** Until
+then the chart matches by name, exactly as before.
+
 ### Dropping removes a student from the whole run
 
 `Roster.live()` is the filter, and `assemble` and `build_handouts` both

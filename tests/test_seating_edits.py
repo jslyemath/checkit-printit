@@ -22,6 +22,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from checkit_printit import room as room_mod
+from checkit_printit import roster as roster_mod
 from checkit_printit import seating as seating_mod
 
 
@@ -562,6 +563,178 @@ class TestSaving:
         out = gui_mod.api_seating_save(obj, {"room": a_room()})
         assert out["room"]["sections"][0]["name"] == "820"
         assert out["names"], "and the names, or the next draw is blank"
+
+
+WITH_IDS = """versions = ["A", "B"]
+
+[[group]]
+seats = [{name = "Ada Lovelace", sid = "806001", version = "A"},
+         {name = "Alan Turing", sid = "806002", version = "B"}]
+"""
+
+NO_IDS = """versions = ["A", "B"]
+
+[[group]]
+seats = ["Ada Lovelace", "Alan Turing"]
+"""
+
+STALE_ID = """versions = ["A", "B"]
+
+[[group]]
+seats = [{name = "Ada Lovelace", sid = "999999", version = "A"}]
+"""
+
+
+class TestASeatKnowsWhoItIs:
+    """A seat used to be a name and nothing else.
+
+    `api_roster_save` writes the roster and nothing else, so renaming a
+    student in the Roster tab left `seating.toml` naming somebody who
+    no longer existed: they lost their seat, their place in the stack
+    and their version letter, and the build said nothing, because an
+    unmatched seat is simply skipped. `room.json` keyed its seats by
+    student id all along and survived the same edit.
+    """
+
+    def chart_of(self, tmp_path, text):
+        p = tmp_path / "seating.toml"
+        p.write_text(text, encoding="utf-8")
+        return seating_mod.load(str(p))
+
+    def renamed(self):
+        """Ada as the Roster tab now spells her; the chart still says
+        Lovelace, because nothing propagates a rename to it."""
+        return roster_mod.Roster([
+            roster_mod.Student(name="Ada King", skills=["AD"], sid="806001"),
+            roster_mod.Student(name="Alan Turing", skills=["AD"], sid="806002"),
+        ])
+
+    def test_a_renamed_student_keeps_their_seat(self, tmp_path):
+        chart = self.chart_of(tmp_path, WITH_IDS)
+        ordered, unseated = chart.order(self.renamed())
+        assert [s.name for s in ordered] == ["Ada King", "Alan Turing"]
+        assert unseated == []
+        assert ordered[0].version == "A", "the seat's letter was lost"
+
+    def test_without_an_id_a_rename_still_loses_the_seat(self, tmp_path):
+        """The behaviour being fixed, pinned so the fix stays visible.
+
+        A chart written before the key existed has no id to match on,
+        so the name is all there is. That is why the key is written on
+        every save and not merely read.
+        """
+        chart = self.chart_of(tmp_path, NO_IDS)
+        ordered, unseated = chart.order(self.renamed())
+        assert [s.name for s in ordered] == ["Alan Turing"]
+        assert [s.name for s in unseated] == ["Ada King"]
+
+    def test_a_chart_with_no_ids_still_matches_by_name(self, tmp_path):
+        """Every hand-written chart. Nothing about those may change."""
+        chart = self.chart_of(tmp_path, NO_IDS)
+        people = roster_mod.Roster([
+            roster_mod.Student(name="Ada Lovelace", skills=["AD"]),
+            roster_mod.Student(name="Alan Turing", skills=["AD"]),
+        ])
+        ordered, unseated = chart.order(people)
+        assert [s.name for s in ordered] == ["Ada Lovelace", "Alan Turing"]
+        assert unseated == []
+
+    def test_an_id_matching_nobody_falls_back_to_the_name(self, tmp_path):
+        """A stale id must not be worse than no id: the chart may
+        predate a re-import that changed the numbering."""
+        chart = self.chart_of(tmp_path, STALE_ID)
+        people = roster_mod.Roster([
+            roster_mod.Student(name="Ada Lovelace", skills=["AD"],
+                               sid="806001"),
+        ])
+        ordered, _ = chart.order(people)
+        assert [s.name for s in ordered] == ["Ada Lovelace"]
+
+    def test_the_save_writes_the_id(self, course):
+        obj, gui_mod, course_mod = course
+        gui_mod.api_seating_save(obj, {"room": a_room()})
+        text = open(course_mod.file_in("P", "seating"), encoding="utf-8").read()
+        assert "sid = " in text, "the chart was written without any ids"
+        chart = seating_mod.load(course_mod.file_in("P", "seating"))
+        assert all(s.sid for s in chart.seats if s.name), \
+            "a named seat came back without the id that was written"
+
+
+class TestTheTwoSeatingFilesMustAgree:
+    """They overlap in one fact -- who sits where with which version --
+    and the same save writes both, so they agree until something edits
+    one alone. A filter would hide that; a check names it, which is how
+    `check_dropped_are_unseated` already reasons.
+    """
+
+    def saved(self, course):
+        obj, gui_mod, course_mod = course
+        gui_mod.api_seating_save(obj, {"room": a_room()})
+        return obj, gui_mod, course_mod
+
+    def test_a_fresh_save_agrees_with_itself(self, course):
+        """The ordinary case, and the one that must stay silent: both
+        files come out of the same call."""
+        obj, gui_mod, course_mod = self.saved(course)
+        chart = seating_mod.load(course_mod.file_in("P", "seating"))
+        room = room_mod.load(course_mod.file_in("P", "room"))
+        assert seating_mod.disagrees_with_room(chart, room) == []
+
+    def test_a_different_version_letter_is_named(self, course):
+        obj, gui_mod, course_mod = self.saved(course)
+        chart = seating_mod.load(course_mod.file_in("P", "seating"))
+        room = room_mod.load(course_mod.file_in("P", "room"))
+        for section in room.get("sections") or []:
+            for seat in room_mod.live_seats(section):
+                if (seat.get("student") or "").strip():
+                    seat["version"] = "Z"
+                    break
+            break
+        problems = seating_mod.disagrees_with_room(chart, room)
+        assert problems, "a changed letter was not noticed"
+        assert any("Z" in p for p in problems), problems
+
+    def test_a_seat_only_one_file_knows_is_named(self, course):
+        obj, gui_mod, course_mod = self.saved(course)
+        chart = seating_mod.load(course_mod.file_in("P", "seating"))
+        room = room_mod.load(course_mod.file_in("P", "room"))
+        for section in room.get("sections") or []:
+            for seat in room_mod.live_seats(section):
+                if (seat.get("student") or "").strip():
+                    seat["student"] = ""
+                    break
+            break
+        problems = seating_mod.disagrees_with_room(chart, room)
+        assert problems, "an emptied seat was not noticed"
+
+    def test_a_chart_with_no_ids_is_left_alone(self, tmp_path, course):
+        """A hand-written or imported chart holds names and no ids, and
+        its names were never meant to line up with the room's ids.
+        Comparing them would produce a page of noise about a file
+        somebody wrote deliberately."""
+        obj, gui_mod, course_mod = self.saved(course)
+        room = room_mod.load(course_mod.file_in("P", "room"))
+        p = tmp_path / "hand.toml"
+        p.write_text('versions = ["A", "B"]\n\n[[group]]\n'
+                     'seats = ["Someone Else", "Another Person"]\n',
+                     encoding="utf-8")
+        chart = seating_mod.load(str(p))
+        assert seating_mod.disagrees_with_room(chart, room) == []
+
+    def test_the_build_refuses_rather_than_printing_the_wrong_thing(
+            self, course):
+        """The check exists to stop a build, not to decorate a report."""
+        obj, gui_mod, course_mod = self.saved(course)
+        text = open(course_mod.file_in("P", "seating"), encoding="utf-8").read()
+        # One seat's version changed in the chart alone, as a hand edit
+        # or a half-finished merge would leave it.
+        broken = text.replace('version = "A"', 'version = "B"', 1)
+        assert broken != text, "no version to change; the fixture moved"
+        with open(course_mod.file_in("P", "seating"), "w",
+                  encoding="utf-8") as f:
+            f.write(broken)
+        with pytest.raises(gui_mod.GuiError, match="disagree"):
+            gui_mod.api_print_preview(obj, {})
 
 
 class TestWhatSaveDoesToTheChart:
