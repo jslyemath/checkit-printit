@@ -500,6 +500,48 @@ diagnosis down the wrong path. What actually stops a push or a pull is
 `conn.ready`: a web app URL and a secret. `renderFormBar` says that,
 and both working tabs call it.
 
+### Dropping removes a student from the whole run
+
+`Roster.live()` is the filter, and `assemble` and `build_handouts` both
+apply it. Two copies on purpose: `build_handouts` is public and decides
+what prints, `assemble` also protects `check_flat_pins`. Both are pinned
+by their own test -- mutation showed that with only one in place every
+other test still passed.
+
+It used to be enforced *only* by emptying the seat.
+`check_dropped_are_unseated` says printing works off the chart and so
+there is "deliberately no filter at print time" -- but `build_handouts`
+prints `ordered + unseated`, so a correctly emptied seat moved the
+student into the second group rather than out of the run. On 2026-10-23
+a dropped student got a three-page packet built from the previous
+week's choices. The guard passed: it looks for dropped-but-still-seated,
+which is the opposite mistake.
+
+`check_dropped_are_unseated` still runs **before** the filter, because
+filtering first leaves it nothing to find.
+
+### Only `form pull` dates a choice, and only two things write one
+
+`form pull` writes `skills` and stamps `chose_for`. The only other
+writer is `from_spreadsheet_export` (the `import_csv` command), which is
+a documented one-way migration and leaves choices undated. The class
+list importer creates students with `skills = []` and `merge` preserves
+what is there; the GUI's roster save does not touch skills at all.
+
+So "undated" is a migration state, not a steady one. After one pull
+every active student is dated, and a date that never appears is the
+point.
+
+### availability.toml is a local copy of what the form says
+
+`skills` there is the open-for-retake list that `form push` sends as the
+question's options. It is **not** read back from the form, so it can
+drift -- on 2026-10-23 it was `[]` while the live form was offering 14
+options from an earlier push. Nothing silently breaks: `nothing_to_say()`
+refuses a push with no skills or no date, so the blank cannot reach the
+form without `--force`. `skills set` only rewrites the lines it is given
+and never clears the list.
+
 ### A choice carries the day it was made for
 
 `Student.chose_for` is a date, or None. `form pull` stamps it with the

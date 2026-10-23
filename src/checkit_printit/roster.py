@@ -132,6 +132,17 @@ class Roster:
     def __iter__(self):
         return iter(self.students)
 
+    def live(self):
+        """Everyone still enrolled. Dropping removes a student from a run.
+
+        Named once so that "which students does this run concern" has a
+        single answer. `build_handouts` used to print `ordered + unseated`
+        straight off the full roster, and a dropped student -- whose seat
+        had been correctly emptied -- came back as *unseated* and printed
+        anyway. Three pages, from choices made the week before.
+        """
+        return Roster([s for s in self.students if not s.dropped])
+
     def skills_used(self):
         """Every skill anyone asked for, in first-seen order.
 
