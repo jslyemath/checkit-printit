@@ -180,7 +180,16 @@ def publication_skills(publication, bank):
 
 
 def build_handouts(roster, chart, publication, seeds):
-    """Students in seating order, each with their versions resolved."""
+    """Students in seating order, each with their versions resolved.
+
+    Dropped students are not students in a run. `assemble` filters them
+    too, and this is the deliberate second copy: this is the function
+    that decides what prints, and it is public and called directly by
+    tests and by anything added later. The usual "is there a second
+    copy?" rule yields here, because the cost of the two disagreeing is
+    a paper in a departed student's hands.
+    """
+    roster = roster.live() if hasattr(roster, "live") else roster
     ordered, unseated = chart.order(roster) if chart else (list(roster), [])
     handouts = []
     pinned = publication.student_versions or {}
@@ -463,8 +472,18 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None,
     """Write a complete, compilable folder. Returns a short report."""
     rng = rng or random.Random()
     bank = Bank(publication.bank_path)
-    check_flat_pins(publication, roster)
+    # Order matters. `check_dropped_are_unseated` needs the *whole* roster,
+    # because what it looks for is a dropped student who still holds a
+    # seat -- filter first and it has nothing left to find.
     check_dropped_are_unseated(roster, chart)
+    # Then out they go, for every step after this one. Dropping was only
+    # ever enforced by emptying the seat, and `build_handouts` prints the
+    # seated *plus* everyone unseated, so an emptied seat put the student
+    # in the second group instead of removing them. On 2026-10-23 that
+    # shipped a three-page packet, built from the previous week's
+    # choices, for a student who had been dropped.
+    roster = roster.live() if hasattr(roster, "live") else roster
+    check_flat_pins(publication, roster)
     missing = {}
     env_misses = set()
     env = make_env(missing=env_misses)

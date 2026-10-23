@@ -414,6 +414,98 @@ class TestAssembly:
                                        rng=random.Random(1))
         return out, report
 
+    def test_a_dropped_student_prints_nothing(self, bank_dir, tmp_path):
+        """Dropping takes a student out of the whole run.
+
+        It used to take them out of the seating chart only, and
+        `build_handouts` prints the seated *plus* everyone unseated --
+        so emptying the seat moved the student into the second group
+        instead of removing them. On 2026-10-23 that put a three-page
+        packet, built from the previous week's choices, into a real run
+        for a student who had been dropped a fortnight earlier. The
+        existing guard looks for the opposite mistake (dropped but
+        still seated) and passed cleanly.
+        """
+        people = roster_mod.Roster([
+            roster_mod.Student(name="Ada", section="1", skills=["AD"]),
+            roster_mod.Student(name="Bo", section="1", skills=["AD", "SU"]),
+            roster_mod.Student(name="Cy", section="1", skills=["AD", "SU"],
+                               dropped=True, dropped_by="instructor"),
+        ])
+        out, report = self.build(bank_dir, tmp_path, roster=people,
+                                 chart=chart_for(tmp_path, ["Ada", "Bo"]))
+        main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
+        assert r"\setname{Cy}" not in main
+        assert r"\setname{Ada}" in main and r"\setname{Bo}" in main
+
+    def test_the_dropped_are_not_counted_as_unseated(self, bank_dir, tmp_path):
+        """The route the bug took. An empty seat is the point of
+        dropping, so "unseated" must not quietly mean "print anyway"."""
+        people = roster_mod.Roster([
+            roster_mod.Student(name="Ada", section="1", skills=["AD"]),
+            roster_mod.Student(name="Cy", section="1", skills=["AD"],
+                               dropped=True),
+        ])
+        _, report = self.build(bank_dir, tmp_path, roster=people,
+                               chart=chart_for(tmp_path, ["Ada"]))
+        assert "Cy" not in str(report.get("unseated", []))
+
+    def test_build_handouts_drops_them_on_its_own(self, bank_dir, tmp_path):
+        """Called directly, not through `assemble`.
+
+        Both functions filter, which is a deliberate second copy -- and
+        a second copy nothing exercises separately is one that rots. A
+        mutation run proved that: with only one of the two filters in
+        place every other test still passed, so neither was pinned down
+        on its own. This pins `build_handouts`.
+        """
+        people = roster_mod.Roster([
+            roster_mod.Student(name="Ada", section="1", skills=["AD"]),
+            roster_mod.Student(name="Cy", section="1", skills=["AD", "SU"],
+                               dropped=True, dropped_by="instructor"),
+        ])
+        source, _ = theme.load(bank_dir)
+        publication = make_publication(bank_dir)
+        seeds = assemble_mod.choose_seeds(
+            assemble_mod.Bank(bank_dir), ["A", "B"], publication,
+            random.Random(1))
+        handouts, unseated = assemble_mod.build_handouts(
+            people, chart_for(tmp_path, ["Ada"]), publication, seeds)
+        assert [h.name for h in handouts] == ["Ada"]
+        assert [s.display for s in unseated] == []
+
+    def test_a_dropped_students_old_skills_cannot_refuse_the_run(
+            self, bank_dir, tmp_path):
+        """The other half of the filter, and not a cosmetic one.
+
+        `check_flat_pins` refuses a flat `[seeds]` pin when the run
+        prints more than one skill, because one seed across several
+        skills cannot mean what it says. It counts skills off the
+        roster -- so a dropped student still carrying last term's
+        choices adds slugs nobody is printing, and the build refuses a
+        run that is perfectly valid.
+
+        Here the live student asks for one skill, so the pin is legal;
+        the dropped student's leftover second skill must not be
+        counted. Found by mutation: with only `build_handouts`
+        filtering, every other test still passed.
+        """
+        people = roster_mod.Roster([
+            roster_mod.Student(name="Ada", section="1", skills=["AD"]),
+            roster_mod.Student(name="Cy", section="1", skills=["SU"],
+                               dropped=True, dropped_by="instructor"),
+        ])
+        # The fixture bank draws BUNDLE_UNTIL + 40 seeds, so printable
+        # ones run 400..439. 450 is past the end and fails for an
+        # unrelated reason.
+        publication = make_publication(bank_dir, seeds={"A": 420})
+        out, _ = self.build(bank_dir, tmp_path, publication=publication,
+                            roster=people,
+                            chart=chart_for(tmp_path, ["Ada"]))
+        main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
+        assert r"\setname{Ada}" in main
+        assert r"\setname{Cy}" not in main
+
     def test_neighbours_get_different_versions(self, bank_dir, tmp_path):
         out, report = self.build(bank_dir, tmp_path)
         main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
