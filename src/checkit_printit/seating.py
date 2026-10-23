@@ -29,6 +29,18 @@ class Seat:
     name: str
     group: int
     version: str
+    #: The roster `sid`, when the chart records one.
+    #:
+    #: A seat used to be a name and nothing else, which made this the
+    #: one join in the tool done on a name -- and `api_roster_save`
+    #: writes only the roster, so renaming a student in the Roster tab
+    #: silently unseated them. `room.json` keyed its seats by id all
+    #: along and survived a rename; this file did not.
+    #:
+    #: Empty for a hand-written chart, and for every chart written
+    #: before this key existed. `Chart.order` falls back to the name,
+    #: so those keep working exactly as they did.
+    sid: str = ""
     pinned: bool = False
     # Which chair at its own table, counting as the file lists them.
     # Kept because the seats are handed back in *stack* order, and once
@@ -128,8 +140,10 @@ def load(path, versions=("A", "B")):
                 name = (entry.get("name") or "").strip()
                 pinned_version = entry.get("version")
                 at = entry.get("at")
+                sid = str(entry.get("sid") or "").strip()
             else:
                 name, pinned_version, at = str(entry).strip(), None, None
+                sid = ""
             if not name:
                 continue
             if pinned_version is not None and pinned_version not in versions:
@@ -150,6 +164,7 @@ def load(path, versions=("A", "B")):
                 name=name,
                 group=g,
                 version=pinned_version or assigned[i],
+                sid=sid,
                 pinned=pinned_version is not None,
                 at_table=i,
             )))
@@ -163,6 +178,54 @@ def load(path, versions=("A", "B")):
     if any(at is not None for at, _ in found):
         found.sort(key=lambda pair: (pair[0] is None, pair[0] or 0))
     return Chart([seat for _, seat in found], versions)
+
+
+def disagrees_with_room(chart, room):
+    """Where `seating.toml` and `room.json` do not say the same thing.
+
+    Returns a list of sentences, empty when they agree.
+
+    The two files overlap in exactly one fact -- who sits where, with
+    which version -- and the app writes both in the same save, so they
+    agree right up until something edits one of them alone. A filter
+    would hide that; a check names it, which is the same reasoning as
+    `check_dropped_are_unseated`.
+
+    Compared by student id only. A chart with no ids in it is a
+    hand-written or imported one, and the names in it were never
+    expected to line up with the room's ids -- so that case returns
+    nothing rather than a page of noise about a file somebody wrote
+    deliberately.
+    """
+    from . import room as room_mod
+
+    seated = {}
+    for section in room.get("sections") or []:
+        for seat in room_mod.live_seats(section):
+            who = str(seat.get("student") or "").strip()
+            if who:
+                seated[who] = str(seat.get("version") or "").strip()
+
+    charted = {s.sid: s for s in chart.seats if s.sid}
+    if not charted:
+        return []
+
+    problems = []
+    for sid in sorted(set(charted) - set(seated)):
+        problems.append(
+            f"{charted[sid].name} has a seat in seating.toml but not in "
+            f"the seating chart.")
+    for sid in sorted(set(seated) - set(charted)):
+        problems.append(
+            f"a student seated in the chart (id {sid}) has no seat in "
+            f"seating.toml.")
+    for sid in sorted(set(charted) & set(seated)):
+        theirs, ours = seated[sid], charted[sid].version
+        if theirs and ours and theirs != ours:
+            problems.append(
+                f"{charted[sid].name} is version {ours} in seating.toml "
+                f"and {theirs} in the seating chart.")
+    return problems
 
 
 def blank_seat(text, name):
@@ -274,10 +337,20 @@ class Chart:
         """
         people = list(roster)
         index = index_by_name(people)
+        # The id wins where the chart records one. That is the whole
+        # point of recording it: a renamed student keeps their seat,
+        # their place in the stack and their version letter, where
+        # before the seat simply stopped matching anybody.
+        by_sid = {}
+        for i, student in enumerate(people):
+            if student.sid:
+                by_sid.setdefault(student.sid, []).append(i)
 
         ordered, seated = [], set()
         for seat in self.seats:
-            hits = index.get(seat.name)
+            hits = by_sid.get(seat.sid) if seat.sid else None
+            if not hits:
+                hits = index.get(seat.name)
             if not hits:
                 continue
             if len(hits) > 1:
@@ -353,10 +426,15 @@ def to_toml(room, name_of, written_by="the seating chart tab"):
     """Write the chart a room describes.
 
     `name_of` turns a student id into the name the roster knows them by.
-    The room holds ids; `seating.toml` holds names, because that is what a
-    chart has always held and what `Chart.order` matches on. The roster
-    name rather than the printed one: two students can share a printed
-    name, and this is the file that has to identify them.
+    The room holds ids and so, now, does each seat: `sid` is written
+    beside the name and is what `Chart.order` matches on first. The
+    name stays because a chart is meant to be read and hand-edited, and
+    a wall of nine-digit numbers is not -- but it is no longer the join.
+    Renaming a student used to unseat them silently, because
+    `api_roster_save` writes the roster and nothing else.
+
+    The roster name rather than the printed one: two students can share
+    a printed name, and this is the file that has to identify them.
 
     **Every seat is pinned.** The app decides the letters now -- by
     coloring the room, where `alternate` could only cycle a list -- so
@@ -466,8 +544,13 @@ def to_toml(room, name_of, written_by="the seating chart tab"):
                     continue
                 version = seat.get("version") or ""
                 at = numbered.get(seat_id)
+                # The id the room already keyed this seat by. Written
+                # second, after the name, so the file still reads as a
+                # list of people.
+                sid = str(seat.get("student") or "").strip()
                 entries.append(
                     "{name = " + _quote(name)
+                    + (", sid = " + _quote(sid) if sid else "")
                     + (", version = " + _quote(version) if version else "")
                     + (f", at = {at}" if at else "")
                     + "}")

@@ -1229,7 +1229,38 @@ def api_print_save(course, body):
     return api_print(course, {})
 
 
+def _check_chart_matches_room(course):
+    """Refuse a build whose two seating files disagree.
+
+    Only reachable from the web app, because `room.json` is its file --
+    the CLI build reads `seating.toml` and knows nothing else. Both are
+    written by the same save, so a divergence means one of them was
+    edited alone, and what prints would not be what the Seats tab
+    shows.
+    """
+    chart_path = course.file("seating")
+    room_path = course.file("room")
+    if not (os.path.isfile(chart_path) and os.path.isfile(room_path)):
+        return
+    try:
+        chart = seating_mod.load(chart_path)
+        room = room_mod.load(room_path)
+    except (OSError, seating_mod.SeatingError, room_mod.RoomError):
+        # Neither is this check's business to report: the build and the
+        # Seats tab each say so in their own words, and a second
+        # unreadable-file message here would only arrive first.
+        return
+    problems = seating_mod.disagrees_with_room(chart, room)
+    if problems:
+        raise GuiError(
+            "the seating chart and seating.toml disagree, so what prints "
+            "would not be what the Seats tab shows:\n\n"
+            + "\n".join("  " + p for p in problems)
+            + "\n\nOpen Seats and save it to rewrite seating.toml.")
+
+
 def _build(course, preview, seed=None):
+    _check_chart_matches_room(course)
     draft = printjob_mod.load_draft(course.name)
     identity = _course_identity(course)
     try:
