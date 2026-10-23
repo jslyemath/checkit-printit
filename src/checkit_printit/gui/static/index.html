@@ -162,8 +162,13 @@
              aria-label="The day it happens"
              title="Prints on the paper, names the job folder, and is how a response is matched to an assessment.">
       <span class="spacer"></span>
-      <button id="print-reset" class="act"
-              title="Empty every field on this tab, ready for the next run. Save to keep it; Discard puts it back.">Reset this print job</button>
+      <!-- An icon button, like every other secondary action in the app.
+           It was the one piece of loose underlined-looking text left in
+           a page header, which is why it read as out of place. The
+           reset glyph is the Roster's. -->
+      <button id="print-reset" class="iconbtn undo" type="button"
+              aria-label="Empty every field on this tab"
+              title="Empty every field on this tab, ready for the next run. It becomes an unsaved change: Save keeps it, Discard puts it back."></button>
     </header>
     <p id="print-blocked" class="banner warn" hidden></p>
     <!-- "The roster changed since you last opened this tab" is news, not
@@ -602,6 +607,20 @@
 </main>
 
 <div id="toast" class="toast" hidden></div>
+
+<!-- The app's own confirmation. `window.confirm` is browser chrome and
+     the desktop pane suppresses it -- that is why the drop button
+     looked dead for weeks. A `<dialog>` is an element on the page, so
+     it shows. Driven by `ask()`. -->
+<dialog id="ask" class="ask">
+  <h3 id="ask-title"></h3>
+  <div id="ask-body"></div>
+  <div class="toolbar">
+    <span class="spacer"></span>
+    <button id="ask-no">Cancel</button>
+    <button id="ask-yes" class="primary">Go ahead</button>
+  </div>
+</dialog>
 
 <script>window.PRINTIT_TOKEN = "__TOKEN__";</script>
 <script src="/app.js"></script>

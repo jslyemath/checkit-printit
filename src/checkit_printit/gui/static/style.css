@@ -787,6 +787,19 @@ tr.secband td { z-index: 1; }
    over the table. The whole value is still in the cell's tooltip. */
 th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* "Who gets what" sizes itself. The fixed layout and the `auto` width
+   above are for the Roster, whose widths come from a `<colgroup>` that
+   `sizeColumns` works out -- nothing does that for this table, so it
+   stopped at its content and left the rest of the row empty. `auto`
+   plus a full width lets the browser do the same job: columns to fit
+   their content, and the slack to the widest one, which here is the
+   list of skills. */
+#who {
+  table-layout: auto;
+  width: 100%;
+  min-width: 0;
+}
+
 @media (max-width: 720px) {
   main { padding: 16px; }
 }
@@ -911,6 +924,22 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+/* Facts that are peers, side by side, as labels rather than as a
+   sentence -- 13.4's alternative to running them together with words
+   in between. Several chips sit in one `.sec-count`. */
+.chip {
+  display: inline-block;
+  padding: 1px var(--s2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.chip + .chip { margin-left: var(--s1); }
+
 .annot-body { min-width: 0; }
 .annot-body > :last-child { margin-bottom: 0; }
 
@@ -1192,6 +1221,23 @@ table.seeds td {
 /* The pickers inside Print job are the same control as the Update form's
    list, just shorter. */
 .skill-list.short { max-height: 190px; margin-top: 4px; }
+
+/* ---- the app's own confirmation --------------------------------------
+   A `<dialog>`, because `window.confirm` is browser chrome and the
+   desktop pane suppresses it. */
+.ask {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  color: var(--ink);
+  padding: var(--s5);
+  max-width: 460px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .35);
+}
+.ask::backdrop { background: rgba(0, 0, 0, .45); }
+.ask h3 { margin: 0 0 var(--s3); font-size: var(--t-lg); }
+.ask p { margin: 0 0 var(--s2); font-size: var(--t-md); color: var(--ink-2); }
+.ask .toolbar { margin: var(--s4) 0 0; }
 
 /* ---- empty states ----------------------------------------------------
    **A door, not a sign.** "This roster is empty" is a fact the screen

@@ -90,6 +90,23 @@ const COLUMNS = [
 
 let students = [];
 let edits = new Map();          // "index:field" -> value
+/* Drops waiting for Save, as index -> the state you asked for.
+ *
+ * Dropping used to write the file the moment you pressed it, which made
+ * it the one control on the tab that did not wait for Save -- and the
+ * one with the largest consequence, since it empties a seat. It is a
+ * pending change like any other now: the student moves to the Dropped
+ * band, the save bar comes up, and Discard puts them back. */
+let pendingDrops = new Map();
+
+/* What the table should show, which is not always what the file says. */
+function isDropped(student) {
+  return pendingDrops.has(student.index)
+    ? pendingDrops.get(student.index)
+    : Boolean(student.dropped);
+}
+
+function pendingCount() { return edits.size + pendingDrops.size; }
 // Sorts stack, the way a spreadsheet's do: the most recent click is the
 // primary key and the ones before it survive as tiebreakers. Sorting by
 // surname and then by section gives 820 A-Z, then 830 A-Z.
@@ -159,6 +176,79 @@ function toast(message, bad) {
   toastTimer = setTimeout(() => { el.hidden = true; }, bad ? 9000 : 3000);
 }
 
+/* ---- asking, and cross-tab fallout ---------------------------------
+ *
+ * `ask()` is the app's confirmation. `window.confirm` is browser
+ * chrome and the desktop pane suppresses it, so a `<dialog>` does the
+ * job instead -- it is an element on the page.
+ *
+ * Returns a promise for true or false, and never blocks.
+ */
+function ask({ title, body, yes = "Go ahead", no = "Cancel" }) {
+  const box = document.getElementById("ask");
+  document.getElementById("ask-title").textContent = title;
+  const where = document.getElementById("ask-body");
+  where.textContent = "";
+  for (const line of [].concat(body)) {
+    const p = document.createElement("p");
+    p.textContent = line;
+    where.appendChild(p);
+  }
+  const ok = document.getElementById("ask-yes");
+  const cancel = document.getElementById("ask-no");
+  ok.textContent = yes;
+  cancel.textContent = no;
+  return new Promise(resolve => {
+    const done = (answer) => {
+      ok.onclick = cancel.onclick = box.onclose = null;
+      if (box.open) box.close();
+      resolve(answer);
+    };
+    ok.onclick = () => done(true);
+    cancel.onclick = () => done(false);
+    // Escape closes it, which is a cancel.
+    box.onclose = () => done(false);
+    box.showModal();
+  });
+}
+
+/* Unsaved work held on a tab other than the one being saved.
+ *
+ * Saving one tab can invalidate another's pending work -- a seating
+ * save renumbers the versions a print draft has overrides against --
+ * and the only honest moment to say so is before it happens.
+ *
+ * `saving` is the tab doing the saving, so its own pending work is not
+ * reported back to it.
+ */
+function pendingElsewhere(saving) {
+  const held = [];
+  const add = (view, label, what) => {
+    if (saving !== view && what) held.push(`${label}: ${what}`);
+  };
+  const n = pendingCount();
+  add("roster", "Roster",
+      n ? `${n} unsaved change${n === 1 ? "" : "s"}` : "");
+  add("print", "Print job", printDirty() ? "an unsaved print job" : "");
+  add("form", "Update form",
+      skills && skillsDirty() ? "unsaved assessment settings" : "");
+  return held;
+}
+
+/* Ask before a save knocks over work held elsewhere -- and **only**
+ * then. A warning that fires when nothing is at stake is one that gets
+ * clicked through without reading. */
+async function okDespitePending(saving, consequence) {
+  const held = pendingElsewhere(saving);
+  if (!held.length) return true;
+  return ask({
+    title: "Unsaved work on another tab",
+    body: [consequence, ...held],
+    yes: "Save anyway",
+    no: "Go back",
+  });
+}
+
 // ----------------------------------------------------------------- nav --
 
 /* The rail's icons.
@@ -202,10 +292,14 @@ const GLYPH = {
   // Two ways round, from Seating, where it already means exactly this.
   swapby: "M4 8h13l-3-3M20 16H7l3 3",
 
-  /* A doorway with an arrow through it: leaving the class to drop,
-     coming back in to restore. The frame and the door panel stay put
+  /* A doorway with an arrow beside it: leaving the class to drop,
+     coming back to restore. The frame and the open door panel stay put
      and only the arrow turns, so the pair is one idea with a
      direction.
+
+     The arrow sits **outside** the frame and reaches its threshold.
+     Drawn inside the door it was a line in a box, which is not a
+     picture of leaving.
 
      Two earlier attempts were worse. A person with a minus sign loses
      the minus at this size, and the minus is the whole meaning. A
@@ -215,12 +309,10 @@ const GLYPH = {
 
      Not a bin, ever: dropping deletes nobody, and it is an unkind
      picture of a person. */
-  drop: [{ r: [13.5, 3, 7.5, 18, 1.6] },
-         { d: "M10.5 3H5.2A1.2 1.2 0 0 0 4 4.2v15.6A1.2 1.2 0 0 0 5.2 21h5.3"
-              + "M6.5 12h6.2M10 8.8l3.2 3.2-3.2 3.2" }],
-  restore: [{ r: [13.5, 3, 7.5, 18, 1.6] },
-            { d: "M10.5 3H5.2A1.2 1.2 0 0 0 4 4.2v15.6A1.2 1.2 0 0 0 5.2 21h5.3"
-                 + "M12.7 12H6.5M9.7 8.8L6.5 12l3.2 3.2" }],
+  drop: [{ r: [12, 4.5, 4.5, 15, 1.4] }, { r: [17.5, 2.5, 4.5, 19, 1.4] },
+         { d: "M2 12h8.2M7.2 8.8l3.2 3.2-3.2 3.2" }],
+  restore: [{ r: [12, 4.5, 4.5, 15, 1.4] }, { r: [17.5, 2.5, 4.5, 19, 1.4] },
+            { d: "M10.2 12H2M5 8.8L1.8 12l3.2 3.2" }],
   /* An arrow coming back round to where it started. */
   reset: "M19.4 12a7.4 7.4 0 1 1-2.2-5.3M19.6 4.4v4.2h-4.2",
 };
@@ -516,7 +608,7 @@ function saveBar(view, dirty, what) {
 }
 
 function refreshDirty() {
-  const n = edits.size;
+  const n = pendingCount();
   saveBar("roster", n > 0,
           n === 1 ? "1 unsaved change" : `${n} unsaved changes`);
 }
@@ -988,8 +1080,8 @@ function renderRoster() {
      the bottom, sorted inside itself by the same keys. That replaced
      the "show dropped students" tick, which could only hide them or
      scatter them through everyone else. */
-  const active = sortRoster(students.filter(s => !s.dropped));
-  const dropped = sortRoster(students.filter(s => s.dropped));
+  const active = sortRoster(students.filter(s => !isDropped(s)));
+  const dropped = sortRoster(students.filter(s => isDropped(s)));
 
   const runs = sectionRuns(active) || [];
   let runAt = 0;
@@ -1017,7 +1109,7 @@ function renderRoster() {
     if (row.band) { body.appendChild(sectionBand(row.band)); continue; }
     const student = row.student;
     const tr = document.createElement("tr");
-    if (student.dropped) tr.className = "dropped";
+    if (isDropped(student)) tr.className = "dropped";
 
     for (const column of COLUMNS) {
       const td = document.createElement("td");
@@ -1029,14 +1121,14 @@ function renderRoster() {
         // window had to spare. Grey until you point at it, so the column
         // is quiet and the accent says which row you are on.
         const b = document.createElement("button");
-        b.className = "iconbtn" + (student.dropped ? " undo" : "");
-        b.appendChild(icon(student.dropped ? "restore" : "drop"));
-        b.title = student.dropped
+        b.className = "iconbtn" + (isDropped(student) ? " undo" : "");
+        b.appendChild(icon(isDropped(student) ? "restore" : "drop"));
+        b.title = isDropped(student)
           ? "Put this student back on the roster."
           : "Drop this student. They stay on the roster, greyed out, and "
             + "print nothing.";
         b.setAttribute("aria-label", b.title);
-        b.onclick = () => drop(student, !student.dropped);
+        b.onclick = () => drop(student, !isDropped(student));
         td.appendChild(b);
       } else if (column.edit) {
         td.classList.add("cell-" + column.key);
@@ -1073,36 +1165,37 @@ function renderRoster() {
   renderRosterEmpty(shown.length > 0);
 }
 
-async function drop(student, dropped) {
-  if (edits.size) {
-    toast("Save or discard your edits first — dropping rewrites the file.", true);
-    return;
-  }
-  /* **No `confirm()`.** It is a blocking native dialog, and the desktop
-     app's browser pane suppresses it: the handler ran, the dialog never
-     appeared, and the button looked dead. Verified by stubbing
-     `window.confirm` and watching it be called with the right message
-     while nothing happened on screen.
+/* Mark a student dropped or restored. Nothing is written until Save.
+ *
+ * Pressing it twice puts them back where they started, so the entry
+ * goes rather than recording a change that is not one.
+ */
+function drop(student, dropped) {
+  if (Boolean(student.dropped) === dropped) pendingDrops.delete(student.index);
+  else pendingDrops.set(student.index, dropped);
+  // Opened, so the student is visible where they have just gone rather
+  // than vanishing into a band that is shut by default.
+  if (dropped) shutBands.delete(DROPPED_BAND);
+  renderRoster();
+  refreshDirty();
+}
 
-     Nothing replaced it, because the action no longer needs one. Drop
-     moves the student into the Dropped band, which is on the same
-     screen with a restore button in the same column -- the undo is
-     visible rather than promised. The one thing restore does not give
-     back is the seat, so the toast says so. */
-  try {
+async function applyDrops() {
+  /* Drops before edits, and by the name the file still holds: the drop
+     call matches on name, so a rename saved first would leave it
+     looking for somebody who is no longer there. Nothing here renames
+     anyone, so the names are still the stored ones. */
+  let done = 0;
+  for (const [index, dropped] of pendingDrops) {
+    const student = students.find(s => s.index === index);
+    if (!student) continue;
     const data = await api("/api/roster/drop",
                            { who: student.name, dropped });
     students = data.students;
-    // Opened so the student is visible where they have just gone,
-    // rather than vanishing into a band that is shut by default.
-    if (dropped) shutBands.delete(DROPPED_BAND);
-    renderRoster();
-    toast(dropped
-      ? `${student.name} dropped. Their seat is now empty — restoring `
-        + `them does not give it back.`
-      : `${student.name} restored. They have no seat; give them one in `
-        + `Seating.`);
-  } catch (err) { toast(err.message, true); }
+    done += 1;
+  }
+  pendingDrops.clear();
+  return done;
 }
 
 async function save() {
@@ -1110,18 +1203,33 @@ async function save() {
     const [index, field] = k.split(":");
     return { index: Number(index), field, value };
   });
+  const seats = [...pendingDrops.values()].filter(Boolean).length;
   try {
-    const data = await api("/api/roster/save", { edits: payload });
-    students = data.students;
+    const dropped = await applyDrops();
+    if (payload.length) {
+      const data = await api("/api/roster/save", { edits: payload });
+      students = data.students;
+    }
+    const n = payload.length + dropped;
     edits.clear();
     renderRoster();
     refreshDirty();
-    toast(data.saved === 1 ? "Saved 1 change" : `Saved ${data.saved} changes`);
-  } catch (err) { toast(err.message, true); }
+    toast(`Saved ${n} change${n === 1 ? "" : "s"}`
+      + (seats ? `. ${seats === 1 ? "A seat is" : seats + " seats are"} now `
+                 + `empty — restoring does not give one back.` : ""));
+  } catch (err) {
+    // A drop may have gone through before a later one failed, so redraw
+    // from whatever the server last returned rather than leave the
+    // table showing a state nothing is in.
+    renderRoster();
+    refreshDirty();
+    toast(err.message, true);
+  }
 }
 
 function revert() {
   edits.clear();
+  pendingDrops.clear();
   renderRoster();
   refreshDirty();
   toast("Discarded");
@@ -1178,7 +1286,14 @@ function sameMinute(a, b) {
 }
 
 function skillsDirty() {
-  if (!skills) return false;
+  /* `skillsDrawn`, not just `skills`. The data is prefetched at boot
+     and `assessment` is not filled until the tab is drawn, so a tab
+     nobody has opened compared the server's values against an empty
+     object and reported every field as changed. Harmless while only
+     the save bar asked -- it is only drawn after `loadSkills` -- and
+     not harmless once `pendingElsewhere` started asking cold, where it
+     warned about unsaved work that did not exist. */
+  if (!skills || !skillsDrawn) return false;
   const was = skills.assessment;
   const now = assessment;
   const sameFields = ["name", "date", "limit"].every(k => (was[k] || "") === (now[k] || ""))
@@ -2303,13 +2418,23 @@ function renderWho() {
                                                   draft.mode === "same");
   const movedCount = Object.keys(draft.versions).length;
   const overrideCount = Object.keys(draft.overrides).length;
-  // One fact, not three run together: what prints, and for how many.
-  // The moved-version count went to the Version column's own reset,
-  // which is the thing it is about.
-  document.getElementById("who-count").textContent =
-    papers ? `${papers} paper${papers === 1 ? "" : "s"} for ${getting} `
-             + `student${getting === 1 ? "" : "s"}`
-           : "nothing to print yet";
+  /* Two counts as two chips, not a sentence. "44 papers for 44
+     students" is grammar doing a label's job; 13.4's own answer for
+     facts that are peers is small grouped pills, and this is the case
+     it was written for. The moved-version count went to the Version
+     column's own reset, which is the thing it is about. */
+  const count = document.getElementById("who-count");
+  count.textContent = "";
+  if (!papers) {
+    count.textContent = "nothing to print yet";
+  } else {
+    for (const [n, word] of [[papers, "paper"], [getting, "student"]]) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = `${n} ${word}${n === 1 ? "" : "s"}`;
+      count.appendChild(chip);
+    }
+  }
   // One reset per column, shown on the same condition as the row ones.
   const vreset = document.getElementById("reset-versions");
   vreset.title = movedCount
@@ -2693,7 +2818,9 @@ async function boot() {
   document.getElementById("form-push").onclick = pushForm;
   document.getElementById("print-save").onclick = savePrint;
   document.getElementById("print-revert").onclick = revertPrint;
-  document.getElementById("print-reset").onclick = resetPrint;
+  const preset = document.getElementById("print-reset");
+  preset.appendChild(icon("reset"));
+  preset.onclick = resetPrint;
   document.getElementById("setup-signin").onclick = signInToGoogle;
   document.getElementById("course-save").onclick = saveIdentity;
   document.getElementById("course-revert").onclick = revertIdentity;

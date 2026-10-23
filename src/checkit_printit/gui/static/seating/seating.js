@@ -6177,6 +6177,20 @@ async function saveSeating(only) {
      one document and `room.check` has to see all of it -- but a room
      built from the saved copy with one section swapped in means only
      that section's edits land. */
+
+  /* A seating save reaches into the Print tab: the print order comes
+     from this chart, and so does the version letter each seat gives,
+     which a print draft may hold overrides against. `okDespitePending`
+     lives in app.js -- the two scripts share one scope -- and asks
+     **only** when something is actually held elsewhere. */
+  if (typeof okDespitePending === "function") {
+    const go = await okDespitePending(
+      "seating",
+      "Saving the chart changes the print order and the version each "
+      + "seat gives, which the Print job is built from.");
+    if (!go) return;
+  }
+
   const room = only === undefined ? seatingRoom : roomWith(only);
   try {
     const out = await api("/api/seating/save", { room: room });
