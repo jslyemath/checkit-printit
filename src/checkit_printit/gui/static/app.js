@@ -185,32 +185,59 @@ function toast(message, bad) {
  *
  * Returns a promise for true or false, and never blocks.
  */
-function ask({ title, body, yes = "Go ahead", no = "Cancel" }) {
+function askBox({ title, body, yes, no, value }) {
+  /* One dialog, two questions. `value === null` is the yes/no form and
+     resolves true/false; anything else shows the field and resolves to
+     the text, or null if cancelled -- the same shape `window.prompt`
+     had, so a caller reads the same way.
+
+     Both exist because the pane suppresses `confirm` *and* `prompt`,
+     and a suppressed one returns falsy without drawing anything. Two
+     controls shipped dead that way: Push it, and the Seating tab's
+     "how many versions". */
   const box = document.getElementById("ask");
   document.getElementById("ask-title").textContent = title;
   const where = document.getElementById("ask-body");
   where.textContent = "";
-  for (const line of [].concat(body)) {
+  for (const line of [].concat(body || [])) {
     const p = document.createElement("p");
     p.textContent = line;
     where.appendChild(p);
   }
+  const field = document.getElementById("ask-input");
+  const wants = value !== null;
+  field.hidden = !wants;
+  if (wants) field.value = String(value);
   const ok = document.getElementById("ask-yes");
   const cancel = document.getElementById("ask-no");
   ok.textContent = yes;
   cancel.textContent = no;
   return new Promise(resolve => {
     const done = (answer) => {
-      ok.onclick = cancel.onclick = box.onclose = null;
+      ok.onclick = cancel.onclick = box.onclose = field.onkeydown = null;
       if (box.open) box.close();
       resolve(answer);
     };
-    ok.onclick = () => done(true);
-    cancel.onclick = () => done(false);
+    ok.onclick = () => done(wants ? field.value : true);
+    cancel.onclick = () => done(wants ? null : false);
     // Escape closes it, which is a cancel.
-    box.onclose = () => done(false);
+    box.onclose = () => done(wants ? null : false);
+    if (wants) {
+      field.onkeydown = (e) => {
+        if (e.key === "Enter") { e.preventDefault(); done(field.value); }
+      };
+    }
     box.showModal();
+    if (wants) { field.focus(); field.select(); }
   });
+}
+
+function ask({ title, body, yes = "Go ahead", no = "Cancel" }) {
+  return askBox({ title, body, yes, no, value: null });
+}
+
+function askFor({ title, body, value = "", yes = "Set", no = "Cancel" }) {
+  return askBox({ title, body, yes, no, value });
 }
 
 /* Unsaved work held on a tab other than the one being saved.
@@ -1656,9 +1683,22 @@ async function pushForm() {
           + "is on screen.", true);
     return;
   }
-  if (!confirm("Push this to the form?\n\nIt replaces the four slots shown "
-               + "in the preview, and students see the change immediately."))
-    return;
+  /* `ask`, not `confirm`. The desktop pane suppresses native modals, so
+     `confirm` returned falsy without ever drawing anything and this
+     button did nothing at all -- silently, which is the worst way for
+     the most consequential control in the app to fail. Reported as
+     "I tried using the Push it button... but nothing happened."
+
+     The same bug was found and fixed on the Roster's drop button
+     earlier the same day. This copy was missed: a fix applied to one
+     path is not applied to the others. */
+  const go = await ask({
+    title: "Push this to the form?",
+    body: ["It replaces the four slots shown in the preview.",
+           "Students see the change immediately."],
+    yes: "Push it",
+  });
+  if (!go) return;
   try {
     const out = await api("/api/form/push", {});
     // What actually changed is worth saying, since a push that changed
