@@ -277,6 +277,74 @@ def test_each_annotated_sections_hint_is_its_own(html):
     assert not lonely, f"{len(lonely)} `?` button(s) with no explanation"
 
 
+def rules_only():
+    """`style.css` with every comment removed.
+
+    Both weight checks below were written against the raw file and both
+    failed on their first run, for the same reason and neither of them
+    on a real fault. One matched a `stroke-width:` that appears inside a
+    comment explaining the weight rule; the other blamed the unsaved dot,
+    because splitting on braces hands you everything since the last `}`
+    as the "selector", comments included, and the comment above that
+    block says the word `svg`.
+
+    This is the project's standing hazard in a new place: prose about
+    the syntax, read as the syntax. Both Mustache and Jinja templates
+    broke this way. Strip first, then scan.
+    """
+    return re.sub(r"/\*.*?\*/", "", read("style.css"), flags=re.S)
+
+
+def test_every_glyph_size_comes_with_its_own_variable():
+    """One optical line weight across the whole app, enforced here.
+
+    `.glyph` sets `stroke-width: calc(24 * 1.5 / var(--glyph-size))`. The
+    glyphs are drawn in a 24-unit box, so that lands every stroke on
+    screen at 1.5px no matter what size the glyph is rendered at -- but
+    only if `--glyph-size` says the truth. A block that sets `width:
+    16px` and forgets the variable inherits 18 and draws at 1.33px, and
+    the drift is far too small to see in isolation and perfectly obvious
+    once two of them sit side by side. That is exactly how the rail's
+    gear and chevron came out lighter than the icons above them.
+
+    So: any rule that gives a glyph a width must set `--glyph-size` to
+    the same number in the same block.
+    """
+    blocks = re.findall(r"([^{}]*)\{([^{}]*)\}", rules_only())
+    bad = []
+    for selector, body in blocks:
+        if "glyph" not in selector and "svg" not in selector:
+            continue
+        width = re.search(r"(?<!-)\bwidth:\s*(\d+)px", body)
+        if not width:
+            continue
+        size = re.search(r"--glyph-size:\s*(\d+)", body)
+        if not size or size.group(1) != width.group(1):
+            bad.append((selector.strip().splitlines()[-1].strip(),
+                        width.group(1),
+                        size.group(1) if size else "missing"))
+    assert not bad, "glyph width without a matching --glyph-size: " + "; ".join(
+        f"{sel} is {w}px but --glyph-size is {g}" for sel, w, g in bad)
+
+
+def test_the_weight_check_would_notice_a_forgotten_variable():
+    """The check above passes on a clean stylesheet, which proves nothing
+    until it has been watched failing. Same shape as the collision
+    check's twin: feed it the mistake and confirm it objects."""
+    body = "width: 16px; height: 16px;"
+    width = re.search(r"(?<!-)\bwidth:\s*(\d+)px", body)
+    size = re.search(r"--glyph-size:\s*(\d+)", body)
+    assert width and not size, "the patterns no longer match what they must"
+
+
+def test_the_one_weight_is_stated_once():
+    """1.5px lives in a single declaration. Two of them is how a second
+    weight gets introduced without anyone deciding to."""
+    rule = re.findall(r"stroke-width:\s*([^;]+);", rules_only())
+    assert rule == ["calc(24 * 1.5 / var(--glyph-size, 18))"], (
+        f"expected one stroke-width declaration, found {rule}")
+
+
 def test_a_counter_is_not_inside_a_heading(html):
     """13.5: the name goes in the heading, the count sits right-aligned on
     the same row. `<h3>Extras <span id=extras-count>` was the old way."""

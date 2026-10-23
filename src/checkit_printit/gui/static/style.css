@@ -259,21 +259,35 @@ h2 { font-size: 18px; margin: 0 0 12px; font-weight: 600; }
   cursor: pointer;
 }
 
-/* Every glyph `glyph()` builds, wherever it is used. Said once: a path
-   with no `fill: none` is a filled shape, and the colour never reaches
-   the stroke -- which is how the first icon outside the rail arrived as
-   a solid black blob. Size belongs to the context, not here. */
+/* ---- glyphs ----------------------------------------------------------
+   Every glyph `glyph()` builds, wherever it is used. A path with no
+   `fill: none` is a filled shape and the colour never reaches the
+   stroke, which is how the first icon outside the rail arrived as a
+   solid black blob.
+
+   **One rule for line weight: every glyph in the app draws at the same
+   optical thickness, 1.5 device pixels.** Stroke width is in the 24
+   unit viewBox, so a constant number there gets *thinner the smaller
+   the icon is drawn* -- 1.6 units is 1.4px at 21px and 0.87px at 13px,
+   which is the drift between the rail's main icons and the small ones
+   beneath them.
+
+   So the width is computed from the size rather than typed: at render
+   size S, `stroke-width: 24 * 1.5 / S`. Three sizes are in use and
+   each names its own; a fourth must do the same arithmetic rather than
+   pick a number that looks about right. */
 .glyph {
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.6;
+  stroke-width: calc(24 * 1.5 / var(--glyph-size, 18));
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.glyph rect { fill: none; }
+.glyph rect, .glyph circle { fill: none; }
 
 .navrail button svg {
   flex: 0 0 auto;
+  --glyph-size: 21;
   /* Sized against the label beside it: a 19px glyph next to 15px text
      read as a small picture with a big word. */
   width: 21px;
@@ -513,7 +527,7 @@ button.iconbtn {
 /* 18, not 16. The chair's legs are 3.9 units of a 24-unit box, which
    at 16px is under three pixels of stroke and reads as noise rather
    than as a chair. */
-button.iconbtn svg { width: 18px; height: 18px; display: block; }
+button.iconbtn svg { width: 18px; height: 18px; display: block; --glyph-size: 18; }
 button.iconbtn:hover {
   color: var(--accent);
   background: var(--accent-soft);
@@ -530,7 +544,7 @@ button.iconbtn.tiny {
   height: 20px;
   vertical-align: middle;
 }
-button.iconbtn.tiny svg { width: 13px; height: 13px; }
+button.iconbtn.tiny svg { width: 13px; height: 13px; --glyph-size: 13; }
 th .namefmt { float: right; margin-top: -1px; }
 
 /* Restoring is the undo, so it is not the colour of a thing to do. */
@@ -620,6 +634,7 @@ tr.secband td {
 .bandtoggle .glyph {
   width: 13px;
   height: 13px;
+  --glyph-size: 13;
   flex: 0 0 auto;
   color: var(--muted);
   transition: transform .12s ease;
@@ -830,6 +845,25 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   flex-wrap: wrap;
   margin-bottom: var(--s5);
 }
+
+/* Name over date, with the corner action held in the corner. As one
+   wrapping row the action dropped to a second line at a narrow window,
+   which moved it and grew the header. `nowrap` keeps it put; the left
+   block shrinks instead. */
+.pagehead.stacked {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: var(--s4);
+}
+.pagehead-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s1);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.pagehead.stacked .pagedate { margin-left: 0; }
 .pagetitle, .pagedate {
   font: inherit;
   color: var(--ink);
@@ -866,6 +900,45 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   border-color: var(--accent);
 }
 .pagetitle::placeholder { color: var(--dim); font-weight: 500; }
+
+/* ---- the date field --------------------------------------------------
+   **What we can and cannot reach.** The input's box, its segments, the
+   highlight on the segment you are editing, and the little calendar
+   button are all page content and take our colours. The calendar panel
+   that drops out of it is browser UI drawn outside the document: no
+   selector reaches it, and the only control over it is `color-scheme`,
+   which we already set, so it at least arrives dark when the app is.
+
+   So the field matches the app and the popup matches the browser. */
+input[type="date"]::-webkit-datetime-edit { color: var(--ink); }
+input[type="date"]::-webkit-datetime-edit-text { color: var(--dim); }
+input[type="date"]::-webkit-datetime-edit-fields-wrapper { padding: 0; }
+input[type="date"]::-webkit-datetime-edit-month-field:focus,
+input[type="date"]::-webkit-datetime-edit-day-field:focus,
+input[type="date"]::-webkit-datetime-edit-year-field:focus {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: var(--r-xs);
+  outline: none;
+}
+/* Held back to muted strength and lifted to full on hover, like every
+   other quiet control.
+
+   No `filter: invert()`. There was one, and it was backwards: Chrome
+   already draws this glyph light when `color-scheme: dark` is in
+   effect, so inverting it turned a light glyph dark again and the
+   button all but vanished. Found by setting the invert to 0 in the
+   live page and looking, which is the only way to tell -- the computed
+   style says `invert(1)` either way. */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: .6;
+  cursor: pointer;
+  border-radius: var(--r-xs);
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  background: var(--surface-3);
+}
 
 /* A page whose name is not a field: Roster is called Roster. Same size
    and weight as an editable one, so the two tabs read as the same app. */
@@ -1052,13 +1125,37 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The preview, laid out as a Google Form stacks it: one rounded card per
    item, so the four things a push writes read as four things rather than
    six lines of prose. */
-.wording { display: flex; flex-direction: column; gap: 10px; }
+/* ---- the form preview -----------------------------------------------
+   **It should look like somewhere else.** This is a picture of a
+   Google Form, not another section of this app, and when it was built
+   from the same surfaces as everything around it the reader had to be
+   told which it was.
 
-.fcard {
-  background: var(--bg);
+   So it borrows the shape Google Forms actually has: white cards
+   floating on a tinted ground, generous rounding, a coloured bar
+   across the top of the first card. Borrowed shape, not borrowed
+   colour -- the accent stays ours, because a purple strip would be
+   claiming to *be* Google rather than to show what it will say. */
+.wording {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: var(--s4);
+  background: var(--surface-3);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  padding: 12px 14px;
+  /* Inset, so the ground reads as a surface the cards sit on rather
+     than as one more panel in the column. */
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .12);
+}
+
+/* Each question is its own card on that ground, as on the real form. */
+.fcard {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: var(--s3) var(--s4);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .10);
 }
 .fcard-title {
   font-weight: 600;
@@ -1112,13 +1209,18 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The form's own title and description, above the items -- as a student
    meets them, before any question. */
+/* The title card, which on a real form carries a coloured bar across
+   its top and sits above the questions. */
 .fhead {
-  padding: 2px 2px 10px;
-  border-bottom: 2px solid var(--accent);
-  margin-bottom: 4px;
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-top: 6px solid var(--accent);
+  border-radius: var(--r-lg);
+  padding: var(--s4);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .10);
 }
-.fhead-title { font-size: 19px; font-weight: 600; }
-.fhead-desc { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.fhead-title { font-size: var(--t-xl); font-weight: 600; }
+.fhead-desc { color: var(--muted); font-size: var(--t-md); margin-top: var(--s1); }
 
 /* A section printit does not have the text for yet. Said out loud rather
    than quietly rendered empty, which would read as "this section is blank

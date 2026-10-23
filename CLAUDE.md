@@ -495,6 +495,34 @@ accent on hover, which is the instructor's rule for a row action. A
 glyph with no chip reads as a picture printed on the row rather than as
 something to press.
 
+### One line weight, 1.5px, everywhere
+
+Every glyph is drawn in a 24-unit `viewBox`, and `.glyph` carries
+
+```css
+stroke-width: calc(24 * 1.5 / var(--glyph-size, 18));
+```
+
+so a glyph rendered at any size still puts 1.5 real pixels on screen.
+That only holds if `--glyph-size` tells the truth. **Any rule that
+gives a glyph a width must set `--glyph-size` to the same number in the
+same block.** Four places do today: the rail at 21, `.iconbtn` at 18,
+`.iconbtn.tiny` at 13, and the band chevron at 13.
+
+Forgetting it is not a visible mistake on its own -- a 16px glyph
+inheriting 18 draws at 1.33px, which nobody can see in isolation and
+everybody can see next to a 1.5px one. That is how the rail's gear and
+collapse chevron came out lighter than the five icons above them.
+`test_every_glyph_size_comes_with_its_own_variable` and
+`test_the_one_weight_is_stated_once` now hold the line; both were
+watched failing against three deliberate breakages before being
+believed.
+
+A dot inside a glyph is a zero-length segment -- `M18.4 12h0.01` with
+`stroke-linecap: round` -- not a small circle. It is then exactly one
+stroke-width across and scales with everything else. The door knob was
+a stroked `r=0.6` circle and thinned away to nothing at 18px.
+
 ### `app.js` and `seating.js` share one global scope
 
 Two plain `<script>` tags, so a top-level `const` declared in both is a
