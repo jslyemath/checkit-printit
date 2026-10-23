@@ -22,7 +22,8 @@ const VIEWS = [
   { id: "print", label: "Print job", short: "Print", icon: "print" },
   { id: "record", label: "Record", short: "Record", icon: "record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
   { id: "seating", label: "Seating", short: "Seats", icon: "seating" },
-  { id: "setup", label: "Setup", short: "Setup", icon: "setup", foot: true },
+  { id: "setup", label: "Settings", short: "Settings", icon: "setup",
+    foot: true },
   // No Cold call tab. It is Seating's Up Next mode: the chart is
   // already on the projector, so picking somebody should light a chair
   // rather than replace the screen with a list of names.
@@ -284,35 +285,49 @@ const GLYPH = {
   seating: [{ r: [7.5, 2.5, 9, 7, 2] },
             { r: [4, 11, 16, 3.2, 1.6] },
             { d: "M7 21v-6.8M17 21v-6.8" }],
-  setup: "M4 7.4h9.2M17.2 7.4h2.8M4 16.6h3.6M11.6 16.6h8.4"
-    + "M15.2 5.2v4.4M9.2 14.4v4.4",
+  /* A gear. It was two sliders, which is a picture of *adjusting*
+     things and read as an equaliser; the tab is where the course is
+     set up once. Eight teeth as short radial strokes plus two
+     circles, because a toothed outline drawn as one path is unreadable
+     at 21px. */
+  setup: [{ o: [12, 12, 3.1] }, { o: [12, 12, 6.4] },
+          { d: "M12 2.6v2.6M12 18.8v2.6M21.4 12h-2.6M5.2 12H2.6"
+               + "M18.6 5.4l-1.8 1.8M7.2 16.8l-1.8 1.8"
+               + "M18.6 18.6l-1.8-1.8M7.2 7.2L5.4 5.4" }],
   collapse: "M14.5 7.5 9.5 12l5 4.5",
   // Points up while a group is open; CSS turns it when it closes.
   chev: "M6 14.5l6-6 6 6",
   // Two ways round, from Seating, where it already means exactly this.
   swapby: "M4 8h13l-3-3M20 16H7l3 3",
 
-  /* A doorway with an arrow beside it: leaving the class to drop,
-     coming back to restore. The frame and the open door panel stay put
-     and only the arrow turns, so the pair is one idea with a
-     direction.
+  /* A door -- a panel with a knob -- and an arrow going through it to
+     drop, coming back out to restore. Only the arrow turns, so the
+     pair is one idea with a direction.
 
-     The arrow sits **outside** the frame and reaches its threshold.
-     Drawn inside the door it was a line in a box, which is not a
-     picture of leaving.
-
-     Two earlier attempts were worse. A person with a minus sign loses
-     the minus at this size, and the minus is the whole meaning. A
-     chair with an arrow -- Seating's own, so at least honest about
-     emptying a seat -- was too many strokes in 18px and read as a
-     shape with an arrow.
+     Fourth attempt, and the first chosen by looking rather than by
+     reasoning about coordinates. A person with a minus loses the minus
+     at 18px, and the minus is the whole meaning. Seating's chair with
+     an arrow was too many strokes to read small. A frame plus a
+     separate open panel was two disjoint rectangles. Four candidates
+     were drawn at 56px and 18px side by side and this one was picked
+     off the screen.
 
      Not a bin, ever: dropping deletes nobody, and it is an unkind
-     picture of a person. */
-  drop: [{ r: [12, 4.5, 4.5, 15, 1.4] }, { r: [17.5, 2.5, 4.5, 19, 1.4] },
-         { d: "M2 12h8.2M7.2 8.8l3.2 3.2-3.2 3.2" }],
-  restore: [{ r: [12, 4.5, 4.5, 15, 1.4] }, { r: [17.5, 2.5, 4.5, 19, 1.4] },
-            { d: "M10.2 12H2M5 8.8L1.8 12l3.2 3.2" }],
+     picture of a person.
+
+     The knob is a zero-length segment, not a circle: `stroke-linecap:
+     round` turns it into a dot exactly one stroke-width across, so it
+     thickens and thins with every other line instead of thinning away
+     at 18px, which a stroked r=0.6 circle did. It sits at the far edge
+     of the panel so it never crowds the arrowhead. The arrow stops
+     1.4 units past the threshold -- through the doorway, not parked
+     in the middle of it. */
+  drop: [{ r: [9, 2.5, 12, 19, 1.6] },
+         { d: "M18.4 12h0.01" },
+         { d: "M2 12h8.2M7.4 8.4l3 3.6-3 3.6" }],
+  restore: [{ r: [9, 2.5, 12, 19, 1.6] },
+            { d: "M18.4 12h0.01" },
+            { d: "M10.2 12H2M5 8.4L2 12l3 3.6" }],
   /* An arrow coming back round to where it started. */
   reset: "M19.4 12a7.4 7.4 0 1 1-2.2-5.3M19.6 4.4v4.2h-4.2",
 };
@@ -334,7 +349,16 @@ function icon(name) {
   svg.setAttribute("class", "glyph");
   const spec = GLYPH[name];
   for (const part of (Array.isArray(spec) ? spec : [{ d: spec || "" }])) {
-    if (part.r) {
+    if (part.o) {
+      // A circle, because one drawn as two arcs in path data is
+      // unreadable to the next person editing it.
+      const [cx, cy, radius] = part.o;
+      const c = document.createElementNS(ns, "circle");
+      c.setAttribute("cx", cx);
+      c.setAttribute("cy", cy);
+      c.setAttribute("r", radius);
+      svg.appendChild(c);
+    } else if (part.r) {
       const [x, y, w, h, radius] = part.r;
       const rect = document.createElementNS(ns, "rect");
       rect.setAttribute("x", x);
@@ -851,7 +875,9 @@ function renderHeader() {
       // it does not read as a heading for the drop links beneath it.
       th.className = "actions-head pinright";
       const reset = document.createElement("button");
-      reset.className = "iconbtn undo";
+      // `tiny`, matching the name-format switch in the Name heading:
+      // two controls in the same header row, so they are the same size.
+      reset.className = "iconbtn tiny undo";
       reset.id = "reset-sort";
       reset.appendChild(icon("reset"));
       reset.title = "Back to section, then surname.";

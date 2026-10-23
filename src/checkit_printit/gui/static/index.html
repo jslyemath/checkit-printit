@@ -154,14 +154,18 @@
          looked authoritative was the one you could not change, and the
          panel's name was true of the entire tab. Both are gone: the
          heading is the field. -->
-    <header class="pagehead">
-      <input id="p-title" class="pagetitle" type="text" spellcheck="false"
-             placeholder="Name this run" aria-label="What this run is called"
-             title="Prints at the top of every paper, and names the job folder.">
-      <input id="p-date" class="pagedate" type="date"
-             aria-label="The day it happens"
-             title="Prints on the paper, names the job folder, and is how a response is matched to an assessment.">
-      <span class="spacer"></span>
+    <!-- Name over date, and Reset pinned to the corner. They were all
+         one wrapping row, so at a narrow window Reset dropped onto a
+         second line and the header grew a step. -->
+    <header class="pagehead stacked">
+      <div class="pagehead-main">
+        <input id="p-title" class="pagetitle" type="text" spellcheck="false"
+               placeholder="Name this run" aria-label="What this run is called"
+               title="Prints at the top of every paper, and names the job folder.">
+        <input id="p-date" class="pagedate" type="date"
+               aria-label="The day it happens"
+               title="Prints on the paper, names the job folder, and is how a response is matched to an assessment.">
+      </div>
       <!-- An icon button, like every other secondary action in the app.
            It was the one piece of loose underlined-looking text left in
            a page header, which is why it read as out of place. The
