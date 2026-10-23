@@ -278,8 +278,10 @@ class TestThePrintDraftIsChecked:
                 "extras": [{"skill": "NOPE", "copies": 1}]}})
 
     def test_a_good_draft_saves(self, printable):
+        # `mode` stated, because `simply_print` is only kept in "same"
+        # -- the draft no longer carries the other mode's list.
         out = gui_mod.api_print_save(printable, {"draft": {
-            "simply_print": ["AD"], "date": "2026-10-02"}})
+            "mode": "same", "simply_print": ["AD"], "date": "2026-10-02"}})
         assert out["draft"]["simply_print"] == ["AD"]
 
     @pytest.mark.parametrize("mode", ["", "simply", "SAME", "chosen", 3])

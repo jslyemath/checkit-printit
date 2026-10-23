@@ -137,12 +137,31 @@ def save_draft(space, draft):
         f"key_copies = {int(merged['key_copies'])}",
         f"names      = {'true' if merged['names'] else 'false'}",
         "",
-        "[selection]",
-        f"simply_print         = {_list(merged['simply_print'])}",
-        f"default_when_missing = {_list(merged['default_when_missing'])}",
-        f"append_for_everyone  = {_list(merged['append_for_everyone'])}",
-        "",
     ]
+
+    # Only the keys this mode uses -- the same rule `write_job` applies
+    # to `publication.toml`, and for the same reason it gives there: a
+    # file carrying a setting the run does not use is a file that will
+    # be read back later and believed.
+    #
+    # The draft is such a file, and the rule had not been applied to
+    # it. On 2026-10-23 it held `mode = "chose"` and
+    # `simply_print = ["N2"]` left over from the previous run, four
+    # days old. Nothing used it, and one click on the mode toggle
+    # would have printed N2 for all 43 students without asking.
+    #
+    # Written even when empty, unlike in `write_job`: this one is
+    # edited by hand, and a key that vanishes when you clear it is a
+    # key you cannot find again. The *other* mode's keys are what go.
+    if merged["mode"] == "same":
+        wanted = [("simply_print", merged["simply_print"])]
+    else:
+        wanted = [("default_when_missing", merged["default_when_missing"]),
+                  ("append_for_everyone", merged["append_for_everyone"])]
+    lines.append("[selection]")
+    for key, value in wanted:
+        lines.append(f"{key:<20} = {_list(value)}")
+    lines.append("")
     if merged["variants"]:
         lines.append("[variants]")
         for slug, case in sorted(merged["variants"].items()):

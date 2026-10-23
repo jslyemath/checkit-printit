@@ -40,13 +40,30 @@ FULL = {
 }
 
 
+#: Which `[selection]` key each mode ignores. `save_draft` drops
+#: those rather than keeping them, so the round trip is per mode --
+#: see the comment there for why a draft must not carry a setting its
+#: own mode does not use.
+UNUSED_BY = {
+    "chose": {"simply_print"},
+    "same": {"default_when_missing", "append_for_everyone"},
+}
+
+
 class TestTheDraftRoundTrips:
     """Every key, because the ones in tables were the ones that broke."""
 
+    @pytest.mark.parametrize("mode", sorted(UNUSED_BY))
     @pytest.mark.parametrize("key", sorted(FULL))
-    def test_each_key_survives_a_save_and_a_load(self, space, key):
-        printjob.save_draft(space, FULL)
-        assert printjob.load_draft(space)[key] == FULL[key]
+    def test_each_key_survives_a_save_and_a_load(self, space, key, mode):
+        printjob.save_draft(space, dict(FULL, mode=mode))
+        after = printjob.load_draft(space)
+        if key in UNUSED_BY[mode]:
+            assert after[key] == [], (
+                f"{key} is not used in {mode!r} mode, so keeping it is how "
+                f"a stale list survives to be believed later")
+        else:
+            assert after[key] == FULL[key]
 
     def test_a_course_with_no_draft_still_opens(self, space):
         """A form with no saved state has to render, so every key is
@@ -56,11 +73,33 @@ class TestTheDraftRoundTrips:
         assert draft["title"] and draft["simply_print"] == []
 
     def test_a_partial_save_keeps_what_it_did_not_mention(self, space):
-        printjob.save_draft(space, FULL)
+        printjob.save_draft(space, dict(FULL, mode="chose"))
         printjob.save_draft(space, {"title": "Something else"})
         after = printjob.load_draft(space)
         assert after["title"] == "Something else"
+        assert after["default_when_missing"] == ["D1"]
+
+    def test_the_other_mode_s_list_does_not_ride_along(self, space):
+        """The whole point of the change.
+
+        On 2026-10-23 `job.toml` held `mode = "chose"` beside
+        `simply_print = ["N2"]`, four days old and left over from a run
+        where the class did all sit the same paper. Nothing used it --
+        and one click on the mode toggle would have printed N2 for all
+        43 students, from a decision nobody remembered making.
+        """
+        printjob.save_draft(space, dict(FULL, mode="same"))
+        assert printjob.load_draft(space)["simply_print"] == ["W1", "W2"]
+        printjob.save_draft(space, {"mode": "chose"})
+        assert printjob.load_draft(space)["simply_print"] == []
+
+    def test_the_mode_in_use_keeps_its_own_list(self, space):
+        """The other half: dropping the unused one must not drop the
+        used one, or the setting could never be made at all."""
+        printjob.save_draft(space, dict(FULL, mode="same"))
+        after = printjob.load_draft(space)
         assert after["simply_print"] == ["W1", "W2"]
+        assert after["default_when_missing"] == []
 
     def test_a_hand_edited_draft_of_the_wrong_shape_does_not_poison_the_view(
             self, space):
