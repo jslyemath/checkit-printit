@@ -23,6 +23,15 @@ of its inputs.
 import os
 import sqlite3
 
+
+class RecordError(Exception):
+    """Something asked of the record that it cannot do.
+
+    One class, because a caller has one thing to catch and one message
+    to show -- the same shape `ResponseError` and `SeatingError` have.
+    """
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS run (
     run_id  TEXT PRIMARY KEY,   -- the output folder's name
@@ -32,7 +41,15 @@ CREATE TABLE IF NOT EXISTS run (
     seed    INTEGER NOT NULL,   -- so a run can be found again from the record
     output  TEXT NOT NULL,
     extras  INTEGER NOT NULL DEFAULT 0,
-    unnamed INTEGER NOT NULL DEFAULT 0
+    unnamed INTEGER NOT NULL DEFAULT 0,
+    -- Moved to the bottom of the Runs list, not hidden and never
+    -- deleted: the printed rows under it are the only record that a
+    -- paper existed, and Scans may still have to place a loose sheet
+    -- from it.
+    delisted INTEGER NOT NULL DEFAULT 0,
+    -- Set when Scans has read this run back. A graded run cannot be
+    -- delisted -- see `set_flags`.
+    graded   INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS printed (
@@ -51,12 +68,27 @@ CREATE INDEX IF NOT EXISTS printed_by_run ON printed(run_id);
 """
 
 
+#: Columns added to `run` after the first databases were written.
+#: `CREATE TABLE IF NOT EXISTS` does nothing to a table that exists,
+#: so a column added to SCHEMA alone reaches new courses only -- and
+#: the real one has three runs in it already.
+ADDED = {
+    "delisted": "INTEGER NOT NULL DEFAULT 0",
+    "graded": "INTEGER NOT NULL DEFAULT 0",
+}
+
+
 def connect(path):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
     db.executescript(SCHEMA)
+    have = {r["name"] for r in db.execute("PRAGMA table_info(run)")}
+    for column, decl in ADDED.items():
+        if column not in have:
+            db.execute(f"ALTER TABLE run ADD COLUMN {column} {decl}")
+    db.commit()
     return db
 
 
@@ -115,6 +147,86 @@ def runs(path):
             " COUNT(DISTINCT p.sid) AS students"
             " FROM run r LEFT JOIN printed p ON p.run_id = r.run_id"
             " GROUP BY r.run_id ORDER BY r.date, r.built")]
+    finally:
+        db.close()
+
+
+def run_detail(path, run_id):
+    """One run: its own row, and what it printed, per skill.
+
+    Returns None where the run is unknown, so a caller can say so
+    rather than draw an empty page.
+
+    The per-skill rows are what the detail view is for -- which skills
+    were in the run, how many papers of each, and the seed behind every
+    version. All of it is already in `printed`; nothing new is stored.
+    """
+    if not os.path.isfile(path):
+        return None
+    db = connect(path)
+    try:
+        row = db.execute(
+            "SELECT r.*, COUNT(p.printed_id) AS papers,"
+            " COUNT(DISTINCT p.sid) AS students"
+            " FROM run r LEFT JOIN printed p ON p.run_id = r.run_id"
+            " WHERE r.run_id = ? GROUP BY r.run_id", (run_id,)).fetchone()
+        if row is None or row["run_id"] is None:
+            return None
+        out = dict(row)
+        out["skills"] = [dict(r) for r in db.execute(
+            "SELECT slug, COUNT(*) AS papers,"
+            " COUNT(DISTINCT version) AS versions"
+            " FROM printed WHERE run_id = ?"
+            " GROUP BY slug ORDER BY slug", (run_id,))]
+        # One row per paper actually drawn, which is the thing a
+        # reprint has to reproduce and the thing Scans will match a
+        # scanned page against.
+        out["seeds"] = [dict(r) for r in db.execute(
+            "SELECT DISTINCT slug, version, seed FROM printed"
+            " WHERE run_id = ? ORDER BY slug, version", (run_id,))]
+        return out
+    finally:
+        db.close()
+
+
+def set_flags(path, run_id, delisted=None, graded=None):
+    """Set `delisted` / `graded` on one run. Returns the row after.
+
+    **A graded run cannot be delisted.** Refused here rather than only
+    in the view, because the view is not the only caller and a rule
+    enforced in one place is a rule with a way round it.
+
+    **Grading a delisted run brings it back into the list.** Not
+    refused: the reason a graded run may not be delisted is that what
+    was read back from it has to be findable, and that reason applies
+    just as much to a run delisted before it was scanned. Refusing
+    would block a legitimate scan to protect a tidier list.
+
+    Ungrading is always allowed -- it is the undo of a mistake.
+    """
+    if not os.path.isfile(path):
+        raise RecordError(f"{path} does not exist, so there are no runs.")
+    db = connect(path)
+    try:
+        row = db.execute("SELECT * FROM run WHERE run_id = ?",
+                         (run_id,)).fetchone()
+        if row is None:
+            raise RecordError(f"no run called {run_id!r}.")
+        want_graded = row["graded"] if graded is None else int(bool(graded))
+        want_delisted = (row["delisted"] if delisted is None
+                         else int(bool(delisted)))
+        if delisted and want_graded:
+            raise RecordError(
+                f"{run_id} has been graded, so it cannot be delisted. "
+                f"What was read back from it is the record of an "
+                f"attempt, and the list is where it is found.")
+        if graded and want_delisted:
+            want_delisted = 0
+        db.execute("UPDATE run SET delisted = ?, graded = ? WHERE run_id = ?",
+                   (want_delisted, want_graded, run_id))
+        db.commit()
+        return dict(db.execute("SELECT * FROM run WHERE run_id = ?",
+                               (run_id,)).fetchone())
     finally:
         db.close()
 

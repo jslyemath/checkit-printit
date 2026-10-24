@@ -901,6 +901,49 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 .pagetitle::placeholder { color: var(--dim); font-weight: 500; }
 
+/* ---- Runs ------------------------------------------------------------
+   A row that opens something. Not underlined -- the instructor's
+   standing rule is that underlined text is not how a function looks --
+   so it reads as a heavier cell that answers to the pointer. */
+.rowlink {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.rowlink:hover { color: var(--accent); }
+.rowlink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+/* Seeds are numbers to compare, not prose. Tabular figures line the
+   digits up down the column, which is the only way a wrong one is
+   visible at a glance. */
+.seedcell {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A row of small facts, the shape 13.4 settled on for peers. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+.chip.ok {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+#runs-detail .pagehead { gap: var(--s2); }
+#run-sub { margin: calc(var(--s1) * -1) 0 var(--s4); }
+
 /* ---- the date field --------------------------------------------------
    **What we can and cannot reach.** The input's box, its segments, the
    highlight on the segment you are editing, and the little calendar

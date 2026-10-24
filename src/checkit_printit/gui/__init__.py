@@ -35,6 +35,8 @@ from .. import course as course_mod
 from .. import availability as availability_mod
 from .. import provision as provision_mod
 from .. import room as room_mod
+from .. import publication as pub_mod
+from .. import record as record_mod
 from .. import responses as responses_mod
 from .. import clasp as clasp_mod
 from .. import boilerplate as boilerplate_mod
@@ -1402,6 +1404,179 @@ def api_print_reveal(_course, body):
     return {"opened": path}
 
 
+# ----------------------------------------------------------------- runs --
+
+def _run_json(row):
+    """One row of the Runs list.
+
+    `built` is kept distinct from `date` on purpose: the date is what
+    is printed on the paper and the one the instructor thinks in, and
+    `built` is when the folder was actually written. They differ -- the
+    10-19 run is dated the 19th and was built at 10:43:37 -- and a list
+    that showed only one of them could not explain two runs with the
+    same date.
+    """
+    return {
+        "id": row["run_id"],
+        "title": row["title"],
+        "date": row["date"],
+        "built": row["built"],
+        "seed": row["seed"],
+        "papers": row.get("papers", 0),
+        "students": row.get("students", 0),
+        "extras": row.get("extras", 0),
+        "output": row["output"],
+        "delisted": bool(row.get("delisted")),
+        "graded": bool(row.get("graded")),
+        # Whether the folder is still on disk. A run whose folder has
+        # been moved or deleted can still be listed -- the record is
+        # the record -- but Reprint cannot work, and saying so here is
+        # better than a button that fails when pressed.
+        "onDisk": bool(row["output"]) and os.path.isdir(row["output"]),
+    }
+
+
+def api_runs(course, _body):
+    """Every run, newest first, with the delisted at the end.
+
+    Sorted here rather than in SQL: `runs()` orders oldest-first
+    because every other caller wants a history, and reversing a list
+    of at most a few dozen rows is cheaper than a second query that
+    could drift from the first.
+    """
+    rows = [_run_json(r) for r in record_mod.runs(course.file("record"))]
+    rows.reverse()
+    live = [r for r in rows if not r["delisted"]]
+    gone = [r for r in rows if r["delisted"]]
+    return {"runs": live, "delisted": gone,
+            "hasRecord": os.path.isfile(course.file("record"))}
+
+
+def api_run(course, body):
+    """One run's detail page."""
+    run_id = str(body.get("id") or "").strip()
+    if not run_id:
+        raise GuiError("no run was named.")
+    detail = record_mod.run_detail(course.file("record"), run_id)
+    if detail is None:
+        raise GuiError(
+            f"no run called {run_id!r} is in this course's record. It may "
+            f"have been built before the record existed, or under another "
+            f"course.")
+    out = _run_json(detail)
+    out["skills"] = [dict(s) for s in detail["skills"]]
+    out["seeds"] = [dict(s) for s in detail["seeds"]]
+    return {"run": out}
+
+
+def api_run_flag(course, body):
+    """Delist, relist, or mark graded. Returns the refreshed list.
+
+    The list comes back rather than the one row, because delisting
+    moves a run between two groups and the view would otherwise have
+    to work out where it went.
+    """
+    run_id = str(body.get("id") or "").strip()
+    fields = {}
+    for name in ("delisted", "graded"):
+        if name in body:
+            fields[name] = bool(body[name])
+    if not fields:
+        raise GuiError("nothing to set.")
+    try:
+        record_mod.set_flags(course.file("record"), run_id, **fields)
+    except record_mod.RecordError as exc:
+        raise GuiError(str(exc)) from None
+    return api_runs(course, {})
+
+
+def _job_folder_for_run(row):
+    """Where the job folder of a finished run is.
+
+    `run_id` is the output folder's name, which `folder_for` builds
+    from the same title and date -- so the job folder is found by
+    rebuilding the name rather than by storing a second path that
+    could go stale.
+    """
+    return printjob_mod.folder_for({"title": row["title"],
+                                    "date": row["date"]})
+
+
+def api_run_replay(course, body):
+    """Reprint a finished run exactly, from its manifest.
+
+    Draws nothing: every version comes from the manifest. Separate
+    from `api_run_reuse` on purpose -- merging the two is how somebody
+    reprints last month's papers by accident.
+    """
+    run_id = str(body.get("id") or "").strip()
+    detail = record_mod.run_detail(course.file("record"), run_id)
+    if detail is None:
+        raise GuiError(f"no run called {run_id!r}.")
+    if not detail["output"] or not os.path.isdir(detail["output"]):
+        raise GuiError(
+            f"this run's folder is not where the record says it is "
+            f"({detail['output'] or 'no path recorded'}), so there is no "
+            f"manifest to reprint from. Starting a new run from its "
+            f"settings still works.")
+    pub = os.path.join(_job_folder_for_run(detail), "publication.toml")
+    if not os.path.isfile(pub):
+        raise GuiError(
+            f"this run's job folder no longer has a publication.toml, so "
+            f"it cannot be reprinted. Expected it beside "
+            f"{_job_folder_for_run(detail)}.")
+    try:
+        result = runner_mod.run(pub, replay=detail["output"])
+    except runner_mod.BuildError as exc:
+        raise GuiError(str(exc)) from None
+    return {"out": result.out, "papers": result.replay_papers,
+            "notes": list(result.replay_notes)}
+
+
+#: The parts of a finished run worth carrying into a new one. Not the
+#: title, the date, the seeds or the per-student overrides: those are
+#: what makes it *that* run, and copying them is how a fresh run comes
+#: out as a quiet duplicate of an old one.
+REUSED = ("mode", "simply_print", "default_when_missing",
+          "append_for_everyone", "variants", "extras", "keys",
+          "key_copies", "names")
+
+
+def api_run_reuse(course, body):
+    """Load a finished run's settings into the print draft.
+
+    Drawn fresh against today's roster when the instructor builds; this
+    only fills the form. It does **not** save -- the draft comes back
+    for the Print tab to show, and the instructor saves it like any
+    other edit, so there is something to discard.
+    """
+    run_id = str(body.get("id") or "").strip()
+    detail = record_mod.run_detail(course.file("record"), run_id)
+    if detail is None:
+        raise GuiError(f"no run called {run_id!r}.")
+    pub = os.path.join(_job_folder_for_run(detail), "publication.toml")
+    if not os.path.isfile(pub):
+        raise GuiError(
+            f"this run's settings are not on disk any more. Expected a "
+            f"publication.toml in {_job_folder_for_run(detail)}.")
+    try:
+        old = pub_mod.load(pub)
+    except pub_mod.PublicationError as exc:
+        raise GuiError(str(exc)) from None
+
+    draft = printjob_mod.load_draft(course.name)
+    for key in REUSED:
+        value = getattr(old, key, None)
+        if value is None:
+            continue
+        draft[key] = (dict(value) if isinstance(value, dict)
+                      else list(value) if isinstance(value, (list, tuple))
+                      else value)
+    # `simply_print` decides the mode, the way `load_draft` reads it.
+    draft["mode"] = "same" if draft.get("simply_print") else "chose"
+    return {"draft": draft, "from": run_id}
+
+
 ROUTES = {
     "/api/course": api_course,
     "/api/roster": api_roster,
@@ -1432,6 +1607,11 @@ ROUTES = {
     "/api/skills/preview": api_skills_preview,
     "/api/skills/save": api_skills_save,
     "/api/form/push": api_form_push,
+    "/api/runs": api_runs,
+    "/api/run": api_run,
+    "/api/run/flag": api_run_flag,
+    "/api/run/replay": api_run_replay,
+    "/api/run/reuse": api_run_reuse,
 }
 
 

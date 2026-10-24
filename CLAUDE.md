@@ -523,6 +523,32 @@ diagnosis down the wrong path. What actually stops a push or a pull is
 `conn.ready`: a web app URL and a secret. `renderFormBar` says that,
 and both working tabs call it.
 
+### The Runs tab, and what it is allowed to do
+
+`record.db` already held everything: the `run` table plus `printed`.
+Two columns were added -- `delisted` and `graded` -- with a migration
+in `connect()`, because `CREATE TABLE IF NOT EXISTS` does nothing to a
+table that exists and the real course had runs in it already.
+
+* **A graded run cannot be delisted**, refused in `record.set_flags`
+  and not merely hidden in the view. **Grading a delisted run
+  un-delists it**: the reason a graded run may not be delisted is that
+  what was read back has to be findable, and that applies equally to
+  one delisted before it was scanned. Asking for both in one call is a
+  contradiction and is named as one.
+* **Delisting never deletes.** The `printed` rows under a run are the
+  only record that a paper existed, and Scans may still have to place
+  a loose sheet from it.
+* **Reprint and reuse are separate**, because merging them is how
+  somebody reprints last month's papers by accident. Reprint replays
+  the manifest; reuse loads the old settings into the draft and
+  **writes nothing** -- title and date are deliberately not carried
+  over, since they are what made it that run and the date names the
+  folder.
+* A run's job folder is found by rebuilding its name with
+  `printjob.folder_for`, not by storing a second path that could go
+  stale -- `run_id` is already `"{title} {date}"`.
+
 ### The draft carries only what its mode uses
 
 `save_draft` writes `simply_print` in `same` mode, and

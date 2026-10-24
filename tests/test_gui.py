@@ -335,3 +335,193 @@ class TestOverTheWire:
         url, token = running
         code, payload = self._get(url + "api/nope", token)
         assert code == 404 and "no such endpoint" in payload["error"]
+
+
+class TestTheRunsTab:
+    """Every handler is called at least once here.
+
+    `api_run_reuse` shipped referring to a `pub_mod` that
+    `gui/__init__.py` had never imported. 853 tests passed, because
+    not one of them called it -- the NameError only appeared when the
+    button was pressed in a browser. A handler no test calls is a
+    handler nothing checks.
+    """
+
+    def runs_for(self, course):
+        from checkit_printit import record
+        record.write_run(
+            course.file("record"), run_id="Checkpoint 2026-09-18",
+            title="Checkpoint", date="2026-09-18",
+            built="2026-09-18T10:00:00", seed=613,
+            output=str(course.path), extras=0,
+            handouts=[{"sid": "806001", "name": "Ada Lovelace",
+                       "section": "820", "version": "A",
+                       "papers": [("W1", 511), ("D1", 420)]},
+                      {"sid": "806002", "name": "Bo Martin",
+                       "section": "830", "version": "B",
+                       "papers": [("W1", 802)]}])
+
+    def test_a_course_with_no_record_lists_nothing_and_says_so(self, course):
+        out = gui_mod.api_runs(course, {})
+        assert out["runs"] == [] and out["delisted"] == []
+        assert out["hasRecord"] is False
+
+    def test_the_list_carries_what_the_table_shows(self, course):
+        self.runs_for(course)
+        row = gui_mod.api_runs(course, {})["runs"][0]
+        assert row["title"] == "Checkpoint"
+        assert row["papers"] == 3 and row["students"] == 2
+        assert row["seed"] == 613
+        assert row["delisted"] is False and row["graded"] is False
+
+    def test_built_is_reported_separately_from_date(self, course):
+        """They differ -- a run dated the 19th was built at 10:43 --
+        and a list showing one could not explain two runs on a day."""
+        self.runs_for(course)
+        row = gui_mod.api_runs(course, {})["runs"][0]
+        assert row["date"] == "2026-09-18"
+        assert row["built"] == "2026-09-18T10:00:00"
+
+    def test_a_missing_output_folder_is_flagged_not_hidden(self, course):
+        """The record is the record. A run whose folder has moved is
+        still listed; `onDisk` is how the view disables Reprint
+        instead of offering a button that fails when pressed."""
+        self.runs_for(course)
+        assert gui_mod.api_runs(course, {})["runs"][0]["onDisk"] is True
+        from checkit_printit import record
+        import sqlite3
+        db = sqlite3.connect(course.file("record"))
+        db.execute("UPDATE run SET output = '/gone'")
+        db.commit()
+        db.close()
+        assert gui_mod.api_runs(course, {})["runs"][0]["onDisk"] is False
+
+    def test_the_detail_page(self, course):
+        self.runs_for(course)
+        run = gui_mod.api_run(course, {"id": "Checkpoint 2026-09-18"})["run"]
+        assert {s["slug"] for s in run["skills"]} == {"W1", "D1"}
+        assert len(run["seeds"]) == 3
+
+    def test_an_unknown_run_says_so_rather_than_drawing_nothing(self, course):
+        self.runs_for(course)
+        with pytest.raises(gui_mod.GuiError, match="no run called"):
+            gui_mod.api_run(course, {"id": "never"})
+
+    def test_asking_for_no_run_at_all(self, course):
+        with pytest.raises(gui_mod.GuiError, match="no run was named"):
+            gui_mod.api_run(course, {})
+
+    def test_delisting_moves_it_between_the_two_groups(self, course):
+        self.runs_for(course)
+        out = gui_mod.api_run_flag(
+            course, {"id": "Checkpoint 2026-09-18", "delisted": True})
+        assert out["runs"] == []
+        assert [r["id"] for r in out["delisted"]] == ["Checkpoint 2026-09-18"]
+
+    def test_delisting_a_graded_run_is_refused_through_the_view_too(
+            self, course):
+        self.runs_for(course)
+        gui_mod.api_run_flag(course, {"id": "Checkpoint 2026-09-18",
+                                      "graded": True})
+        with pytest.raises(gui_mod.GuiError, match="cannot be delisted"):
+            gui_mod.api_run_flag(course, {"id": "Checkpoint 2026-09-18",
+                                          "delisted": True})
+
+    def test_setting_nothing_is_refused(self, course):
+        self.runs_for(course)
+        with pytest.raises(gui_mod.GuiError, match="nothing to set"):
+            gui_mod.api_run_flag(course, {"id": "Checkpoint 2026-09-18"})
+
+    def name_a_bank(self, course, bank_dir):
+        """Point the course at a bank. `publication.toml` requires
+        one, and the shared fixture makes a course without."""
+        config = os.path.join(course.path, "course.toml")
+        with open(config, encoding="utf-8") as f:
+            text = f.read()
+        if "[bank]" in text:
+            text = text.split("[bank]")[0]
+        with open(config, "w", encoding="utf-8") as f:
+            # A TOML *literal* string, single-quoted. In a basic string
+            # a Windows path's backslashes are escapes, and this one
+            # died on an invalid hex value before anything was read.
+            f.write(text.rstrip("\n")
+                    + "\n\n[bank]\npath = '" + str(bank_dir) + "'\n")
+
+    def job_folder_for(self, course, **over):
+        """A real job folder beside the record, as a finished run
+        leaves behind. `folder_for` is what the handler uses to find
+        it, so the test builds it in the same place rather than
+        asserting a path it made up."""
+        from checkit_printit import printjob
+        draft = dict(printjob.load_draft("Test"))
+        draft.update({"title": "Checkpoint", "date": "2026-09-18",
+                      "mode": "same", "simply_print": ["W1"],
+                      "variants": {"W1": "whole_numbers"},
+                      "keys": False, "key_copies": 3})
+        draft.update(over)
+        return printjob.write_job("Test", draft, course_name="TEST 101")
+
+    def test_reuse_carries_the_settings_over(self, course, bank_dir):
+        """The happy path, and the only one that reads the old
+        publication at all -- every refusal returns before it. That is
+        why `pub_mod` could be missing from the imports while 853
+        tests passed."""
+        self.runs_for(course)
+        self.name_a_bank(course, bank_dir)
+        self.job_folder_for(course)
+        out = gui_mod.api_run_reuse(course, {"id": "Checkpoint 2026-09-18"})
+        draft = out["draft"]
+        assert out["from"] == "Checkpoint 2026-09-18"
+        assert draft["mode"] == "same"
+        assert draft["simply_print"] == ["W1"]
+        assert draft["variants"] == {"W1": "whole_numbers"}
+        assert draft["keys"] is False and draft["key_copies"] == 3
+
+    def test_reuse_does_not_carry_the_title_or_the_date(self, course,
+                                                        bank_dir):
+        """They are what made it *that* run. Copying them is how a
+        fresh run comes out as a quiet duplicate of an old one -- and
+        the date decides the folder name, so it would overwrite."""
+        self.runs_for(course)
+        self.name_a_bank(course, bank_dir)
+        self.job_folder_for(course)
+        before = dict(__import__("checkit_printit.printjob", fromlist=["x"])
+                      .load_draft("Test"))
+        draft = gui_mod.api_run_reuse(
+            course, {"id": "Checkpoint 2026-09-18"})["draft"]
+        assert draft["title"] == before["title"]
+        assert draft["date"] == before["date"]
+
+    def test_reuse_writes_nothing(self, course, bank_dir):
+        """It fills the form and stops. The instructor saves it like
+        any other edit, so there is something to discard."""
+        from checkit_printit import printjob
+        self.runs_for(course)
+        self.name_a_bank(course, bank_dir)
+        self.job_folder_for(course)
+        before = printjob.load_draft("Test")
+        gui_mod.api_run_reuse(course, {"id": "Checkpoint 2026-09-18"})
+        assert printjob.load_draft("Test") == before
+
+    def test_reuse_without_a_job_folder_says_where_it_looked(self, course):
+        """The course here has a record but no job folder, which is
+        exactly the state of a run whose folder was tidied away."""
+        self.runs_for(course)
+        with pytest.raises(gui_mod.GuiError, match="not on disk"):
+            gui_mod.api_run_reuse(course, {"id": "Checkpoint 2026-09-18"})
+
+    def test_replay_without_a_folder_says_so(self, course):
+        self.runs_for(course)
+        import sqlite3
+        db = sqlite3.connect(course.file("record"))
+        db.execute("UPDATE run SET output = '/gone'")
+        db.commit()
+        db.close()
+        with pytest.raises(gui_mod.GuiError, match="not where the record"):
+            gui_mod.api_run_replay(course, {"id": "Checkpoint 2026-09-18"})
+
+    def test_reuse_and_replay_reject_an_unknown_run(self, course):
+        self.runs_for(course)
+        for handler in (gui_mod.api_run_reuse, gui_mod.api_run_replay):
+            with pytest.raises(gui_mod.GuiError, match="no run called"):
+                handler(course, {"id": "never"})
