@@ -308,6 +308,49 @@ title=#2,#1}
 \newcommand{\vseed}{}
 \newcommand{\setvseed}[1]{\renewcommand{\vseed}{#1}}
 
+% ---------------------------------------------------------------------
+% What a page carries so it can be read back (design 14.5)
+%
+% Three marks, and the reason for each:
+%
+%   \runseed   the run this sheet belongs to, printed after the version
+%              as `v715-1513199331`. A loose sheet can then be traced to
+%              its run by eye, with no equipment.
+%   \cipsid    the student id, when the run prints names. Blank runs
+%              leave it unset and the header prints empty boxes to write
+%              in -- which is what lets an unnamed spare be graded.
+%   the code   everything above plus the skill and the sheet number, as
+%              a QR in the footer, so splitting a scanned stack needs no
+%              OCR at all.
+%
+% `qrcode` is pure TeX and draws with no external tool, which matters:
+% a build must not depend on something the instructor has to install.
+\usepackage{qrcode}
+
+\newcommand{\runseed}{0}
+\newcommand{\setrunseed}[1]{\renewcommand{\runseed}{#1}}
+
+\newcommand{\cipsid}{}
+\newcommand{\setsid}[1]{\renewcommand{\cipsid}{#1}}
+
+% Which sheet of the current skill this is. Reset by \skillheader,
+% which runs once at the top of every skill, and stepped in the footer,
+% which is expanded once per page at shipout and therefore in order.
+\newcounter{cipsheet}
+\setcounter{cipsheet}{0}
+
+% The payload. Deliberately a fixed order with a format tag in front:
+% Scans will meet codes printed by versions of this file that no longer
+% exist, and a reader that cannot tell which layout it is holding has
+% to guess.
+%
+% Uppercase, digits, hyphen and `*` only -- all of which QR encodes in
+% alphanumeric mode, which is smaller and more robust than byte mode.
+% A slug may contain a hyphen (W1-E), so the separator cannot be one.
+\newcommand{\cippayload}{%
+  CIP1*\runseed*\currentskill*\vseed*\thecipsheet*\thepage*%
+  \ifx\cipsid\empty 0\else\cipsid\fi}
+
 % --- Updated Skill macros ---
 \newcommand\currentskill{}
 
@@ -358,16 +401,39 @@ title=#2,#1}
 % keeps the slug, and only the printed title moves.
 \NewDocumentCommand{\skillheader}{o m}{%
     \gdefcurrentskill{#2}%
+    \setcounter{cipsheet}{0}%
     \begin{skill}[\getskillcolor{#2}]{\IfNoValueTF{#1}{#2}{#1}}%
         \getskilldesc{#2}%
     \end{skill}%
 }
 
 % For compatibility with older skill files
-\newenvironment{setskill}[1]{\gdefcurrentskill{#1}\begin{skill}{\currentskill}}{\end{skill}}
+\newenvironment{setskill}[1]{%
+    \gdefcurrentskill{#1}\setcounter{cipsheet}{0}%
+    \begin{skill}{\currentskill}}{\end{skill}}
 
 % Adds a newpage to separate skills
 \newcommand{\skillpage}[1]{\input{#1}\newpage}
+
+% Drawn small, and quiet: this is for a scanner, and a student should
+% not feel watched by it. `\cipcode` is what the footer calls.
+\newcommand{\cipcode}{%
+  \stepcounter{cipsheet}%
+  % `nolink`, which is why it was cyan. `qrcode` sets
+  % `\qr@hyperlinktrue` by default, wraps the code in a hyperref
+  % link, and hyperref colours it -- so wrapping it in
+  % `\textcolor{black}` changed nothing, because the colour was not
+  % coming from the surrounding text. A payload of `CIP1*...` is not a
+  % URL either, so the link was never meaningful.
+  %
+  % A scanner wants maximum contrast; light cyan on white is close to
+  % the worst case a decoder can be handed.
+  %
+  % 9mm, not 7.5: 33 modules across 7.5mm is 0.23mm each, which a
+  % 300dpi scan samples at under three pixels. Three is the floor
+  % every decoder quotes, so it was sitting exactly on it.
+  \raisebox{-0.35\height}{\textcolor{black}{%
+    \qrcode[height=9mm, level=M, nolink]{\cippayload}}}}
 
 %insert nicer urls if needed in online PDF checkpoints (pandemic era)
 \usepackage{hyperref}
@@ -395,13 +461,44 @@ title=#2,#1}
 \makeatother
 % Whatever \setname last set; a ruled blank until it is called.
 \newcommand{\scname}{\underline{\Large\phantom{Blank}\hspace{2.9in}}}
-\newcommand{\scheadleft}{\sffamily\color{darkgray} Name: \scname}
+% One box per digit. Separated digits are the most reliable
+% handwriting there is, and this is the only handwriting the system
+% has to read -- so it is worth the width. Filled when the run knows
+% the student, empty to be written in when it does not, which is what
+% lets an unnamed spare be graded at all.
+\makeatletter
+% One box per character. `\@tfor` walks the digits, so the whole block
+% has to be defined with `@` a letter -- not merely used inside one
+% pair of \makeatletter, which is how the first attempt defined
+% `\@ tfor` and failed at the first named student.
+% 2.2ex wide, measured against a rendered page rather than guessed:
+% at 1.5ex the digits touched both edges of their box and read as one
+% smear, which defeats the whole point of separating them.
+\newcommand{\cipdigitboxes}[1]{%
+  \sffamily\footnotesize
+  \@tfor\cipdigit:=#1\do{%
+    \framebox[2.2ex][c]{\rule{0pt}{2.1ex}\cipdigit}\kern0.2ex}}
+% Nine boxes, which is the width of a Banner id. A run that knows the
+% student fills them; one that does not leaves them to be written in.
+\newcommand{\cipblankboxes}{\cipdigitboxes{~~~~~~~~~}}
+\newcommand{\cipidboxes}{%
+  \ifx\cipsid\empty
+    \expandafter\cipblankboxes
+  \else
+    \expandafter\cipdigitboxes\expandafter{\cipsid}%
+  \fi}
+\newcommand{\scheadleft}{%
+  \sffamily\color{darkgray} Name: \scname
+  \hspace{1.2em}\raisebox{0.15ex}{ID: \cipidboxes}}
+\makeatother
 
 \fancyhead[C]{}
 \fancyhead[R]{\scheadright}
 \fancyhead[L]{\scheadleft}
-\fancyfoot[RE, LO]{\maketitle}
-\fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed}}
+\fancyfoot[RE, LO]{\maketitle\hspace{0.6em}\cipcode}
+% The run seed as a dashed suffix, so a sheet found on the floor in
+% March can be traced to the run that printed it without a scanner.
+\fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed-\runseed}}
 \fancyfoot[LE, RO]{\sffamily\textit{\color{darkgray}\currentskill\hspace{0.5em}\roundbox{20pt}}}
 
 % The second and later sheets of a skill that runs past one page.
@@ -420,8 +517,8 @@ title=#2,#1}
     \renewcommand{\headrulewidth}{0pt}%
     \fancyhead[R]{\scheadright}%
     \fancyhead[L]{\scheadleft}%
-    \fancyfoot[RE, LO]{\maketitle}%
-    \fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed}}%
+    \fancyfoot[RE, LO]{\maketitle\hspace{0.6em}\cipcode}%
+    \fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed-\runseed}}%
 }
 
 \newcommand{\cacadclass}{

@@ -326,8 +326,16 @@ def descriptions_tex(bank, slugs):
     return "\n".join(lines) + "\n"
 
 
-def main_tex(publication, handouts, extras, keys, load_helpers=False):
-    """The document that pulls the skill files together."""
+def main_tex(publication, handouts, extras, keys, load_helpers=False,
+             run_seed=None):
+    """The document that pulls the skill files together.
+
+    `run_seed` goes onto every page -- after the version as
+    `v715-1513199331`, and inside the footer code. None writes 0,
+    which is what a caller that does not have one (a preview, an old
+    test) gets; a sheet marked run 0 is honestly marked as belonging
+    to no recorded run.
+    """
     out = [
         r"\documentclass[12pt,twoside]{article}",
         r"\usepackage[utf8]{inputenc}",
@@ -354,6 +362,11 @@ def main_tex(publication, handouts, extras, keys, load_helpers=False):
         "",
         r"\begin{document}",
         "",
+        # Design 14.5. Written once: every page's code carries it, and
+        # it prints after the version as `v715-1513199331` so a loose
+        # sheet can be traced to its run by eye.
+        f"\\setrunseed{{{run_seed if run_seed is not None else 0}}}",
+        "",
         "% ---- student copies",
     ]
 
@@ -361,6 +374,11 @@ def main_tex(publication, handouts, extras, keys, load_helpers=False):
         name = "Blank" if handout.blank_name or not handout.name else handout.name
         out.append(f"\\setname{{{name}}}")
         out.append(f"\\setsect{{{handout.section or 'Blank'}}}")
+        # Empty on a run that prints no names, and on a spare: the
+        # header then draws empty boxes to write an id into, which is
+        # the only thing that lets an unnamed paper be graded.
+        sid = "" if handout.blank_name else (handout.sid or "")
+        out.append(f"\\setsid{{{sid}}}")
         for slug, seed in handout.versions:
             out.append(f"\\skillpage{{{slug}/{slug} v{seed}}}")
         out.append(r"\preparefornextstudent")
@@ -379,6 +397,7 @@ def main_tex(publication, handouts, extras, keys, load_helpers=False):
         out.append(r"\setboolean{anstoggle}{true}")
         out.append(r"\setname{Key}")
         out.append(r"\setsect{Blank}")
+        out.append(r"\setsid{}")
         for _ in range(keys["copies"]):
             for slug, seed in keys["versions"]:
                 out.append(f"\\skillpage{{{slug}/{slug} v{seed}}}")
@@ -557,7 +576,8 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None,
 
     with open(os.path.join(out_dir, "main.tex"), "w", encoding="utf-8") as f:
         f.write(main_tex(publication, handouts, extras, keys,
-                         load_helpers=helper is not None))
+                         load_helpers=helper is not None,
+                         run_seed=run_seed))
 
     _copy_assets(bank, out_dir, written)
 
