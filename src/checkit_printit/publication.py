@@ -44,6 +44,15 @@ class Publication:
     keys: bool = True
     key_copies: int = 1
     names: bool = True
+
+    #: The student id field in the header -- the number on a named run,
+    #: the write-in grid on a blank one. Off prints neither, which is
+    #: what a run nobody will scan wants.
+    ids: bool = True
+
+    #: The footer code. Off means a sheet carries no machine-readable
+    #: mark at all and can only be sorted by reading it.
+    codes: bool = True
     extras: tuple = ()
 
     #: One student moved to another version, for this run only. Keyed by
@@ -179,6 +188,11 @@ def load(path):
         keys=bool(print_opts.get("keys", True)),
         key_copies=int(print_opts.get("key_copies", 1)),
         names=bool(print_opts.get("names", True)),
+        # Both default true: a publication written before these existed
+        # describes a run that had them, and reading it as "off" would
+        # quietly change what an old job reprints.
+        ids=bool(print_opts.get("ids", True)),
+        codes=bool(print_opts.get("codes", True)),
         extras=extras,
         seeds=flat_seeds,
         skill_seeds=skill_seeds,
@@ -223,6 +237,8 @@ path = "seating.toml"
 keys       = true   # answer keys after the student copies
 key_copies = 1
 names      = true   # false prints a ruled blank instead of each name
+ids        = true   # the student id field in the header
+codes      = true   # the scanning code in the footer
 
 # Force one version of one skill onto a chosen seed; everything unpinned is
 # drawn as usual. To reproduce a whole run instead, re-run it with the seed it

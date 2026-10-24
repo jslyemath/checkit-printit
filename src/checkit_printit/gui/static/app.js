@@ -3043,12 +3043,19 @@ function renderPrintFields() {
     keys: document.getElementById("p-keys"),
     key_copies: document.getElementById("p-key-copies"),
     names: document.getElementById("p-names"),
+    ids: document.getElementById("p-ids"),
+    codes: document.getElementById("p-codes"),
   };
   f.title.value = draft.title || "";
   f.date.value = draft.date || "";
   f.keys.checked = Boolean(draft.keys);
   f.key_copies.value = draft.key_copies || 1;
   f.names.checked = Boolean(draft.names);
+  // `!== false` rather than Boolean(): a draft written before these
+  // existed has neither key, and both marks were on in every run it
+  // describes. Reading absent as off would silently drop them.
+  f.ids.checked = draft.ids !== false;
+  f.codes.checked = draft.codes !== false;
   document.getElementById("p-keycopies-wrap").hidden = !draft.keys;
   for (const [key, input] of Object.entries(f)) {
     input.oninput = input.onchange = () => {

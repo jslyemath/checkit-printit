@@ -43,6 +43,8 @@ DEFAULTS = {
     "keys": True,
     "key_copies": 1,
     "names": True,
+    "ids": True,
+    "codes": True,
     "simply_print": [],
     "default_when_missing": [],
     "append_for_everyone": [],
@@ -225,6 +227,8 @@ def publication_text(space, draft, course_name, semester="", professor=""):
         f"keys       = {'true' if draft['keys'] else 'false'}",
         f"key_copies = {int(draft['key_copies'])}",
         f"names      = {'true' if draft['names'] else 'false'}",
+        f"ids        = {'true' if draft['ids'] else 'false'}",
+        f"codes      = {'true' if draft['codes'] else 'false'}",
         "",
     ]
     # Only the keys this mode uses. The build would ignore the others --

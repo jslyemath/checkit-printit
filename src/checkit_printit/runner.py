@@ -96,7 +96,7 @@ def choose_run_seed(record, seed):
 
 
 def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
-        replay=None, install_theme=True):
+        replay=None, install_theme=True, ids=None, codes=None):
     """Build a class set. Returns a BuildResult; raises BuildError.
 
     `preview` writes nothing at all -- no folder, no theme, no record -- and
@@ -106,6 +106,17 @@ def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
         publication = pub_mod.load(pub_path)
     except pub_mod.PublicationError as exc:
         raise BuildError(str(exc)) from None
+
+    # `ids` and `codes` may be overridden for one build without
+    # editing the publication. None means "whatever the file says",
+    # which is why they are not plain booleans: a `False` default
+    # would turn the marks off for every caller that did not think
+    # about them, including `--replay`.
+    if ids is not None or codes is not None:
+        publication = dataclasses.replace(
+            publication,
+            ids=publication.ids if ids is None else bool(ids),
+            codes=publication.codes if codes is None else bool(codes))
 
     record = None
     notes = ()
