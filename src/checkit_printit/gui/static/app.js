@@ -20,7 +20,7 @@ const VIEWS = [
   { id: "roster", label: "Roster", short: "Roster", icon: "roster" },
   { id: "form", label: "Update form", short: "Form", icon: "form" },
   { id: "print", label: "Print job", short: "Print", icon: "print" },
-  { id: "record", label: "Record", short: "Record", icon: "record", soon: "What has been printed, to whom, at which seed. Today: `record runs`, `record student`, `record skills`." },
+  { id: "runs", label: "Runs", short: "Runs", icon: "record" },
   { id: "seating", label: "Seating", short: "Seats", icon: "seating" },
   { id: "setup", label: "Settings", short: "Settings", icon: "setup",
     foot: true },
@@ -357,6 +357,8 @@ const GLYPH = {
             { d: "M10.2 12H2M5 8.4L2 12l3 3.6" }],
   /* An arrow coming back round to where it started. */
   reset: "M19.4 12a7.4 7.4 0 1 1-2.2-5.3M19.6 4.4v4.2h-4.2",
+  back: "M14.5 5.5 8 12l6.5 6.5",
+  forward: "M9.5 5.5 16 12l-6.5 6.5",
 };
 
 function icon(name) {
@@ -597,6 +599,9 @@ function show(id) {
     if (id === "print") loadPrint();
     if (id === "setup") loadSetup();
     if (id === "seating") loadSeating();
+    // Every visit, like Print: a build made since the last look is the
+    // whole reason to open this tab.
+    if (id === "runs") loadRuns();
   }
   shownView = id;
   location.hash = id;
@@ -1709,6 +1714,287 @@ async function pushForm() {
   } catch (err) { toast(err.message, true); }
 }
 
+
+/* ---- Runs ------------------------------------------------------------
+ *
+ * Two pages in one view and never both: `runs-list` and `runs-detail`.
+ * Drilling in replaces the list rather than expanding a row, because
+ * the detail is 50-odd rows of seeds -- as an expanding row it would
+ * push the list a screen and a half down, and as a side panel it would
+ * leave too little of the content column for the seed table.
+ *
+ * Nothing here is editable, so there is no save bar and no dirty
+ * state. The two flags write immediately and the server hands back the
+ * refreshed list, because delisting moves a run between two groups and
+ * the view would otherwise have to work out where it went.
+ */
+let runsState = null;
+let openRun = null;        // the run id being shown, or null for the list
+
+function loadRuns() {
+  api("/api/runs").then(out => {
+    runsState = out;
+    if (openRun) showRun(openRun);
+    else renderRuns();
+  }).catch(err => toast(err.message, true));
+}
+
+function runRow(run, tbody) {
+  const tr = document.createElement("tr");
+  const add = (text, cls) => {
+    const td = document.createElement("td");
+    td.textContent = text;
+    if (cls) td.className = cls;
+    tr.appendChild(td);
+    return td;
+  };
+  const open = document.createElement("td");
+  const link = document.createElement("button");
+  link.className = "rowlink";
+  link.textContent = run.title;
+  link.onclick = () => showRun(run.id);
+  open.appendChild(link);
+  if (run.graded) {
+    const chip = document.createElement("span");
+    chip.className = "chip ok";
+    chip.textContent = "graded";
+    open.appendChild(chip);
+  }
+  tr.appendChild(open);
+
+  add(spokenDay(run.date) || run.date, "ro");
+  // Date and time, because two runs can share a date -- 10/19 is
+  // dated the 19th and was built at 10:43:37.
+  add(builtAt(run.built), "ro");
+  add(String(run.papers), "ro");
+  add(String(run.students), "ro");
+  add(String(run.seed), "ro seedcell");
+
+  const actions = document.createElement("td");
+  actions.className = "pinright";
+  // A graded run offers no delist at all, rather than offering one
+  // and refusing it. The record refuses it too; this is the half that
+  // keeps the instructor from meeting a wall.
+  if (!run.graded) {
+    const flag = document.createElement("button");
+    flag.className = "iconbtn tiny";
+    flag.appendChild(icon(run.delisted ? "restore" : "drop"));
+    flag.title = run.delisted
+      ? "Put this run back in the list."
+      : "Move this run to the delisted group. Nothing is deleted.";
+    flag.setAttribute("aria-label", flag.title);
+    flag.onclick = () => setRunFlag(run.id, { delisted: !run.delisted });
+    actions.appendChild(flag);
+  }
+  tr.appendChild(actions);
+  tbody.appendChild(tr);
+}
+
+function builtAt(stamp) {
+  // "2026-10-19T10:43:37" -> "10/19, 10:43". Sliced rather than parsed:
+  // the string is written by the build in local time and `new Date` on
+  // an unzoned stamp is a timezone argument nobody needs here.
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(stamp || "");
+  if (!m) return stamp || "";
+  return `${Number(m[2])}/${Number(m[3])}, ${m[4]}:${m[5]}`;
+}
+
+function renderRuns() {
+  openRun = null;
+  document.getElementById("runs-list").hidden = false;
+  document.getElementById("runs-detail").hidden = true;
+  const live = runsState.runs;
+  const gone = runsState.delisted;
+
+  const body = document.querySelector("#runs tbody");
+  body.textContent = "";
+  for (const run of live) runRow(run, body);
+
+  const empty = document.getElementById("runs-empty");
+  empty.textContent = live.length ? "" : (
+    gone.length
+      ? "Every run is delisted. They are below."
+      : "Nothing has been built for this course yet. Build a print job "
+        + "and it appears here.");
+  empty.hidden = Boolean(live.length);
+  document.querySelector("#runs").hidden = !live.length;
+
+  const count = document.getElementById("runs-count");
+  count.textContent = live.length
+    ? `${live.length} run${live.length === 1 ? "" : "s"}` : "";
+
+  const wrap = document.getElementById("runs-delisted-wrap");
+  wrap.hidden = !gone.length;
+  document.getElementById("runs-delisted-count").textContent =
+    gone.length ? String(gone.length) : "";
+  const goneBody = document.querySelector("#runs-gone tbody");
+  goneBody.textContent = "";
+  for (const run of gone) runRow(run, goneBody);
+}
+
+function allRuns() {
+  return [...runsState.runs, ...runsState.delisted];
+}
+
+async function showRun(id) {
+  let out;
+  try {
+    out = await api("/api/run", { id });
+  } catch (err) { toast(err.message, true); return; }
+  const run = out.run;
+  openRun = id;
+  document.getElementById("runs-list").hidden = true;
+  document.getElementById("runs-detail").hidden = false;
+
+  for (const [id, name] of [["run-back", "back"], ["run-prev", "back"],
+                            ["run-next", "forward"]]) {
+    const b = document.getElementById(id);
+    if (!b.firstChild) b.appendChild(icon(name));
+  }
+  document.getElementById("run-title").textContent = run.title;
+  document.getElementById("run-sub").textContent =
+    `${spokenDay(run.date) || run.date} \u00b7 built ${builtAt(run.built)}`
+    + (run.delisted ? " \u00b7 delisted" : "");
+
+  const facts = document.getElementById("run-facts");
+  facts.textContent = "";
+  const pairs = [
+    [`${run.papers} paper${run.papers === 1 ? "" : "s"}`, ""],
+    [`${run.students} student${run.students === 1 ? "" : "s"}`, ""],
+    [`seed ${run.seed}`, ""],
+  ];
+  if (run.extras) pairs.push([`${run.extras} spare`, ""]);
+  if (run.graded) pairs.push(["graded", "ok"]);
+  for (const [text, cls] of pairs) {
+    const chip = document.createElement("span");
+    chip.className = "chip" + (cls ? " " + cls : "");
+    chip.textContent = text;
+    facts.appendChild(chip);
+  }
+
+  // Seeds grouped under their skill, so the table is one row per skill
+  // rather than one per paper -- 14 rows instead of 29 for a real run.
+  const byslug = {};
+  for (const s of run.seeds) (byslug[s.slug] = byslug[s.slug] || []).push(s);
+  const body = document.querySelector("#run-skills tbody");
+  body.textContent = "";
+  for (const skill of run.skills) {
+    const tr = document.createElement("tr");
+    const add = (text, cls) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      if (cls) td.className = cls;
+      tr.appendChild(td);
+    };
+    add(skill.slug);
+    add(String(skill.papers), "ro");
+    add(String(skill.versions), "ro");
+    add((byslug[skill.slug] || [])
+        .map(s => `${s.version} ${s.seed}`).join("   "), "ro seedcell");
+    body.appendChild(tr);
+  }
+  document.getElementById("run-skill-count").textContent =
+    `${run.skills.length} skill${run.skills.length === 1 ? "" : "s"}`;
+
+  // Reprint needs the folder the manifest lives in. A run whose folder
+  // has been moved is still a run -- the record is the record -- so it
+  // is listed and the button says why it cannot act.
+  const why = document.getElementById("run-again-why");
+  document.getElementById("run-replay").disabled = !run.onDisk;
+  why.textContent = run.onDisk ? "" :
+    "This run's folder is not where the record says it is, so it cannot "
+    + "be reprinted exactly. Starting a new run from its settings still "
+    + "works.";
+
+  document.getElementById("run-replay").onclick = () => replayRun(run);
+  document.getElementById("run-reuse").onclick = () => reuseRun(run);
+
+  const order = allRuns().map(r => r.id);
+  const at = order.indexOf(id);
+  const prev = document.getElementById("run-prev");
+  const next = document.getElementById("run-next");
+  prev.disabled = at <= 0;
+  next.disabled = at < 0 || at >= order.length - 1;
+  prev.onclick = () => showRun(order[at - 1]);
+  next.onclick = () => showRun(order[at + 1]);
+}
+
+async function replayRun(run) {
+  const go = await ask({
+    title: "Reprint this run exactly?",
+    body: [`${run.papers} paper${run.papers === 1 ? "" : "s"} for the same `
+           + `${run.students} student${run.students === 1 ? "" : "s"}, at `
+           + `the same seeds.`,
+           "Nothing is drawn. A new folder is written beside the original."],
+    yes: "Reprint it",
+  });
+  if (!go) return;
+  try {
+    const out = await api("/api/run/replay", { id: run.id });
+    toast(`Reprinted ${out.papers} paper${out.papers === 1 ? "" : "s"}.`);
+  } catch (err) { toast(err.message, true); }
+}
+
+async function reuseRun(run) {
+  /* Fills the Print tab's form and leaves it unsaved, so it can be
+     discarded. Warns about unsaved print work first, because this
+     overwrites it -- the same courtesy `okDespitePending` does for
+     the other direction. */
+  if (printState && printDirty()) {
+    const go = await ask({
+      title: "Replace the print job you are building?",
+      body: ["The Print job tab has unsaved changes, and these settings "
+             + "would overwrite them."],
+      yes: "Replace it",
+    });
+    if (!go) return;
+  }
+  let out;
+  try {
+    out = await api("/api/run/reuse", { id: run.id });
+  } catch (err) { toast(err.message, true); return; }
+
+  /* `draft` is null until the Print tab has been opened once, and
+     Runs can be the first tab of a session -- open the app, look at
+     what was printed, reuse it. Writing into null threw a TypeError
+     and the button did nothing visible.
+
+     Loading here rather than guarding the read: the settings are
+     about to be merged *into* today's draft, so today's draft has to
+     exist first. `loadPrint` then runs a second time under `show`,
+     and leaves what is set below alone, because by then the draft
+     differs from the saved file and `printDirty()` is true. */
+  if (!printState) await loadPrint();
+  if (!printState) return;        // the load itself failed and said so
+
+  // The title and date are deliberately *not* carried over -- they are
+  // what made it that run. Today's draft keeps its own.
+  const keep = { title: draft.title, date: draft.date };
+  draft = { ...out.draft, ...keep };
+  show("print");
+  renderPrintFields();
+  renderModes();
+  renderVariants();
+  renderWho();
+  refreshPrintDirty();
+  toast("Settings loaded. Nothing is saved yet \u2014 check them, then Save.");
+}
+
+async function setRunFlag(id, fields) {
+  if (fields.delisted) {
+    const go = await ask({
+      title: "Delist this run?",
+      body: ["It moves to a group at the bottom of the list.",
+             "Nothing is deleted, and you can put it back."],
+      yes: "Delist it",
+    });
+    if (!go) return;
+  }
+  try {
+    runsState = await api("/api/run/flag", { id, ...fields });
+  } catch (err) { toast(err.message, true); return; }
+  renderRuns();
+}
 
 // --------------------------------------------------------------- google --
 

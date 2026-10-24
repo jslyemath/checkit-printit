@@ -123,6 +123,149 @@ class TestAsking:
         assert record.runs(db)[0]["seed"] == 918
 
 
+class TestOneRunsDetail:
+    """What the Runs tab draws when you open a run. Nothing new is
+    stored for it -- every figure comes out of `printed`."""
+
+    def test_it_counts_papers_and_students(self, db):
+        write(db)
+        d = record.run_detail(db, "out-1")
+        assert d["papers"] == 3
+        assert d["students"] == 2
+
+    def test_it_groups_by_skill(self, db):
+        write(db)
+        got = {r["slug"]: (r["papers"], r["versions"])
+               for r in record.run_detail(db, "out-1")["skills"]}
+        assert got == {"W1": (2, 2), "D1": (1, 1)}
+
+    def test_it_lists_each_version_s_seed(self, db):
+        """The thing a reprint has to reproduce, and the thing Scans
+        will match a scanned page against."""
+        write(db)
+        seeds = {(r["slug"], r["version"]): r["seed"]
+                 for r in record.run_detail(db, "out-1")["seeds"]}
+        assert seeds == {("W1", "A"): 511, ("W1", "B"): 802,
+                         ("D1", "A"): 420}
+
+    def test_an_unknown_run_is_none_not_an_empty_page(self, db):
+        write(db)
+        assert record.run_detail(db, "never-built") is None
+
+    def test_no_database_at_all_is_none(self, tmp_path):
+        assert record.run_detail(str(tmp_path / "nope.db"), "out-1") is None
+
+
+class TestDelistingAndGrading:
+    def test_a_fresh_run_is_neither(self, db):
+        write(db)
+        row = record.runs(db)[0]
+        assert row["delisted"] == 0 and row["graded"] == 0
+
+    def test_delisting_sticks(self, db):
+        write(db)
+        assert record.set_flags(db, "out-1", delisted=True)["delisted"] == 1
+        assert record.runs(db)[0]["delisted"] == 1
+
+    def test_a_flag_not_passed_is_left_alone(self, db):
+        """Both are read off the row when the caller does not pass
+        them, so setting one cannot silently clear the other."""
+        write(db)
+        record.set_flags(db, "out-1", delisted=True)
+        after = record.set_flags(db, "out-1", delisted=True)
+        assert after["delisted"] == 1 and after["graded"] == 0
+
+    def test_grading_a_delisted_run_brings_it_back(self, db):
+        """Not refused. The reason a graded run may not be delisted --
+        that what was read back has to be findable -- applies just as
+        much to one delisted before it was scanned, so the grade wins
+        and the run returns to the list."""
+        write(db)
+        record.set_flags(db, "out-1", delisted=True)
+        after = record.set_flags(db, "out-1", graded=True)
+        assert after["graded"] == 1
+        assert after["delisted"] == 0, "a graded run must be findable"
+
+    def test_a_graded_run_cannot_be_delisted(self, db):
+        """Refused in the record, not only in the view. The view is not
+        the only caller, and a rule enforced in one place is a rule
+        with a way round it."""
+        write(db)
+        record.set_flags(db, "out-1", graded=True)
+        with pytest.raises(record.RecordError, match="graded"):
+            record.set_flags(db, "out-1", delisted=True)
+
+    def test_asking_for_both_at_once_is_refused(self, db):
+        """Grading un-delists, but only as a consequence. Asking for
+        both in one call is a contradiction and is named as one rather
+        than silently resolved."""
+        write(db)
+        with pytest.raises(record.RecordError, match="cannot be delisted"):
+            record.set_flags(db, "out-1", delisted=True, graded=True)
+
+    def test_ungrading_is_always_allowed(self, db):
+        """It is the undo of a mistake."""
+        write(db)
+        record.set_flags(db, "out-1", graded=True)
+        assert record.set_flags(db, "out-1", graded=False)["graded"] == 0
+
+    def test_an_unknown_run_says_so(self, db):
+        write(db)
+        with pytest.raises(record.RecordError, match="no run called"):
+            record.set_flags(db, "nope", graded=True)
+
+
+class TestTheMigration:
+    """`CREATE TABLE IF NOT EXISTS` does nothing to a table that
+    already exists, so a column added to SCHEMA alone would reach new
+    courses only -- and the real course had three runs in it when
+    these columns were added."""
+
+    #: `run` as it stood before the two flags. Built by hand rather
+    #: than by dropping columns: SQLite's DROP COLUMN chokes on the
+    #: comments in the real SCHEMA, and a database written by the old
+    #: code is what is actually being simulated.
+    OLD_SCHEMA = """
+    CREATE TABLE run (
+        run_id  TEXT PRIMARY KEY,
+        title   TEXT NOT NULL,
+        date    TEXT NOT NULL,
+        built   TEXT NOT NULL,
+        seed    INTEGER NOT NULL,
+        output  TEXT NOT NULL,
+        extras  INTEGER NOT NULL DEFAULT 0,
+        unnamed INTEGER NOT NULL DEFAULT 0
+    );
+    """
+
+    def old_database(self, path):
+        import sqlite3
+        raw = sqlite3.connect(path)
+        raw.executescript(self.OLD_SCHEMA)
+        raw.execute(
+            "INSERT INTO run VALUES ('out-old', 'Checkpoint', '2026-09-18',"
+            " '2026-09-18T10:00:00', 613, '/out/out-old', 0, 0)")
+        raw.commit()
+        raw.close()
+
+    def test_a_database_without_the_columns_gains_them(self, db):
+        self.old_database(db)
+        rows = record.runs(db)
+        assert rows and all("delisted" in r and "graded" in r for r in rows)
+        assert rows[0]["delisted"] == 0 and rows[0]["graded"] == 0
+
+    def test_the_row_already_there_survives_it(self, db):
+        self.old_database(db)
+        rows = record.runs(db)
+        assert [r["run_id"] for r in rows] == ["out-old"]
+        assert rows[0]["seed"] == 613
+
+    def test_the_flags_work_on_a_migrated_row(self, db):
+        """Adding the column is half of it; the row has to be usable."""
+        self.old_database(db)
+        assert record.set_flags(db, "out-old", graded=True)["graded"] == 1
+
+
 class TestWhatTheBuildHandsOver:
     """The record is only as good as what assemble reports, and nothing else
     here goes through assemble."""

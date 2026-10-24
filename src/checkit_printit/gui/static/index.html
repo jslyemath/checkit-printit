@@ -314,6 +314,123 @@
 
        Five fixed positions, each answering one question. Nothing lands
        in a position because there was room for it there. -->
+  <section id="view-runs" class="view" hidden>
+    <!-- Two pages in one view, never both. Drilling in *replaces* the
+         list: the detail is 50+ rows of seeds, which as an expanding
+         row would push the list a screen and a half down, and as a
+         side panel would leave too little of the 900px column for the
+         seed table. The same drill-in serves one student in Progress
+         later, so it is one pattern used twice. -->
+    <div id="runs-list">
+      <header class="pagehead">
+        <h2 class="pagename">Runs</h2>
+        <button class="hint" type="button" aria-expanded="false"
+                aria-label="What a run is">?</button>
+        <span class="spacer"></span>
+        <span id="runs-count" class="sec-count"></span>
+      </header>
+      <p class="hint-text" hidden>Every class set this course has
+        built, newest first. The date is what is printed on the paper;
+        the build time is when the folder was written, and two runs can
+        share a date. Nothing here is ever deleted &mdash; the printed
+        rows under a run are the only record that a paper existed.</p>
+
+      <p id="runs-empty" class="muted" hidden></p>
+
+      <div class="scroller">
+        <table id="runs">
+          <thead><tr>
+            <th>Title</th><th>Date</th><th>Built</th>
+            <th>Papers</th><th>Students</th><th>Seed</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <section class="annot annot-full" id="runs-delisted-wrap" hidden>
+        <div class="annot-head">
+          <h3>Delisted</h3>
+          <span id="runs-delisted-count" class="sec-count"></span>
+        </div>
+        <div class="annot-body">
+          <p class="muted">Out of the way, not deleted. A delisted run
+            can still be opened, reprinted and relisted.</p>
+          <div class="scroller">
+            <table id="runs-gone">
+              <thead><tr>
+                <th>Title</th><th>Date</th><th>Built</th>
+                <th>Papers</th><th>Students</th><th>Seed</th><th></th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="runs-detail" hidden>
+      <header class="pagehead">
+        <button id="run-back" class="iconbtn" type="button"
+                aria-label="Back to all runs" title="Back to all runs"></button>
+        <h2 class="pagename" id="run-title"></h2>
+        <span class="spacer"></span>
+        <button id="run-prev" class="iconbtn" type="button"
+                aria-label="The run before this one"></button>
+        <button id="run-next" class="iconbtn" type="button"
+                aria-label="The run after this one"></button>
+      </header>
+      <p id="run-sub" class="muted"></p>
+
+      <section class="annot">
+        <div class="annot-head">
+          <h3>This run</h3>
+        </div>
+        <div class="annot-body">
+          <div id="run-facts" class="chips"></div>
+        </div>
+      </section>
+
+      <section class="annot">
+        <div class="annot-head">
+          <h3>Again</h3>
+          <button class="hint" type="button" aria-expanded="false"
+                  aria-label="The difference between the two">?</button>
+        </div>
+        <div class="annot-body">
+          <p class="hint-text" hidden>Two actions and not one, because
+            merging them is how somebody reprints last month&rsquo;s
+            papers by accident. Reprint gives the same students the
+            same seeds. Starting a new run keeps only the settings
+            &mdash; the selection, the variants, the spares &mdash; and
+            draws fresh against today&rsquo;s roster.</p>
+          <div class="toolbar">
+            <button id="run-replay">Reprint exactly</button>
+            <button id="run-reuse">Start a new run from these settings</button>
+          </div>
+          <p id="run-again-why" class="muted"></p>
+        </div>
+      </section>
+
+      <section class="annot annot-full">
+        <div class="annot-head">
+          <h3>What it printed</h3>
+          <span id="run-skill-count" class="sec-count"></span>
+        </div>
+        <div class="annot-body">
+          <div class="scroller">
+            <table id="run-skills">
+              <thead><tr>
+                <th>Skill</th><th>Papers</th><th>Versions</th>
+                <th>Seeds</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </section>
+
   <section id="view-seating" class="view seatapp" hidden>
 
     <div class="paper">
