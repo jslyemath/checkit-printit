@@ -339,22 +339,32 @@ title=#2,#1}
 \newcounter{cipsheet}
 \setcounter{cipsheet}{0}
 
-% The payload. Deliberately a fixed order with a format tag in front:
-% Scans will meet codes printed by versions of this file that no longer
-% exist, and a reader that cannot tell which layout it is holding has
-% to guess.
+% ---------------------------------------------------------------------
+% The payload: the least that identifies a sheet.
 %
-% Uppercase, digits, hyphen and `*` only. **Not** for QR's
-% alphanumeric mode: `qrcode.sty` has no such mode -- it writes mode
-% indicator 4, binary, for everything, which was checked in the
-% package source rather than assumed. The character set is narrow for
-% the human reasons instead: a payload that survives being read aloud,
-% retyped, or pasted into a log without quoting.
+%   C1-1513199331-347
 %
-% The separator cannot be a hyphen, because a slug has one (W1-E).
-\newcommand{\cippayload}{%
-  CIP1*\runseed*\currentskill*\vseed*\thecipsheet*\thepage*%
-  \ifx\cipsid\empty 0\else\cipsid\fi}
+% **`runseed` plus `page` is already a unique key.** A run numbers its
+% pages once, so the skill, the version seed, the sheet-within-skill
+% and the student are every one of them a lookup in that run's
+% manifest. Putting any of them in the code buys nothing a scanner
+% needs and costs modules.
+%
+% `C1` is the format version, and is nearly free: 17 characters still
+% fits a version-1 symbol, which holds 20 bytes at level M. Without it
+% a later change of fields would be unreadable rather than merely
+% different.
+%
+% Seventeen characters is 21 modules. The 47-character feedback URL
+% this replaced was 33 -- and because a symbol's physical size is set
+% by its module count, that is the whole difference between a 15mm
+% square and an 11mm one at the same scan quality. A code that also
+% took students to feedback was simply not worth 4mm of paper.
+%
+% What is given up: a loose sheet whose run folder is gone says
+% nothing about itself. The skill is printed beside the code in words
+% for exactly that case.
+\newcommand{\cippayload}{C1-\runseed-\thepage}
 
 % --- Updated Skill macros ---
 \newcommand\currentskill{}
@@ -437,27 +447,43 @@ title=#2,#1}
   % 9mm, not 7.5: 33 modules across 7.5mm is 0.23mm each, which a
   % 300dpi scan samples at under three pixels. Three is the floor
   % every decoder quotes, so it was sitting exactly on it.
-  % 15mm, from a module measured off a 600dpi render rather than from
-  % version arithmetic -- the package puts a quiet zone inside the
-  % height it is given, so the data modules are smaller than
-  % height/29 and the arithmetic was optimistic by a third.
+  % 11mm at level **L**, which is a deliberate pair and not two
+  % independent settings.
   %
-  % Measured at 12mm: 0.381mm per module, which is exactly 3.00
-  % pixels at 200dpi. Three is the floor every decoder quotes, so
-  % that was sitting on it with nothing in hand for a fold, a crease
-  % or a photocopy. 15mm gives 0.476mm -- 3.75 pixels at 200dpi and
-  % 5.6 at 300 -- which is room to be wrong in.
+  % A version-1 symbol is 21 modules and holds 17 bytes at level L
+  % but only 14 at level M. The payload is exactly 17. At M it
+  % therefore spills to version 2 -- 25 modules -- and since the
+  % height is fixed, more modules means each one is *smaller*:
+  % measured at 11mm/M it was 0.423mm, 3.33 pixels at a 200dpi scan.
+  % At L the same 11mm holds 21 modules at 0.52mm, 4.1 pixels.
+  %
+  % So L is not a concession here. It buys a coarser symbol, and a
+  % coarser symbol survives a worse scan than a finer one with more
+  % error correction in it. What is given up is damage tolerance: 7%
+  % of the symbol may be lost rather than 15%. In a footer corner,
+  % where staples and folds live, that is the real cost.
+  %
+  % If the payload ever grows past 17 characters this silently falls
+  % to version 2 and the modules shrink again. Re-measure after any
+  % change to `\cippayload`.
+  %
+  % Sizes here are measured off a 600dpi render, never computed from
+  % the QR version tables -- `qrcode` puts its quiet zone inside the
+  % height it is given, and the tables were misread once already.
   %
   % Centred on the footer text rather than hung below it: `\raisebox`
   % by half the height, less half the x-height, puts the middle of the
   % square on the middle of the line.
-  % Order matters. `\raisebox{-0.5\height}` measures the box it is
-  % given, so the inner one has to be the raw symbol -- that puts its
-  % middle on the baseline. Lifting by half an x-height then puts it
-  % on the middle of the text. Nested the other way round, `\height`
-  % was the already-shifted box and the code hung low.
-  \raisebox{0.5ex}{\raisebox{-0.5\height}[0pt][0pt]{\textcolor{black}{%
-    \qrcode[height=15mm, level=M, nolink]{\cippayload}}}}}
+  % Centred the way `\roundbox` is, and by the same mechanism: a
+  % tikzpicture with `baseline=-0.7ex`, which puts the picture's
+  % origin 0.7ex above the text baseline and the node's centre on it.
+  % Two nested `\raisebox`es were doing this arithmetically and still
+  % reading as top-aligned; copying the thing already in the footer
+  % that looks right is better than computing something that should.
+  \begin{tikzpicture}[baseline=-0.7ex]
+    \node[inner sep=0pt, outer sep=0pt] {\textcolor{black}{%
+      \qrcode[height=11mm, level=L, nolink]{\cippayload}}};
+  \end{tikzpicture}}
 
 %insert nicer urls if needed in online PDF checkpoints (pandemic era)
 \usepackage{hyperref}
@@ -484,7 +510,7 @@ title=#2,#1}
 \newcommand{\scheadright}{\sffamily\color{darkgray} \@acadclass{}\scsection\hspace{5pt} \textbullet{}\hspace{5pt}  \@date \hspace{5pt} \textbullet{}\hspace{5pt}  \@author}
 \makeatother
 % Whatever \setname last set; a ruled blank until it is called.
-\newcommand{\scname}{\underline{\large\phantom{Blank}\hspace{1.6in}}}
+\newcommand{\scname}{\underline{\large\phantom{Blank}\hspace{1.25in}}}
 % One box per digit. Separated digits are the most reliable
 % handwriting there is, and this is the only handwriting the system
 % has to read -- so it is worth the width. Filled when the run knows
@@ -506,6 +532,12 @@ title=#2,#1}
 \newlength{\cipcell}
 \setlength{\cipcell}{4.4mm}
 \newcommand{\cipidgrid}{%
+  % Lowered 1.80pt so the grid's bottom rule meets the blank name's
+  % underline. `\underline` draws below the baseline and a
+  % `\framebox` stands on it, so they start a rule's-worth apart and
+  % no amount of sizing brings them together. Measured off a 600dpi
+  % render of this very header; see `align_check.py` in the notes.
+  \raisebox{-1.80pt}{%
   \begingroup
   \color{black!30}%
   \setlength{\fboxsep}{0pt}%
@@ -515,7 +547,7 @@ title=#2,#1}
     \@tfor\cipdiv:=12345678\do{%
       \vrule width 0.4pt\makebox[\cipcell]{}}%
   }%
-  \endgroup}
+  \endgroup}}
 
 % When the run knows the student the id is simply printed, at the
 % size of everything else on this line. It is a fact about the paper,
@@ -526,8 +558,12 @@ title=#2,#1}
 
 % The blank name rule shortens when the grid is shown, because the
 % two together at full width push the course and date off the line.
+% `\scname` expands to `\large <name>`, and a size command leaks to
+% the end of its group -- which here is the whole header. So the id
+% came out at name size. The braces scope it, and the id then sits at
+% the size of "Name:" and "MAT 106-820" either side of it.
 \newcommand{\scheadleft}{%
-  \makebox[4.3in][l]{\sffamily\color{darkgray} Name: \scname
+  \makebox[4.3in][l]{\sffamily\color{darkgray} Name: {\scname}%
     \hspace{1em}ID: \cipidfield}}
 \makeatother
 
@@ -535,17 +571,36 @@ title=#2,#1}
 \fancyhead[R]{\scheadright}
 \fancyhead[L]{\scheadleft}
 % Titles are long and carry a date -- "Skill Checkpoint Redo
-% 2026-10-23" -- so the inner slot is given a width and a smaller
-% face rather than being allowed to run into the centre.
-\fancyfoot[RE, LO]{\makebox[2.3in][l]{\footnotesize\maketitle}}
-% The run seed as a dashed suffix, so a sheet found on the floor in
-% March can be traced to the run that printed it without a scanner.
-\fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed-\runseed}}
-% The code on the outer edge with the skill and the grading box: that
-% corner holds the least text, and is where a scanner looks for a
-% fixed mark.
+% 2026-10-23" -- so this slot is given a width and a smaller face
+% rather than being allowed to run into the centre.
+%
+% The code goes **outside** the title, which puts it in the corner
+% diagonally opposite the grading box on both sides of a sheet: on an
+% odd page the title is on the left, so the code is left of it; on an
+% even page the title is on the right, so the code is right of it.
+% Two slots rather than one, because `[RE, LO]` is a single slot and
+% the order has to differ.
+% The title at its own size, as it always was. It fits beside the
+% code because the instructor shortened what he calls a run -- "SC
+% Redo 10/23" rather than "Skill Checkpoint Redo 2026-10-23".
+%
+% The box is spacing, not a clip: a title long enough to overflow
+% 1.9in will still run into the version string in the centre. The
+% centre spans roughly 2.75in to 4.25in of a 7in line, so everything
+% left of it has to finish by 2.75in, and 15mm of code leaves about
+% 1.9in for a name.
+\fancyfoot[LO]{\cipcode\hspace{0.6em}%
+  \makebox[1.9in][l]{\maketitle}}
+\fancyfoot[RE]{\makebox[1.9in][r]{\maketitle}%
+  \hspace{0.6em}\cipcode}
+% Just the version again. The run seed was printed here as a dashed
+% suffix so a loose sheet could be traced by eye -- but it is in the
+% code now, and the code is the thing that will actually be read.
+% Two copies of a ten-digit number on every page, one of them for a
+% case the other already covers, is clutter.
+\fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed}}
 \fancyfoot[LE, RO]{\sffamily\textit{\color{darkgray}%
-  \currentskill\hspace{0.5em}\roundbox{20pt}\hspace{0.6em}\cipcode}}
+  \currentskill\hspace{0.5em}\roundbox{20pt}}}
 
 % The second and later sheets of a skill that runs past one page.
 %
@@ -563,11 +618,14 @@ title=#2,#1}
     \renewcommand{\headrulewidth}{0pt}%
     \fancyhead[R]{\scheadright}%
     \fancyhead[L]{\scheadleft}%
-    \fancyfoot[RE, LO]{\makebox[2.3in][l]{\footnotesize\maketitle}}%
-    \fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed-\runseed}}%
     % A continued sheet carries the code too -- it is the sheet that
-    % most needs to say which paper it belongs to.
-    \fancyfoot[LE, RO]{\sffamily\color{darkgray}\cipcode}%
+    % most needs to say which paper it belongs to -- in the same
+    % corner as on a first sheet.
+    \fancyfoot[LO]{\cipcode\hspace{0.6em}%
+      \makebox[1.9in][l]{\maketitle}}%
+    \fancyfoot[RE]{\makebox[1.9in][r]{\maketitle}%
+      \hspace{0.6em}\cipcode}%
+    \fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed}}%
 }
 
 \newcommand{\cacadclass}{
@@ -582,7 +640,7 @@ title=#2,#1}
 % -- would come out with a blank rule where the student's name should be.
 \newcommand{\setname}[1]{%
     \ifthenelse{\equal{#1}{Blank} \OR \equal{#1}{blank}}%
-        {\renewcommand{\scname}{\underline{\large\phantom{Blank}\hspace{1.6in}}}}%
+        {\renewcommand{\scname}{\underline{\large\phantom{Blank}\hspace{1.25in}}}}%
         {\renewcommand{\scname}{\large #1}}%
     \pdfbookmark[0]{\texorpdfstring{#1}{#1}}{#1}%
 }

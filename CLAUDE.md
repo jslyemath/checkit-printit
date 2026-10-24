@@ -527,14 +527,16 @@ and both working tabs call it.
 
 Three marks, from design 14.5:
 
-* A **QR in the footer**, `CIP1*<runseed>*<SLUG>*<vseed>*<sheet>*<page>*<sid>`.
-  Fixed order with a format tag in front, because Scans will meet
-  codes printed by versions of the theme that no longer exist.
-  Uppercase, digits, `-` and `*` only -- all of which QR encodes in
-  alphanumeric mode. The separator cannot be `-`: a slug has one.
-  `nolink` is **required**: `qrcode` makes a hyperlink by default and
-  hyperref colours it, which printed a cyan QR.
-* The **run seed after the version**, `v715-1513199331`.
+* A **QR in the footer**, `C1-<runseed>-<page>` and nothing else.
+  `runseed` plus `page` is already a unique key for a sheet, so the
+  skill, the version seed and the student are all manifest lookups.
+  `C1` is the format version. **17 characters, 21 modules, 11mm, and
+  all three numbers are locked together** -- see the comment on
+  `\cipcode`. `nolink` is required: `qrcode` makes a hyperlink by
+  default and hyperref colours it, which printed a cyan QR.
+* The version alone in the footer centre, `v539`. The run seed used
+  to print here too; it is in the code now, and twice on a page is
+  clutter.
 * A **student id** in the header. Printed plainly, at the size of
   everything else on that line, when the run knows the student --
   boxes round a number nobody has to write are noise. A faint ruled
