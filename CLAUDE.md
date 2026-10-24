@@ -523,6 +523,41 @@ diagnosis down the wrong path. What actually stops a push or a pull is
 `conn.ready`: a web app URL and a secret. `renderFormBar` says that,
 and both working tabs call it.
 
+### What a printed page carries, and how to make it reach a bank
+
+Three marks, from design 14.5:
+
+* A **QR in the footer**, `CIP1*<runseed>*<SLUG>*<vseed>*<sheet>*<page>*<sid>`.
+  Fixed order with a format tag in front, because Scans will meet
+  codes printed by versions of the theme that no longer exist.
+  Uppercase, digits, `-` and `*` only -- all of which QR encodes in
+  alphanumeric mode. The separator cannot be `-`: a slug has one.
+  `nolink` is **required**: `qrcode` makes a hyperlink by default and
+  hyperref colours it, which printed a cyan QR.
+* The **run seed after the version**, `v715-1513199331`.
+* A **student id in boxes** in the header, one box per digit. Empty
+  boxes when the run prints no names, which is what lets a spare be
+  graded.
+
+`\setrunseed` is written once by `main_tex`; `\setsid` once per
+student block. `\cipsheet` is reset by `\skillheader` and stepped by
+the footer at shipout.
+
+**A theme change does not reach an existing bank.** `theme.install`
+keeps a bank's own `printit.sty` unless forced -- "that file is the
+author's, and may be a term's worth of layout work" -- so these marks
+print only after:
+
+```
+checkit-printit install --force
+```
+
+run against the bank. That is deliberately the instructor's call, and
+the first real build against `mat-106-checkit` failed on an undefined
+`\setrunseed` for exactly this reason. `test_the_theme_defines_what_
+main_tex_calls` guards the pair for a fresh install; nothing can guard
+a bank nobody has updated.
+
 ### The Runs tab, and what it is allowed to do
 
 `record.db` already held everything: the `run` table plus `printed`.

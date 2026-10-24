@@ -6,6 +6,7 @@ only compiles because the bank happened to be next to it.
 """
 
 import os
+import re
 import random
 import shutil
 import subprocess
@@ -505,6 +506,62 @@ class TestAssembly:
         main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
         assert r"\setname{Ada}" in main
         assert r"\setname{Cy}" not in main
+
+    def test_the_run_seed_is_written_once(self, bank_dir, tmp_path):
+        """Design 14.5. Every page's code carries it, and it prints
+        after the version as `v715-1513199331`, so a sheet found on
+        the floor in March can be traced to its run by eye."""
+        out, _ = self.build(bank_dir, tmp_path)
+        main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
+        assert main.count(r"\setrunseed") == 1
+        assert re.search(r"\\setrunseed\{\d+\}", main)
+
+    def test_every_student_block_sets_an_id(self, bank_dir, tmp_path):
+        """The header draws boxes from it, and the footer code carries
+        it. A block without one would print a paper that cannot be
+        attributed when it comes back."""
+        out, _ = self.build(bank_dir, tmp_path)
+        main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
+        assert main.count(r"\setname") == main.count(r"\setsid")
+
+    def test_a_named_run_fills_the_id_and_a_blank_one_does_not(
+            self, bank_dir, tmp_path):
+        r"""An empty `\setsid` is what makes the header draw empty
+        boxes, and empty boxes are the only reason an unnamed spare
+        can be graded at all."""
+        people = roster_mod.Roster([
+            roster_mod.Student(name="Ada", section="1", skills=["AD"],
+                               sid="806001"),
+        ])
+        out, _ = self.build(bank_dir, tmp_path, roster=people,
+                            chart=chart_for(tmp_path, ["Ada"]))
+        main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
+        assert r"\setsid{806001}" in main
+
+        anon = make_publication(bank_dir, names=False)
+        second = tmp_path / "anon"
+        second.mkdir()
+        out2, _ = self.build(bank_dir, second, publication=anon,
+                             roster=people,
+                             chart=chart_for(second, ["Ada"]))
+        main2 = open(os.path.join(out2, "main.tex"), encoding="utf-8").read()
+        assert r"\setsid{}" in main2
+        assert r"\setsid{806001}" not in main2, \
+            "a run that prints no names must not print the id either"
+
+    def test_the_theme_defines_what_main_tex_calls(self, bank_dir, tmp_path):
+        r"""The two travel separately -- `printit.sty` is installed into
+        a bank and may be an older copy -- so a macro emitted here and
+        missing there is a build that dies at the first page. It did:
+        the first real build against the live bank failed on an
+        undefined `\setrunseed`."""
+        out, _ = self.build(bank_dir, tmp_path)
+        main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
+        sty = open(os.path.join(out, "printit.sty"), encoding="utf-8").read()
+        for macro in ("setrunseed", "setsid"):
+            assert "\\" + macro in main, f"main.tex never calls {macro}"
+            assert "newcommand{\\" + macro + "}" in sty, \
+                f"the theme beside it does not define {macro}"
 
     def test_neighbours_get_different_versions(self, bank_dir, tmp_path):
         out, report = self.build(bank_dir, tmp_path)
