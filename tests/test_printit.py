@@ -563,6 +563,152 @@ class TestAssembly:
             assert "newcommand{\\" + macro + "}" in sty, \
                 f"the theme beside it does not define {macro}"
 
+    def test_both_marks_are_on_unless_asked_otherwise(self, bank_dir,
+                                                      tmp_path):
+        """The theme defaults both on, so a document that wants them
+        says nothing. Checking the *absence* of the off-switches is
+        the point: an older theme, which has never heard of either,
+        still compiles a document from a newer printit."""
+        out, _ = self.build(bank_dir, tmp_path)
+        main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
+        assert r"\cipidfalse" not in main
+        assert r"\cipcodeonfalse" not in main
+
+    @pytest.mark.parametrize("field,switch", [
+        ("ids", r"\cipidfalse"),
+        ("codes", r"\cipcodeonfalse"),
+    ])
+    def test_turning_one_off_writes_its_switch(self, bank_dir, tmp_path,
+                                               field, switch):
+        publication = make_publication(bank_dir, **{field: False})
+        out, _ = self.build(bank_dir, tmp_path, publication=publication)
+        main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
+        assert switch in main
+
+    @pytest.mark.parametrize("field,switch", [
+        ("ids", r"\cipidfalse"),
+        ("codes", r"\cipcodeonfalse"),
+    ])
+    def test_turning_one_off_leaves_the_other_alone(self, bank_dir, tmp_path,
+                                                    field, switch):
+        """Two options, not one toggle. Found worth stating because
+        both switches live in the same two lines of `main_tex` and a
+        copy-paste there would tie them together."""
+        other = r"\cipcodeonfalse" if field == "ids" else r"\cipidfalse"
+        publication = make_publication(bank_dir, **{field: False})
+        out, _ = self.build(bank_dir, tmp_path, publication=publication)
+        main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
+        assert switch in main and other not in main
+
+    def test_the_theme_defines_both_switches(self, bank_dir, tmp_path):
+        """`main_tex` and `printit.sty` travel separately -- the theme
+        is installed into a bank and may be an older copy -- so a
+        switch written by one and unknown to the other is a build that
+        dies on the first page. That happened once already, with
+        `\\setrunseed`."""
+        out, _ = self.build(bank_dir, tmp_path)
+        sty = open(os.path.join(out, "printit.sty"), encoding="utf-8").read()
+        for switch in ("cipid", "cipcodeon"):
+            assert "newif\\if" + switch in sty, \
+                f"the theme does not define \\if{switch}"
+
+    def test_write_job_records_both_options(self, bank_dir, tmp_path,
+                                            monkeypatch):
+        """Written by `write_job`, read back by `publication.load`.
+        The two halves live in different modules, and a key spelt one
+        way in one and another way in the other defaults silently back
+        to true."""
+        from checkit_printit import course as course_mod
+        from checkit_printit import printjob, publication as pub_mod
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(tmp_path / "home"))
+        course_mod.init("P", bank=str(bank_dir), adopt=None)
+
+        draft = dict(printjob.DEFAULTS)
+        draft.update({"title": "T", "date": "2026-01-01",
+                      "ids": False, "codes": False})
+        folder = printjob.write_job("P", draft, course_name="TEST 101",
+                                    root=str(tmp_path / "jobs"))
+        back = pub_mod.load(os.path.join(folder, "publication.toml"))
+        assert back.ids is False and back.codes is False
+
+    def test_an_older_publication_keeps_both_marks(self, bank_dir, tmp_path):
+        """A publication.toml written before these existed describes a
+        run that had both. Reading a missing key as False would quietly
+        change what an old job reprints.
+
+        The file is shaped like a real one -- name and folder inside
+        `[course]` -- because an invented one failed in the loader and
+        tested nothing.
+        """
+        from checkit_printit import publication as pub_mod
+        path = tmp_path / "publication.toml"
+        path.write_text(
+            "[course]\n"
+            'name  = "TEST 101"\n'
+            'title = "T"\n'
+            'date  = "2026-01-01"\n'
+            "\n[bank]\n"
+            "path = '" + str(bank_dir) + "'\n"
+            "\n[print]\nkeys = true\n",
+            encoding="utf-8")
+        back = pub_mod.load(str(path))
+        assert back.ids is True and back.codes is True
+
+    def runner_build(self, bank_dir, tmp_path, **over):
+        """Through `runner.run`, which is what the `build` command
+        calls -- not through `assemble`. The override lives in the
+        runner, so a test that skips it tests nothing about the flags."""
+        from checkit_printit import runner
+        pub = tmp_path / "publication.toml"
+        pub.write_text(
+            "[course]\n"
+            'name  = "TEST 101"\n'
+            'title = "T"\n'
+            'date  = "2026-01-01"\n'
+            "\n[bank]\n"
+            "path = '" + str(bank_dir) + "'\n"
+            "\n[roster]\npath = 'roster.toml'\n"
+            "\n[print]\nkeys = false\n",
+            encoding="utf-8")
+        (tmp_path / "roster.toml").write_text(
+            '[[student]]\nname = "Ada"\nsection = "1"\n'
+            'skills = ["AD"]\n', encoding="utf-8")
+        out = tmp_path / ("out" + "".join(sorted(over)))
+        # `install_theme=False`: `bank_dir` is session-scoped, and
+        # installing into it leaves a theme behind for every test that
+        # runs afterwards. These read `main.tex` and nothing else.
+        runner.run(str(pub), out=str(out), do_compile=False,
+                   seed=1, install_theme=False, **over)
+        return (out / "main.tex").read_text(encoding="utf-8")
+
+    def test_no_codes_reaches_the_document(self, bank_dir, tmp_path):
+        tex = self.runner_build(bank_dir, tmp_path, codes=False)
+        assert r"\cipcodeonfalse" in tex
+        assert r"\cipidfalse" not in tex
+
+    def test_no_ids_reaches_the_document(self, bank_dir, tmp_path):
+        tex = self.runner_build(bank_dir, tmp_path, ids=False)
+        assert r"\cipidfalse" in tex
+        assert r"\cipcodeonfalse" not in tex
+
+    def test_passing_neither_leaves_the_publication_alone(self, bank_dir,
+                                                          tmp_path):
+        """None means "whatever the file says". A plain `False`
+        default on those parameters would have turned the marks off
+        for every caller that did not think about them -- `--replay`
+        among them."""
+        tex = self.runner_build(bank_dir, tmp_path)
+        assert r"\cipidfalse" not in tex
+        assert r"\cipcodeonfalse" not in tex
+
+    def test_an_override_does_not_rewrite_the_publication(self, bank_dir,
+                                                          tmp_path):
+        """The flag is for one build. A run that quietly edited the
+        file would change every later reprint of the same job."""
+        self.runner_build(bank_dir, tmp_path, codes=False)
+        text = (tmp_path / "publication.toml").read_text(encoding="utf-8")
+        assert "codes" not in text
+
     def test_neighbours_get_different_versions(self, bank_dir, tmp_path):
         out, report = self.build(bank_dir, tmp_path)
         main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()

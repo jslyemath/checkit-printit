@@ -975,11 +975,18 @@ def import_csv(csv_path, out):
 @click.option("--replay", type=click.Path(exists=True), default=None,
               help="Reprint a finished run exactly, from the manifest in its "
                    "output folder. Draws nothing.")
-def build(pub_path, out, do_compile, seed, preview, replay):
+@click.option("--ids/--no-ids", default=None,
+              help="The student id field in the header. Overrides the "
+                   "publication for this build only.")
+@click.option("--codes/--no-codes", default=None,
+              help="The scanning code in the footer. Overrides the "
+                   "publication for this build only.")
+def build(pub_path, out, do_compile, seed, preview, replay, ids, codes):
     """Assemble the class set, and compile it."""
     try:
         result = runner.run(pub_path, out=out, do_compile=do_compile,
-                            seed=seed, preview=preview, replay=replay)
+                            seed=seed, preview=preview, replay=replay,
+                            ids=ids, codes=codes)
     except runner.BuildError as exc:
         raise click.ClickException(str(exc))
 

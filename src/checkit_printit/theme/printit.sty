@@ -330,6 +330,15 @@ title=#2,#1}
 \newcommand{\runseed}{0}
 \newcommand{\setrunseed}[1]{\renewcommand{\runseed}{#1}}
 
+% Either mark can be turned off for a run. Both default **on**: a
+% document that says nothing about them is an older one, and printing
+% less than it asked for is the worse way to be wrong.
+%
+% `\ifcipid` covers the whole id field, label included -- a bare
+% "ID:" with nothing after it is worse than no id at all.
+\newif\ifcipid\cipidtrue
+\newif\ifcipcodeon\cipcodeontrue
+
 \newcommand{\cipsid}{}
 \newcommand{\setsid}[1]{\renewcommand{\cipsid}{#1}}
 
@@ -433,6 +442,10 @@ title=#2,#1}
 % Drawn small, and quiet: this is for a scanner, and a student should
 % not feel watched by it. `\cipcode` is what the footer calls.
 \newcommand{\cipcode}{%
+  % The switch lives here rather than at the four call sites -- two
+  % page styles times two parities -- so there is one copy of the
+  % decision and it cannot fall out of step with itself.
+  \ifcipcodeon
   \stepcounter{cipsheet}%
   % `nolink`, which is why it was cyan. `qrcode` sets
   % `\qr@hyperlinktrue` by default, wraps the code in a hyperref
@@ -483,7 +496,8 @@ title=#2,#1}
   \begin{tikzpicture}[baseline=-0.7ex]
     \node[inner sep=0pt, outer sep=0pt] {\textcolor{black}{%
       \qrcode[height=11mm, level=L, nolink]{\cippayload}}};
-  \end{tikzpicture}}
+  \end{tikzpicture}%
+  \fi}
 
 %insert nicer urls if needed in online PDF checkpoints (pandemic era)
 \usepackage{hyperref}
@@ -564,7 +578,7 @@ title=#2,#1}
 % the size of "Name:" and "MAT 106-820" either side of it.
 \newcommand{\scheadleft}{%
   \makebox[4.3in][l]{\sffamily\color{darkgray} Name: {\scname}%
-    \hspace{1em}ID: \cipidfield}}
+    \ifcipid\hspace{1em}ID: \cipidfield\fi}}
 \makeatother
 
 \fancyhead[C]{}

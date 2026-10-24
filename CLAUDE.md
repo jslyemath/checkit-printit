@@ -523,6 +523,25 @@ diagnosis down the wrong path. What actually stops a push or a pull is
 `conn.ready`: a web app URL and a secret. `renderFormBar` says that,
 and both working tabs call it.
 
+### Both marks are optional, on three surfaces
+
+`ids` and `codes` are print options beside `keys`, `key_copies` and
+`names`, and travel the same road: the draft (`job.toml`), the
+publication (`[print]`), the Paper row of the Print tab, and
+`build --no-ids` / `--no-codes`.
+
+**Both default on, everywhere, and absence means on.** A draft or a
+publication written before these existed describes a run that had
+them; reading a missing key as off would quietly change what an old
+job reprints. The theme defaults them on too, so `main_tex` writes a
+switch **only to turn one off** -- which is what lets a document from
+a newer printit still compile against an older `printit.sty`.
+
+The CLI flags are `None` by default, not `False`: they mean "whatever
+the publication says", and they do not rewrite the file. A plain
+`False` default would have turned the marks off for every caller that
+did not think about them, `--replay` among them.
+
 ### What a printed page carries, and how to make it reach a bank
 
 Three marks, from design 14.5:

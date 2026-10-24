@@ -366,6 +366,13 @@ def main_tex(publication, handouts, extras, keys, load_helpers=False,
         # it prints after the version as `v715-1513199331` so a loose
         # sheet can be traced to its run by eye.
         f"\\setrunseed{{{run_seed if run_seed is not None else 0}}}",
+        # Stated only when off. The theme defaults both on, so a run
+        # that wants them writes nothing -- and an older theme that
+        # has never heard of these still compiles a document from a
+        # newer printit, which it would not if the document switched
+        # them on explicitly.
+        *([] if publication.ids else [r"\cipidfalse"]),
+        *([] if publication.codes else [r"\cipcodeonfalse"]),
         "",
         "% ---- student copies",
     ]

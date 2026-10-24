@@ -32,6 +32,12 @@ class Pub:
     """Enough of a publication for `build_handouts` and `main_tex`."""
     student_versions = {}
     names = True
+    #: The two page-mark switches. Defaulted true here because the
+    #: real `Publication` defaults them true -- a fake that disagrees
+    #: with the boundary about a default is a fake that passes tests
+    #: the real thing would fail.
+    ids = True
+    codes = True
     course = "MAT 106"
     semester = "Fall 2026"
     professor = "Slye"
