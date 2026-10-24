@@ -535,9 +535,19 @@ Three marks, from design 14.5:
   `nolink` is **required**: `qrcode` makes a hyperlink by default and
   hyperref colours it, which printed a cyan QR.
 * The **run seed after the version**, `v715-1513199331`.
-* A **student id in boxes** in the header, one box per digit. Empty
-  boxes when the run prints no names, which is what lets a spare be
-  graded.
+* A **student id** in the header. Printed plainly, at the size of
+  everything else on that line, when the run knows the student --
+  boxes round a number nobody has to write are noise. A faint ruled
+  grid of nine 4.4mm cells appears **only** when the name is blank,
+  which is what lets a spare be graded.
+
+**Every slot in the header and footer has an explicit width.**
+fancyhdr does not clip, so a long name or a long title simply runs
+through whatever is beside it. Both happened: "Belinda Soriano
+Garcia" plus a nine-digit id ran through the course and date, and
+"Skill Checkpoint Redo 2026-10-23" ran through the version. Judge
+this on a real title with a real name in it -- a probe called "Probe"
+shows neither.
 
 `\setrunseed` is written once by `main_tex`; `\setsid` once per
 student block. `\cipsheet` is reset by `\skillheader` and stepped by

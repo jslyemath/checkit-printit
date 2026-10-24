@@ -344,9 +344,14 @@ title=#2,#1}
 % exist, and a reader that cannot tell which layout it is holding has
 % to guess.
 %
-% Uppercase, digits, hyphen and `*` only -- all of which QR encodes in
-% alphanumeric mode, which is smaller and more robust than byte mode.
-% A slug may contain a hyphen (W1-E), so the separator cannot be one.
+% Uppercase, digits, hyphen and `*` only. **Not** for QR's
+% alphanumeric mode: `qrcode.sty` has no such mode -- it writes mode
+% indicator 4, binary, for everything, which was checked in the
+% package source rather than assumed. The character set is narrow for
+% the human reasons instead: a payload that survives being read aloud,
+% retyped, or pasted into a log without quoting.
+%
+% The separator cannot be a hyphen, because a slug has one (W1-E).
 \newcommand{\cippayload}{%
   CIP1*\runseed*\currentskill*\vseed*\thecipsheet*\thepage*%
   \ifx\cipsid\empty 0\else\cipsid\fi}
@@ -432,8 +437,27 @@ title=#2,#1}
   % 9mm, not 7.5: 33 modules across 7.5mm is 0.23mm each, which a
   % 300dpi scan samples at under three pixels. Three is the floor
   % every decoder quotes, so it was sitting exactly on it.
-  \raisebox{-0.35\height}{\textcolor{black}{%
-    \qrcode[height=9mm, level=M, nolink]{\cippayload}}}}
+  % 15mm, from a module measured off a 600dpi render rather than from
+  % version arithmetic -- the package puts a quiet zone inside the
+  % height it is given, so the data modules are smaller than
+  % height/29 and the arithmetic was optimistic by a third.
+  %
+  % Measured at 12mm: 0.381mm per module, which is exactly 3.00
+  % pixels at 200dpi. Three is the floor every decoder quotes, so
+  % that was sitting on it with nothing in hand for a fold, a crease
+  % or a photocopy. 15mm gives 0.476mm -- 3.75 pixels at 200dpi and
+  % 5.6 at 300 -- which is room to be wrong in.
+  %
+  % Centred on the footer text rather than hung below it: `\raisebox`
+  % by half the height, less half the x-height, puts the middle of the
+  % square on the middle of the line.
+  % Order matters. `\raisebox{-0.5\height}` measures the box it is
+  % given, so the inner one has to be the raw symbol -- that puts its
+  % middle on the baseline. Lifting by half an x-height then puts it
+  % on the middle of the text. Nested the other way round, `\height`
+  % was the already-shifted box and the code hung low.
+  \raisebox{0.5ex}{\raisebox{-0.5\height}[0pt][0pt]{\textcolor{black}{%
+    \qrcode[height=15mm, level=M, nolink]{\cippayload}}}}}
 
 %insert nicer urls if needed in online PDF checkpoints (pandemic era)
 \usepackage{hyperref}
@@ -460,7 +484,7 @@ title=#2,#1}
 \newcommand{\scheadright}{\sffamily\color{darkgray} \@acadclass{}\scsection\hspace{5pt} \textbullet{}\hspace{5pt}  \@date \hspace{5pt} \textbullet{}\hspace{5pt}  \@author}
 \makeatother
 % Whatever \setname last set; a ruled blank until it is called.
-\newcommand{\scname}{\underline{\Large\phantom{Blank}\hspace{2.9in}}}
+\newcommand{\scname}{\underline{\large\phantom{Blank}\hspace{1.6in}}}
 % One box per digit. Separated digits are the most reliable
 % handwriting there is, and this is the only handwriting the system
 % has to read -- so it is worth the width. Filled when the run knows
@@ -471,35 +495,57 @@ title=#2,#1}
 % has to be defined with `@` a letter -- not merely used inside one
 % pair of \makeatletter, which is how the first attempt defined
 % `\@ tfor` and failed at the first named student.
-% 2.2ex wide, measured against a rendered page rather than guessed:
-% at 1.5ex the digits touched both edges of their box and read as one
-% smear, which defeats the whole point of separating them.
-\newcommand{\cipdigitboxes}[1]{%
-  \sffamily\footnotesize
-  \@tfor\cipdigit:=#1\do{%
-    \framebox[2.2ex][c]{\rule{0pt}{2.1ex}\cipdigit}\kern0.2ex}}
-% Nine boxes, which is the width of a Banner id. A run that knows the
-% student fills them; one that does not leaves them to be written in.
-\newcommand{\cipblankboxes}{\cipdigitboxes{~~~~~~~~~}}
-\newcommand{\cipidboxes}{%
-  \ifx\cipsid\empty
-    \expandafter\cipblankboxes
-  \else
-    \expandafter\cipdigitboxes\expandafter{\cipsid}%
-  \fi}
+% One grid of nine cells, drawn only when nobody has filled the id
+% in. A faint ruled array rather than nine black boxes: it is a place
+% to write, not a thing to read, and at the weight of the boxes it
+% replaced it competed with the student's own name.
+%
+% 4.4mm cells. The first version used 1.5ex -- about 1.3mm -- which
+% the instructor rightly called too tiny to write in. A digit written
+% by an adult wants four to five millimetres.
+\newlength{\cipcell}
+\setlength{\cipcell}{4.4mm}
+\newcommand{\cipidgrid}{%
+  \begingroup
+  \color{black!30}%
+  \setlength{\fboxsep}{0pt}%
+  \setlength{\fboxrule}{0.4pt}%
+  \framebox{%
+    \makebox[\cipcell]{\rule{0pt}{5.2mm}}%
+    \@tfor\cipdiv:=12345678\do{%
+      \vrule width 0.4pt\makebox[\cipcell]{}}%
+  }%
+  \endgroup}
+
+% When the run knows the student the id is simply printed, at the
+% size of everything else on this line. It is a fact about the paper,
+% not a blank: boxes around a number nobody has to write are noise,
+% and the instructor asked for them only in the empty case.
+\newcommand{\cipidfield}{%
+  \ifx\cipsid\empty\cipidgrid\else\cipsid\fi}
+
+% The blank name rule shortens when the grid is shown, because the
+% two together at full width push the course and date off the line.
 \newcommand{\scheadleft}{%
-  \sffamily\color{darkgray} Name: \scname
-  \hspace{1.2em}\raisebox{0.15ex}{ID: \cipidboxes}}
+  \makebox[4.3in][l]{\sffamily\color{darkgray} Name: \scname
+    \hspace{1em}ID: \cipidfield}}
 \makeatother
 
 \fancyhead[C]{}
 \fancyhead[R]{\scheadright}
 \fancyhead[L]{\scheadleft}
-\fancyfoot[RE, LO]{\maketitle\hspace{0.6em}\cipcode}
+% Titles are long and carry a date -- "Skill Checkpoint Redo
+% 2026-10-23" -- so the inner slot is given a width and a smaller
+% face rather than being allowed to run into the centre.
+\fancyfoot[RE, LO]{\makebox[2.3in][l]{\footnotesize\maketitle}}
 % The run seed as a dashed suffix, so a sheet found on the floor in
 % March can be traced to the run that printed it without a scanner.
 \fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed-\runseed}}
-\fancyfoot[LE, RO]{\sffamily\textit{\color{darkgray}\currentskill\hspace{0.5em}\roundbox{20pt}}}
+% The code on the outer edge with the skill and the grading box: that
+% corner holds the least text, and is where a scanner looks for a
+% fixed mark.
+\fancyfoot[LE, RO]{\sffamily\textit{\color{darkgray}%
+  \currentskill\hspace{0.5em}\roundbox{20pt}\hspace{0.6em}\cipcode}}
 
 % The second and later sheets of a skill that runs past one page.
 %
@@ -517,8 +563,11 @@ title=#2,#1}
     \renewcommand{\headrulewidth}{0pt}%
     \fancyhead[R]{\scheadright}%
     \fancyhead[L]{\scheadleft}%
-    \fancyfoot[RE, LO]{\maketitle\hspace{0.6em}\cipcode}%
+    \fancyfoot[RE, LO]{\makebox[2.3in][l]{\footnotesize\maketitle}}%
     \fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed-\runseed}}%
+    % A continued sheet carries the code too -- it is the sheet that
+    % most needs to say which paper it belongs to.
+    \fancyfoot[LE, RO]{\sffamily\color{darkgray}\cipcode}%
 }
 
 \newcommand{\cacadclass}{
@@ -533,8 +582,8 @@ title=#2,#1}
 % -- would come out with a blank rule where the student's name should be.
 \newcommand{\setname}[1]{%
     \ifthenelse{\equal{#1}{Blank} \OR \equal{#1}{blank}}%
-        {\renewcommand{\scname}{\underline{\Large\phantom{Blank}\hspace{2.9in}}}}%
-        {\renewcommand{\scname}{\Large #1}}%
+        {\renewcommand{\scname}{\underline{\large\phantom{Blank}\hspace{1.6in}}}}%
+        {\renewcommand{\scname}{\large #1}}%
     \pdfbookmark[0]{\texorpdfstring{#1}{#1}}{#1}%
 }
 
