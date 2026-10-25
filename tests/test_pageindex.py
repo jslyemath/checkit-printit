@@ -491,7 +491,8 @@ class TestWhatACompileWrites:
         text = sty.read_text(encoding="utf-8")
         for marker, bare in ((r"\cipmark{box}{\roundbox{20pt}}",
                               r"\roundbox{20pt}"),
-                             (r"\cipmark{name}{\scname}", r"\scname"),
+                             (r"\cipmark{name}{\cipfittedname}",
+                              r"\cipfittedname"),
                              (r"\cipmark{id}{\cipidfield}", r"\cipidfield")):
             assert text.count(marker) == 1, f"{marker} moved"
             text = text.replace(marker, bare)
