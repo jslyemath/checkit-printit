@@ -691,6 +691,44 @@ The first real build against `mat-106-checkit` failed on an undefined
 main_tex_calls` guards the pair for a fresh install, and nothing can
 guard a bank nobody has updated.
 
+### The Scans tab, and what places a page
+
+`scans.py` turns PDFs into placed pages and stops there. Marking is
+a separate job with a separate failure mode, and placing has to be
+trustworthy before a reading of somebody's tick is worth showing.
+
+Every page is identified by its own footer code, so **order carries
+nothing**: any sequence, any number of files, blanks mixed in.
+
+Five statuses, because "could not place" is several problems:
+`placed`, `blank` (no code, almost no ink), `unreadable` (ink, no
+code), `foreign` (a code, not ours), `unknown-run`.
+
+Three questions of the batch. Which runs; what was read twice, which
+is never resolved automatically because two scans of one paper are
+usually identical and occasionally are not; and **what never came
+back** -- the question nobody asks until it is too late.
+
+`missing` counts **students' papers only.** Padding has no index
+line, a key never leaves the instructor's folder, and a spare is
+printed in case somebody needs one, so most runs end with spares
+nobody took. The first version counted all three and reported six
+missing for a stack short of two papers.
+
+`INK_FLOOR` separates a blank sheet from one that failed to read. It
+is a guess made against simulated scans and **needs calibrating
+against the real copier**: a machine that runs dark would put an
+empty sheet above it, and every padding page would then be reported
+as a paper that failed.
+
+The read runs in a thread with a polling status, like the Google
+sign-in, because a few hundred pages takes minutes.
+
+**`tools/demo_scans.py`** builds a course, a run and a stack that is
+wrong in the ways a real stack is wrong -- shuffled, split in two, a
+blank, a page read twice, one paper held back. `--home` keeps it out
+of the real print-it home, which anything that builds should do.
+
 ### The Runs tab, and what it is allowed to do
 
 `record.db` already held everything: the `run` table plus `printed`.
