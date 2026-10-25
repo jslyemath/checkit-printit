@@ -433,6 +433,18 @@ title=#2,#1}
 % shipout -- after that group has closed. A locally set save box is
 % void again by then, and the first version of this recorded a box
 % 0sp wide at exactly the right place.
+% The box is measured into a save box and then drawn *separately*,
+% rather than the measured copy being used. `\sbox` typesets without
+% contributing anything, so the measurement is free of consequences and
+% the drawn box is the same tokens the footer always had.
+%
+% Using the measured copy changed the page. `\roundbox` ends in
+% `\xspace`, which decides whether to add a space by looking at what
+% comes next -- and inside a save box what comes next is the end of the
+% box, not the end of the footer. The box and the skill slug beside it
+% shifted about 0.8mm, found by differencing a page against one built
+% with this morning's theme: 3,344 pixels out of 8.4 million, all of
+% them in that corner.
 \newsavebox{\cipboxmeasure}
 \newcommand{\cipcheckbox}[1]{%
   \global\sbox{\cipboxmeasure}{\roundbox{#1}}%
@@ -440,7 +452,7 @@ title=#2,#1}
   \write\cipindex{box*\thepage*\the\pdflastxpos*\the\pdflastypos*%
     \number\wd\cipboxmeasure*\number\ht\cipboxmeasure*%
     \number\dp\cipboxmeasure}%
-  \usebox{\cipboxmeasure}}
+  \roundbox{#1}}
 
 % ---------------------------------------------------------------------
 % The payload: the least that identifies a sheet.
