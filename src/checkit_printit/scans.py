@@ -76,6 +76,11 @@ class Sheet:
     #: What was decoded, whatever it was. Kept for the foreign case,
     #: where the instructor is the only one who can say what it is.
     code: str = ""
+    #: `{label: image}` for whatever was asked for, straightened and
+    #: cut out of this page. Small on purpose: the whole page is
+    #: thrown away once these are taken, because a few hundred full
+    #: renders will not fit in memory and these will.
+    cuts: dict = dataclasses.field(default_factory=dict)
 
     @property
     def placed(self):
@@ -172,6 +177,163 @@ class Batch:
         return out
 
 
+# ----------------------------------------------------- where things are --
+#
+# `main.pages` says where the grading box, the id and the name sit
+# **on the page**. A scan is that page photographed crookedly: shifted,
+# turned a degree or two, and at whatever size the copier felt like.
+# So a rectangle in page coordinates has to be carried across to the
+# scan before anything can be cut out of it.
+#
+# The footer code is the thing that carries it. zxing reports the four
+# corners of every symbol it reads, so the same square is visible in
+# both pictures and the difference between them *is* the
+# transformation -- turn, scale and shift, in one measurement, taken
+# from the page itself rather than assumed about the scanner.
+#
+# What it needs is where the code sits on the page, and that is not in
+# `main.pages`. Rather than record it -- which would mean changing the
+# theme again, and the bank has only just been brought up to date --
+# it is read off the run's own PDF, which is sitting in the folder
+# next to the index.
+#
+# **Twice per run, not once per page.** The footer puts the code at
+# the left margin on an odd page, and after a fixed 1.9in box on an
+# even one. Neither depends on the content, so there are two answers
+# per run and the rest is arithmetic.
+
+
+@dataclasses.dataclass(frozen=True)
+class Anchor:
+    """The footer code's corners on the printed page, in page pixels."""
+
+    corners: tuple          #: ((x, y) * 4), clockwise from top-left
+    dpi: float
+    page_height: float      #: the PDF's own height, in PostScript points
+
+
+def _corners(found):
+    p = found.position
+    return ((p.top_left.x, p.top_left.y), (p.top_right.x, p.top_right.y),
+            (p.bottom_right.x, p.bottom_right.y),
+            (p.bottom_left.x, p.bottom_left.y))
+
+
+def _centre(points):
+    return (sum(x for x, _ in points) / len(points),
+            sum(y for _, y in points) / len(points))
+
+
+def anchors(run_folder, dpi=DPI):
+    """`{parity: Anchor}` for a run, read off its own PDF.
+
+    Parity is `page % 2`, and that is the whole index: the code's
+    place in the footer depends on which side of the sheet it is and
+    on nothing else.
+
+    Returns `{}` when the folder has no PDF any more. That is a real
+    case -- a run can be recorded and its folder moved -- and it means
+    the pages can still be *placed*, because placing only needs the
+    index, but nothing can be cut out of them.
+    """
+    import pypdfium2 as pdfium
+    import zxingcpp
+
+    pdf_path = os.path.join(run_folder, "main.pdf")
+    if not os.path.isfile(pdf_path):
+        return {}
+    out = {}
+    pdf = pdfium.PdfDocument(pdf_path)
+    try:
+        for n in range(1, len(pdf) + 1):
+            if len(out) == 2:
+                break
+            if n % 2 in out:
+                continue
+            page = pdf[n - 1]
+            found = zxingcpp.read_barcodes(page.render(scale=dpi / 72).to_pil())
+            ours = [f for f in found if pageindex.read_payload(f.text)]
+            if ours:
+                out[n % 2] = Anchor(corners=_corners(ours[0]), dpi=dpi,
+                                    page_height=page.get_height())
+    finally:
+        pdf.close()
+    return out
+
+
+def placement(anchor, scan_corners):
+    """Turn, scale and shift that carry the page onto the scan.
+
+    A similarity, not a full perspective: a sheet on a platen is flat
+    and square to the glass, so it can be turned and moved and scaled
+    and nothing else. Fitting a perspective to four points that only
+    differ by those three would read the noise in the corner estimates
+    as keystone.
+    """
+    import math
+
+    px, py = _centre(anchor.corners)
+    sx, sy = _centre(scan_corners)
+    # Measured across the diagonals rather than one edge: a corner
+    # estimate is a pixel or two out either way, and a diagonal is the
+    # longest baseline the symbol offers.
+    scale, angle, n = 0.0, 0.0, 0
+    for i in (0, 1):
+        ax, ay = anchor.corners[i]
+        bx, by = anchor.corners[i + 2]
+        cx, cy = scan_corners[i]
+        dx, dy = scan_corners[i + 2]
+        page_len = math.hypot(bx - ax, by - ay)
+        scan_len = math.hypot(dx - cx, dy - cy)
+        if page_len <= 0:
+            continue
+        scale += scan_len / page_len
+        angle += (math.atan2(dy - cy, dx - cx)
+                  - math.atan2(by - ay, bx - ax))
+        n += 1
+    if not n:
+        return None
+    scale, angle = scale / n, angle / n
+    cos, sin = math.cos(angle) * scale, math.sin(angle) * scale
+
+    def carry(x, y):
+        dx, dy = x - px, y - py
+        return (sx + dx * cos - dy * sin, sy + dx * sin + dy * cos)
+
+    return carry
+
+
+def cut_out(image, mark, anchor, carry, pad=0.3, size=120):
+    """The piece of the scan where `mark` ended up, straightened.
+
+    `pad` is how much of the mark's own width to take on every side.
+    The instructor's tick comes out past the box on purpose -- "a
+    check whose tail comes out past the box" -- so a crop tight to
+    the rectangle would cut off the part he draws deliberately.
+
+    Straightened by mapping the four corners through `Image.QUAD`,
+    which undoes the turn in the same step as the crop. Cropping an
+    upright box around a turned rectangle would bring in whatever is
+    beside it, and beside the grading box is the skill name.
+    """
+    from PIL import Image
+
+    left, top, right, bottom = mark.rect(anchor.dpi, anchor.page_height)
+    grow = (right - left) * pad
+    left, right = left - grow, right + grow
+    top, bottom = top - grow, bottom + grow
+    quad = []
+    for x, y in ((left, top), (left, bottom), (right, bottom), (right, top)):
+        quad.extend(carry(x, y))
+    # `fillcolor` white, because a box near the edge of a skewed sheet
+    # maps to a quad that runs off the scan, and the default fill is
+    # black. One crop came back with a black wedge across its foot --
+    # harmless to look at, and enough to make any ink measure call
+    # that page heavily marked.
+    return image.transform((size, size), Image.QUAD, quad,
+                           resample=Image.BICUBIC, fillcolor=255)
+
+
 def _dark_fraction(image):
     """How much of a page has ink on it, roughly."""
     import numpy
@@ -179,11 +341,18 @@ def _dark_fraction(image):
     return float((grey < 128).mean())
 
 
-def read_page(image, resolve):
-    """Place one rendered page. `resolve(run_no)` gives its Index."""
+def read_page(image, resolve, anchors_for=None, want=()):
+    """Place one rendered page. `resolve(run_no)` gives its Index.
+
+    `anchors_for(run_no)` gives that run's `{parity: Anchor}`, and
+    `want` names the marks to cut out. Both optional: placing a page
+    needs neither, and the instructor may only want to know what came
+    back.
+    """
     import zxingcpp
 
-    found = [c.text for c in zxingcpp.read_barcodes(image)]
+    symbols = zxingcpp.read_barcodes(image)
+    found = [c.text for c in symbols]
     ours = next((pageindex.read_payload(t) for t in found
                  if pageindex.read_payload(t)), None)
 
@@ -207,8 +376,38 @@ def read_page(image, resolve):
         # than the one that printed this sheet.
         return {"status": "unknown-page", "run_no": run_no, "page": page,
                 "code": f"C1-{run_no}-{page}"}
-    return {"status": "placed", "run_no": run_no, "page": page,
-            "entry": entry, "code": f"C1-{run_no}-{page}"}
+    out = {"status": "placed", "run_no": run_no, "page": page,
+           "entry": entry, "code": f"C1-{run_no}-{page}"}
+    if want and anchors_for:
+        out["cuts"] = _cuts(image, entry, page, symbols,
+                            anchors_for(run_no), want)
+    return out
+
+
+def _cuts(image, entry, page, symbols, anchors, want):
+    """Straightened crops of the marks asked for, or nothing.
+
+    Nothing, quietly, in three cases that are all ordinary: the run's
+    folder has gone, so there is no page to compare against; the
+    sheet is a continuation and carries no grading box; the corners
+    came back unusable. None of them is a failure of the read -- the
+    page is still placed -- so none of them raises.
+    """
+    anchor = (anchors or {}).get(page % 2)
+    if anchor is None:
+        return {}
+    ours = next((s for s in symbols if pageindex.read_payload(s.text)), None)
+    if ours is None:
+        return {}
+    carry = placement(anchor, _corners(ours))
+    if carry is None:
+        return {}
+    cuts = {}
+    for label in want:
+        mark = entry.marks.get(label)
+        if mark is not None:
+            cuts[label] = cut_out(image, mark, anchor, carry)
+    return cuts
 
 
 def index_reader(record_path):
@@ -236,7 +435,28 @@ def index_reader(record_path):
     return resolve
 
 
-def read_pdfs(paths, record_path, dpi=DPI, on_page=None):
+def anchor_reader(record_path, dpi=DPI):
+    """`run_no -> {parity: Anchor}`, cached, from the run's own PDF.
+
+    Cached hard, because this is the expensive half: it renders a
+    page of the original at scanning resolution and looks for a code
+    in it. Two per run, and a run's worth of scans then costs
+    nothing more.
+    """
+    cache = {}
+
+    def resolve(run_no):
+        if run_no not in cache:
+            cache[run_no] = {}
+            row = record_mod.run_by_no(record_path, run_no)
+            if row and row.get("output"):
+                cache[run_no] = anchors(row["output"], dpi)
+        return cache[run_no]
+
+    return resolve
+
+
+def read_pdfs(paths, record_path, dpi=DPI, on_page=None, want=()):
     """Read a stack. `on_page(done, total)` is called as it goes.
 
     The PDFs are read in the order given and pages in the order they
@@ -251,6 +471,7 @@ def read_pdfs(paths, record_path, dpi=DPI, on_page=None):
             raise ScanError(f"{path} does not exist.")
 
     resolve = index_reader(record_path)
+    anchors_for = anchor_reader(record_path, dpi) if want else None
     documents = []
     try:
         for path in paths:
@@ -267,8 +488,9 @@ def read_pdfs(paths, record_path, dpi=DPI, on_page=None):
         for path, doc in documents:
             for n in range(1, len(doc) + 1):
                 image = doc[n - 1].render(scale=dpi / 72).to_pil()
-                sheets.append(Sheet(source=path, at=n,
-                                    **read_page(image, resolve)))
+                sheets.append(Sheet(
+                    source=path, at=n,
+                    **read_page(image, resolve, anchors_for, want)))
                 done += 1
                 if on_page:
                     on_page(done, total)

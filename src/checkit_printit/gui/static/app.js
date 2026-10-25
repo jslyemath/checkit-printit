@@ -2064,15 +2064,19 @@ function renderScan(data) {
   // one of them, which is rare. Otherwise it is the same number on
   // every row, which is noise.
   const manyRuns = data.runs.length > 1;
-  const head = ["File", "Sheet", "What it is", "Student", "Skill"];
+  const head = ["File", "Page in it", "What it is", "Student",
+                "Skill"];
   if (manyRuns) head.push("Print job");
   rows(document.getElementById("scan-sheets"), head,
        data.sheets.map(s => {
+         // An answer key is not a matched anything -- it is an
+         // answer key, and saying so is the whole answer. Same for
+         // a spare, which belongs to nobody until it is written on.
+         const what = s.kind === "key" ? "Answer key"
+                    : s.kind === "spare" ? "Spare copy"
+                    : scanOutcome(s.status).short;
          const line = [
-           s.file, s.at,
-           scanOutcome(s.status).short
-             + (s.kind && s.kind !== "student" ? ` \u2014 ${s.kind}` : ""),
-           s.name || s.sid || "", s.skill,
+           s.file, s.at, what, s.name || s.sid || "", s.skill,
          ];
          if (manyRuns) line.push(s.run ?? "");
          return line;
