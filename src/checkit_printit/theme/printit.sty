@@ -599,28 +599,45 @@ title=#2,#1}
   % A scanner wants maximum contrast; light cyan on white is close to
   % the worst case a decoder can be handed.
   %
-  % 9mm, not 7.5: 33 modules across 7.5mm is 0.23mm each, which a
-  % 300dpi scan samples at under three pixels. Three is the floor
-  % every decoder quotes, so it was sitting exactly on it.
-  % 11mm at level **L**, which is a deliberate pair and not two
+  % 9mm at level **L**, which is a deliberate pair and not two
   % independent settings.
   %
   % A version-1 symbol is 21 modules and holds 17 bytes at level L
-  % but only 14 at level M. The payload is exactly 17. At M it
-  % therefore spills to version 2 -- 25 modules -- and since the
-  % height is fixed, more modules means each one is *smaller*:
-  % measured at 11mm/M it was 0.423mm, 3.33 pixels at a 200dpi scan.
-  % At L the same 11mm holds 21 modules at 0.52mm, 4.1 pixels.
+  % but only 14 at level M. `\cippayload` is exactly 17, so at M it
+  % would spill to version 2 -- 25 modules -- and since the height is
+  % fixed, more modules means each one is *smaller*. L is therefore
+  % not a concession: it buys a coarser symbol, and a coarser symbol
+  % survives a worse scan than a finer one with more correction in
+  % it. What is given up is damage tolerance: 7% of the symbol may be
+  % lost rather than 15%, and a footer corner is where staples and
+  % folds live.
   %
-  % So L is not a concession here. It buys a coarser symbol, and a
-  % coarser symbol survives a worse scan than a finer one with more
-  % error correction in it. What is given up is damage tolerance: 7%
-  % of the symbol may be lost rather than 15%. In a footer corner,
-  % where staples and folds live, that is the real cost.
+  % **If `\cippayload` ever grows past 17 characters this silently
+  % falls to version 2 and the modules shrink.** Re-measure after any
+  % change to it.
   %
-  % If the payload ever grows past 17 characters this silently falls
-  % to version 2 and the modules shrink again. Re-measure after any
-  % change to `\cippayload`.
+  % 9mm, not 11, and the 2mm came off the back of a measurement
+  % rather than a rule of thumb. The old 11mm was carried over from a
+  % 33-module symbol, and when the payload was cut to 17 characters
+  % the symbol became 21 modules and nobody revisited the size.
+  %
+  % What was measured: the real footer, on real pages, rendered at
+  % 200dpi -- the low end of the instructor's copier -- then blurred,
+  % skewed, noised and JPEGed, with the decoder given the whole sheet
+  % to search rather than a cropped symbol.
+  %
+  %   size   straight   skewed 4deg   2nd generation   upside down
+  %   11mm      36/36         36/36            36/36         36/36
+  %    9mm      36/36         36/36            36/36         36/36
+  %    8mm      36/36         36/36            30/36         36/36
+  %    7mm      36/36         36/36            34/36         36/36
+  %    6mm      36/36         36/36             0/36         35/36
+  %
+  % 9mm then took 150/150 on second-generation copies alone. 8mm and
+  % 7mm are both marginal and their ordering is noise; the cliff is
+  % between 9 and 8, and it is a photocopy-of-a-photocopy that finds
+  % it. That is not a hypothetical case -- a student who needs a
+  % blank copy gets one off the copier.
   %
   % Sizes here are measured off a 600dpi render, never computed from
   % the QR version tables -- `qrcode` puts its quiet zone inside the
@@ -637,7 +654,7 @@ title=#2,#1}
   % that looks right is better than computing something that should.
   \begin{tikzpicture}[baseline=-0.7ex]
     \node[inner sep=0pt, outer sep=0pt] {\textcolor{black}{%
-      \qrcode[height=11mm, level=L, nolink]{\cippayload}}};
+      \qrcode[height=9mm, level=L, nolink]{\cippayload}}};
   \end{tikzpicture}%
   \fi}
 
@@ -743,8 +760,9 @@ title=#2,#1}
 % The box is spacing, not a clip: a title long enough to overflow
 % 1.9in will still run into the version string in the centre. The
 % centre spans roughly 2.75in to 4.25in of a 7in line, so everything
-% left of it has to finish by 2.75in, and 15mm of code leaves about
-% 1.9in for a name.
+% left of it has to finish by 2.75in. The box is still 1.9in: the
+% code shrinking from 11mm to 9mm moved the title 2mm left and
+% left the room it has unchanged.
 \fancyfoot[LO]{\cippagemark\hspace{0.6em}%
   \makebox[1.9in][l]{\maketitle}}
 \fancyfoot[RE]{\makebox[1.9in][r]{\maketitle}%
