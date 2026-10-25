@@ -467,9 +467,29 @@ title=#2,#1}
 \newcommand{\cipmark}[2]{%
   \global\sbox{\cipmarkbox}{#2}%
   \pdfsavepos
-  \write\cipindex{mark*\thepage*#1*\the\pdflastxpos*\the\pdflastypos*%
+  % Two clocks, and they do not agree.
+  %
+  % The *position* must be read late: \pdflastxpos is only set when
+  % the page ships, so `\the\pdflastxpos` has to survive into the
+  % deferred write unexpanded.
+  %
+  % The *size* must be read now. One save box serves all three marks
+  % on a page, so by shipout it holds whichever was measured last --
+  % and the first version of this reported the footer's 27pt grading
+  % box as the width of the name and the id as well. Position right,
+  % size wrong, on every page.
+  %
+  % \edef settles both: \number expands here and freezes three
+  % literal numbers into the token list, while \noexpand keeps
+  % \thepage and \pdflastxpos for shipout. This is the job
+  % \protected@write exists for.
+  \edef\cipmarkline{\noexpand\write\noexpand\cipindex{%
+    mark*\noexpand\thepage*#1*%
+    \noexpand\the\noexpand\pdflastxpos*%
+    \noexpand\the\noexpand\pdflastypos*%
     \number\wd\cipmarkbox*\number\ht\cipmarkbox*%
-    \number\dp\cipmarkbox}%
+    \number\dp\cipmarkbox}}%
+  \cipmarkline
   #2}
 
 % ---------------------------------------------------------------------

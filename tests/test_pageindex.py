@@ -236,11 +236,20 @@ pdflatex = find_pdflatex()
 
 def one_page_and_two_page_students():
     """Ada takes one skill and so ends on an odd page, which forces a
-    padding sheet. That is the case the index has to step over."""
+    padding sheet. That is the case the index has to step over.
+
+    Nine-digit ids, as the real ones are. With `sid="111"` the id
+    field was narrower than the grading box, so a bug that reported
+    the box's width for every mark still produced a rectangle wide
+    enough to cover the id -- and the pixel test saw nothing wrong.
+    A fixture smaller than the thing it stands for hides the bugs
+    that are about size.
+    """
     return roster_mod.Roster([
-        roster_mod.Student(name="Ada", section="1", skills=["AD"], sid="111"),
+        roster_mod.Student(name="Ada", section="1", skills=["AD"],
+                           sid="800000111"),
         roster_mod.Student(name="Bo", section="1", skills=["AD", "SU"],
-                           sid="222"),
+                           sid="800000222"),
     ])
 
 
@@ -291,7 +300,7 @@ class TestWhatACompileWrites:
     def test_every_student_page_names_its_owner(self, compiled):
         index = pageindex.load(compiled)
         owners = {p.sid for p in index.pages.values() if p.kind == "student"}
-        assert owners == {"111", "222"}
+        assert owners == {"800000111", "800000222"}
 
     def test_the_index_covers_every_page_of_the_pdf(self, compiled):
         """Between the lines and the gaps, nothing is unaccounted for.
@@ -369,26 +378,59 @@ class TestWhatACompileWrites:
             assert "name" in entry.marks, f"page {entry.page} has no name"
             assert "id" in entry.marks, f"page {entry.page} has no id"
 
-    def test_the_id_rectangle_lands_on_the_id(self, compiled):
-        """The named run prints digits there, so the rectangle should
-        hold ink. An empty rectangle means it landed on the margin."""
+    def test_the_three_marks_measure_three_different_things(self, compiled):
+        """A name, nine digits and a 20pt square are not the same
+        width. They were: one save box serves all three and the
+        writes are deferred, so every mark reported whichever was
+        measured last.
+
+        The pixel test below passed throughout, because a rectangle
+        that is too narrow still lands on ink."""
+        index = pageindex.load(compiled)
+        for entry in index.pages.values():
+            if entry.kind == "key":
+                continue
+            widths = {label: entry.marks[label].width
+                      for label in ("name", "id", "box")}
+            assert len(set(widths.values())) == 3, \
+                f"page {entry.page}: {widths}"
+
+    def test_each_rectangle_holds_its_whole_element(self, compiled):
+        """Ink inside, white immediately outside.
+
+        "Is there ink in here" alone cannot tell a rectangle that fits
+        from one that covers the first third of what it is meant to
+        cover. All three of these are followed by white space on the
+        page, so a correct right edge has white just beyond it and a
+        short one has the element still running."""
         pdfium = pytest.importorskip("pypdfium2")
         numpy = pytest.importorskip("numpy")
         pdf = pdfium.PdfDocument(os.path.join(compiled, "main.pdf"))
         index = pageindex.load(compiled)
+        checked = 0
         for entry in index.pages.values():
             if entry.kind == "key":
-                continue                  # keys print no id
+                continue                  # keys print no name or id
             page = pdf[entry.page - 1]
-            left, top, right, bottom = entry.marks["id"].rect(
-                200, page.get_height())
-            crop = numpy.asarray(
-                page.render(scale=200 / 72).to_pil().convert("L")
-                .crop((round(left), round(top), round(right), round(bottom))),
-                dtype=float)
-            assert crop.size, f"page {entry.page}: id rectangle is off-page"
-            assert (crop < 128).sum() > 10, \
-                f"page {entry.page}: nothing inside the id rectangle"
+            grey = page.render(scale=200 / 72).to_pil().convert("L")
+            for label in ("name", "id", "box"):
+                left, top, right, bottom = entry.marks[label].rect(
+                    200, page.get_height())
+                inside = numpy.asarray(grey.crop(
+                    (round(left), round(top), round(right), round(bottom))),
+                    dtype=float)
+                assert inside.size, f"page {entry.page} {label}: off-page"
+                assert (inside < 128).sum() > 10, \
+                    f"page {entry.page} {label}: the rectangle holds no ink"
+
+                beyond = numpy.asarray(grey.crop(
+                    (round(right) + 1, round(top),
+                     round(right) + 7, round(bottom))), dtype=float)
+                assert (beyond < 128).sum() == 0, \
+                    (f"page {entry.page} {label}: ink continues past the "
+                     f"right edge, so the rectangle is too narrow")
+                checked += 1
+        assert checked, "no page carried all three marks"
 
     def test_the_recorded_rectangle_lands_on_the_grading_box(self, compiled):
         """Checked by ink, because a coordinate system can be wrong in
