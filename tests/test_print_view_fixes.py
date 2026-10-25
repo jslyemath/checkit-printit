@@ -243,6 +243,11 @@ class TestTheBuildReportNamesCollisions:
             record_error = ""
             theme_installed = ""
             unmatched_overrides = ()
+            # Every field the view reads. A stand-in missing one
+            # cannot fail the way the real result fails: it raises
+            # AttributeError in a test about collisions instead of
+            # saying anything about collisions.
+            anonymous = False
             report = {"students": 2, "extras": 0, "skills": [], "versions": 0,
                       "keys": 0, "seeds": {}, "unseated": [],
                       "missing_fields": {},

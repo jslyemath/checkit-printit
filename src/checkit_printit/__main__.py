@@ -1078,6 +1078,11 @@ def _report(result):
         click.echo(f"  WARNING  override(s) for "
                    f"{', '.join(result.unmatched_overrides)} matched nobody "
                    f"in the roster, so nothing was changed for them")
+    if result.anonymous:
+        click.echo("  WARNING  no names and no id field, so nothing on "
+                   "these papers says who sat them. Scans will read the "
+                   "code and find the skill, and have no way to attribute "
+                   "the paper to anybody.")
     if report["unseated"]:
         click.echo(f"  WARNING  not in the seating chart, printed last: "
                    f"{', '.join(report['unseated'])}")

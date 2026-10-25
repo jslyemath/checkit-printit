@@ -3111,6 +3111,10 @@ function renderBuild(out) {
     line("override(s) for " + out.unmatchedOverrides.join(", ")
          + " matched nobody in the roster, so nothing changed for them",
          "warnline");
+  if (out.anonymous)
+    line("Names and the ID field are both off, so nothing on these papers "
+         + "says who sat them. Scans will read the code and find the skill, "
+         + "and have no way to attribute the paper to anybody.", "warnline");
   if (out.unseated.length)
     line("not in the seating chart, printed last: " + out.unseated.join(", "),
          "warnline");

@@ -403,56 +403,74 @@ title=#2,#1}
     \thepage*\cipkind*\cipsid*\currentskill*\vseed*\thecipsheet}}
 
 % ---------------------------------------------------------------------
-% Where the grading box is, in the page's own coordinates.
+% Where a thing is on the page, in the page's own coordinates.
 %
-%   box*<page>*<x>*<y>*<width>*<height>*<depth>
+%   mark*<page>*<label>*<x>*<y>*<width>*<height>*<depth>
 %
-% All six numbers in scaled points, from the bottom-left of the page.
-% Scans has to crop the box out of a scan and read what is in it, and
-% there were three ways to know where it is:
+% The five numbers are scaled points from the bottom-left of the page,
+% so the rectangle is x to x+width and y-depth to y+height.
 %
-%   - compute it from the footer's geometry, which breaks silently the
-%     next time anyone adjusts the footer;
-%   - measure it off a render, which is the same constant with an extra
-%     step in front of it, and this project has a bad record with
-%     measurement harnesses;
+% Scans has to cut pieces out of a scanned sheet and read them, and
+% there were three ways to know where to cut:
+%
+%   - compute it from the header and footer geometry, which breaks
+%     silently the next time anybody adjusts either;
+%   - measure it off a render, which is the same constant with a
+%     measuring step in front of it, and this project has a bad record
+%     with measurement harnesses;
 %   - ask the typesetter, which is where the answer actually lives.
 %
-% \pdfsavepos records the position of the point it sits at, and
-% \pdflastxpos is set when the page is shipped -- so the \write has to
-% be deferred, not \immediate, or it reads the previous page's. The
-% box is measured into a save box first, which makes the rectangle
-% exact rather than inferred: x to x+width, y-depth to y+height.
+% One macro and not one per thing, because the three marks worth
+% recording -- the grading box, the id field, the name -- differ only
+% in what they wrap:
 %
-% Only first sheets write one. The continuation style deliberately
-% omits the box -- one skill is ticked once -- so a continued sheet
-% records no box, and "no box on this page" is a fact Scans wants
-% anyway.
-% `\global`, and it is not optional. The footer is built inside a
-% group, the \write above is deferred, and a deferred write runs at
-% shipout -- after that group has closed. A locally set save box is
-% void again by then, and the first version of this recorded a box
-% 0sp wide at exactly the right place.
-% The box is measured into a save box and then drawn *separately*,
+%   box    the thing the instructor ticks. Cropped and classified.
+%   id     printed digits on a named run, an empty grid on a blank
+%          one. The grid is the only way an unnamed paper is ever
+%          attributed to anybody.
+%   name   likewise written by hand on a blank run, and shown beside
+%          the id during review so the instructor has two independent
+%          reads of who this is.
+%
+% The slug and the version are deliberately *not* recorded. Both are
+% already known from the page index once the code has been read -- and
+% if the code cannot be read, the page number is unknown too, so there
+% is no entry to look a position up in. A position that is only
+% available when it is not needed is not worth a line in the file.
+%
+% \pdfsavepos records the position of the point it sits at, and
+% \pdflastxpos is only set when the page is shipped -- so the \write
+% has to be deferred, not \immediate, or it reads the previous page's.
+%
+% `\global` is not optional. A header or footer is built inside a
+% group, and a deferred write runs after that group has closed. A
+% locally set save box is void by then, and the first version of this
+% recorded a box 0sp wide at exactly the right place.
+%
+% The content is measured into a save box and then typeset *again*
 % rather than the measured copy being used. `\sbox` typesets without
-% contributing anything, so the measurement is free of consequences and
-% the drawn box is the same tokens the footer always had.
+% contributing anything, so measuring has no consequences and what
+% reaches the page is the tokens that were always there.
 %
 % Using the measured copy changed the page. `\roundbox` ends in
 % `\xspace`, which decides whether to add a space by looking at what
 % comes next -- and inside a save box what comes next is the end of the
-% box, not the end of the footer. The box and the skill slug beside it
-% shifted about 0.8mm, found by differencing a page against one built
-% with this morning's theme: 3,344 pixels out of 8.4 million, all of
-% them in that corner.
-\newsavebox{\cipboxmeasure}
-\newcommand{\cipcheckbox}[1]{%
-  \global\sbox{\cipboxmeasure}{\roundbox{#1}}%
+% box. The grading box and the skill slug beside it moved about 0.8mm:
+% 3,344 pixels out of 8.4 million, all in one corner, and found only
+% by differencing against a page built before the change.
+%
+% The cost is that #2 is typeset twice, so **only inert content goes in
+% here.** Anything that steps a counter, writes a file or sets a
+% bookmark would do it twice. The three uses are a rule, a grid of
+% rules, and a piece of text.
+\newsavebox{\cipmarkbox}
+\newcommand{\cipmark}[2]{%
+  \global\sbox{\cipmarkbox}{#2}%
   \pdfsavepos
-  \write\cipindex{box*\thepage*\the\pdflastxpos*\the\pdflastypos*%
-    \number\wd\cipboxmeasure*\number\ht\cipboxmeasure*%
-    \number\dp\cipboxmeasure}%
-  \roundbox{#1}}
+  \write\cipindex{mark*\thepage*#1*\the\pdflastxpos*\the\pdflastypos*%
+    \number\wd\cipmarkbox*\number\ht\cipmarkbox*%
+    \number\dp\cipmarkbox}%
+  #2}
 
 % ---------------------------------------------------------------------
 % The payload: the least that identifies a sheet.
@@ -701,8 +719,8 @@ title=#2,#1}
 % came out at name size. The braces scope it, and the id then sits at
 % the size of "Name:" and "MAT 106-820" either side of it.
 \newcommand{\scheadleft}{%
-  \makebox[4.3in][l]{\sffamily\color{darkgray} Name: {\scname}%
-    \ifcipid\hspace{1em}ID: \cipidfield\fi}}
+  \makebox[4.3in][l]{\sffamily\color{darkgray} Name: {\cipmark{name}{\scname}}%
+    \ifcipid\hspace{1em}ID: \cipmark{id}{\cipidfield}\fi}}
 \makeatother
 
 \fancyhead[C]{}
@@ -738,7 +756,7 @@ title=#2,#1}
 % case the other already covers, is clutter.
 \fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed}}
 \fancyfoot[LE, RO]{\sffamily\textit{\color{darkgray}%
-  \currentskill\hspace{0.5em}\cipcheckbox{20pt}}}
+  \currentskill\hspace{0.5em}\cipmark{box}{\roundbox{20pt}}}}
 
 % The second and later sheets of a skill that runs past one page.
 %
