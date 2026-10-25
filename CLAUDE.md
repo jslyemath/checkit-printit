@@ -103,6 +103,34 @@ the wrong field, which is the bug being reported. Click the thing.
 | `~/CheckItPrintIt/jobs/<title> <date>/` | the **job**: `publication.toml` |
 | `~/CheckItPrintIt/<course>/<title> <date>/` | the **run**: `main.pdf`, `main.tex`, `manifest.toml`, `compile.log`, a folder per skill |
 
+### `main.pages`, and the two records that are not the same record
+
+A compile writes a third record beside the other two, and the three
+answer different questions:
+
+| | answers |
+|---|---|
+| `manifest.toml` | which `(skill, version, seed)` were **drawn**, so a run can be replayed |
+| the `printed` table | which **student** got which paper, so Progress can count |
+| `main.pages` | which **page** each paper landed on, so a scan can be split |
+
+Only the third is written by TeX, and it has to be: a skill can run to
+two sheets, so page numbers do not exist until the pages are broken.
+The footer code says `C1-<runseed>-<page>` and nothing else -- this is
+the table it keys into. Before 2026-10-24 there was no such table and
+the code resolved to a run and a page number and stopped.
+
+Two kinds of line. `page*kind*sid*slug*vseed*sheet` per page, written
+from the footer so that padding pages -- set under `\pagestyle{empty}`,
+which has none -- write nothing and the gaps are the blanks. And
+`box*page*x*y*w*h*d`, the grading box in scaled points from the page's
+bottom-left, from `\pdfsavepos`, so Scans crops where the box actually
+is rather than where someone measured it once.
+
+A bank still running an older `printit.sty` produces no index.
+`main.tex` carries `\providecommand{\setkind}[1]{}` so it still
+compiles; Scans reports the missing index when asked to read the run.
+
 "Open the folder" means the second. Opening the first looks like a failed
 build.
 
