@@ -9,6 +9,7 @@ parser says whether TeX wrote the right thing.
 
 import os
 import random
+import shutil
 import subprocess
 
 import pytest
@@ -378,6 +379,48 @@ class TestWhatACompileWrites:
                 f"page {entry.page}: no box outline inside the rectangle"
             assert middle.sum() < middle.size * 0.2, \
                 f"page {entry.page}: the rectangle is not on an empty box"
+
+    def test_measuring_the_box_does_not_move_anything(self, compiled,
+                                                      tmp_path):
+        """Instrumenting the footer must leave the page alone.
+
+        The first version drew the *measured copy* of the box with
+        `\\usebox`, and the box and the skill slug beside it shifted
+        about 0.8mm -- `\\roundbox` ends in `\\xspace`, which decides
+        whether to add a space by looking at what comes next, and
+        inside a save box what comes next is the end of the box.
+
+        3,344 pixels out of 8.4 million, all in one corner. Small
+        enough to miss by eye on every page of a print run, which is
+        why it is a test rather than a look.
+        """
+        pdfium = pytest.importorskip("pypdfium2")
+        numpy = pytest.importorskip("numpy")
+
+        plain = tmp_path / "plainbox"
+        shutil.copytree(compiled, plain)
+        sty = plain / "printit.sty"
+        text = sty.read_text(encoding="utf-8")
+        marker = r"\cipcheckbox{20pt}"
+        assert text.count(marker) == 1, "the footer's call moved"
+        sty.write_text(text.replace(marker, r"\roundbox{20pt}"),
+                       encoding="utf-8")
+        for _ in range(2):
+            subprocess.run([pdflatex, "-interaction=nonstopmode",
+                            "-halt-on-error", "main.tex"],
+                           cwd=plain, capture_output=True, timeout=300)
+
+        was = pdfium.PdfDocument(str(plain / "main.pdf"))
+        now = pdfium.PdfDocument(os.path.join(compiled, "main.pdf"))
+        assert len(was) == len(now)
+        for n in range(min(len(was), 4)):
+            a = numpy.asarray(was[n].render(scale=150 / 72).to_pil()
+                              .convert("L"), dtype=int)
+            b = numpy.asarray(now[n].render(scale=150 / 72).to_pil()
+                              .convert("L"), dtype=int)
+            moved = int((numpy.abs(a - b) > 8).sum())
+            assert moved == 0, \
+                f"page {n + 1}: {moved} pixels moved when the box was measured"
 
     def test_the_code_on_a_page_resolves_to_that_page(self, compiled):
         """The claim the short payload rests on, read back off the
