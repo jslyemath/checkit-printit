@@ -123,6 +123,7 @@ def main():
     checks = [
         ("printit tests", [python, "-m", "pytest", "-q"], PRINTIT, True),
         ("audit", [python, os.path.join(TOOLS, "audit.py")], PRINTIT, False),
+        ("docs", [python, os.path.join(TOOLS, "docs.py")], PRINTIT, False),
     ]
     if not args.quick:
         if os.path.isdir(os.path.join(CHECKIT, "dashboard", "tests")):

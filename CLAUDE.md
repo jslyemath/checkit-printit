@@ -6,6 +6,7 @@ lives there**: `../checkit/CLAUDE.md`. Read that too.
 
 ```bash
 ./.venv/Scripts/python.exe tools/check.py        # everything, one exit code
+./.venv/Scripts/python.exe tools/docs.py         # do the docs still match?
 ./.venv/Scripts/python.exe -m pytest -q
 ./.venv/Scripts/python.exe -m checkit_printit --help
 ```

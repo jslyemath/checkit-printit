@@ -187,6 +187,11 @@ reason.
 | `--no-codes` | leave the scanning code out of the footer |
 | `--no-record` | do not note this run in the course's print record |
 
+Each of the last three has an on-form too — `--ids`, `--codes`,
+`--record` — for forcing one back on when the publication turns it
+off. `-o` and `-p` are also spelled `--out` and `--publication`, and
+`--no-compile` is `--compile`'s other half.
+
 `--no-ids` and `--no-codes` override the publication for one build
 and do not rewrite it; `[print] ids` and `[print] codes` set the
 default. Both are **on** unless something says otherwise, so a job
