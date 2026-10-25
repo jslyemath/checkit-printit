@@ -328,7 +328,12 @@ title=#2,#1}
 \usepackage{qrcode}
 
 \newcommand{\runseed}{0}
-\newcommand{\setrunseed}[1]{\renewcommand{\runseed}{#1}}
+% Also stamps the page index, because this is the moment the run seed
+% becomes known -- the stream is opened when the package loads, which
+% is before the document body has said which run this is.
+\newcommand{\setrunseed}[1]{%
+  \renewcommand{\runseed}{#1}%
+  \immediate\write\cipindex{run*#1}}
 
 % Either mark can be turned off for a run. Both default **on**: a
 % document that says nothing about them is an older one, and printing
@@ -347,6 +352,55 @@ title=#2,#1}
 % which is expanded once per page at shipout and therefore in order.
 \newcounter{cipsheet}
 \setcounter{cipsheet}{0}
+
+% What kind of paper this is. A scanned stack may contain all three and
+% they are graded differently -- a key must never be recorded as an
+% attempt, and a spare belongs to nobody until someone writes an id on
+% it. Nothing on the page says which, so the document has to.
+\newcommand{\cipkind}{student}
+\newcommand{\setkind}[1]{\renewcommand{\cipkind}{#1}}
+
+% ---------------------------------------------------------------------
+% The page index: what the code's key actually resolves to.
+%
+% The footer code says `C1-<runseed>-<page>` and nothing else, on the
+% stated grounds that run plus page is a unique key and everything else
+% is "a lookup in that run's manifest". It was not: `manifest.toml`
+% records which (skill, version, seed) were *drawn*, with no students
+% and no page numbers in it, and the print record's `printed` table has
+% a row per student per paper with no page either. So the key was real
+% and the table it keyed into did not exist.
+%
+% Only one party knows which page a given paper landed on, and it is
+% not Python: a skill can run to two sheets, so page numbers exist only
+% once TeX has broken the pages. The document therefore writes the
+% table itself, one line per page, as it ships them.
+%
+%   run*<runseed>
+%   <page>*<kind>*<sid>*<slug>*<vseed>*<sheet>
+%
+% `*` separates, as it did in the first payload, because `-` occurs in
+% slugs. The header's first field is `run` rather than a page number,
+% which no page can collide with -- and avoids `#`, which `\write`
+% would double.
+%
+% An absent sid is empty: a blank-name run prints boxes to write one
+% into, and claiming an owner we do not have would be worse than
+% admitting we have none.
+%
+% Written from the footer, not from a shipout hook, and that is the
+% whole trick for blank pages: \preparefornextstudent pads with
+% \pagestyle{empty}, which has no footer, so a padding page writes no
+% line without anyone having to detect one. The gaps in the sequence
+% are the blanks.
+%
+% No space before any `*`: a control sequence name ends at the first
+% non-letter, so `\thepage*` is already two tokens.
+\newwrite\cipindex
+\immediate\openout\cipindex=\jobname.pages\relax
+\newcommand{\cipwriteindex}{%
+  \immediate\write\cipindex{%
+    \thepage*\cipkind*\cipsid*\currentskill*\vseed*\thecipsheet}}
 
 % ---------------------------------------------------------------------
 % The payload: the least that identifies a sheet.
@@ -439,14 +493,32 @@ title=#2,#1}
 % Adds a newpage to separate skills
 \newcommand{\skillpage}[1]{\input{#1}\newpage}
 
+% What the footer calls, once per page. Three jobs in a fixed order,
+% and the order is the point: the sheet is counted and the index line
+% written on every page that has a footer, whether or not the code is
+% drawn on it.
+%
+% Keeping the counter and the index inside `\ifcipcodeon` would have
+% tied the record of what was printed to the decision to print a
+% symbol -- two unrelated things, and a page index that silently
+% emptied itself when someone turned the codes off is a worse failure
+% than having no index at all, because it looks like a run with no
+% pages.
+%
+% One call per page is guaranteed by fancyhdr, not by us: `\cipcode`
+% sits in [LO] and [RE], and exactly one of those fires per page.
+\newcommand{\cippagemark}{%
+  \stepcounter{cipsheet}%
+  \cipwriteindex
+  \cipcode}
+
 % Drawn small, and quiet: this is for a scanner, and a student should
-% not feel watched by it. `\cipcode` is what the footer calls.
+% not feel watched by it.
 \newcommand{\cipcode}{%
   % The switch lives here rather than at the four call sites -- two
   % page styles times two parities -- so there is one copy of the
   % decision and it cannot fall out of step with itself.
   \ifcipcodeon
-  \stepcounter{cipsheet}%
   % `nolink`, which is why it was cyan. `qrcode` sets
   % `\qr@hyperlinktrue` by default, wraps the code in a hyperref
   % link, and hyperref colours it -- so wrapping it in
@@ -603,10 +675,10 @@ title=#2,#1}
 % centre spans roughly 2.75in to 4.25in of a 7in line, so everything
 % left of it has to finish by 2.75in, and 15mm of code leaves about
 % 1.9in for a name.
-\fancyfoot[LO]{\cipcode\hspace{0.6em}%
+\fancyfoot[LO]{\cippagemark\hspace{0.6em}%
   \makebox[1.9in][l]{\maketitle}}
 \fancyfoot[RE]{\makebox[1.9in][r]{\maketitle}%
-  \hspace{0.6em}\cipcode}
+  \hspace{0.6em}\cippagemark}
 % Just the version again. The run seed was printed here as a dashed
 % suffix so a loose sheet could be traced by eye -- but it is in the
 % code now, and the code is the thing that will actually be read.
@@ -635,10 +707,10 @@ title=#2,#1}
     % A continued sheet carries the code too -- it is the sheet that
     % most needs to say which paper it belongs to -- in the same
     % corner as on a first sheet.
-    \fancyfoot[LO]{\cipcode\hspace{0.6em}%
+    \fancyfoot[LO]{\cippagemark\hspace{0.6em}%
       \makebox[1.9in][l]{\maketitle}}%
     \fancyfoot[RE]{\makebox[1.9in][r]{\maketitle}%
-      \hspace{0.6em}\cipcode}%
+      \hspace{0.6em}\cippagemark}%
     \fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed}}%
 }
 

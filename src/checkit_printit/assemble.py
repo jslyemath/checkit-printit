@@ -355,6 +355,17 @@ def main_tex(publication, handouts, extras, keys, load_helpers=False,
         r"\providecommand{\stxTitle}[1]{#1}",
         r"\providecommand{\stxOuttro}[1]{\ifanstoggle{\color{scCOLOR}#1}\fi}",
         "",
+        "% A theme old enough not to have heard of paper kinds still has to",
+        "% compile. The bank's copy of printit.sty is only replaced by",
+        "% `install --force`, so the instructor's next build may well be",
+        "% running one -- and \\providecommand loses to a real definition,",
+        "% so this is a no-op wherever the theme is current.",
+        "%",
+        "% What an old theme costs is the page index, which Scans reports",
+        "% when it is asked to read the run. That is a better place to find",
+        "% out than halfway through a print job.",
+        r"\providecommand{\setkind}[1]{}",
+        "",
         f"\\acadclass{{{publication.course}}}",
         f"\\date{{{publication.semester}}}",
         f"\\author{{{publication.professor}}}",
@@ -377,7 +388,7 @@ def main_tex(publication, handouts, extras, keys, load_helpers=False,
         "% ---- student copies",
     ]
 
-    def emit(handout):
+    def emit(handout, kind):
         name = "Blank" if handout.blank_name or not handout.name else handout.name
         out.append(f"\\setname{{{name}}}")
         out.append(f"\\setsect{{{handout.section or 'Blank'}}}")
@@ -386,18 +397,24 @@ def main_tex(publication, handouts, extras, keys, load_helpers=False,
         # the only thing that lets an unnamed paper be graded.
         sid = "" if handout.blank_name else (handout.sid or "")
         out.append(f"\\setsid{{{sid}}}")
+        # Goes into the page index, which is how a scanned stack tells
+        # a student's paper from a spare or a key. Nothing on the page
+        # itself distinguishes them, and the three are graded
+        # differently: a key must never become an attempt, and a spare
+        # belongs to nobody until somebody writes an id on it.
+        out.append(f"\\setkind{{{kind}}}")
         for slug, seed in handout.versions:
             out.append(f"\\skillpage{{{slug}/{slug} v{seed}}}")
         out.append(r"\preparefornextstudent")
         out.append("")
 
     for handout in handouts:
-        emit(handout)
+        emit(handout, "student")
 
     if extras:
         out.append("% ---- extras")
         for handout in extras:
-            emit(handout)
+            emit(handout, "spare")
 
     if keys:
         out.append("% ---- answer keys")
@@ -405,6 +422,7 @@ def main_tex(publication, handouts, extras, keys, load_helpers=False,
         out.append(r"\setname{Key}")
         out.append(r"\setsect{Blank}")
         out.append(r"\setsid{}")
+        out.append(r"\setkind{key}")
         for _ in range(keys["copies"]):
             for slug, seed in keys["versions"]:
                 out.append(f"\\skillpage{{{slug}/{slug} v{seed}}}")
