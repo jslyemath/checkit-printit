@@ -19,6 +19,7 @@ the pages.
 
     run*4242
     1*student*806625853*W5*803*1
+    mark*1*box*34926110*1819429*1769472*1310720*131072
     2*key**N2*840*1
 
 One line per page that carries a footer. Padding pages have none -- they
@@ -57,16 +58,21 @@ TEX_PT_PER_INCH = 72.27
 SP_PER_PT = 65536
 
 
+#: What `\\cipmark` can label. Not an exhaustive list of things on the
+#: page -- just the ones Scans has to cut out and look at.
+MARKS = ("box", "id", "name")
+
+
 @dataclasses.dataclass(frozen=True)
-class Box:
-    """The grading box, in the page's own coordinates.
+class Mark:
+    """Where something sits on the page, in the page's own coordinates.
 
     Scaled points, measured up from the bottom-left corner, written by
     `\\pdfsavepos` at the moment the page was shipped. Asked of the
     typesetter rather than measured off a render or computed from the
-    footer's geometry -- the first breaks silently when anybody adjusts
-    the footer, and the second is the same constant with a measuring
-    step in front of it.
+    header and footer geometry -- the first breaks silently whenever
+    either is adjusted, and the second is the same constant with a
+    measuring step in front of it.
     """
 
     x: int
@@ -100,11 +106,17 @@ class Page:
     slug: str
     vseed: str
     sheet: int
-    #: None on a continuation sheet. The continuation page style omits
-    #: the box deliberately -- one skill is ticked once -- so "no box
-    #: on this page" means "nothing to grade here", which is a fact
-    #: Scans wants rather than a gap in the record.
-    box: Box = None
+    #: {label: Mark}. A continuation sheet has no `box`: the
+    #: continuation page style omits it deliberately, because one
+    #: skill is ticked once. "No box on this page" therefore means
+    #: "nothing to grade here", which is a fact Scans wants rather
+    #: than a gap in the record.
+    marks: dict = dataclasses.field(default_factory=dict)
+
+    @property
+    def box(self):
+        """The grading box, or None on a sheet that carries none."""
+        return self.marks.get("box")
 
     @property
     def gradable(self):
@@ -156,28 +168,37 @@ def parse(text):
     folder, and because the error messages are about content rather
     than about where it came from.
     """
-    run_seed, pages, boxes = None, {}, {}
+    run_seed, pages, marks = None, {}, {}
     for number, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
         fields = line.split("*")
-        if fields[0] == "box":
+        if fields[0] == "mark":
             # Written by a *deferred* write, so it arrives after that
             # page's own line and is collected separately rather than
             # assumed to be adjacent to it.
-            if len(fields) != 7 or not all(f.lstrip("-").isdigit()
-                                           for f in fields[1:]):
+            # fields[2] is the label, so the numbers begin at 3.
+            if (len(fields) != 8 or not fields[1].isdigit()
+                    or not all(f.lstrip("-").isdigit() for f in fields[3:])):
                 raise PageIndexError(
-                    f"line {number} is a box this reader does not "
+                    f"line {number} is a mark this reader does not "
                     f"understand: {line!r}")
-            page, *values = (int(f) for f in fields[1:])
-            if page in boxes:
+            page, label = int(fields[1]), fields[2]
+            if label not in MARKS:
+                # Loud, for the same reason an unknown kind is: this
+                # reader is older than the theme that wrote the file,
+                # and quietly dropping a mark would mean cropping
+                # nothing where something was recorded.
                 raise PageIndexError(
-                    f"line {number} is a second grading box for page {page}. "
-                    f"The footer draws one, so two means the page carries a "
-                    f"mark this reader would crop the wrong one of.")
-            boxes[page] = Box(*values)
+                    f"line {number} records a {label!r} mark, which this "
+                    f"version does not know. Known: {', '.join(MARKS)}.")
+            if label in marks.setdefault(page, {}):
+                raise PageIndexError(
+                    f"line {number} is a second {label!r} on page {page}. "
+                    f"Each is drawn once, so two means this reader would "
+                    f"crop the wrong one.")
+            marks[page][label] = Mark(*(int(f) for f in fields[3:]))
             continue
         if fields[0] == "run":
             if len(fields) != 2 or not fields[1].isdigit():
@@ -218,14 +239,14 @@ def parse(text):
             "no run header, so these pages cannot be matched to the run "
             "their codes name.")
 
-    orphans = sorted(set(boxes) - set(pages))
+    orphans = sorted(set(marks) - set(pages))
     if orphans:
-        # A box on a page with no entry means the two writes disagree
-        # about what a page is, and cropping it would read a mark
+        # Marks on a page with no entry mean the two writes disagree
+        # about what a page is, and cropping them would read something
         # belonging to nobody.
         raise PageIndexError(
-            f"pages {orphans} have a grading box and no entry of their own.")
-    pages = {n: dataclasses.replace(p, box=boxes.get(n))
+            f"pages {orphans} carry marks and have no entry of their own.")
+    pages = {n: dataclasses.replace(p, marks=marks.get(n, {}))
              for n, p in pages.items()}
     return Index(run_seed=run_seed, pages=pages)
 

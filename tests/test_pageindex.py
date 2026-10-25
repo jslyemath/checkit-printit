@@ -24,7 +24,8 @@ from checkit_printit.compile import find_pdflatex
 GOOD = (
     "run*4242\n"
     "1*student*806625853*W5*803*1\n"
-    "box*1*34926110*1819429*1769472*1310720*131072\n"
+    "mark*1*box*34926110*1819429*1769472*1310720*131072\n"
+    "mark*1*id*21000000*2900000*1500000*300000*60000\n"
     "2*student*806625853*W5*803*2\n"
     "4*spare**W6*571*1\n"
     "5*key**N2*840*1\n"
@@ -85,32 +86,47 @@ class TestReadingTheFile:
         with pytest.raises(pageindex.PageIndexError, match="'sample'"):
             pageindex.parse("run*1\n1*sample*1*W5*803*1\n")
 
-    def test_a_box_is_attached_to_its_page(self):
+    def test_marks_are_attached_to_their_page(self):
         index = pageindex.parse(GOOD)
-        assert index.get(1).box.x == 34926110
-        assert index.get(1).box.width == 1769472
+        assert index.get(1).marks["box"].x == 34926110
+        assert index.get(1).marks["box"].width == 1769472
+        assert index.get(1).marks["id"].x == 21000000
+
+    def test_box_is_a_shorthand_for_the_box_mark(self):
+        """Scans asks for the grading box constantly and for the
+        others rarely, so the common one keeps a name."""
+        index = pageindex.parse(GOOD)
+        assert index.get(1).box is index.get(1).marks["box"]
 
     def test_a_continuation_sheet_has_no_box(self):
         """Sheet 2 of a skill deliberately omits it -- one skill is
         ticked once -- so None here means "nothing to grade on this
         page", not "the record is incomplete"."""
         assert pageindex.parse(GOOD).get(2).box is None
+        assert pageindex.parse(GOOD).get(2).marks == {}
 
-    def test_a_box_on_a_page_that_has_no_entry_is_refused(self):
+    def test_a_mark_on_a_page_that_has_no_entry_is_refused(self):
         """The two lines are written by different mechanisms, one
         immediate and one deferred. If they ever disagree about what a
-        page is, cropping the box would read a mark belonging to
+        page is, cropping would read something belonging to
         nobody."""
         with pytest.raises(pageindex.PageIndexError, match=r"\[9\]"):
-            pageindex.parse(GOOD + "box*9*1*2*3*4*5\n")
+            pageindex.parse(GOOD + "mark*9*box*1*2*3*4*5\n")
 
-    def test_two_boxes_on_one_page_are_refused(self):
-        with pytest.raises(pageindex.PageIndexError, match="second grading"):
-            pageindex.parse(GOOD + "box*1*1*2*3*4*5\n")
+    def test_the_same_mark_twice_on_one_page_is_refused(self):
+        with pytest.raises(pageindex.PageIndexError, match="second 'box'"):
+            pageindex.parse(GOOD + "mark*1*box*1*2*3*4*5\n")
 
-    def test_a_malformed_box_line_is_refused(self):
+    def test_an_unknown_mark_is_refused_not_dropped(self):
+        """A label this reader does not know means a theme newer than
+        it. Dropping it quietly would mean cropping nothing where
+        something was recorded."""
+        with pytest.raises(pageindex.PageIndexError, match="'signature'"):
+            pageindex.parse(GOOD + "mark*1*signature*1*2*3*4*5\n")
+
+    def test_a_malformed_mark_line_is_refused(self):
         with pytest.raises(pageindex.PageIndexError, match="line 2"):
-            pageindex.parse("run*1\nbox*1*nope*2*3*4*5\n")
+            pageindex.parse("run*1\nmark*1*box*nope*2*3*4*5\n")
 
     def test_the_rectangle_counts_down_from_the_top(self):
         """`\\pdfsavepos` measures up from the bottom of the page and
@@ -344,6 +360,36 @@ class TestWhatACompileWrites:
             assert not zxingcpp.read_barcodes(image), \
                 f"page {n} still carries a code"
 
+    def test_every_page_records_a_name_and_an_id(self, compiled):
+        """A blank-name run writes both by hand, and both get cropped
+        and shown during review -- two independent reads of who the
+        paper belongs to."""
+        index = pageindex.load(compiled)
+        for entry in index.pages.values():
+            assert "name" in entry.marks, f"page {entry.page} has no name"
+            assert "id" in entry.marks, f"page {entry.page} has no id"
+
+    def test_the_id_rectangle_lands_on_the_id(self, compiled):
+        """The named run prints digits there, so the rectangle should
+        hold ink. An empty rectangle means it landed on the margin."""
+        pdfium = pytest.importorskip("pypdfium2")
+        numpy = pytest.importorskip("numpy")
+        pdf = pdfium.PdfDocument(os.path.join(compiled, "main.pdf"))
+        index = pageindex.load(compiled)
+        for entry in index.pages.values():
+            if entry.kind == "key":
+                continue                  # keys print no id
+            page = pdf[entry.page - 1]
+            left, top, right, bottom = entry.marks["id"].rect(
+                200, page.get_height())
+            crop = numpy.asarray(
+                page.render(scale=200 / 72).to_pil().convert("L")
+                .crop((round(left), round(top), round(right), round(bottom))),
+                dtype=float)
+            assert crop.size, f"page {entry.page}: id rectangle is off-page"
+            assert (crop < 128).sum() > 10, \
+                f"page {entry.page}: nothing inside the id rectangle"
+
     def test_the_recorded_rectangle_lands_on_the_grading_box(self, compiled):
         """Checked by ink, because a coordinate system can be wrong in
         a way that still produces plausible numbers -- and this one
@@ -401,10 +447,13 @@ class TestWhatACompileWrites:
         shutil.copytree(compiled, plain)
         sty = plain / "printit.sty"
         text = sty.read_text(encoding="utf-8")
-        marker = r"\cipcheckbox{20pt}"
-        assert text.count(marker) == 1, "the footer's call moved"
-        sty.write_text(text.replace(marker, r"\roundbox{20pt}"),
-                       encoding="utf-8")
+        for marker, bare in ((r"\cipmark{box}{\roundbox{20pt}}",
+                              r"\roundbox{20pt}"),
+                             (r"\cipmark{name}{\scname}", r"\scname"),
+                             (r"\cipmark{id}{\cipidfield}", r"\cipidfield")):
+            assert text.count(marker) == 1, f"{marker} moved"
+            text = text.replace(marker, bare)
+        sty.write_text(text, encoding="utf-8")
         for _ in range(2):
             subprocess.run([pdflatex, "-interaction=nonstopmode",
                             "-halt-on-error", "main.tex"],

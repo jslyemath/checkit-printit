@@ -1306,6 +1306,7 @@ def _build(course, preview, seed=None):
                        for a, b, version in report["collisions"]],
         "unseated": list(report["unseated"]),
         "unmatchedOverrides": list(result.unmatched_overrides),
+        "anonymous": result.anonymous,
         "missingFields": {k: list(v) for k, v in report["missing_fields"].items()},
         "pdf": result.pdf,
         "recorded": result.recorded,

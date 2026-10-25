@@ -654,10 +654,16 @@ class TestAssembly:
         back = pub_mod.load(str(path))
         assert back.ids is True and back.codes is True
 
-    def runner_build(self, bank_dir, tmp_path, **over):
+    def runner_build(self, bank_dir, tmp_path, names=True, **over):
         """Through `runner.run`, which is what the `build` command
         calls -- not through `assemble`. The override lives in the
-        runner, so a test that skips it tests nothing about the flags."""
+        runner, so a test that skips it tests nothing about the flags.
+
+        `names` is not one of the overrides: only `ids` and `codes`
+        got flags, because only those two are a per-build decision.
+        Whether a run prints names is what the job *is*, so it goes
+        in the publication with the rest of the job.
+        """
         from checkit_printit import runner
         pub = tmp_path / "publication.toml"
         pub.write_text(
@@ -668,18 +674,47 @@ class TestAssembly:
             "\n[bank]\n"
             "path = '" + str(bank_dir) + "'\n"
             "\n[roster]\npath = 'roster.toml'\n"
-            "\n[print]\nkeys = false\n",
+            "\n[print]\nkeys = false\n"
+            f"names = {'true' if names else 'false'}\n",
             encoding="utf-8")
         (tmp_path / "roster.toml").write_text(
             '[[student]]\nname = "Ada"\nsection = "1"\n'
             'skills = ["AD"]\n', encoding="utf-8")
-        out = tmp_path / ("out" + "".join(sorted(over)))
+        out = tmp_path / ("out" + "".join(sorted(over)) + ("n" if names else ""))
         # `install_theme=False`: `bank_dir` is session-scoped, and
         # installing into it leaves a theme behind for every test that
         # runs afterwards. These read `main.tex` and nothing else.
-        runner.run(str(pub), out=str(out), do_compile=False,
-                   seed=1, install_theme=False, **over)
+        self.last = runner.run(str(pub), out=str(out), do_compile=False,
+                               seed=1, install_theme=False, **over)
         return (out / "main.tex").read_text(encoding="utf-8")
+
+    def test_a_run_nobody_can_be_identified_from_is_flagged(self, bank_dir,
+                                                            tmp_path):
+        """Names off and the id field off together leave nothing on
+        the paper that says who sat it: no printed name, no printed
+        id, and no grid to write one into. The code still resolves to
+        a skill and a version, and the owner is simply gone.
+
+        A warning and not a refusal -- an anonymous practice set is a
+        reasonable thing to want, and this is only a mistake if
+        somebody meant to grade it.
+        """
+        self.runner_build(bank_dir, tmp_path, ids=False, names=False)
+        assert self.last.anonymous
+
+    def test_blank_names_with_the_grid_left_on_is_not_flagged(self, bank_dir,
+                                                              tmp_path):
+        """The ordinary blank run. The student writes their own name
+        and id, so the paper is attributable and nothing is wrong."""
+        self.runner_build(bank_dir, tmp_path, names=False)
+        assert not self.last.anonymous
+
+    def test_named_without_the_grid_is_not_flagged(self, bank_dir, tmp_path):
+        """The id field is redundant on a named paper as far as the
+        machine goes -- the code plus the page index already name the
+        student. Turning it off is a layout choice, not a loss."""
+        self.runner_build(bank_dir, tmp_path, ids=False)
+        assert not self.last.anonymous
 
     def test_no_codes_reaches_the_document(self, bank_dir, tmp_path):
         tex = self.runner_build(bank_dir, tmp_path, codes=False)

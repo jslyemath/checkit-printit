@@ -60,6 +60,12 @@ class BuildResult:
     #: Override keys that matched nobody in the roster -- a mistyped id, or
     #: a student who has left since. Reported, never dropped.
     unmatched_overrides: tuple = ()
+    #: True when a run prints neither names nor an id field, so nothing
+    #: on any of its papers says who sat it and Scans can never
+    #: attribute one. Warned about rather than refused: an anonymous
+    #: practice set is a reasonable thing to want, and this is only a
+    #: mistake if somebody meant to grade it.
+    anonymous: bool = False
 
 
 def default_output_root():
@@ -169,6 +175,8 @@ def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
 
     result = BuildResult(publication=publication, out=out, run_seed=0,
                          unmatched_overrides=tuple(unmatched_overrides),
+                         anonymous=not publication.names
+                         and not publication.ids,
                          report={}, replayed=record is not None,
                          replay_notes=tuple(notes),
                          replay_papers=len(record["paper"]) if record else 0,
