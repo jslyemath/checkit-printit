@@ -1638,24 +1638,6 @@ class Scanning:
 
 SCANNING = Scanning()
 
-#: What each status means, in the instructor's terms rather than the
-#: reader's. Shown beside the count, because "unreadable" on its own
-#: does not say what to do about it.
-STATUS_WORDS = {
-    "placed": ("Placed", "matched to a student and a skill"),
-    "blank": ("Blank", "no code and no ink -- a padding sheet or a "
-                       "separator, and nothing to do"),
-    "unreadable": ("Could not read", "there is ink on these but no code "
-                                     "a scanner could find"),
-    "foreign": ("Not ours", "a barcode from something else"),
-    "unknown-run": ("Unknown run", "one of our codes, naming a run this "
-                                   "course has no record of"),
-    "unknown-page": ("Unknown page", "the run is here and does not have "
-                                     "that page -- the folder was rebuilt "
-                                     "after this was printed"),
-}
-
-
 def _batch_json(batch, record_path):
     """The batch as the page wants it.
 
@@ -1715,8 +1697,11 @@ def _batch_json(batch, record_path):
                              for s in group]}
                   for (run, page), group in sorted(batch.duplicates.items())]
 
-    return {"counts": counts, "words": STATUS_WORDS, "runs": runs,
-            "sheets": sheets, "missing": missing, "duplicates": duplicates,
+    # No wording here. What each outcome is *called* is a view
+    # decision and lives in app.js; sending it over HTTP only meant
+    # two places to change it.
+    return {"counts": counts, "runs": runs, "sheets": sheets,
+            "missing": missing, "duplicates": duplicates,
             "gradable": sum(1 for s in batch.sheets if s.gradable)}
 
 

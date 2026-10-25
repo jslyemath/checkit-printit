@@ -345,7 +345,8 @@
         <table id="runs">
           <thead><tr>
             <th>Title</th><th>Date</th><th>Built</th>
-            <th>Papers</th><th>Students</th><th>Seed</th><th></th>
+            <th>Papers</th><th>Students</th><th>Seed</th>
+            <th class="stretch"></th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -363,7 +364,8 @@
             <table id="runs-gone">
               <thead><tr>
                 <th>Title</th><th>Date</th><th>Built</th>
-                <th>Papers</th><th>Students</th><th>Seed</th><th></th>
+                <th>Papers</th><th>Students</th><th>Seed</th>
+                <th class="stretch"></th>
               </tr></thead>
               <tbody></tbody>
             </table>
@@ -735,48 +737,54 @@
       <span class="spacer"></span>
       <span id="scan-count" class="sec-count"></span>
     </header>
-    <p class="hint-text" hidden>Drop in the PDFs the copier sent and
-      every page is matched back to the student whose paper it is, by
-      the code in its footer. The stack can be in any order, split
-      across as many files as the copier needed, and have blank sheets
-      in it &mdash; nothing here reads the position of a page.</p>
+    <p class="hint-text" hidden>Give it the PDFs your copier emailed
+      you and it works out whose paper each page is, by reading the
+      little square code printed in the footer. Because every page
+      says what it is, the order does not matter: the stack can be
+      shuffled, split across as many files as the copier needed, and
+      have blank sheets in it.</p>
 
     <div class="scan-pick">
-      <label class="btn" for="scan-files">Choose scans&hellip;</label>
+      <label class="btn" for="scan-files">Choose files&hellip;</label>
       <input id="scan-files" type="file" accept="application/pdf" multiple
              hidden>
       <span id="scan-chosen" class="muted"></span>
-      <button id="scan-go" class="btn primary" type="button" disabled>Read
-        them</button>
+      <button id="scan-go" class="btn primary" type="button"
+              disabled>Match them up</button>
     </div>
 
     <p id="scan-progress" class="muted" hidden></p>
     <p id="scan-error" class="warnline" hidden></p>
 
     <div id="scan-result" hidden>
-      <div id="scan-runs" class="muted"></div>
+      <p id="scan-runs"></p>
       <ul id="scan-counts" class="scan-counts"></ul>
 
-      <!-- Both of these are empty on a clean stack, and both are the
-           reason to look at this page at all. Missing comes first:
-           a paper that never came back is the one nobody chases,
+      <!-- Both of these are empty when nothing went wrong, and both
+           are the reason to open this tab at all. Missing comes
+           first: a paper nobody can find is the one nobody chases,
            because the student it belonged to does not complain. -->
       <div id="scan-missing" hidden>
-        <h3>Never came back</h3>
-        <p class="muted">Printed in the run and not in this stack.
-          Absent, or stuck to another sheet in the feeder.</p>
+        <h3>Papers you did not scan</h3>
+        <p class="muted">These were printed for a student, and they are
+          not in what you just gave me. Either the student was away, or
+          the sheet stuck to another one going through the feeder.
+          Worth finding before you grade.</p>
         <div class="scroller"><table id="scan-missing-table"></table></div>
       </div>
 
       <div id="scan-dupes" hidden>
-        <h3>Read twice</h3>
-        <p class="muted">The same paper turned up more than once &mdash;
-          a double feed, or a stack scanned twice. Nothing is thrown
-          away automatically.</p>
+        <h3>Pages that went through twice</h3>
+        <p class="muted">The same sheet of paper turned up more than
+          once &mdash; usually a double feed, sometimes a stack scanned
+          twice. Nothing has been thrown away; this is just so you
+          know.</p>
         <div class="scroller"><table id="scan-dupes-table"></table></div>
       </div>
 
-      <h3 id="scan-sheets-head">Every page</h3>
+      <h3 id="scan-sheets-head">Everything in the stack</h3>
+      <p class="muted">One line per page, in the order the copier sent
+        them.</p>
       <div class="scroller"><table id="scan-sheets"></table></div>
     </div>
   </section>

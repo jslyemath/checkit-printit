@@ -21,7 +21,7 @@ const VIEWS = [
   { id: "form", label: "Update form", short: "Form", icon: "form" },
   { id: "print", label: "Print job", short: "Print", icon: "print" },
   { id: "runs", label: "Runs", short: "Runs", icon: "record" },
-  { id: "scans", label: "Scans", short: "Scans", icon: "record" },
+  { id: "scans", label: "Scans", short: "Scans", icon: "scan" },
   { id: "seating", label: "Seating", short: "Seats", icon: "seating" },
   { id: "setup", label: "Settings", short: "Settings", icon: "setup",
     foot: true },
@@ -322,6 +322,20 @@ const GLYPH = {
           { d: "M12 2.6v2.6M12 18.8v2.6M21.4 12h-2.6M5.2 12H2.6"
                + "M18.6 5.4l-1.8 1.8M7.2 16.8l-1.8 1.8"
                + "M18.6 18.6l-1.8-1.8M7.2 7.2L5.4 5.4" }],
+  /* Corner brackets with a line across them -- the reticle every
+     scanner app draws. A flatbed, which is the literal object, is a
+     shallow box with a lid and reads as a drawer at 21px; this says
+     *scanning* rather than *scanner*, and the tab is an action. It
+     also happens to be a picture of what the tab does: find a code
+     inside a rectangle.
+
+     `record`, the clock, stays with Runs, which is about things that
+     already happened. The two tabs had the same glyph. */
+  scan: [{ d: "M4 9V6.2A2.2 2.2 0 0 1 6.2 4H9" },
+         { d: "M15 4h2.8A2.2 2.2 0 0 1 20 6.2V9" },
+         { d: "M20 15v2.8a2.2 2.2 0 0 1-2.2 2.2H15" },
+         { d: "M9 20H6.2A2.2 2.2 0 0 1 4 17.8V15" },
+         { d: "M3.4 12h17.2" }],
   collapse: "M14.5 7.5 9.5 12l5 4.5",
   // Points up while a group is open; CSS turns it when it closes.
   chev: "M6 14.5l6-6 6 6",
@@ -1772,7 +1786,10 @@ function runRow(run, tbody) {
   add(String(run.students), "ro");
   add(String(run.seed), "ro seedcell");
 
+  // Last, and marked `.stretch`, so the table fills its frame and
+  // the buttons end up at the right edge rather than halfway across.
   const actions = document.createElement("td");
+  actions.className = "stretch";
   actions.className = "pinright";
   // A graded run offers no delist at all, rather than offering one
   // and refusing it. The record refuses it too; this is the half that
@@ -1884,54 +1901,141 @@ function show_scan_error(message) {
   box.hidden = !message;
 }
 
-function rows(table, head, body) {
+/* A table from a heading row and a list of rows.
+ *
+ * `stretch` is which column absorbs the width the others do not
+ * need -- see `.stretch` in style.css. Without one the slack is
+ * shared out evenly and a column of page numbers comes out as wide
+ * as a column of names.
+ *
+ * The last column by default, which was not the first guess.
+ * Stretching the column with the most variable content shoves
+ * everything after it against the right edge: a two-column table
+ * ends up with the name at one side and the skill at the other and
+ * an inch of nothing between. Last means every column packs left and
+ * the slack lands where there is nothing to misalign.
+ */
+function rows(table, head, body, stretch = head.length - 1) {
   table.innerHTML = "";
   const thead = document.createElement("thead");
   const hr = document.createElement("tr");
-  for (const cell of head) {
+  head.forEach((cell, i) => {
     const th = document.createElement("th");
     th.textContent = cell;
+    if (i === stretch) th.className = "stretch";
     hr.appendChild(th);
-  }
+  });
   thead.appendChild(hr);
   table.appendChild(thead);
   const tbody = document.createElement("tbody");
   for (const line of body) {
     const tr = document.createElement("tr");
-    for (const cell of line) {
+    line.forEach((cell, i) => {
       const td = document.createElement("td");
       td.textContent = cell;
+      if (i === stretch) td.className = "stretch";
       tr.appendChild(td);
-    }
+    });
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
 }
 
+/* What each outcome is called, and what it means for the person
+ * holding the paper.
+ *
+ * Here and not on the server: this is wording, and wording belongs
+ * with the view. `sentence` takes the count because "1 page was
+ * blank" and "2 pages were blank" are different sentences, and
+ * "1 pages" is the kind of thing that makes software look unfinished.
+ *
+ * `chase` marks the ones worth doing something about. Only those are
+ * coloured -- a page of green ticks beside the ordinary outcomes
+ * would make the two that matter harder to find, not easier.
+ */
+const SCAN_OUTCOME = {
+  placed: {
+    short: "Matched",
+    sentence: n => `${n} ${n === 1 ? "page" : "pages"} matched to a student`,
+    why: "I know whose paper this is and which skill it was for.",
+  },
+  blank: {
+    short: "Blank",
+    sentence: n => `${n} blank ${n === 1 ? "page" : "pages"}`,
+    why: "Nothing printed and nothing written. A spacer sheet, or the "
+       + "back of a single-sided page. Ignored.",
+  },
+  unreadable: {
+    short: "Could not read",
+    sentence: n => `${n} ${n === 1 ? "page" : "pages"} I could not read`,
+    why: "There is something on these, but no code I could find. A "
+       + "torn corner, a very dark scan, or a page printed before the "
+       + "codes existed. You will have to place these by hand.",
+    chase: true,
+  },
+  foreign: {
+    short: "Not from here",
+    sentence: n => `${n} ${n === 1 ? "page carries" : "pages carry"} `
+                 + "a barcode from something else",
+    why: "A code, but not one of ours. Probably a cover sheet.",
+  },
+  "unknown-run": {
+    short: "Unknown print job",
+    sentence: n => `${n} ${n === 1 ? "page names" : "pages name"} `
+                 + "a print job I have no record of",
+    why: "The code is one of ours and names a job this course has not "
+       + "got. From another course, or a job whose folder was deleted.",
+    chase: true,
+  },
+  "unknown-page": {
+    short: "Page not in that job",
+    sentence: n => `${n} ${n === 1 ? "page is" : "pages are"} `
+                 + "numbered past the end of the job they name",
+    why: "The job is here and does not have that page -- the folder "
+       + "was built again after this was printed.",
+    chase: true,
+  },
+};
+
+function scanOutcome(status) {
+  return SCAN_OUTCOME[status] || { short: status, sentence: n => `${n} ${status}` };
+}
+
 function renderScan(data) {
   document.getElementById("scan-result").hidden = false;
+  const n = data.sheets.length;
   document.getElementById("scan-count").textContent =
-    `${data.sheets.length} page${data.sheets.length === 1 ? "" : "s"}`;
+    `${n} page${n === 1 ? "" : "s"} scanned`;
 
-  document.getElementById("scan-runs").textContent = data.runs.length
-    ? "From " + data.runs.map(r =>
-        `run ${r.no}, ${r.title} ${r.date} (${r.pages} pages printed)`)
-        .join("; ")
-    : "No page in this stack named a run this course knows.";
+  // One run is the ordinary case and reads as a sentence. More than
+  // one is unusual enough to be worth listing.
+  const runs = document.getElementById("scan-runs");
+  if (!data.runs.length) {
+    runs.textContent = "None of these pages came from a print job this "
+                     + "course knows about.";
+  } else if (data.runs.length === 1) {
+    const r = data.runs[0];
+    runs.textContent = `These are from ${r.title}, printed `
+      + `${spokenDay(r.date) || r.date}. That job was ${r.pages} pages.`;
+  } else {
+    runs.textContent = "These come from more than one print job: "
+      + data.runs.map(r => `${r.title} (${spokenDay(r.date) || r.date})`)
+          .join(", ") + ".";
+  }
 
   const counts = document.getElementById("scan-counts");
   counts.innerHTML = "";
-  for (const [status, n] of Object.entries(data.counts)) {
-    const words = data.words[status] || [status, ""];
+  for (const [status, count] of Object.entries(data.counts)) {
+    const outcome = scanOutcome(status);
     const li = document.createElement("li");
-    li.className = "scan-count-" + status;
+    if (outcome.chase) li.className = "chase";
     const strong = document.createElement("strong");
-    strong.textContent = `${n} ${words[0].toLowerCase()}`;
+    strong.textContent = outcome.sentence(count) + ".";
     li.appendChild(strong);
-    if (words[1]) {
+    if (outcome.why) {
       const span = document.createElement("span");
       span.className = "muted";
-      span.textContent = " \u2014 " + words[1];
+      span.textContent = " " + outcome.why;
       li.appendChild(span);
     }
     counts.appendChild(li);
@@ -1941,25 +2045,38 @@ function renderScan(data) {
   missing.hidden = !data.missing.length;
   if (data.missing.length)
     rows(document.getElementById("scan-missing-table"),
-         ["Student", "Skill", "Run", "Page"],
-         data.missing.map(m => [m.name || m.sid || "(no name)", m.skill,
-                                m.run, m.page]));
+         ["Student", "Skill"],
+         data.missing.map(m => [m.name || m.sid || "(no name on it)",
+                                m.skill]));
 
   const dupes = document.getElementById("scan-dupes");
   dupes.hidden = !data.duplicates.length;
   if (data.duplicates.length)
     rows(document.getElementById("scan-dupes-table"),
-         ["Run", "Page", "Found in"],
-         data.duplicates.map(d => [d.run, d.page, d.where.join(", ")]));
+         ["The same paper", "Turned up in"],
+         data.duplicates.map(d => [
+           data.sheets.find(s => s.run === d.run && s.page === d.page)
+             ?.name || `page ${d.page}`,
+           d.where.join(" and "),
+         ]));
 
-  rows(document.getElementById("scan-sheets"),
-       ["File", "At", "What it is", "Student", "Skill", "Run", "Page"],
-       data.sheets.map(s => [
-         s.file, s.at,
-         (data.words[s.status] || [s.status])[0]
-           + (s.kind && s.kind !== "student" ? ` (${s.kind})` : ""),
-         s.name || s.sid || "", s.skill, s.run ?? "", s.page ?? "",
-       ]));
+  // The print job only earns a column when the stack spans more than
+  // one of them, which is rare. Otherwise it is the same number on
+  // every row, which is noise.
+  const manyRuns = data.runs.length > 1;
+  const head = ["File", "Sheet", "What it is", "Student", "Skill"];
+  if (manyRuns) head.push("Print job");
+  rows(document.getElementById("scan-sheets"), head,
+       data.sheets.map(s => {
+         const line = [
+           s.file, s.at,
+           scanOutcome(s.status).short
+             + (s.kind && s.kind !== "student" ? ` \u2014 ${s.kind}` : ""),
+           s.name || s.sid || "", s.skill,
+         ];
+         if (manyRuns) line.push(s.run ?? "");
+         return line;
+       }));
 }
 
 function renderRuns() {
