@@ -745,6 +745,43 @@ th.actions-head button.act { text-transform: none; letter-spacing: 0; }
   border-radius: var(--r-md);
 }
 
+/* A table with no colgroup fills its frame.
+ *
+ * `table { width: auto }` above is for the Roster, whose columns are
+ * measured and written into a <colgroup> by `sizeColumns`. Every
+ * other table inherited the rule without the colgroup and sat at its
+ * natural width inside a full-width panel -- Runs was 522px in a
+ * 1060px frame, so half of the panel was empty.
+ *
+ * `table-layout: auto` as well, because `fixed` with no colgroup
+ * divides the width equally and makes every column the same size.
+ */
+.scroller table:not(#roster) {
+  width: 100%;
+  table-layout: auto;
+}
+
+/* Which column takes the extra room.
+ *
+ * Under auto layout a cell asking for `width: 1%` shrinks to its
+ * content, so marking every column but one leaves that one with
+ * whatever is left. Without this the slack is shared out evenly and
+ * a column of page numbers ends up as wide as a column of names.
+ *
+ * `nowrap` goes with it: a column that has been squeezed to its
+ * content must not then wrap inside that width.
+ */
+.scroller table:not(#roster) th,
+.scroller table:not(#roster) td {
+  width: 1%;
+  white-space: nowrap;
+}
+.scroller table:not(#roster) th.stretch,
+.scroller table:not(#roster) td.stretch {
+  width: auto;
+  white-space: normal;
+}
+
 body.tall main {
   height: 100vh;
   overflow: hidden;
@@ -1632,13 +1669,9 @@ body.hasbar.tall main { padding-bottom: 68px; }
 /* Only the two that need chasing are coloured. "Placed" and "blank"
    are the ordinary outcome and a page of green ticks would make the
    two that matter harder to find, not easier. */
-.scan-count-unreadable strong,
-.scan-count-unknown-run strong,
-.scan-count-unknown-page strong { color: var(--warn); }
+.scan-counts li.chase strong { color: var(--warn); }
 
 #scan-missing h3, #scan-dupes h3, #scan-sheets-head {
   margin: var(--s4) 0 var(--s1);
   font-size: var(--t-base);
 }
-#scan-missing table th:first-child,
-#scan-dupes table th:first-child { text-align: left; }
