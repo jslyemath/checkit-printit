@@ -136,15 +136,27 @@ class Batch:
         return {key: group for key, group in seen.items() if len(group) > 1}
 
     def missing(self, index_for):
-        """`{run: [pages]}` printed in a run and not in this stack.
+        """`{run: [pages]}` handed to a student and not in this stack.
 
-        `index_for(run_no)` gives that run's `pageindex.Index`. Pages
-        the index does not list are padding and are not expected back.
+        `index_for(run_no)` gives that run's `pageindex.Index`.
+
+        **Students' papers only.** Three kinds of page are printed and
+        only one of them is expected back:
+
+        * padding has no line in the index at all, so it cannot be
+          missing;
+        * an answer key never leaves the instructor's folder;
+        * a spare is printed in case somebody needs one, and most
+          runs end with spares nobody took.
+
+        Counting those would bury the real answer -- the first
+        version of this listed six missing pages for a stack that was
+        short of two students' papers and four keys.
 
         The question nobody asks until it is too late. A paper that
-        never came back is a student who was absent, or a sheet that
-        stuck to another one in the feeder, and those want different
-        responses -- but both start here.
+        never came back is a student who was absent or a sheet that
+        stuck to another in the feeder, and those want different
+        responses, but both start here.
         """
         arrived = {(s.run_no, s.page) for s in self.placed}
         out = {}
@@ -152,8 +164,9 @@ class Batch:
             index = index_for(run_no)
             if index is None:
                 continue
-            gone = [page for page in sorted(index.pages)
-                    if (run_no, page) not in arrived]
+            gone = [page for page, entry in sorted(index.pages.items())
+                    if entry.kind == "student"
+                    and (run_no, page) not in arrived]
             if gone:
                 out[run_no] = gone
         return out

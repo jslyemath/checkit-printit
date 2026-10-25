@@ -727,6 +727,60 @@
     </div>
   </section>
 
+  <section id="view-scans" class="view" hidden>
+    <header class="pagehead">
+      <h2 class="pagename">Scans</h2>
+      <button class="hint" type="button" aria-expanded="false"
+              aria-label="What this does">?</button>
+      <span class="spacer"></span>
+      <span id="scan-count" class="sec-count"></span>
+    </header>
+    <p class="hint-text" hidden>Drop in the PDFs the copier sent and
+      every page is matched back to the student whose paper it is, by
+      the code in its footer. The stack can be in any order, split
+      across as many files as the copier needed, and have blank sheets
+      in it &mdash; nothing here reads the position of a page.</p>
+
+    <div class="scan-pick">
+      <label class="btn" for="scan-files">Choose scans&hellip;</label>
+      <input id="scan-files" type="file" accept="application/pdf" multiple
+             hidden>
+      <span id="scan-chosen" class="muted"></span>
+      <button id="scan-go" class="btn primary" type="button" disabled>Read
+        them</button>
+    </div>
+
+    <p id="scan-progress" class="muted" hidden></p>
+    <p id="scan-error" class="warnline" hidden></p>
+
+    <div id="scan-result" hidden>
+      <div id="scan-runs" class="muted"></div>
+      <ul id="scan-counts" class="scan-counts"></ul>
+
+      <!-- Both of these are empty on a clean stack, and both are the
+           reason to look at this page at all. Missing comes first:
+           a paper that never came back is the one nobody chases,
+           because the student it belonged to does not complain. -->
+      <div id="scan-missing" hidden>
+        <h3>Never came back</h3>
+        <p class="muted">Printed in the run and not in this stack.
+          Absent, or stuck to another sheet in the feeder.</p>
+        <div class="scroller"><table id="scan-missing-table"></table></div>
+      </div>
+
+      <div id="scan-dupes" hidden>
+        <h3>Read twice</h3>
+        <p class="muted">The same paper turned up more than once &mdash;
+          a double feed, or a stack scanned twice. Nothing is thrown
+          away automatically.</p>
+        <div class="scroller"><table id="scan-dupes-table"></table></div>
+      </div>
+
+      <h3 id="scan-sheets-head">Every page</h3>
+      <div class="scroller"><table id="scan-sheets"></table></div>
+    </div>
+  </section>
+
   <section id="view-soon" class="view" hidden>
     <h2 id="soon-title">Not built yet</h2>
     <p class="muted" id="soon-body"></p>

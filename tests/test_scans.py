@@ -259,7 +259,11 @@ class TestTheThreeQuestions:
         """The question nobody asks until it is too late. A student
         whose paper went missing is the one who does not complain."""
         _, index, _ = stack
-        dropped = batch.placed[0]
+        # A student's paper specifically. `placed[0]` is whatever the
+        # shuffle put first, and when that was a key this asserted
+        # that a key not coming back is reported -- which it is not,
+        # and should not be.
+        dropped = next(s for s in batch.placed if s.entry.kind == "student")
         short = scans.Batch(sheets=[s for s in batch.sheets
                                     if s is not dropped])
         assert short.missing(lambda n: index) == {dropped.run_no:
@@ -271,3 +275,29 @@ class TestTheThreeQuestions:
         _, index, _ = stack
         assert index.blanks(), "no padding page, so this proves nothing"
         assert batch.missing(lambda n: index) == {}
+
+    def test_an_answer_key_is_not_expected_back(self, stack):
+        """A key never leaves the instructor's folder, so a stack
+        without one is not short of anything. Counting keys buried
+        the real answer: a stack missing two students' papers
+        reported six missing pages, four of them keys."""
+        _, index, _ = stack
+        keys = [n for n, e in index.pages.items() if e.kind == "key"]
+        assert keys, "the run printed no keys, so this proves nothing"
+        nothing = scans.Batch(sheets=[
+            scans.Sheet(source="x", at=1, status="placed", run_no=RUN_NO,
+                        page=n, entry=index.get(n))
+            for n in index.pages if index.get(n).kind == "student"])
+        assert nothing.missing(lambda n: index) == {}
+
+    def test_a_student_page_is_still_expected_back(self, stack):
+        """The other half: without this, the test above would pass
+        if `missing` had simply stopped reporting anything."""
+        _, index, _ = stack
+        students = [n for n, e in index.pages.items()
+                    if e.kind == "student"]
+        short = scans.Batch(sheets=[
+            scans.Sheet(source="x", at=1, status="placed", run_no=RUN_NO,
+                        page=n, entry=index.get(n))
+            for n in students[1:]])
+        assert short.missing(lambda n: index) == {RUN_NO: [students[0]]}

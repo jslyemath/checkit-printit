@@ -1603,3 +1603,42 @@ body.hasbar.tall main { padding-bottom: 68px; }
   border-color: var(--warn);
   background: color-mix(in srgb, var(--warn) 10%, transparent);
 }
+
+/* ---- Scans ------------------------------------------------------- */
+
+.scan-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin: var(--s3) 0;
+  flex-wrap: wrap;
+}
+/* The file input is hidden and its label is the button, which is the
+   only way to style one. The label has to look like a button and be
+   reachable by keyboard, so it keeps `.btn` and the input stays
+   focusable rather than `display: none`. */
+.scan-pick label.btn { cursor: pointer; }
+#scan-chosen { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
+
+.scan-counts {
+  list-style: none;
+  margin: var(--s3) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+.scan-counts li { font-size: var(--t-sm); }
+/* Only the two that need chasing are coloured. "Placed" and "blank"
+   are the ordinary outcome and a page of green ticks would make the
+   two that matter harder to find, not easier. */
+.scan-count-unreadable strong,
+.scan-count-unknown-run strong,
+.scan-count-unknown-page strong { color: var(--warn); }
+
+#scan-missing h3, #scan-dupes h3, #scan-sheets-head {
+  margin: var(--s4) 0 var(--s1);
+  font-size: var(--t-base);
+}
+#scan-missing table th:first-child,
+#scan-dupes table th:first-child { text-align: left; }

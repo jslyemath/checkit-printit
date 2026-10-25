@@ -21,6 +21,7 @@ const VIEWS = [
   { id: "form", label: "Update form", short: "Form", icon: "form" },
   { id: "print", label: "Print job", short: "Print", icon: "print" },
   { id: "runs", label: "Runs", short: "Runs", icon: "record" },
+  { id: "scans", label: "Scans", short: "Scans", icon: "record" },
   { id: "seating", label: "Seating", short: "Seats", icon: "seating" },
   { id: "setup", label: "Settings", short: "Settings", icon: "setup",
     foot: true },
@@ -598,6 +599,7 @@ function show(id) {
     // print job itself was saved -- which read as the table being stale.
     if (id === "print") loadPrint();
     if (id === "setup") loadSetup();
+    if (id === "scans") scanSetup();
     if (id === "seating") loadSeating();
     // Every visit, like Print: a build made since the last look is the
     // whole reason to open this tab.
@@ -1797,6 +1799,167 @@ function builtAt(stamp) {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(stamp || "");
   if (!m) return stamp || "";
   return `${Number(m[2])}/${Number(m[3])}, ${m[4]}:${m[5]}`;
+}
+
+// ------------------------------------------------------------- scans ----
+//
+// Import a stack, place every page, report what did not place. The
+// marking itself is not here yet: placing has to be trustworthy
+// before a reading of someone's tick is worth showing, and placing is
+// the part that can be checked without an opinion.
+
+let scanChosen = [];
+let scanPolling = null;
+let scanWired = false;
+
+function scanSetup() {
+  // `show()` calls this every time the tab is opened, so it has to be
+  // safe to call twice. Without the guard the second visit adds a
+  // second click handler and "Read them" uploads the stack twice.
+  if (scanWired) return;
+  scanWired = true;
+  const input = document.getElementById("scan-files");
+  const go = document.getElementById("scan-go");
+  input.addEventListener("change", () => {
+    scanChosen = Array.from(input.files || []);
+    const chosen = document.getElementById("scan-chosen");
+    chosen.textContent = scanChosen.length
+      ? scanChosen.map(f => f.name).join(", ")
+      : "";
+    go.disabled = !scanChosen.length;
+  });
+  go.addEventListener("click", scanStart);
+}
+
+async function scanStart() {
+  const go = document.getElementById("scan-go");
+  go.disabled = true;
+  show_scan_error("");
+  document.getElementById("scan-result").hidden = true;
+  const progress = document.getElementById("scan-progress");
+  progress.hidden = false;
+  progress.textContent = "Reading the files\u2026";
+
+  // Base64 rather than a path: the stack arrives in Downloads off the
+  // copier's email, and a file picker is the gesture everybody has.
+  const files = [];
+  for (const file of scanChosen) {
+    const buffer = await file.arrayBuffer();
+    let binary = "";
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < bytes.length; i += 0x8000)
+      binary += String.fromCharCode.apply(
+        null, bytes.subarray(i, i + 0x8000));
+    files.push({ name: file.name, data: btoa(binary) });
+  }
+
+  const out = await api("/api/scan/start", { files });
+  if (!out) { go.disabled = false; progress.hidden = true; return; }
+  scanPoll();
+}
+
+function scanPoll() {
+  clearTimeout(scanPolling);
+  scanPolling = setTimeout(async () => {
+    const out = await api("/api/scan/status", {});
+    if (!out) return;
+    const progress = document.getElementById("scan-progress");
+    if (out.running) {
+      progress.textContent = out.total
+        ? `Reading page ${out.done} of ${out.total}\u2026`
+        : "Reading\u2026";
+      scanPoll();
+      return;
+    }
+    progress.hidden = true;
+    document.getElementById("scan-go").disabled = !scanChosen.length;
+    if (out.error) { show_scan_error(out.error); return; }
+    if (out.result) renderScan(out.result);
+  }, 400);
+}
+
+function show_scan_error(message) {
+  const box = document.getElementById("scan-error");
+  box.textContent = message;
+  box.hidden = !message;
+}
+
+function rows(table, head, body) {
+  table.innerHTML = "";
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  for (const cell of head) {
+    const th = document.createElement("th");
+    th.textContent = cell;
+    hr.appendChild(th);
+  }
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  for (const line of body) {
+    const tr = document.createElement("tr");
+    for (const cell of line) {
+      const td = document.createElement("td");
+      td.textContent = cell;
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+}
+
+function renderScan(data) {
+  document.getElementById("scan-result").hidden = false;
+  document.getElementById("scan-count").textContent =
+    `${data.sheets.length} page${data.sheets.length === 1 ? "" : "s"}`;
+
+  document.getElementById("scan-runs").textContent = data.runs.length
+    ? "From " + data.runs.map(r =>
+        `run ${r.no}, ${r.title} ${r.date} (${r.pages} pages printed)`)
+        .join("; ")
+    : "No page in this stack named a run this course knows.";
+
+  const counts = document.getElementById("scan-counts");
+  counts.innerHTML = "";
+  for (const [status, n] of Object.entries(data.counts)) {
+    const words = data.words[status] || [status, ""];
+    const li = document.createElement("li");
+    li.className = "scan-count-" + status;
+    const strong = document.createElement("strong");
+    strong.textContent = `${n} ${words[0].toLowerCase()}`;
+    li.appendChild(strong);
+    if (words[1]) {
+      const span = document.createElement("span");
+      span.className = "muted";
+      span.textContent = " \u2014 " + words[1];
+      li.appendChild(span);
+    }
+    counts.appendChild(li);
+  }
+
+  const missing = document.getElementById("scan-missing");
+  missing.hidden = !data.missing.length;
+  if (data.missing.length)
+    rows(document.getElementById("scan-missing-table"),
+         ["Student", "Skill", "Run", "Page"],
+         data.missing.map(m => [m.name || m.sid || "(no name)", m.skill,
+                                m.run, m.page]));
+
+  const dupes = document.getElementById("scan-dupes");
+  dupes.hidden = !data.duplicates.length;
+  if (data.duplicates.length)
+    rows(document.getElementById("scan-dupes-table"),
+         ["Run", "Page", "Found in"],
+         data.duplicates.map(d => [d.run, d.page, d.where.join(", ")]));
+
+  rows(document.getElementById("scan-sheets"),
+       ["File", "At", "What it is", "Student", "Skill", "Run", "Page"],
+       data.sheets.map(s => [
+         s.file, s.at,
+         (data.words[s.status] || [s.status])[0]
+           + (s.kind && s.kind !== "student" ? ` (${s.kind})` : ""),
+         s.name || s.sid || "", s.skill, s.run ?? "", s.page ?? "",
+       ]));
 }
 
 function renderRuns() {
