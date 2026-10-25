@@ -60,6 +60,9 @@ class BuildResult:
     #: Override keys that matched nobody in the roster -- a mistyped id, or
     #: a student who has left since. Reported, never dropped.
     unmatched_overrides: tuple = ()
+    #: The number the print record gave this run, which is what the
+    #: footer code carries. None when there is no record to key into.
+    run_id: int = None
     #: True when a run prints neither names nor an id field, so nothing
     #: on any of its papers says who sat it and Scans can never
     #: attribute one. Warned about rather than refused: an anonymous
@@ -102,7 +105,8 @@ def choose_run_seed(record, seed):
 
 
 def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
-        replay=None, install_theme=True, ids=None, codes=None):
+        replay=None, install_theme=True, ids=None, codes=None,
+        keep_record=True):
     """Build a class set. Returns a BuildResult; raises BuildError.
 
     `preview` writes nothing at all -- no folder, no theme, no record -- and
@@ -205,11 +209,25 @@ def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
     # the build it previewed, and yesterday's set is unrecoverable.
     result.run_seed = choose_run_seed(record, seed)
 
+    # And a run number, which is a different thing and is what the
+    # footer code carries. Allocated before the document is written,
+    # because the document has to print it -- the record is only
+    # written afterwards. A folder that has been built before keeps
+    # the number it already has, so a rebuild does not change what
+    # the reprinted paper says.
+    #
+    # No course, or --no-record, means no number: there would be
+    # nothing for a scanner to look the code up in.
+    if publication.course_folder and keep_record and not preview:
+        result.run_id = record_mod.next_run_no(
+            course_mod.file_in(publication.course_folder, "record"),
+            os.path.basename(os.path.normpath(out)))
+
     try:
         result.report = assemble(
             publication, people, chart, out, theme_source,
             rng=random.Random(result.run_seed), dry_run=preview,
-            run_seed=result.run_seed)
+            run_seed=result.run_seed, run_id=result.run_id)
     except (AssemblyError, BankError) as exc:
         raise BuildError(str(exc)) from None
 
@@ -218,7 +236,8 @@ def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
 
     # Recorded when the folder is written, not when it compiles: the papers
     # exist either way, and --no-compile is a normal way to finish.
-    _record(publication, result)
+    if keep_record:
+        _record(publication, result)
 
     if not do_compile:
         return result
@@ -248,6 +267,7 @@ def _record(publication, result):
             date=str(publication.date),
             built=datetime.datetime.now().isoformat(timespec="seconds"),
             seed=result.run_seed,
+            run_no=result.run_id,
             output=os.path.abspath(result.out),
             handouts=result.report.get("handouts", []),
             extras=result.report.get("extras", 0),

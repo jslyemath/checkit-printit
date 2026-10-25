@@ -22,7 +22,7 @@ from checkit_printit import seating, theme
 from checkit_printit.compile import find_pdflatex
 
 GOOD = (
-    "run*4242\n"
+    "run*7\n"
     "1*student*806625853*W5*803*1\n"
     "mark*1*box*34926110*1819429*1769472*1310720*131072\n"
     "mark*1*id*21000000*2900000*1500000*300000*60000\n"
@@ -35,7 +35,7 @@ GOOD = (
 class TestReadingTheFile:
     def test_it_reads_the_run_and_the_pages(self):
         index = pageindex.parse(GOOD)
-        assert index.run_seed == 4242
+        assert index.run_id == 7
         assert sorted(index.pages) == [1, 2, 4, 5]
         assert index.get(1).slug == "W5"
         assert index.get(2).sheet == 2
@@ -160,7 +160,7 @@ class TestReadingTheFile:
 
 class TestThePayload:
     def test_it_reads_a_code(self):
-        assert pageindex.read_payload("C1-4242-17") == (4242, 17)
+        assert pageindex.read_payload("C1-7-17") == (7, 17)
 
     def test_a_foreign_code_is_not_an_error(self):
         """A scanned page may carry a library barcode or a watermark.
@@ -169,10 +169,18 @@ class TestThePayload:
         assert pageindex.read_payload("9781234567897") is None
         assert pageindex.read_payload("https://example.edu") is None
 
-    def test_a_later_format_is_not_read_as_this_one(self):
+    def test_the_payload_cannot_outgrow_version_1(self):
+        """The budget, written down where it can fail.
+
+        Version 1 holds 14 bytes at level M. `C1-<run>-<page>` with
+        999 runs in a course and 9999 pages in a run is 12. Past 14
+        the encoder moves to version 2 silently, the modules shrink,
+        and 9mm stops reading."""
+        assert len("C1-999-9999") <= 14
+        assert len("C1-99999-99999") <= 14      # absurd, and still fits
         """What the `C1` tag is for. A code with different fields has
         to be distinguishable from this one, not silently misread."""
-        assert pageindex.read_payload("C2-4242-17-W5") is None
+        assert pageindex.read_payload("C2-7-17-W5") is None
 
 
 class TestWhatTheDocumentDeclares:
@@ -264,7 +272,7 @@ def build_and_compile(bank_dir, tmp_path, **options):
     source, _ = theme.load(bank_dir)
     assemble_mod.assemble(publication, one_page_and_two_page_students(),
                           seating.load(str(chart)), out, source,
-                          rng=random.Random(1), run_seed=4242)
+                          rng=random.Random(1), run_seed=4242, run_id=7)
     for _ in range(2):
         subprocess.run([pdflatex, "-interaction=nonstopmode",
                         "-halt-on-error", "main.tex"],
@@ -294,8 +302,8 @@ class TestWhatACompileWrites:
     def test_the_index_is_written_beside_the_pdf(self, compiled):
         assert os.path.isfile(os.path.join(compiled, pageindex.FILENAME))
 
-    def test_the_run_seed_is_the_one_the_build_was_given(self, compiled):
-        assert pageindex.load(compiled).run_seed == 4242
+    def test_the_run_number_is_the_one_the_build_was_given(self, compiled):
+        assert pageindex.load(compiled).run_id == 7
 
     def test_every_student_page_names_its_owner(self, compiled):
         index = pageindex.load(compiled)
@@ -353,7 +361,7 @@ class TestWhatACompileWrites:
         bare = pageindex.load(compiled_without_codes)
         assert bare.pages, "codes off, and the index came out empty"
         assert sorted(bare.pages) == sorted(full.pages)
-        assert bare.run_seed == full.run_seed
+        assert bare.run_id == full.run_id
 
     def test_with_the_codes_off_there_is_nothing_to_scan(
             self, compiled_without_codes):
@@ -514,6 +522,47 @@ class TestWhatACompileWrites:
             assert moved == 0, \
                 f"page {n + 1}: {moved} pixels moved when the box was measured"
 
+    def test_the_symbol_is_still_one_version_1(self, compiled):
+        """21 modules, and the whole size argument rests on it.
+
+        A version-1 symbol holds 14 bytes at level M. Past that the
+        encoder silently moves to version 2, which is 25 modules --
+        and because the height is fixed, more modules means each one
+        is *smaller*, so the symbol stops reading at 9mm. Nothing
+        errors; it just quietly becomes unscannable.
+
+        Counted off the render rather than from the version tables,
+        which have been misread here before.
+        """
+        pdfium = pytest.importorskip("pypdfium2")
+        zxingcpp = pytest.importorskip("zxingcpp")
+        numpy = pytest.importorskip("numpy")
+        pdf = pdfium.PdfDocument(os.path.join(compiled, "main.pdf"))
+        image = pdf[0].render(scale=600 / 72).to_pil()
+        found = zxingcpp.read_barcodes(image)
+        assert found, "page 1 carries no readable code"
+        p = found[0].position
+        xs = [p.top_left.x, p.top_right.x, p.bottom_left.x, p.bottom_right.x]
+        ys = [p.top_left.y, p.top_right.y, p.bottom_left.y, p.bottom_right.y]
+        across = max(max(xs) - min(xs), max(ys) - min(ys))
+
+        # A module, measured off the page. The top-left finder's bar
+        # is exactly 7 modules wide, so the first dark run along the
+        # symbol's top edge gives the module size without assuming
+        # the answer -- which the first version of this test did,
+        # dividing the width by 21 and then checking it was 21.
+        grey = numpy.asarray(image.convert("L"), dtype=float)
+        row = grey[round(min(ys) + across * 0.5 / 21),
+                   round(min(xs)):round(max(xs)) + 1] < 128
+        assert row[0], "the symbol's top-left corner is not dark"
+        bar = int(numpy.argmin(row))        # first light pixel
+        module_px = bar / 7.0
+        modules = round(across / module_px)
+        assert modules == 21, \
+            (f"{modules} modules, so not version 1 -- the payload has "
+             f"outgrown what level M holds and the symbol is now finer "
+             f"than 9mm can carry")
+
     def test_the_code_on_a_page_resolves_to_that_page(self, compiled):
         """The claim the short payload rests on, read back off the
         page at 200dpi -- the low end of the instructor's copier.
@@ -528,5 +577,5 @@ class TestWhatACompileWrites:
             image = pdf[n - 1].render(scale=200 / 72).to_pil()
             found = [c.text for c in zxingcpp.read_barcodes(image)]
             assert found, f"page {n} carries no readable code"
-            assert pageindex.read_payload(found[0]) == (index.run_seed, n)
+            assert pageindex.read_payload(found[0]) == (index.run_id, n)
             assert entry.page == n

@@ -327,14 +327,20 @@ def descriptions_tex(bank, slugs):
 
 
 def main_tex(publication, handouts, extras, keys, load_helpers=False,
-             run_seed=None):
-    """The document that pulls the skill files together.
+             run_id=None):
+    r"""The document that pulls the skill files together.
 
-    `run_seed` goes onto every page -- after the version as
-    `v715-1513199331`, and inside the footer code. None writes 0,
-    which is what a caller that does not have one (a preview, an old
-    test) gets; a sheet marked run 0 is honestly marked as belonging
-    to no recorded run.
+    `run_id` is the number the print record gave this run, and it is
+    what the footer code carries. **Not the draw seed**: a replay
+    carries the replayed run's seed on purpose, so two runs routinely
+    share one and a seed cannot say which run a sheet came from.
+
+    None means there is no record to key into -- no course, or
+    `--no-record` -- and then `\setrunid` is not written at all. The
+    theme takes that as "this is not a printit run": no page index,
+    no footer code, and none of the per-page work that goes with
+    them. A code naming a run that was never recorded would be worse
+    than no code, because it looks readable.
     """
     out = [
         r"\documentclass[12pt,twoside]{article}",
@@ -373,10 +379,11 @@ def main_tex(publication, handouts, extras, keys, load_helpers=False,
         "",
         r"\begin{document}",
         "",
-        # Design 14.5. Written once: every page's code carries it, and
-        # it prints after the version as `v715-1513199331` so a loose
-        # sheet can be traced to its run by eye.
-        f"\\setrunseed{{{run_seed if run_seed is not None else 0}}}",
+        # Design 14.5/14.12. The one line that tells the theme this
+        # is a printit run. Left out when there is no record to key
+        # into, which switches the whole mechanism off -- see the
+        # docstring.
+        *([f"\\setrunid{{{int(run_id)}}}"] if run_id is not None else []),
         # Stated only when off. The theme defaults both on, so a run
         # that wants them writes nothing -- and an older theme that
         # has never heard of these still compiles a document from a
@@ -512,7 +519,7 @@ def versions_for(chart, publication):
 
 
 def assemble(publication, roster, chart, out_dir, theme, rng=None,
-             dry_run=False, run_seed=None):
+             dry_run=False, run_seed=None, run_id=None):
     """Write a complete, compilable folder. Returns a short report."""
     rng = rng or random.Random()
     bank = Bank(publication.bank_path)
@@ -602,7 +609,7 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None,
     with open(os.path.join(out_dir, "main.tex"), "w", encoding="utf-8") as f:
         f.write(main_tex(publication, handouts, extras, keys,
                          load_helpers=helper is not None,
-                         run_seed=run_seed))
+                         run_id=run_id))
 
     _copy_assets(bank, out_dir, written)
 

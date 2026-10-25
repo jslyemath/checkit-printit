@@ -35,6 +35,13 @@ class RecordError(Exception):
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS run (
     run_id  TEXT PRIMARY KEY,   -- the output folder's name
+    -- What identifies this run *to a scanner*, and the reason it is
+    -- not the seed: a replay carries the replayed run's seed on
+    -- purpose, so two runs routinely share one. This is allocated
+    -- once per course and never reused, so a code resolves to
+    -- exactly one run. Small on purpose -- it has to fit in a QR
+    -- symbol alongside a page number.
+    run_no  INTEGER,
     title   TEXT NOT NULL,
     date    TEXT NOT NULL,
     built   TEXT NOT NULL,
@@ -63,6 +70,14 @@ CREATE TABLE IF NOT EXISTS printed (
     version    TEXT NOT NULL DEFAULT ''
 );
 
+-- Small facts about the course that are not about one run. At
+-- present just `last_run_no`, the highest run number ever issued,
+-- which has to outlive the row that was given it.
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS printed_by_student ON printed(sid, slug);
 CREATE INDEX IF NOT EXISTS printed_by_run ON printed(run_id);
 """
@@ -75,6 +90,12 @@ CREATE INDEX IF NOT EXISTS printed_by_run ON printed(run_id);
 ADDED = {
     "delisted": "INTEGER NOT NULL DEFAULT 0",
     "graded": "INTEGER NOT NULL DEFAULT 0",
+    # Nullable, because the runs already in a record were built
+    # before run numbers existed and there is no honest number to
+    # give them. A paper from one of those carries a seed-based code
+    # or none at all, and `run_by_no` will not match it -- which is
+    # correct: those runs cannot be scanned by code.
+    "run_no": "INTEGER",
 }
 
 
@@ -92,8 +113,68 @@ def connect(path):
     return db
 
 
+def _high_water(db):
+    """The highest run number ever issued in this course.
+
+    Kept in `meta` rather than read off the rows, because the rows
+    can go. The maximum over surviving rows is the same number right
+    up until something is deleted, and then it quietly hands that
+    run's number to the next one -- which is the misattribution run
+    numbers exist to prevent.
+
+    MAX over the rows is still taken, for a record written before
+    this table existed.
+    """
+    row = db.execute("SELECT value FROM meta WHERE key = 'last_run_no'"
+                     ).fetchone()
+    stored = int(row["value"]) if row else 0
+    present = db.execute("SELECT MAX(run_no) FROM run").fetchone()[0] or 0
+    return max(stored, int(present))
+
+
+def next_run_no(path, run_id):
+    """The number this run should carry. Allocated, then reused.
+
+    Building into the same folder twice is one printing event, so the
+    number is looked up by `run_id` first and only allocated when the
+    folder is new. Otherwise a rebuild would burn a number and, worse,
+    change what the code on the reprinted paper says.
+
+    Pure: asking does not allocate. The mark moves when the run is
+    actually written, so a build that fails between here and there
+    leaves no gap.
+    """
+    db = connect(path)
+    try:
+        row = db.execute("SELECT run_no FROM run WHERE run_id = ?",
+                         (run_id,)).fetchone()
+        if row is not None and row["run_no"]:
+            return int(row["run_no"])
+        return _high_water(db) + 1
+    finally:
+        db.close()
+
+
+def run_by_no(path, run_no):
+    """The run a scanned code names, or None.
+
+    None has two meanings and the caller has to tell them apart: a
+    code from another course, or a run that has been deleted. Neither
+    is recoverable here.
+    """
+    if not os.path.isfile(path):
+        return None
+    db = connect(path)
+    try:
+        row = db.execute("SELECT * FROM run WHERE run_no = ?",
+                         (int(run_no),)).fetchone()
+        return dict(row) if row else None
+    finally:
+        db.close()
+
+
 def write_run(path, run_id, title, date, built, seed, output, handouts,
-              extras=0):
+              extras=0, run_no=None):
     """Record one print run. Re-recording the same run replaces it.
 
     A run is identified by its output folder, so building into the same folder
@@ -123,13 +204,20 @@ def write_run(path, run_id, title, date, built, seed, output, handouts,
             # that no test can tell from the first.
             db.execute("DELETE FROM run WHERE run_id = ?", (run_id,))
             db.execute(
-                "INSERT INTO run (run_id, title, date, built, seed, output,"
-                " extras, unnamed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (run_id, title, date, built, int(seed), output, int(extras),
-                 unnamed))
+                "INSERT INTO run (run_id, run_no, title, date, built,"
+                " seed, output, extras, unnamed)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_id, run_no and int(run_no), title, date, built,
+                 int(seed), output, int(extras), unnamed))
             db.executemany(
                 "INSERT INTO printed (run_id, sid, name, section, slug, seed,"
                 " version) VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+            if run_no:
+                db.execute(
+                    "INSERT INTO meta (key, value) VALUES ('last_run_no', ?)"
+                    " ON CONFLICT(key) DO UPDATE SET value = ?"
+                    " WHERE CAST(value AS INTEGER) < ?",
+                    (str(int(run_no)), str(int(run_no)), int(run_no)))
     finally:
         db.close()
     return len(rows), unnamed

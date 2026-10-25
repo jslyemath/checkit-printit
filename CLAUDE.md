@@ -103,33 +103,108 @@ the wrong field, which is the bug being reported. Click the thing.
 | `~/CheckItPrintIt/jobs/<title> <date>/` | the **job**: `publication.toml` |
 | `~/CheckItPrintIt/<course>/<title> <date>/` | the **run**: `main.pdf`, `main.tex`, `manifest.toml`, `compile.log`, a folder per skill |
 
-### `main.pages`, and the two records that are not the same record
+### Three records, and which question each answers
 
-A compile writes a third record beside the other two, and the three
-answer different questions:
+A run writes three, and they are not substitutes for one another:
 
-| | answers |
+| | answers | written by |
+|---|---|---|
+| `manifest.toml` | which `(skill, version, seed)` were **drawn**, so a run can be replayed | Python, before the compile |
+| the `printed` table | which **student** got which paper, so Progress can count | Python, after the folder is written |
+| `main.pages` | which **page** each paper landed on, so a scan can be split | **TeX**, as it ships the pages |
+
+The third has to be TeX's, because a skill can run to two sheets and
+page numbers do not exist until the pages are broken.
+
+### What is printed on a page, and what reads it back
+
+**The footer code** is a QR carrying `C1-<runid>-<page>`, 9mm at
+error-correction level M. That is the whole payload: run plus page is
+a unique key, and everything else is a lookup in that run's
+`main.pages`.
+
+`<runid>` is the **run number**, not the draw seed, and the difference
+matters. `choose_run_seed` carries a replayed run's seed on purpose,
+and a replay writes to a new folder, so a reprint produces two runs
+sharing one seed -- with different page-to-student mappings, because a
+replay exists to fix something. Resolving a code by seed would hand
+papers to the wrong students. `record.next_run_no` allocates the
+number, `record.run_by_no` resolves it, and `meta.last_run_no` is the
+high-water mark so a deleted run's number is never issued again.
+
+**Sizing is one decision, not three.** A version-1 symbol is 21
+modules and holds 14 bytes at level M. `C1-999-9999` is 11. Grow the
+payload past 14 and the encoder moves to version 2 silently, the
+modules shrink, and 9mm stops being readable --
+`test_the_symbol_is_still_one_version_1` measures the module count off
+a render to hold that line. 9mm itself was measured: on real pages at
+200dpi, blurred, skewed and JPEGed, 9mm reads 150/150 on a photocopy
+of a photocopy and 8mm reads 134/150.
+
+**`main.pages`** has three kinds of line:
+
+```
+run*7                                       the run number
+17*student*800000111*W5*803*1               page, kind, sid, skill, version, sheet
+mark*17*box*34926110*1819429*1769472*...    label, then x y w h d in scaled points
+```
+
+* The page line is written **from the footer**, which is why padding
+  pages need no detecting: `\preparefornextstudent` pads under
+  `\pagestyle{empty}`, which has no footer, so a blank writes nothing
+  and the gaps in the sequence *are* the blanks.
+* `kind` is `student`, `spare` or `key`, from `\setkind`. Nothing on
+  the page distinguishes them and they grade differently.
+* `mark` records where something sits, from `\pdfsavepos`, for
+  cropping out of a scan. Three labels: `box`, `id`, `name`. The slug
+  and version are deliberately not recorded -- both are already known
+  once the code is read, and if the code cannot be read there is no
+  page number to look anything up by.
+
+### The macros `main.tex` emits, and what they switch on
+
+| macro | what it does |
 |---|---|
-| `manifest.toml` | which `(skill, version, seed)` were **drawn**, so a run can be replayed |
-| the `printed` table | which **student** got which paper, so Progress can count |
-| `main.pages` | which **page** each paper landed on, so a scan can be split |
+| `\setrunid{N}` | **the gate.** Opens `main.pages`, and switches on the index, the marks and the footer code. Emitted only when the run has a record to key into |
+| `\setkind{...}` | `student`, `spare` or `key` for the block that follows |
+| `\setsid{...}` | the student id; empty draws the writing grid |
+| `\setname` / `\setsect` / `\setvseed` | as before |
 
-Only the third is written by TeX, and it has to be: a skill can run to
-two sheets, so page numbers do not exist until the pages are broken.
-The footer code says `C1-<runseed>-<page>` and nothing else -- this is
-the table it keys into. Before 2026-10-24 there was no such table and
-the code resolved to a run and a page number and stopped.
+**A document that never calls `\setrunid` pays for none of it**: no
+file is opened, no line is written per page, `\cipmark` measures
+nothing, and no code is drawn. That is the hand-written case, and it
+compiles about 11% faster than before any of this existed. A printit
+run costs about 6.8% more than it did, roughly 10ms a page.
 
-Two kinds of line. `page*kind*sid*slug*vseed*sheet` per page, written
-from the footer so that padding pages -- set under `\pagestyle{empty}`,
-which has none -- write nothing and the gaps are the blanks. And
-`box*page*x*y*w*h*d`, the grading box in scaled points from the page's
-bottom-left, from `\pdfsavepos`, so Scans crops where the box actually
-is rather than where someone measured it once.
+`main.tex` also carries `\providecommand{\setkind}[1]{}` so a bank
+running an older `printit.sty` still compiles -- it then produces no
+index, and Scans says so when asked to read the run.
 
-A bank still running an older `printit.sty` produces no index.
-`main.tex` carries `\providecommand{\setkind}[1]{}` so it still
-compiles; Scans reports the missing index when asked to read the run.
+### Turning the marks off
+
+| | id field | footer code |
+|---|---|---|
+| hand-written document | **on** | **off** -- no run to key into |
+| `\usepackage[noid]{printit}` | off | |
+| `\usepackage[nocode]{printit}` | | off |
+| `\cipidfalse` / `\cipcodeonfalse` in a preamble | off | off |
+| `build --no-ids` / `--no-codes` | off | off |
+| `[print] ids = false` / `codes = false` | off | off |
+| `build --no-record` | | off -- nothing to look a code up in |
+
+Absence means **on** everywhere, so `main_tex` writes a switch only to
+turn one *off* and an older theme still compiles a newer document.
+
+A run with `names = false` **and** `ids = false` prints papers with
+nothing on them that says who sat them. That is warned about, not
+refused: an anonymous practice set is a reasonable thing to want.
+
+### A build against a real job writes to the real record
+
+Any publication naming a course records the run. Four junk rows went
+into the instructor's live record this way, from test builds into temp
+folders. `build --no-record` is the way to avoid it, and a test that
+builds should set `CHECKIT_PRINTIT_HOME` to somewhere of its own.
 
 "Open the folder" means the second. Opening the first looks like a failed
 build.
@@ -570,52 +645,50 @@ the publication says", and they do not rewrite the file. A plain
 `False` default would have turned the marks off for every caller that
 did not think about them, `--replay` among them.
 
-### What a printed page carries, and how to make it reach a bank
+### The header and footer have no slack, and fancyhdr does not clip
 
-Three marks, from design 14.5:
+**Every slot has an explicit width.** Without one a long name or a
+long title simply runs through whatever is beside it. Both happened:
+a 21-character name plus a nine-digit id ran through the course and
+date, and "Skill Checkpoint Redo 2026-10-23" ran through the version.
+Judge this on a real title with a real name in it -- a probe called
+"Probe" shows neither.
 
-* A **QR in the footer**, `C1-<runseed>-<page>` and nothing else.
-  `runseed` plus `page` is already a unique key for a sheet, so the
-  skill, the version seed and the student are all manifest lookups.
-  `C1` is the format version. **17 characters, 21 modules, 11mm, and
-  all three numbers are locked together** -- see the comment on
-  `\cipcode`. `nolink` is required: `qrcode` makes a hyperlink by
-  default and hyperref colours it, which printed a cyan QR.
-* The version alone in the footer centre, `v539`. The run seed used
-  to print here too; it is in the code now, and twice on a page is
-  clutter.
-* A **student id** in the header. Printed plainly, at the size of
-  everything else on that line, when the run knows the student --
-  boxes round a number nobody has to write are noise. A faint ruled
-  grid of nine 4.4mm cells appears **only** when the name is blank,
-  which is what lets a spare be graded.
+The text block is 7in and the header's three parts very nearly fill
+it. They are now three fancyhdr slots rather than two:
 
-**Every slot in the header and footer has an explicit width.**
-fancyhdr does not clip, so a long name or a long title simply runs
-through whatever is beside it. Both happened: "Belinda Soriano
-Garcia" plus a nine-digit id ran through the course and date, and
-"Skill Checkpoint Redo 2026-10-23" ran through the version. Judge
-this on a real title with a real name in it -- a probe called "Probe"
-shows neither.
+| slot | holds | width |
+|---|---|---|
+| `[L]` | `Name:` and the name | 2.5in box, name budgeted to 2.1in |
+| `[C]` | `ID:` and the field | centred on the head |
+| `[R]` | course, term, author | what is left |
 
-`\setrunseed` is written once by `main_tex`; `\setsid` once per
-student block. `\cipsheet` is reset by `\skillheader` and stepped by
-the footer at shipout.
+The id is in the centre slot so that a printed id and an empty grid
+land in the same place, which they did not when the id simply
+followed the name. That fixes where the id starts, so the name is
+**scaled to fit** past 2.1in rather than colliding with "ID:". The
+longest name on either roster is 22 characters and is not touched.
 
-**A theme change does not reach an existing bank.** `theme.install`
-keeps a bank's own `printit.sty` unless forced -- "that file is the
-author's, and may be a term's worth of layout work" -- so these marks
-print only after:
+The budget was set by measuring ink columns, because the gap that
+matters is from the name to the word "ID:" -- and the `name` and `id`
+marks do not include that label. Reading the gap between the marks
+called a 27-character name clear while the render showed it touching.
+
+### A theme change does not reach an existing bank
+
+`theme.install` keeps a bank's own `printit.sty` unless forced --
+"that file is the author's, and may be a term's worth of layout
+work" -- so none of the page marks print until
 
 ```
 checkit-printit install --force
 ```
 
-run against the bank. That is deliberately the instructor's call, and
-the first real build against `mat-106-checkit` failed on an undefined
-`\setrunseed` for exactly this reason. `test_the_theme_defines_what_
-main_tex_calls` guards the pair for a fresh install; nothing can guard
-a bank nobody has updated.
+is run against the bank. That is deliberately the instructor's call.
+The first real build against `mat-106-checkit` failed on an undefined
+`\setrunid` for exactly this reason; `test_the_theme_defines_what_
+main_tex_calls` guards the pair for a fresh install, and nothing can
+guard a bank nobody has updated.
 
 ### The Runs tab, and what it is allowed to do
 

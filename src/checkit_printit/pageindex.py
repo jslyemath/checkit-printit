@@ -17,7 +17,7 @@ the PDF, because the document is the only party that knows: a skill may
 run to two sheets, so page numbers do not exist until TeX has broken
 the pages.
 
-    run*4242
+    run*7
     1*student*806625853*W5*803*1
     mark*1*box*34926110*1819429*1769472*1310720*131072
     2*key**N2*840*1
@@ -35,9 +35,18 @@ import re
 #: Written by `printit.sty` next to `main.pdf`. `\jobname` is `main`.
 FILENAME = "main.pages"
 
-#: The footer code's payload. `C1` is the format tag: a later change of
-#: fields has to be distinguishable from this one, because Scans will
-#: meet codes printed by a theme that no longer exists.
+#: The footer code's payload, `C1-<run>-<page>`. `C1` is the format
+#: tag: a later change of fields has to be distinguishable from this
+#: one, because Scans will meet codes printed by a theme that no
+#: longer exists.
+#:
+#: The first field is the **run number** the print record allocated,
+#: not the draw seed. A seed does not identify a run: `choose_run_seed`
+#: carries the replayed run's seed on purpose, so a reprint produces
+#: two runs sharing one -- and because a replay exists to fix
+#: something, the two can have different page-to-student mappings.
+#: Resolving a code by seed would therefore not merely be ambiguous,
+#: it would silently hand a paper to the wrong student.
 PAYLOAD = re.compile(r"^C1-(\d+)-(\d+)$")
 
 #: What `\setkind` can say. A key must never be recorded as an attempt,
@@ -135,7 +144,9 @@ class Page:
 
 @dataclasses.dataclass(frozen=True)
 class Index:
-    run_seed: int
+    #: The run number the code carries, matching `run.run_no` in the
+    #: course record. Not the draw seed -- see PAYLOAD.
+    run_id: int
     pages: dict           #: {page number: Page}
 
     def get(self, page):
@@ -168,7 +179,7 @@ def parse(text):
     folder, and because the error messages are about content rather
     than about where it came from.
     """
-    run_seed, pages, marks = None, {}, {}
+    run_id, pages, marks = None, {}, {}
     for number, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
         if not line:
@@ -205,7 +216,7 @@ def parse(text):
                 raise PageIndexError(
                     f"line {number} is a run header this reader does not "
                     f"understand: {line!r}")
-            run_seed = int(fields[1])
+            run_id = int(fields[1])
             continue
         if len(fields) != 6:
             raise PageIndexError(
@@ -234,7 +245,7 @@ def parse(text):
         pages[int(page)] = Page(page=int(page), kind=kind, sid=sid, slug=slug,
                                 vseed=vseed, sheet=int(sheet) if sheet else 0)
 
-    if run_seed is None:
+    if run_id is None:
         raise PageIndexError(
             "no run header, so these pages cannot be matched to the run "
             "their codes name.")
@@ -248,7 +259,7 @@ def parse(text):
             f"pages {orphans} carry marks and have no entry of their own.")
     pages = {n: dataclasses.replace(p, marks=marks.get(n, {}))
              for n, p in pages.items()}
-    return Index(run_seed=run_seed, pages=pages)
+    return Index(run_id=run_id, pages=pages)
 
 
 def load(folder):
@@ -268,11 +279,12 @@ def load(folder):
 
 
 def read_payload(text):
-    """`C1-4242-17` -> (4242, 17). None for anything else.
+    """`C1-7-17` -> (run 7, page 17). None for anything else.
 
-    Anything else is the ordinary case, not an error: a scanned page may
-    carry a library barcode, a watermark, or a code from some other
-    system entirely.
+    Anything else is the ordinary case, not an error: a scanned page
+    may carry a library barcode, a watermark, or a code from some
+    other system entirely, and a stack is looped over rather than
+    checked one at a time.
     """
     match = PAYLOAD.match(text.strip())
     if not match:
