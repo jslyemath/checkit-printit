@@ -48,6 +48,48 @@ class PageIndexError(Exception):
     pass
 
 
+#: TeX points per inch. Not 72 -- that is the PostScript point a PDF's
+#: page box is measured in, and mixing the two is a 0.4% error, which
+#: at the bottom of a page is about a pixel and a half.
+TEX_PT_PER_INCH = 72.27
+
+#: Scaled points per TeX point.
+SP_PER_PT = 65536
+
+
+@dataclasses.dataclass(frozen=True)
+class Box:
+    """The grading box, in the page's own coordinates.
+
+    Scaled points, measured up from the bottom-left corner, written by
+    `\\pdfsavepos` at the moment the page was shipped. Asked of the
+    typesetter rather than measured off a render or computed from the
+    footer's geometry -- the first breaks silently when anybody adjusts
+    the footer, and the second is the same constant with a measuring
+    step in front of it.
+    """
+
+    x: int
+    y: int
+    width: int
+    height: int
+    depth: int
+
+    def rect(self, dpi, page_height_pt):
+        """(left, top, right, bottom) in pixels of a render at `dpi`.
+
+        `page_height_pt` is the PDF's own page height, in PostScript
+        points, because the image counts down from the top and
+        `\\pdfsavepos` counts up from the bottom.
+        """
+        per_sp = dpi / (SP_PER_PT * TEX_PT_PER_INCH)
+        tall = page_height_pt * dpi / 72.0
+        return (self.x * per_sp,
+                tall - (self.y + self.height) * per_sp,
+                (self.x + self.width) * per_sp,
+                tall - (self.y - self.depth) * per_sp)
+
+
 @dataclasses.dataclass(frozen=True)
 class Page:
     """One printed side, and what was on it."""
@@ -58,6 +100,11 @@ class Page:
     slug: str
     vseed: str
     sheet: int
+    #: None on a continuation sheet. The continuation page style omits
+    #: the box deliberately -- one skill is ticked once -- so "no box
+    #: on this page" means "nothing to grade here", which is a fact
+    #: Scans wants rather than a gap in the record.
+    box: Box = None
 
     @property
     def gradable(self):
@@ -109,12 +156,29 @@ def parse(text):
     folder, and because the error messages are about content rather
     than about where it came from.
     """
-    run_seed, pages = None, {}
+    run_seed, pages, boxes = None, {}, {}
     for number, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
         fields = line.split("*")
+        if fields[0] == "box":
+            # Written by a *deferred* write, so it arrives after that
+            # page's own line and is collected separately rather than
+            # assumed to be adjacent to it.
+            if len(fields) != 7 or not all(f.lstrip("-").isdigit()
+                                           for f in fields[1:]):
+                raise PageIndexError(
+                    f"line {number} is a box this reader does not "
+                    f"understand: {line!r}")
+            page, *values = (int(f) for f in fields[1:])
+            if page in boxes:
+                raise PageIndexError(
+                    f"line {number} is a second grading box for page {page}. "
+                    f"The footer draws one, so two means the page carries a "
+                    f"mark this reader would crop the wrong one of.")
+            boxes[page] = Box(*values)
+            continue
         if fields[0] == "run":
             if len(fields) != 2 or not fields[1].isdigit():
                 raise PageIndexError(
@@ -153,6 +217,16 @@ def parse(text):
         raise PageIndexError(
             "no run header, so these pages cannot be matched to the run "
             "their codes name.")
+
+    orphans = sorted(set(boxes) - set(pages))
+    if orphans:
+        # A box on a page with no entry means the two writes disagree
+        # about what a page is, and cropping it would read a mark
+        # belonging to nobody.
+        raise PageIndexError(
+            f"pages {orphans} have a grading box and no entry of their own.")
+    pages = {n: dataclasses.replace(p, box=boxes.get(n))
+             for n, p in pages.items()}
     return Index(run_seed=run_seed, pages=pages)
 
 

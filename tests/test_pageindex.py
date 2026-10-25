@@ -23,6 +23,7 @@ from checkit_printit.compile import find_pdflatex
 GOOD = (
     "run*4242\n"
     "1*student*806625853*W5*803*1\n"
+    "box*1*34926110*1819429*1769472*1310720*131072\n"
     "2*student*806625853*W5*803*2\n"
     "4*spare**W6*571*1\n"
     "5*key**N2*840*1\n"
@@ -82,6 +83,52 @@ class TestReadingTheFile:
         papers nobody sat."""
         with pytest.raises(pageindex.PageIndexError, match="'sample'"):
             pageindex.parse("run*1\n1*sample*1*W5*803*1\n")
+
+    def test_a_box_is_attached_to_its_page(self):
+        index = pageindex.parse(GOOD)
+        assert index.get(1).box.x == 34926110
+        assert index.get(1).box.width == 1769472
+
+    def test_a_continuation_sheet_has_no_box(self):
+        """Sheet 2 of a skill deliberately omits it -- one skill is
+        ticked once -- so None here means "nothing to grade on this
+        page", not "the record is incomplete"."""
+        assert pageindex.parse(GOOD).get(2).box is None
+
+    def test_a_box_on_a_page_that_has_no_entry_is_refused(self):
+        """The two lines are written by different mechanisms, one
+        immediate and one deferred. If they ever disagree about what a
+        page is, cropping the box would read a mark belonging to
+        nobody."""
+        with pytest.raises(pageindex.PageIndexError, match=r"\[9\]"):
+            pageindex.parse(GOOD + "box*9*1*2*3*4*5\n")
+
+    def test_two_boxes_on_one_page_are_refused(self):
+        with pytest.raises(pageindex.PageIndexError, match="second grading"):
+            pageindex.parse(GOOD + "box*1*1*2*3*4*5\n")
+
+    def test_a_malformed_box_line_is_refused(self):
+        with pytest.raises(pageindex.PageIndexError, match="line 2"):
+            pageindex.parse("run*1\nbox*1*nope*2*3*4*5\n")
+
+    def test_the_rectangle_counts_down_from_the_top(self):
+        """`\\pdfsavepos` measures up from the bottom of the page and
+        an image counts down from the top, so the conversion has to
+        flip -- and the page height it flips about is in PostScript
+        points while the position is in TeX points. Getting that wrong
+        is a 0.4% error, which at the bottom of a page is a pixel and
+        a half."""
+        box = pageindex.parse(GOOD).get(1).box
+        left, top, right, bottom = box.rect(dpi=200, page_height_pt=792)
+        assert bottom > top, "the rectangle is upside down"
+        assert right > left
+        # 1769472sp is 27pt, which at 200dpi over 72.27pt to the inch
+        # is 74.7px. Height plus depth is 1441792sp, or 22pt, 60.9px.
+        assert round(right - left) == 75
+        assert round(bottom - top) == 61
+        # The page is 792pt, so 2200px tall at this dpi, and the box
+        # sits in the footer: its foot is 25.76pt up, which is 71px.
+        assert round(2200 - bottom) == 71
 
     def test_a_page_listed_twice_is_refused(self):
         """Storing into a dict would hide this: the second line would
@@ -295,6 +342,42 @@ class TestWhatACompileWrites:
             image = pdf[n - 1].render(scale=200 / 72).to_pil()
             assert not zxingcpp.read_barcodes(image), \
                 f"page {n} still carries a code"
+
+    def test_the_recorded_rectangle_lands_on_the_grading_box(self, compiled):
+        """Checked by ink, because a coordinate system can be wrong in
+        a way that still produces plausible numbers -- and this one
+        was: the first version measured the box inside the group the
+        footer is built in, and the deferred write read a void
+        register, giving the right position and a width of zero.
+
+        The box is a thick rounded outline filled white. So inside the
+        rectangle there must be dark pixels around the edge and almost
+        none in the middle. A rectangle on blank paper has none at
+        all; one that slid onto the skill slug beside it has them in
+        the middle.
+        """
+        pdfium = pytest.importorskip("pypdfium2")
+        numpy = pytest.importorskip("numpy")
+        pdf = pdfium.PdfDocument(os.path.join(compiled, "main.pdf"))
+        index = pageindex.load(compiled)
+        boxed = [p for p in index.pages.values() if p.box]
+        assert boxed, "no page recorded a grading box"
+
+        for entry in boxed:
+            page = pdf[entry.page - 1]
+            left, top, right, bottom = entry.box.rect(200, page.get_height())
+            image = page.render(scale=200 / 72).to_pil().convert("L")
+            crop = numpy.asarray(
+                image.crop((round(left), round(top),
+                            round(right), round(bottom))), dtype=float)
+            assert crop.size, f"page {entry.page}: the rectangle is off-page"
+            dark = crop < 128
+            inset = max(1, min(crop.shape) // 4)
+            middle = dark[inset:-inset, inset:-inset]
+            assert dark.sum() - middle.sum() > 20, \
+                f"page {entry.page}: no box outline inside the rectangle"
+            assert middle.sum() < middle.size * 0.2, \
+                f"page {entry.page}: the rectangle is not on an empty box"
 
     def test_the_code_on_a_page_resolves_to_that_page(self, compiled):
         """The claim the short payload rests on, read back off the

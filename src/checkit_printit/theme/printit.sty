@@ -403,6 +403,46 @@ title=#2,#1}
     \thepage*\cipkind*\cipsid*\currentskill*\vseed*\thecipsheet}}
 
 % ---------------------------------------------------------------------
+% Where the grading box is, in the page's own coordinates.
+%
+%   box*<page>*<x>*<y>*<width>*<height>*<depth>
+%
+% All six numbers in scaled points, from the bottom-left of the page.
+% Scans has to crop the box out of a scan and read what is in it, and
+% there were three ways to know where it is:
+%
+%   - compute it from the footer's geometry, which breaks silently the
+%     next time anyone adjusts the footer;
+%   - measure it off a render, which is the same constant with an extra
+%     step in front of it, and this project has a bad record with
+%     measurement harnesses;
+%   - ask the typesetter, which is where the answer actually lives.
+%
+% \pdfsavepos records the position of the point it sits at, and
+% \pdflastxpos is set when the page is shipped -- so the \write has to
+% be deferred, not \immediate, or it reads the previous page's. The
+% box is measured into a save box first, which makes the rectangle
+% exact rather than inferred: x to x+width, y-depth to y+height.
+%
+% Only first sheets write one. The continuation style deliberately
+% omits the box -- one skill is ticked once -- so a continued sheet
+% records no box, and "no box on this page" is a fact Scans wants
+% anyway.
+% `\global`, and it is not optional. The footer is built inside a
+% group, the \write above is deferred, and a deferred write runs at
+% shipout -- after that group has closed. A locally set save box is
+% void again by then, and the first version of this recorded a box
+% 0sp wide at exactly the right place.
+\newsavebox{\cipboxmeasure}
+\newcommand{\cipcheckbox}[1]{%
+  \global\sbox{\cipboxmeasure}{\roundbox{#1}}%
+  \pdfsavepos
+  \write\cipindex{box*\thepage*\the\pdflastxpos*\the\pdflastypos*%
+    \number\wd\cipboxmeasure*\number\ht\cipboxmeasure*%
+    \number\dp\cipboxmeasure}%
+  \usebox{\cipboxmeasure}}
+
+% ---------------------------------------------------------------------
 % The payload: the least that identifies a sheet.
 %
 %   C1-1513199331-347
@@ -686,7 +726,7 @@ title=#2,#1}
 % case the other already covers, is clutter.
 \fancyfoot[C]{\sffamily\textit{\color{darkgray}v\vseed}}
 \fancyfoot[LE, RO]{\sffamily\textit{\color{darkgray}%
-  \currentskill\hspace{0.5em}\roundbox{20pt}}}
+  \currentskill\hspace{0.5em}\cipcheckbox{20pt}}}
 
 % The second and later sheets of a skill that runs past one page.
 %
