@@ -1,5 +1,27 @@
 \ProvidesPackage{printit}
 
+% ---------------------------------------------------------------------
+% Options, for a document written by hand rather than by printit.
+%
+%   \usepackage[noid]{printit}     no id field in the header
+%   \usepackage[nocode]{printit}   never draw the footer code
+%
+% Neither is needed for an ordinary hand-written assessment. The code
+% already draws nothing unless \setrunseed has been called, which
+% only printit does, so `nocode` is for the case where printit built
+% the run and the symbol is still not wanted. The id field *is* on by
+% default, because a line of boxes to write a student number into is
+% worth having whoever made the page.
+%
+% The underlying switches are \cipidfalse and \cipcodeonfalse, and
+% either can be used in a preamble instead of the option.
+\newif\ifcipid\cipidtrue
+\newif\ifcipcodeon\cipcodeontrue
+\DeclareOption{noid}{\cipidfalse}
+\DeclareOption{nocode}{\cipcodeonfalse}
+\DeclareOption*{}
+\ProcessOptions\relax
+
 \usepackage[T1]{fontenc}
 
 % Colors live in printitfigures.sty; see its note.
@@ -333,6 +355,10 @@ title=#2,#1}
 % is before the document body has said which run this is.
 \newcommand{\setrunseed}[1]{%
   \renewcommand{\runseed}{#1}%
+  \ifcipindex\else
+    \immediate\openout\cipindex=\jobname.pages\relax
+    \global\cipindextrue
+  \fi
   \immediate\write\cipindex{run*#1}}
 
 % Either mark can be turned off for a run. Both default **on**: a
@@ -340,9 +366,9 @@ title=#2,#1}
 % less than it asked for is the worse way to be wrong.
 %
 % `\ifcipid` covers the whole id field, label included -- a bare
-% "ID:" with nothing after it is worse than no id at all.
-\newif\ifcipid\cipidtrue
-\newif\ifcipcodeon\cipcodeontrue
+% "ID:" with nothing after it is worse than no id at all. Both
+% switches are declared at the top of this file, with the package
+% options that set them.
 
 \newcommand{\cipsid}{}
 \newcommand{\setsid}[1]{\renewcommand{\cipsid}{#1}}
@@ -396,11 +422,22 @@ title=#2,#1}
 %
 % No space before any `*`: a control sequence name ends at the first
 % non-letter, so `\thepage*` is already two tokens.
+% The stream is opened by \setrunseed, not here, and `\ifcipindex`
+% is false until it is. A hand-written document never calls
+% \setrunseed -- it is printit's way of saying "this is a run" --
+% so it pays for none of this: no file appears beside its PDF, no
+% line is written per page, and \cipmark becomes a pass-through
+% that does not measure anything.
+%
+% Gating on \setrunseed rather than on a package option means
+% there is nothing to remember and nothing to get wrong.
 \newwrite\cipindex
-\immediate\openout\cipindex=\jobname.pages\relax
+\newif\ifcipindex
 \newcommand{\cipwriteindex}{%
-  \immediate\write\cipindex{%
-    \thepage*\cipkind*\cipsid*\currentskill*\vseed*\thecipsheet}}
+  \ifcipindex
+    \immediate\write\cipindex{%
+      \thepage*\cipkind*\cipsid*\currentskill*\vseed*\thecipsheet}%
+  \fi}
 
 % ---------------------------------------------------------------------
 % Where a thing is on the page, in the page's own coordinates.
@@ -465,6 +502,7 @@ title=#2,#1}
 % rules, and a piece of text.
 \newsavebox{\cipmarkbox}
 \newcommand{\cipmark}[2]{%
+  \ifcipindex
   \global\sbox{\cipmarkbox}{#2}%
   \pdfsavepos
   % Two clocks, and they do not agree.
@@ -490,6 +528,7 @@ title=#2,#1}
     \number\wd\cipmarkbox*\number\ht\cipmarkbox*%
     \number\dp\cipmarkbox}}%
   \cipmarkline
+  \fi
   #2}
 
 % ---------------------------------------------------------------------
@@ -605,10 +644,19 @@ title=#2,#1}
 % Drawn small, and quiet: this is for a scanner, and a student should
 % not feel watched by it.
 \newcommand{\cipcode}{%
-  % The switch lives here rather than at the four call sites -- two
-  % page styles times two parities -- so there is one copy of the
-  % decision and it cannot fall out of step with itself.
-  \ifcipcodeon
+  % Two conditions, one copy of each, and they live here rather than
+  % at the four call sites -- two page styles times two parities.
+  %
+  % `\ifcipindex` is the important one. The code is a key into the
+  % page index, so with no index there is nothing for it to key into:
+  % it would carry `C1-0-17`, naming run zero, which does not exist.
+  % A hand-written assessment that never calls \setrunseed therefore
+  % prints no symbol at all, without having to ask for that.
+  %
+  % It is also the most expensive thing on the page -- qrcode.sty does
+  % its Reed-Solomon in TeX macros -- so not drawing it is most of
+  % what a hand-written document saves.
+  \ifcipindex\ifcipcodeon
   % `nolink`, which is why it was cyan. `qrcode` sets
   % `\qr@hyperlinktrue` by default, wraps the code in a hyperref
   % link, and hyperref colours it -- so wrapping it in
@@ -676,7 +724,7 @@ title=#2,#1}
     \node[inner sep=0pt, outer sep=0pt] {\textcolor{black}{%
       \qrcode[height=9mm, level=L, nolink]{\cippayload}}};
   \end{tikzpicture}%
-  \fi}
+  \fi\fi}
 
 %insert nicer urls if needed in online PDF checkpoints (pandemic era)
 \usepackage{hyperref}
@@ -700,10 +748,45 @@ title=#2,#1}
 % Whatever \setsect last set, appended to the course: "-800", or nothing.
 \newcommand{\scsection}{}
 \makeatletter
-\newcommand{\scheadright}{\sffamily\color{darkgray} \@acadclass{}\scsection\hspace{5pt} \textbullet{}\hspace{5pt}  \@date \hspace{5pt} \textbullet{}\hspace{5pt}  \@author}
+% Each gap was \hspace{5pt} *plus* a literal word space -- about
+% 8.3pt. The spaces are gone and the 5pt stays, which closes the
+% three parts up by about a third without changing the rhythm.
+\newcommand{\scheadright}{\sffamily\color{darkgray} \@acadclass{}\scsection\hspace{5pt}\textbullet{}\hspace{5pt}\@date\hspace{5pt}\textbullet{}\hspace{5pt}\@author}
 \makeatother
 % Whatever \setname last set; a ruled blank until it is called.
 \newcommand{\scname}{\underline{\large\phantom{Blank}\hspace{1.25in}}}
+
+% The name has a budget, because the id is centred and so starts
+% at a fixed place whatever the name does. Past the budget the
+% name is scaled to fit instead of running into "ID:".
+%
+% 2.1in, chosen by measuring the ink rather than the boxes. The gap
+% that matters is from the end of the name to the word "ID:", and
+% the `name` and `id` marks do not include that label -- reading the
+% gap between them said a 27-character name cleared by 0.10in while
+% the render showed it touching.
+%
+% Measured in ink columns, the name-to-"ID:" gap is:
+%
+%        name   budget 2.25in   budget 2.1in
+%    22 chars         0.34in         0.34in   (not shrunk either way)
+%    27 chars         0.16in         0.31in
+%    blank            0.30in         0.30in
+%
+% So 2.1in leaves every case about a third of an inch, and leaves
+% the longest name on either roster -- 22 characters -- at full
+% size. Only longer ones are scaled, and only by what it takes.
+%
+% Shrinking on demand rather than always: scaling every name to a
+% fixed width would make the short ones enormous.
+\newlength{\cipnamebudget}
+\setlength{\cipnamebudget}{2.1in}
+\newsavebox{\cipnamefit}
+\newcommand{\cipfittedname}{%
+  \sbox{\cipnamefit}{\scname}%
+  \ifdim\wd\cipnamefit>\cipnamebudget
+    \resizebox{\cipnamebudget}{!}{\scname}%
+  \else\scname\fi}
 % One box per digit. Separated digits are the most reliable
 % handwriting there is, and this is the only handwriting the system
 % has to read -- so it is worth the width. Filled when the run knows
@@ -755,12 +838,19 @@ title=#2,#1}
 % the end of its group -- which here is the whole header. So the id
 % came out at name size. The braces scope it, and the id then sits at
 % the size of "Name:" and "MAT 106-820" either side of it.
+% Three slots, not two. The id used to follow the name, so it sat
+% at a different place on every page and in a different place again
+% on a blank run -- which is what read as clunky. fancyhdr's centre
+% slot was empty, and it centres on the head regardless of what the
+% other two hold, so both kinds of id now land identically.
 \newcommand{\scheadleft}{%
-  \makebox[4.3in][l]{\sffamily\color{darkgray} Name: {\cipmark{name}{\scname}}%
-    \ifcipid\hspace{1em}ID: \cipmark{id}{\cipidfield}\fi}}
+  \makebox[2.5in][l]{\sffamily\color{darkgray} Name: %
+    {\cipmark{name}{\cipfittedname}}}}
+\newcommand{\scheadid}{%
+  \ifcipid\sffamily\color{darkgray} ID: \cipmark{id}{\cipidfield}\fi}
 \makeatother
 
-\fancyhead[C]{}
+\fancyhead[C]{\scheadid}
 \fancyhead[R]{\scheadright}
 \fancyhead[L]{\scheadleft}
 % Titles are long and carry a date -- "Skill Checkpoint Redo
@@ -810,6 +900,7 @@ title=#2,#1}
 \fancypagestyle{skillcontinued}{%
     \fancyhf{}%
     \renewcommand{\headrulewidth}{0pt}%
+    \fancyhead[C]{\scheadid}%
     \fancyhead[R]{\scheadright}%
     \fancyhead[L]{\scheadleft}%
     % A continued sheet carries the code too -- it is the sheet that
