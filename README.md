@@ -180,8 +180,51 @@ reason.
 | `--preview` | report what would be printed, write nothing |
 | `--no-compile` | write the folder, skip `pdflatex` |
 | `--seed N` | reproduce an earlier run's version choices |
+| `--replay DIR` | reprint a finished run exactly, from the manifest in its folder |
 | `-o DIR` | write somewhere other than the default folder |
 | `-p FILE` | use a publication file other than `publication.toml` |
+| `--no-ids` | leave the student id field out of the header |
+| `--no-codes` | leave the scanning code out of the footer |
+| `--no-record` | do not note this run in the course's print record |
+
+`--no-ids` and `--no-codes` override the publication for one build
+and do not rewrite it; `[print] ids` and `[print] codes` set the
+default. Both are **on** unless something says otherwise, so a job
+file written before they existed still prints what it always did.
+
+`--no-record` is for a throwaway build. It also leaves the scanning
+code off the page: the code is a key into the print record, and there
+would be nothing to look it up in.
+
+## Marks for scanning, and how to turn them off
+
+A run printed through `build` carries two things a scanner uses:
+
+* a **QR code** in the footer, 9mm, saying which run and which page;
+* a `main.pages` file beside the PDF, mapping each page to the
+  student, skill and version that landed on it, and giving the
+  position of the grading box, the id field and the name.
+
+Between them a marked paper can be matched back to its student
+without anybody reading the page, which is what lets a shuffled,
+double-sided, partly blank stack of scans be sorted automatically.
+
+**A document you wrote by hand gets none of this, and pays nothing
+for it.** The whole mechanism is switched on by `\setrunid`, which
+only `build` writes. Without it no file is opened, no code is drawn,
+and the compile is faster than it would have been before any of this
+existed.
+
+If you want the parts individually:
+
+```latex
+\usepackage[noid]{printit}     % no id field in the header
+\usepackage[nocode]{printit}   % never draw the footer code
+```
+
+or `\cipidfalse` and `\cipcodeonfalse` anywhere in the preamble. The
+id field is on by default even for a hand-written page, because a row
+of boxes to write a student number into is worth having either way.
 
 ## How a skill becomes a page
 
@@ -204,11 +247,19 @@ Builds land in `~/CheckItPrintIt/<course>/<title>/`, or wherever `-o` says. Set
 
 ```
 main.tex                 the assembled document
+main.pdf                 and what it compiled to
+main.pages               what landed on each page, written by TeX
+manifest.toml            what this run drew, so it can be reprinted exactly
 printit.sty              the theme
 Skill Descriptions.tex   generated from bank.xml
 W1/W1 v451.tex           one file per skill per version
 assets/                  figures
 ```
+
+`main.pages` is the one a scanner needs. A skill can run to two
+sheets, so which page a paper landed on is not known until TeX has
+broken the pages -- TeX writes it as it ships them. Keep it with the
+PDF.
 
 Everything the document needs is in there. `pdflatex main.tex` builds it with no
 tool, no bank, and no `TEXINPUTS`, which means you can archive it, audit it, or

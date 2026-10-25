@@ -405,14 +405,15 @@ def chart_for(tmp_path, names):
 
 
 class TestAssembly:
-    def build(self, bank_dir, tmp_path, publication=None, roster=None, chart=None):
+    def build(self, bank_dir, tmp_path, publication=None, roster=None,
+              chart=None, run_id=None):
         publication = publication or make_publication(bank_dir)
         roster = roster or two_students()
         chart = chart if chart is not None else chart_for(tmp_path, ["Ada", "Bo"])
         out = str(tmp_path / "out")
         source, _ = theme.load(bank_dir)
         report = assemble_mod.assemble(publication, roster, chart, out, source,
-                                       rng=random.Random(1))
+                                       rng=random.Random(1), run_id=run_id)
         return out, report
 
     def test_a_dropped_student_prints_nothing(self, bank_dir, tmp_path):
@@ -507,14 +508,28 @@ class TestAssembly:
         assert r"\setname{Ada}" in main
         assert r"\setname{Cy}" not in main
 
-    def test_the_run_seed_is_written_once(self, bank_dir, tmp_path):
-        """Design 14.5. Every page's code carries it, and it prints
-        after the version as `v715-1513199331`, so a sheet found on
-        the floor in March can be traced to its run by eye."""
+    def test_a_run_with_a_record_declares_its_number(self, bank_dir,
+                                                     tmp_path):
+        """Design 14.5/14.12. `\\setrunid` is the one line that tells
+        the theme this is a printit run: it opens the page index and
+        switches on the footer code. Once, because it opens a file."""
+        out, _ = self.build(bank_dir, tmp_path, run_id=7)
+        main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
+        assert main.count(r"\setrunid") == 1
+        assert r"\setrunid{7}" in main
+
+    def test_a_run_with_no_record_declares_nothing(self, bank_dir, tmp_path):
+        """No course, or --no-record, means no number -- and then the
+        line is left out entirely rather than written as 0.
+
+        A zero would name a run that was never recorded, and the
+        theme would go on to print codes keyed to it. A code that
+        looks readable and resolves to nothing is worse than no code:
+        it is only discovered at the scanner, by which time the paper
+        has been written on."""
         out, _ = self.build(bank_dir, tmp_path)
         main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
-        assert main.count(r"\setrunseed") == 1
-        assert re.search(r"\\setrunseed\{\d+\}", main)
+        assert r"\setrunid" not in main
 
     def test_every_student_block_sets_an_id(self, bank_dir, tmp_path):
         """The header draws boxes from it, and the footer code carries
@@ -555,10 +570,10 @@ class TestAssembly:
         missing there is a build that dies at the first page. It did:
         the first real build against the live bank failed on an
         undefined `\setrunseed`."""
-        out, _ = self.build(bank_dir, tmp_path)
+        out, _ = self.build(bank_dir, tmp_path, run_id=7)
         main = open(os.path.join(out, "main.tex"), encoding="utf-8").read()
         sty = open(os.path.join(out, "printit.sty"), encoding="utf-8").read()
-        for macro in ("setrunseed", "setsid"):
+        for macro in ("setrunid", "setsid"):
             assert "\\" + macro in main, f"main.tex never calls {macro}"
             assert "newcommand{\\" + macro + "}" in sty, \
                 f"the theme beside it does not define {macro}"

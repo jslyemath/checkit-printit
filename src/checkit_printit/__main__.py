@@ -981,12 +981,18 @@ def import_csv(csv_path, out):
 @click.option("--codes/--no-codes", default=None,
               help="The scanning code in the footer. Overrides the "
                    "publication for this build only.")
-def build(pub_path, out, do_compile, seed, preview, replay, ids, codes):
+@click.option("--record/--no-record", "keep_record", default=True,
+              help="Note the run in the course's print record. --no-record "
+                   "is for a throwaway build: nothing is written to the "
+                   "record, and the papers carry no scanning code, because "
+                   "there would be nothing to look one up in.")
+def build(pub_path, out, do_compile, seed, preview, replay, ids, codes,
+          keep_record):
     """Assemble the class set, and compile it."""
     try:
         result = runner.run(pub_path, out=out, do_compile=do_compile,
                             seed=seed, preview=preview, replay=replay,
-                            ids=ids, codes=codes)
+                            ids=ids, codes=codes, keep_record=keep_record)
     except runner.BuildError as exc:
         raise click.ClickException(str(exc))
 

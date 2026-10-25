@@ -7,7 +7,7 @@
 %   \usepackage[nocode]{printit}   never draw the footer code
 %
 % Neither is needed for an ordinary hand-written assessment. The code
-% already draws nothing unless \setrunseed has been called, which
+% already draws nothing unless \setrunid has been called, which
 % only printit does, so `nocode` is for the case where printit built
 % the run and the symbol is still not wanted. The id field *is* on by
 % default, because a line of boxes to write a student number into is
@@ -335,9 +335,12 @@ title=#2,#1}
 %
 % Three marks, and the reason for each:
 %
-%   \runseed   the run this sheet belongs to, printed after the version
-%              as `v715-1513199331`. A loose sheet can then be traced to
-%              its run by eye, with no equipment.
+%   \runid     which run this sheet belongs to. A small number the
+%              print record allocates, one per run per course, and
+%              never reuses. **Not the draw seed**: a replay carries
+%              the replayed run's seed on purpose, so two runs
+%              routinely share one and a seed cannot say which run a
+%              sheet came from.
 %   \cipsid    the student id, when the run prints names. Blank runs
 %              leave it unset and the header prints empty boxes to write
 %              in -- which is what lets an unnamed spare be graded.
@@ -349,12 +352,12 @@ title=#2,#1}
 % a build must not depend on something the instructor has to install.
 \usepackage{qrcode}
 
-\newcommand{\runseed}{0}
-% Also stamps the page index, because this is the moment the run seed
-% becomes known -- the stream is opened when the package loads, which
-% is before the document body has said which run this is.
-\newcommand{\setrunseed}[1]{%
-  \renewcommand{\runseed}{#1}%
+\newcommand{\runid}{0}
+% The one command that says "this document is a printit run". It
+% opens the page index, stamps it, and switches on everything that
+% writes to it -- see the note on \cipindex above.
+\newcommand{\setrunid}[1]{%
+  \renewcommand{\runid}{#1}%
   \ifcipindex\else
     \immediate\openout\cipindex=\jobname.pages\relax
     \global\cipindextrue
@@ -389,7 +392,7 @@ title=#2,#1}
 % ---------------------------------------------------------------------
 % The page index: what the code's key actually resolves to.
 %
-% The footer code says `C1-<runseed>-<page>` and nothing else, on the
+% The footer code says `C1-<runid>-<page>` and nothing else, on the
 % stated grounds that run plus page is a unique key and everything else
 % is "a lookup in that run's manifest". It was not: `manifest.toml`
 % records which (skill, version, seed) were *drawn*, with no students
@@ -402,7 +405,7 @@ title=#2,#1}
 % once TeX has broken the pages. The document therefore writes the
 % table itself, one line per page, as it ships them.
 %
-%   run*<runseed>
+%   run*<runid>
 %   <page>*<kind>*<sid>*<slug>*<vseed>*<sheet>
 %
 % `*` separates, as it did in the first payload, because `-` occurs in
@@ -422,14 +425,14 @@ title=#2,#1}
 %
 % No space before any `*`: a control sequence name ends at the first
 % non-letter, so `\thepage*` is already two tokens.
-% The stream is opened by \setrunseed, not here, and `\ifcipindex`
+% The stream is opened by \setrunid, not here, and `\ifcipindex`
 % is false until it is. A hand-written document never calls
-% \setrunseed -- it is printit's way of saying "this is a run" --
+% \setrunid -- it is printit's way of saying "this is a run" --
 % so it pays for none of this: no file appears beside its PDF, no
 % line is written per page, and \cipmark becomes a pass-through
 % that does not measure anything.
 %
-% Gating on \setrunseed rather than on a package option means
+% Gating on \setrunid rather than on a package option means
 % there is nothing to remember and nothing to get wrong.
 \newwrite\cipindex
 \newif\ifcipindex
@@ -534,29 +537,30 @@ title=#2,#1}
 % ---------------------------------------------------------------------
 % The payload: the least that identifies a sheet.
 %
-%   C1-1513199331-347
+%   C1-7-347
 %
-% **`runseed` plus `page` is already a unique key.** A run numbers its
-% pages once, so the skill, the version seed, the sheet-within-skill
-% and the student are every one of them a lookup in that run's
-% manifest. Putting any of them in the code buys nothing a scanner
-% needs and costs modules.
+% **`runid` plus `page` is a unique key.** A run numbers its pages
+% once, so the skill, the version seed, the sheet-within-skill and
+% the student are every one of them a lookup in that run's page
+% index. Putting any of them in the code buys nothing a scanner needs
+% and costs modules.
 %
-% `C1` is the format version, and is nearly free: 17 characters still
-% fits a version-1 symbol, which holds 20 bytes at level M. Without it
-% a later change of fields would be unreadable rather than merely
-% different.
+% `C1` is the format version. Without it a later change of fields
+% would be unreadable rather than merely different -- and Scans will
+% meet codes printed by a theme that no longer exists.
 %
-% Seventeen characters is 21 modules. The 47-character feedback URL
-% this replaced was 33 -- and because a symbol's physical size is set
-% by its module count, that is the whole difference between a 15mm
-% square and an 11mm one at the same scan quality. A code that also
-% took students to feedback was simply not worth 4mm of paper.
+% The payload was `C1-<seed>-<page>` until 2026-10-25 and 17
+% characters long, which exactly fills a version-1 symbol at level L.
+% A run number is 1 to 3 digits where a seed is 10, so the longest
+% realistic payload is now about 11 characters -- which fits level
+% **M** in the same 21 modules. Same size on the page, 15% of the
+% symbol recoverable instead of 7%, and a footer corner is where
+% staples and folds live.
 %
-% What is given up: a loose sheet whose run folder is gone says
+% What is given up: a loose sheet whose course record is gone says
 % nothing about itself. The skill is printed beside the code in words
 % for exactly that case.
-\newcommand{\cippayload}{C1-\runseed-\thepage}
+\newcommand{\cippayload}{C1-\runid-\thepage}
 
 % --- Updated Skill macros ---
 \newcommand\currentskill{}
@@ -650,7 +654,7 @@ title=#2,#1}
   % `\ifcipindex` is the important one. The code is a key into the
   % page index, so with no index there is nothing for it to key into:
   % it would carry `C1-0-17`, naming run zero, which does not exist.
-  % A hand-written assessment that never calls \setrunseed therefore
+  % A hand-written assessment that never calls \setrunid therefore
   % prints no symbol at all, without having to ask for that.
   %
   % It is also the most expensive thing on the page -- qrcode.sty does
@@ -667,22 +671,23 @@ title=#2,#1}
   % A scanner wants maximum contrast; light cyan on white is close to
   % the worst case a decoder can be handed.
   %
-  % 9mm at level **L**, which is a deliberate pair and not two
+  % 9mm at level **M**, which is a deliberate pair and not two
   % independent settings.
   %
   % A version-1 symbol is 21 modules and holds 17 bytes at level L
-  % but only 14 at level M. `\cippayload` is exactly 17, so at M it
-  % would spill to version 2 -- 25 modules -- and since the height is
-  % fixed, more modules means each one is *smaller*. L is therefore
-  % not a concession: it buys a coarser symbol, and a coarser symbol
-  % survives a worse scan than a finer one with more correction in
-  % it. What is given up is damage tolerance: 7% of the symbol may be
-  % lost rather than 15%, and a footer corner is where staples and
-  % folds live.
+  % but only 14 at level M. The payload was 17 while it carried a
+  % ten-digit seed, so L was forced. A run number is 1 to 3 digits,
+  % which brings it to about 11 -- inside M, in the same 21 modules.
   %
-  % **If `\cippayload` ever grows past 17 characters this silently
-  % falls to version 2 and the modules shrink.** Re-measure after any
-  % change to it.
+  % **If `\cippayload` ever grows past 14 characters this silently
+  % falls to version 2, the modules shrink, and the symbol stops
+  % reading at 9mm.** Re-measure after any change to it;
+  % `test_the_symbol_is_still_one_version_1` holds the line.
+  %
+  % Measured at level M on second-generation copies: 9mm reads
+  % 150/150, the same as L. The extra correction is not buying
+  % legibility, which is set by module size -- it is buying damage
+  % tolerance for the staple.
   %
   % 9mm, not 11, and the 2mm came off the back of a measurement
   % rather than a rule of thumb. The old 11mm was carried over from a
@@ -722,7 +727,7 @@ title=#2,#1}
   % that looks right is better than computing something that should.
   \begin{tikzpicture}[baseline=-0.7ex]
     \node[inner sep=0pt, outer sep=0pt] {\textcolor{black}{%
-      \qrcode[height=9mm, level=L, nolink]{\cippayload}}};
+      \qrcode[height=9mm, level=M, nolink]{\cippayload}}};
   \end{tikzpicture}%
   \fi\fi}
 
