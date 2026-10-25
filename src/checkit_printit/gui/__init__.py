@@ -18,6 +18,7 @@ the background. A random token is minted per run, injected into the page, and
 required on every API call as a header a cross-origin form cannot set.
 """
 
+import base64
 import dataclasses
 import http.server
 import json
@@ -27,6 +28,7 @@ import secrets
 import socketserver
 import sys
 import threading
+import time
 import traceback
 import urllib.parse
 import webbrowser
@@ -37,6 +39,7 @@ from .. import provision as provision_mod
 from .. import room as room_mod
 from .. import publication as pub_mod
 from .. import record as record_mod
+from .. import scans as scans_mod
 from .. import responses as responses_mod
 from .. import clasp as clasp_mod
 from .. import boilerplate as boilerplate_mod
@@ -1578,8 +1581,188 @@ def api_run_reuse(course, body):
     return {"draft": draft, "from": run_id}
 
 
+# --------------------------------------------------------------- scans ----
+
+class Scanning:
+    """One read at a time, in a thread, because it takes minutes.
+
+    Several hundred pages, each rendered and searched for a code. A
+    request that did that inline would hold the connection open long
+    enough for the page to look hung -- the same reason the Google
+    sign-in runs this way.
+
+    One at a time, and deliberately: two reads of the same stack
+    would race for the same scratch folder, and there is no honest
+    reason to start a second before the first has been looked at.
+    """
+
+    def __init__(self):
+        self.running = False
+        self.done = 0
+        self.total = 0
+        self.result = None
+        self.error = ""
+        self.started_at = 0.0
+
+    def status(self):
+        return {"running": self.running, "done": self.done,
+                "total": self.total, "result": self.result,
+                "error": self.error}
+
+    def start(self, course, paths):
+        if self.running:
+            raise GuiError("a stack is already being read.")
+        self.running, self.done, self.total = True, 0, 0
+        self.result, self.error = None, ""
+        self.started_at = time.time()
+        record_path = course.file("record")
+
+        def progress(done, total):
+            self.done, self.total = done, total
+
+        def run():
+            try:
+                batch = scans_mod.read_pdfs(paths, record_path,
+                                            on_page=progress)
+                self.result = _batch_json(batch, record_path)
+            except (scans_mod.ScanError, OSError) as exc:
+                self.error = str(exc)
+            except Exception as exc:                      # noqa: BLE001
+                traceback.print_exc()
+                self.error = f"the read failed: {exc}"
+            finally:
+                self.running = False
+
+        threading.Thread(target=run, daemon=True).start()
+
+
+SCANNING = Scanning()
+
+#: What each status means, in the instructor's terms rather than the
+#: reader's. Shown beside the count, because "unreadable" on its own
+#: does not say what to do about it.
+STATUS_WORDS = {
+    "placed": ("Placed", "matched to a student and a skill"),
+    "blank": ("Blank", "no code and no ink -- a padding sheet or a "
+                       "separator, and nothing to do"),
+    "unreadable": ("Could not read", "there is ink on these but no code "
+                                     "a scanner could find"),
+    "foreign": ("Not ours", "a barcode from something else"),
+    "unknown-run": ("Unknown run", "one of our codes, naming a run this "
+                                   "course has no record of"),
+    "unknown-page": ("Unknown page", "the run is here and does not have "
+                                     "that page -- the folder was rebuilt "
+                                     "after this was printed"),
+}
+
+
+def _batch_json(batch, record_path):
+    """The batch as the page wants it.
+
+    Names are resolved here rather than in `scans`: the reader deals
+    in student ids, because an id is what a paper carries, and only
+    the course knows what the id is called.
+    """
+    resolve = scans_mod.index_reader(record_path)
+    names = record_mod.names_printed(record_path)
+
+    counts = {}
+    for sheet in batch.sheets:
+        counts[sheet.status] = counts.get(sheet.status, 0) + 1
+
+    runs = []
+    for run_no in batch.runs:
+        row = record_mod.run_by_no(record_path, run_no)
+        index = resolve(run_no)
+        runs.append({
+            "no": run_no,
+            "title": (row or {}).get("title", ""),
+            "date": (row or {}).get("date", ""),
+            "pages": len(index.pages) if index else 0,
+        })
+
+    sheets = []
+    for sheet in batch.sheets:
+        entry = sheet.entry
+        sheets.append({
+            "file": os.path.basename(sheet.source),
+            "at": sheet.at,
+            "status": sheet.status,
+            "run": sheet.run_no,
+            "page": sheet.page,
+            "skill": entry.slug if entry else "",
+            "kind": entry.kind if entry else "",
+            "sid": entry.sid if entry else "",
+            "name": names.get(entry.sid, "") if entry and entry.sid else "",
+            "gradable": sheet.gradable,
+            "code": sheet.code,
+        })
+
+    missing = []
+    for run_no, pages in batch.missing(resolve).items():
+        index = resolve(run_no)
+        for page in pages:
+            entry = index.get(page)
+            missing.append({
+                "run": run_no, "page": page,
+                "skill": entry.slug, "kind": entry.kind,
+                "sid": entry.sid,
+                "name": names.get(entry.sid, "") if entry.sid else "",
+            })
+
+    duplicates = [{"run": run, "page": page,
+                   "where": [f"{os.path.basename(s.source)} p{s.at}"
+                             for s in group]}
+                  for (run, page), group in sorted(batch.duplicates.items())]
+
+    return {"counts": counts, "words": STATUS_WORDS, "runs": runs,
+            "sheets": sheets, "missing": missing, "duplicates": duplicates,
+            "gradable": sum(1 for s in batch.sheets if s.gradable)}
+
+
+def api_scan_start(course, body):
+    """Take the uploaded PDFs and start reading them.
+
+    The files arrive base64 in the request rather than as paths. A
+    path would mean typing one, and the stack arrives in Downloads
+    straight off the copier's email -- a file picker is the gesture
+    everybody already has. They are written into the course so a read
+    can be repeated without asking for them again.
+    """
+    files = body.get("files") or []
+    if not files:
+        raise GuiError("no files were chosen.")
+
+    folder = os.path.join(course.path, "scans")
+    os.makedirs(folder, exist_ok=True)
+    paths = []
+    for item in files:
+        name = os.path.basename(str(item.get("name") or "scan.pdf"))
+        if not name.lower().endswith(".pdf"):
+            raise GuiError(f"{name} is not a PDF.")
+        try:
+            blob = base64.b64decode(item.get("data") or "", validate=True)
+        except (ValueError, TypeError):
+            raise GuiError(f"{name} did not arrive intact.") from None
+        if not blob.startswith(b"%PDF"):
+            raise GuiError(f"{name} does not look like a PDF.")
+        path = os.path.join(folder, name)
+        with open(path, "wb") as f:
+            f.write(blob)
+        paths.append(path)
+
+    SCANNING.start(course, paths)
+    return {"started": True, "files": [os.path.basename(p) for p in paths]}
+
+
+def api_scan_status(_course, _body):
+    return SCANNING.status()
+
+
 ROUTES = {
     "/api/course": api_course,
+    "/api/scan/start": api_scan_start,
+    "/api/scan/status": api_scan_status,
     "/api/roster": api_roster,
     "/api/roster/save": api_roster_save,
     "/api/roster/drop": api_roster_drop,

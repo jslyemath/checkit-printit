@@ -239,6 +239,29 @@ def runs(path):
         db.close()
 
 
+def names_printed(path):
+    """`{sid: name}`, the most recent name printed for each student.
+
+    The record rather than the roster, because this is for reading a
+    paper back: what the sheet in your hand says is the name it was
+    printed with, and a student who changed their name mid-term would
+    otherwise be shown under a name that is not on the page.
+
+    Most recent wins -- a run prints one name per student, and the
+    later run is the better guess for a paper whose run is unknown.
+    """
+    if not os.path.isfile(path):
+        return {}
+    db = connect(path)
+    try:
+        return {r["sid"]: r["name"] for r in db.execute(
+            "SELECT p.sid, p.name FROM printed p JOIN run r"
+            " ON r.run_id = p.run_id WHERE p.sid != ''"
+            " ORDER BY r.built ASC")}
+    finally:
+        db.close()
+
+
 def run_detail(path, run_id):
     """One run: its own row, and what it printed, per skill.
 
