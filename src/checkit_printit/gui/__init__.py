@@ -1112,27 +1112,35 @@ def api_print(course, _body):
                 descriptions[slug] = ""
                 titles[slug] = slug
 
-    # The letter each seat gives, so the table can show what a student will
-    # get before anything is drawn. Read from the chart rather than guessed:
-    # it comes from a seat's position within its table, and a lone seat or a
-    # table of three is not the same arithmetic as a table of four.
-    seat_version, versions_available = {}, []
+    # The chart, for two things: the order the stack comes out in, and
+    # the letter each seat gives. Both read from the file the build
+    # reads, through the call the build makes.
+    chart, versions_available, seating_note = None, [], ""
     seating_path = course.file("seating")
     if os.path.isfile(seating_path):
         try:
             chart = seating_mod.load(seating_path)
             versions_available = list(chart.versions)
-            for seat in chart.seats:
-                if str(seat.name).strip():
-                    seat_version[seat.name] = seat.version
-        except (OSError, seating_mod.SeatingError):
-            pass
+        except (OSError, seating_mod.SeatingError) as exc:
+            seating_note = str(exc)
+
+    # Seating order, which is print order, with anyone unseated after
+    # them -- exactly what `build_handouts` does, by the same call. A
+    # chart that cannot be read leaves the roster's own order, and
+    # says why rather than pretending.
+    live = [s for s in (people or []) if not s.dropped]
+    where = {roster_mod.key_of(s): i for i, s in enumerate(people or [])}
+    if chart is not None:
+        try:
+            seated, unseated = chart.order(live)
+            live = list(seated) + list(unseated)
+        except seating_mod.SeatingError as exc:
+            seating_note = str(exc)
 
     students = []
     if people is not None:
-        for i, s in enumerate(people):
-            if s.dropped:
-                continue
+        for s in live:
+            i = where.get(roster_mod.key_of(s), -1)
             key = roster_mod.key_of(s)
             students.append({
                 "index": i, "key": key, "name": s.name,
@@ -1147,7 +1155,12 @@ def api_print(course, _body):
                 "choseFor": (s.chose_for.isoformat() if s.chose_for else ""),
                 "override": list(draft["overrides"].get(key, []))
                             if key in draft["overrides"] else None,
-                "seatVersion": seat_version.get(s.name, ""),
+                # From the seat the chart gave this student, not
+                # from a lookup by name: the chart matches on id
+                # first *because names change*, and a renamed
+                # student was keeping their seat in the build while
+                # losing their letter here.
+                "seatVersion": getattr(s, "version", "") or "",
                 "version": draft["versions"].get(key, ""),
             })
 
@@ -1180,6 +1193,9 @@ def api_print(course, _body):
         "assessment": _assessment_brief(course),
         "jobFolder": printjob_mod.folder_for(draft),
         "versionsAvailable": versions_available,
+        # Empty when the chart was read. Anything else means the table
+        # is in roster order and the paper will not be.
+        "seatingNote": seating_note,
         # So "Reset this print job" is an ordinary edit that Discard can
         # undo, rather than a second way to write the file.
         "defaults": dict(printjob_mod.DEFAULTS),

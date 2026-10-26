@@ -84,7 +84,40 @@ class Publication:
 
     @property
     def full_title(self):
+        """Title and date, for naming a folder and a run.
+
+        ISO, because this is what the output folder and the print
+        record's `run_id` are called: it sorts, and a slash is not a
+        character a folder may contain. What *prints* is
+        `printed_title`.
+        """
         return " ".join(p for p in (self.title, self.date) if p).strip()
+
+    @property
+    def short_date(self):
+        """`2026-10-23` as `10/23`, for the page.
+
+        Anything that is not an ISO date is handed back untouched --
+        a job may carry "Week 4" or nothing, and a date field is not
+        a promise of a format.
+        """
+        parts = str(self.date).split("-")
+        if len(parts) == 3 and all(p.isdigit() for p in parts):
+            _, month, day = parts
+            return f"{int(month)}/{int(day)}"
+        return str(self.date)
+
+    @property
+    def printed_title(self):
+        """What goes on the paper: the title and `m/d`.
+
+        Separate from `full_title` because the year is worth having
+        in a folder name and is dead weight in a footer that also
+        holds the code, the version and the skill -- the instructor
+        had taken to typing "SC Redo 10/23" by hand to get it.
+        """
+        return " ".join(p for p in (self.title, self.short_date)
+                        if p).strip()
 
 
 def _course_bank(name):
