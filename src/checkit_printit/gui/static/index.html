@@ -764,15 +764,6 @@
            are the reason to open this tab at all. Missing comes
            first: a paper nobody can find is the one nobody chases,
            because the student it belonged to does not complain. -->
-      <div id="scan-missing" hidden>
-        <h3>Papers you did not scan</h3>
-        <p class="muted">These were printed for a student, and they are
-          not in what you just gave me. Either the student was away, or
-          the sheet stuck to another one going through the feeder.
-          Worth finding before you grade.</p>
-        <div class="scroller"><table id="scan-missing-table"></table></div>
-      </div>
-
       <div id="scan-dupes" hidden>
         <h3>Pages that went through twice</h3>
         <p class="muted">The same sheet of paper turned up more than
@@ -782,10 +773,48 @@
         <div class="scroller"><table id="scan-dupes-table"></table></div>
       </div>
 
-      <h3 id="scan-sheets-head">Everything in the stack</h3>
-      <p class="muted">One line per page, in the order the copier sent
-        them.</p>
-      <div class="scroller"><table id="scan-sheets"></table></div>
+      <!-- The review. One row per paper, not a student-by-skill
+           grid: on a redo each student picks one or two skills out of
+           fourteen, so the grid would be 85% empty and the crops
+           would be scattered through the gaps. A list is dense
+           whatever the run looks like, and review is a thing you work
+           down rather than navigate. -->
+      <div id="scan-review" hidden>
+        <header class="pagehead">
+          <h3>Check the marking</h3>
+          <span class="spacer"></span>
+          <span id="review-count" class="sec-count"></span>
+        </header>
+        <p class="muted">Each paper with the actual square off the
+          page beside it, so you are agreeing with the paper and not
+          with my guess. Change anything that is wrong.</p>
+        <p class="warnline" id="review-unsaved">Nothing here is saved
+          yet &mdash; there is nowhere for it to go until attempts and
+          passes are recorded, which is the next thing being built.
+          Reloading this page loses whatever you have decided.</p>
+
+        <div id="review-asks" hidden>
+          <div class="review-head">
+            <strong id="review-asks-count"></strong>
+            <span class="spacer"></span>
+            <button id="review-accept" class="btn" type="button"></button>
+          </div>
+          <div id="review-asks-rows" class="review-rows"></div>
+        </div>
+
+        <details id="review-rest">
+          <summary id="review-rest-head"></summary>
+          <div id="review-rest-rows" class="review-rows"></div>
+        </details>
+      </div>
+
+      <details id="scan-sheets-wrap">
+        <summary id="scan-sheets-head">Everything in the stack</summary>
+        <p class="muted">One line per page, in the order the copier
+          sent them &mdash; including the blanks and anything I could
+          not place.</p>
+        <div class="scroller"><table id="scan-sheets"></table></div>
+      </details>
     </div>
   </section>
 

@@ -2001,6 +2001,154 @@ function scanOutcome(status) {
   return SCAN_OUTCOME[status] || { short: status, sentence: n => `${n} ${status}` };
 }
 
+/* The review grid.
+ *
+ * One row per paper. The crop is the point of it: the instructor is
+ * agreeing with a photograph of his own tick, not with a number, and
+ * a cell that showed only a verdict would be asking him to trust the
+ * reader rather than check it.
+ *
+ * Uncertain first and the rest folded away, because the reader gets
+ * ticks right and flags question marks -- so the pile that needs a
+ * person is small and specific, and the rest is there to be looked
+ * through rather than worked through.
+ */
+let reviewRows = [];
+let reviewOutcomes = [];
+
+function reviewRow(row) {
+  const el = document.createElement("div");
+  el.className = "review-row";
+  el.dataset.id = row.id;
+
+  const who = document.createElement("div");
+  who.className = "review-who";
+  const name = document.createElement("div");
+  name.className = "review-name";
+  name.textContent = row.name || row.sid || "(no name)";
+  const skill = document.createElement("div");
+  skill.className = "muted";
+  skill.textContent = row.skill;
+  who.append(name, skill);
+
+  const shot = document.createElement("div");
+  shot.className = "review-shot";
+  if (row.crop) {
+    const img = document.createElement("img");
+    img.src = row.crop;
+    img.alt = `the grading box on ${row.name || row.sid}'s ${row.skill}`;
+    img.loading = "lazy";
+    shot.appendChild(img);
+  } else {
+    const gap = document.createElement("span");
+    gap.className = "muted review-nocrop";
+    // Said plainly, because the next thing he does depends on it:
+    // this is a paper he may still be holding.
+    gap.textContent = "no paper came back";
+    shot.appendChild(gap);
+  }
+
+  const picks = document.createElement("div");
+  picks.className = "review-picks";
+  picks.setAttribute("role", "radiogroup");
+  for (const outcome of reviewOutcomes) {
+    // "Did not sit it" is only an answer for a paper that is not
+    // here. A sheet that came back was sat, whatever is on it.
+    if (outcome.id === "absent" && row.scanned) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "review-pick";
+    button.dataset.outcome = outcome.id;
+    button.textContent = outcome.label;
+    button.title = outcome.mark;
+    button.setAttribute("role", "radio");
+    button.onclick = () => setOutcome(row.id, outcome.id);
+    picks.appendChild(button);
+  }
+
+  el.append(who, shot, picks);
+  paintRow(el, row);
+  return el;
+}
+
+function paintRow(el, row) {
+  el.classList.toggle("undecided", !row.outcome);
+  for (const button of el.querySelectorAll(".review-pick")) {
+    const on = button.dataset.outcome === row.outcome;
+    button.classList.toggle("on", on);
+    button.setAttribute("aria-checked", on ? "true" : "false");
+  }
+}
+
+function setOutcome(id, outcome) {
+  const row = reviewRows.find(r => r.id === id);
+  if (!row) return;
+  // Clicking the one already chosen clears it, which is the only way
+  // back to "I have not decided" without reloading the stack.
+  row.outcome = row.outcome === outcome ? "" : outcome;
+  row.touched = true;
+  for (const el of document.querySelectorAll(
+      `.review-row[data-id="${CSS.escape(id)}"]`)) {
+    paintRow(el, row);
+  }
+  countReview();
+}
+
+function countReview() {
+  const undecided = reviewRows.filter(r => !r.outcome).length;
+  const done = reviewRows.length - undecided;
+  document.getElementById("review-count").textContent =
+    `${done} of ${reviewRows.length} decided`;
+  const accept = document.getElementById("review-accept");
+  if (accept) accept.disabled = !undecided;
+}
+
+function renderReview(data) {
+  reviewRows = (data.review || []).map(r => ({ ...r, touched: false }));
+  reviewOutcomes = data.outcomes || [];
+  const box = document.getElementById("scan-review");
+  box.hidden = !reviewRows.length;
+  if (!reviewRows.length) return;
+
+  const asks = reviewRows.filter(r => !r.outcome);
+  const rest = reviewRows.filter(r => r.outcome);
+
+  const asksBox = document.getElementById("scan-review")
+    .querySelector("#review-asks");
+  asksBox.hidden = !asks.length;
+  if (asks.length) {
+    document.getElementById("review-asks-count").textContent =
+      asks.length === 1 ? "1 paper needs you"
+                        : `${asks.length} papers need you`;
+    const accept = document.getElementById("review-accept");
+    accept.textContent = rest.length === 1
+      ? "Agree with the other one"
+      : `Agree with the other ${rest.length}`;
+    // Agreeing is not saving. It marks the readings the instructor
+    // has not argued with as decided; the saving is one action at
+    // the end, and it is not built yet.
+    accept.onclick = () => {
+      for (const row of reviewRows) if (row.outcome) row.agreed = true;
+      countReview();
+      accept.disabled = true;
+    };
+    const rows = document.getElementById("review-asks-rows");
+    rows.innerHTML = "";
+    for (const row of asks) rows.appendChild(reviewRow(row));
+  }
+
+  const restHead = document.getElementById("review-rest-head");
+  restHead.textContent = rest.length === 1
+    ? "The one I am sure about"
+    : `The ${rest.length} I am sure about`;
+  const restRows = document.getElementById("review-rest-rows");
+  restRows.innerHTML = "";
+  for (const row of rest) restRows.appendChild(reviewRow(row));
+  document.getElementById("review-rest").open = !asks.length;
+
+  countReview();
+}
+
 function renderScan(data) {
   document.getElementById("scan-result").hidden = false;
   const n = data.sheets.length;
@@ -2025,6 +2173,23 @@ function renderScan(data) {
 
   const counts = document.getElementById("scan-counts");
   counts.innerHTML = "";
+  // Said here rather than listed in a section of its own: the papers
+  // themselves are rows in the review below, and a table up here
+  // would be the same fact written twice.
+  if (data.missing.length) {
+    const li = document.createElement("li");
+    li.className = "chase";
+    const strong = document.createElement("strong");
+    strong.textContent = data.missing.length === 1
+      ? "1 paper was printed and never came back."
+      : `${data.missing.length} papers were printed and never came back.`;
+    const span = document.createElement("span");
+    span.className = "muted";
+    span.textContent = " They are at the top of the review below, "
+      + "where you can mark one by hand or say the student was away.";
+    li.append(strong, span);
+    counts.appendChild(li);
+  }
   for (const [status, count] of Object.entries(data.counts)) {
     const outcome = scanOutcome(status);
     const li = document.createElement("li");
@@ -2040,14 +2205,6 @@ function renderScan(data) {
     }
     counts.appendChild(li);
   }
-
-  const missing = document.getElementById("scan-missing");
-  missing.hidden = !data.missing.length;
-  if (data.missing.length)
-    rows(document.getElementById("scan-missing-table"),
-         ["Student", "Skill"],
-         data.missing.map(m => [m.name || m.sid || "(no name on it)",
-                                m.skill]));
 
   const dupes = document.getElementById("scan-dupes");
   dupes.hidden = !data.duplicates.length;
@@ -2081,6 +2238,8 @@ function renderScan(data) {
          if (manyRuns) line.push(s.run ?? "");
          return line;
        }));
+
+  renderReview(data);
 }
 
 function renderRuns() {
