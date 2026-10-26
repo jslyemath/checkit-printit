@@ -20,6 +20,7 @@ required on every API call as a header a cross-origin form cannot set.
 
 import base64
 import dataclasses
+import io
 import http.server
 import json
 import mimetypes
@@ -1623,7 +1624,8 @@ class Scanning:
         def run():
             try:
                 batch = scans_mod.read_pdfs(paths, record_path,
-                                            on_page=progress)
+                                            on_page=progress,
+                                            want=("box",))
                 self.result = _batch_json(batch, record_path)
             except (scans_mod.ScanError, OSError) as exc:
                 self.error = str(exc)
@@ -1702,6 +1704,8 @@ def _batch_json(batch, record_path):
     # two places to change it.
     return {"counts": counts, "runs": runs, "sheets": sheets,
             "missing": missing, "duplicates": duplicates,
+            "outcomes": OUTCOMES,
+            "review": _review_rows(batch, record_path, names),
             "gradable": sum(1 for s in batch.sheets if s.gradable)}
 
 
@@ -1742,6 +1746,94 @@ def api_scan_start(course, body):
 
 def api_scan_status(_course, _body):
     return SCANNING.status()
+
+
+#: What the instructor can say about one paper.
+#:
+#: His two marks are a tick and a `?`, and a box he has left alone is
+#: the third thing. `absent` is not a mark at all -- it is the answer
+#: for a paper that was printed and never came back, and it is kept
+#: apart from "not passed" because **an attempt is logged when a
+#: paper is graded, never when it is printed**. A student who was not
+#: there did not attempt anything.
+#:
+#: Hard-coded for now. 14.4 says states are configurable per course,
+#: because other instructors use other marks, and whatever the list
+#: becomes only the pass mark will export as a pass.
+OUTCOMES = [
+    {"id": "passed", "label": "Passed", "mark": "a tick"},
+    {"id": "queried", "label": "Query", "mark": "a ? beside the box"},
+    {"id": "failed", "label": "Not passed", "mark": "an empty box"},
+    {"id": "absent", "label": "Did not sit it", "mark": "no paper"},
+]
+
+#: What the reader's call suggests, before the instructor touches it.
+#: `unsure` suggests nothing on purpose: that is the whole point of
+#: it, and a default there would be the guess the reader declined to
+#: make.
+SUGGESTS = {"ticked": "passed", "empty": "failed", "unsure": ""}
+
+
+def _as_jpeg(image, quality=72):
+    """A crop, small enough to put in the page by the hundred.
+
+    JPEG and not PNG: 2KB against 9KB, and the whole run's crops go
+    into one response. Lossy is fine because nothing is measured
+    from this copy -- the reading was taken from the original, server
+    side, before it was ever encoded.
+    """
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", quality=quality)
+    return "data:image/jpeg;base64," + base64.b64encode(
+        buf.getvalue()).decode()
+
+
+def _review_rows(batch, record_path, names):
+    """One row per paper: what it is, what was read, what to crop.
+
+    Papers that never came back are rows too, with no crop. The
+    instructor asked for that and was right: a sheet that missed the
+    scanner is still a sheet he may be holding, and he should be able
+    to put the result in by hand rather than hunt for somewhere else
+    to do it.
+    """
+    resolve = scans_mod.index_reader(record_path)
+    rows = []
+    for sheet in batch.placed:
+        entry = sheet.entry
+        if entry.kind != "student":
+            continue
+        read = (scans_mod.measure(sheet.cuts["box"])
+                if "box" in sheet.cuts else None)
+        rows.append({
+            "id": f"{sheet.run_no}-{sheet.page}",
+            "run": sheet.run_no, "page": sheet.page,
+            "sid": entry.sid, "name": names.get(entry.sid, ""),
+            "skill": entry.slug, "scanned": True,
+            "crop": _as_jpeg(sheet.cuts["box"]) if "box" in sheet.cuts
+                    else "",
+            "read": (read or {}).get("call", ""),
+            "ink": (read or {}).get("inside", 0),
+            "beside": (read or {}).get("beside", 0),
+            "outcome": SUGGESTS.get((read or {}).get("call"), ""),
+        })
+
+    for run_no, pages in batch.missing(resolve).items():
+        index = resolve(run_no)
+        for page in pages:
+            entry = index.get(page)
+            rows.append({
+                "id": f"{run_no}-{page}",
+                "run": run_no, "page": page,
+                "sid": entry.sid, "name": names.get(entry.sid, ""),
+                "skill": entry.slug, "scanned": False, "crop": "",
+                "read": "", "ink": 0, "beside": 0, "outcome": "",
+            })
+
+    # By student, then skill: a student's papers belong together, and
+    # the instructor works down a class list.
+    rows.sort(key=lambda r: ((r["name"] or r["sid"]).lower(), r["skill"]))
+    return rows
 
 
 ROUTES = {

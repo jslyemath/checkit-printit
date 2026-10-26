@@ -1675,3 +1675,87 @@ body.hasbar.tall main { padding-bottom: 68px; }
   margin: var(--s4) 0 var(--s1);
   font-size: var(--t-base);
 }
+
+/* ---- the review -------------------------------------------------- */
+
+.review-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  margin: var(--s2) 0 var(--s4);
+}
+
+/* Three columns and not a table: the middle one holds a picture
+   whose height sets the row, and the right one is a group of
+   buttons. A table would make both of those fight the cell. */
+.review-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 14rem) auto 1fr;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  background: var(--panel);
+}
+.review-name { font-size: var(--t-base); }
+
+/* The crop sits on white whatever the app's theme is. It is a
+   photograph of paper, and paper is white -- on a dark background a
+   scan reads as a negative. */
+.review-shot {
+  background: #fff;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 2px;
+  min-width: 171px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Natural size. The crop is 171x120 as cut, and shrinking it
+   throws away detail on the only thing in the row that the
+   instructor is actually being asked to look at. Scaling it *up*
+   would only blur it -- for a bigger picture, scan at a higher
+   resolution. */
+.review-shot img { display: block; width: 171px; height: auto; }
+.review-nocrop { color: #8a8a8a; padding: 0 var(--s3); font-size: 13px; }
+
+.review-picks { display: flex; gap: var(--s1); flex-wrap: wrap; }
+.review-pick {
+  font: inherit;
+  font-size: var(--t-sm);
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.review-pick:hover { border-color: var(--border-strong, var(--line)); }
+.review-pick.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent, #0b1f14);
+}
+
+/* A row nobody has decided yet is marked on its edge rather than
+   coloured all over: the thing being looked at is the crop, and a
+   tinted row would fight it. */
+.review-row.undecided { box-shadow: inset 3px 0 0 var(--warn); }
+
+.review-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-top: var(--s3);
+}
+#review-rest > summary, #scan-sheets-wrap > summary {
+  cursor: pointer;
+  font-size: var(--t-base);
+  margin: var(--s4) 0 var(--s1);
+}
