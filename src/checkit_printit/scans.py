@@ -288,8 +288,15 @@ def placement(anchor, scan_corners):
         if page_len <= 0:
             continue
         scale += scan_len / page_len
-        angle += (math.atan2(dy - cy, dx - cx)
-                  - math.atan2(by - ay, bx - ax))
+        # Wrapped into (-pi, pi] before it is added in. The two
+        # diagonals of one turn can come out as +90 and -270
+        # degrees, which are the same angle and average to -90 -- a
+        # quarter turn the wrong way. A sheet off a feeder is never
+        # more than a few degrees out, so this never bit; it was
+        # waiting for the first page somebody fed in sideways.
+        turn = (math.atan2(dy - cy, dx - cx)
+                - math.atan2(by - ay, bx - ax))
+        angle += (turn + math.pi) % (2 * math.pi) - math.pi
         n += 1
     if not n:
         return None
@@ -303,35 +310,171 @@ def placement(anchor, scan_corners):
     return carry
 
 
-def cut_out(image, mark, anchor, carry, pad=0.3, size=120):
-    """The piece of the scan where `mark` ended up, straightened.
+#: How much room to take around a mark, as a fraction of its own
+#: width, going (left, top, right, bottom).
+#:
+#: Not the same on every side, because the two marks the instructor
+#: uses do not sit in the same place. A check "whose tail comes out
+#: past the box" needs room above and to the right; a `?` is written
+#: **beside** the box, to its right, and a crop that stops at the
+#: rectangle does not contain it at all. An empty box and a box with
+#: a question mark next to it are different answers, and only one of
+#: them can be read off a crop that leaves the mark outside.
+#:
+#: Left is the tight side: the skill slug is printed there, half an
+#: em away, and there is nothing to be gained by taking more of it.
+PAD = (0.22, 0.45, 1.05, 0.38)
 
-    `pad` is how much of the mark's own width to take on every side.
-    The instructor's tick comes out past the box on purpose -- "a
-    check whose tail comes out past the box" -- so a crop tight to
-    the rectangle would cut off the part he draws deliberately.
+
+def cut_out(image, mark, anchor, carry, pad=PAD, height=120):
+    """The piece of the scan where `mark` ended up, straightened.
 
     Straightened by mapping the four corners through `Image.QUAD`,
     which undoes the turn in the same step as the crop. Cropping an
     upright box around a turned rectangle would bring in whatever is
     beside it, and beside the grading box is the skill name.
+
+    The output keeps the crop's own shape rather than being forced
+    square -- with a wide pad to the right, a square output would
+    squash the box into an oval.
     """
     from PIL import Image
 
     left, top, right, bottom = mark.rect(anchor.dpi, anchor.page_height)
-    grow = (right - left) * pad
-    left, right = left - grow, right + grow
-    top, bottom = top - grow, bottom + grow
+    unit = right - left
+    left -= unit * pad[0]
+    top -= unit * pad[1]
+    right += unit * pad[2]
+    bottom += unit * pad[3]
+    size = (max(8, round(height * (right - left) / (bottom - top))), height)
     quad = []
     for x, y in ((left, top), (left, bottom), (right, bottom), (right, top)):
         quad.extend(carry(x, y))
-    # `fillcolor` white, because a box near the edge of a skewed sheet
-    # maps to a quad that runs off the scan, and the default fill is
-    # black. One crop came back with a black wedge across its foot --
-    # harmless to look at, and enough to make any ink measure call
-    # that page heavily marked.
-    return image.transform((size, size), Image.QUAD, quad,
-                           resample=Image.BICUBIC, fillcolor=255)
+    # Grey first, and `fillcolor` white.
+    #
+    # A box near the edge of a skewed sheet maps to a quad that runs
+    # off the scan, and the default fill is black -- one crop came
+    # back with a black wedge across its foot, which is harmless to
+    # look at and enough to make any ink measure call that page the
+    # most heavily marked of the lot.
+    #
+    # `fillcolor=255` alone did not fix it: on an RGB image that is
+    # one band's worth, and the other two stay at zero, so the fill
+    # came out darker than before. Everything downstream measures
+    # grey anyway, and a grey crop is a third of the memory when
+    # several hundred of them are being kept.
+    return image.convert("L").transform(size, Image.QUAD, quad,
+                                        resample=Image.BICUBIC,
+                                        fillcolor=255)
+
+
+#: How dark a pixel has to be to count as ink, out of 255.
+#:
+#: 128 -- halfway -- was the obvious choice and the wrong one. Blur
+#: spreads the printed outline of the box inwards, and halfway counts
+#: the grey halo as writing: an empty box measured up to 0.08 of its
+#: own middle as ink, which is more than a faint tick manages.
+#:
+#: Swept against simulated scans. At 80 the faintest tick measures
+#: 0.016 and the most inked empty box 0.003, which is the first
+#: setting where the two do not overlap at all. Going darker still
+#: works and leaves less of the tick to find.
+#:
+#: Absolute rather than relative to each crop's own paper level,
+#: which was tried and is worse: the halo scales with the paper, so
+#: a relative cut keeps counting it however it is set.
+INK = 80
+
+#: Ink inside the box at or above this is a tick. Set between the
+#: two groups rather than at the edge of either -- three times the
+#: heaviest empty box, half the faintest tick.
+TICKED = 0.008
+
+#: Below this, with nothing beside it, the box is empty. The same
+#: number: with the groups cleanly apart there is no band in
+#: between worth reserving, and a gap here would only manufacture
+#: review for readings that are not ambiguous.
+EMPTY = 0.008
+
+#: Ink in the space to the right of the box at or above this is
+#: *something* -- most likely the instructor's `?`, possibly a
+#: smudge. Deliberately not called a question mark: see `measure`.
+#:
+#: Low, because an empty box measures exactly zero there and a
+#: question mark's faintest reading is 0.001. Anything above the
+#: floor is worth a look; the cost of being wrong is one glance.
+BESIDE = 0.002
+
+#: Ignored either side of the box's own outline when measuring, as a
+#: fraction of the box's width. The outline is printed, not written,
+#: and a measurement that counts it is measuring the form.
+EDGE = 0.22
+
+
+def _window(shape, pad=None):
+    """Where the box sits inside a crop, in pixels.
+
+    Derived from PAD rather than written down again, so the two
+    cannot drift apart -- the crop is the rectangle grown by those
+    fractions, so the rectangle is that slice of the crop.
+    """
+    pad = pad or PAD
+    height, width = shape
+    across, down = pad[0] + 1 + pad[2], pad[1] + 1 + pad[3]
+    x0 = int(width * pad[0] / across)
+    x1 = int(width * (pad[0] + 1) / across)
+    y0 = int(height * pad[1] / down)
+    y1 = int(height * (pad[1] + 1) / down)
+    return x0, y0, x1, y1
+
+
+def measure(crop, pad=None):
+    """What a crop of the grading box shows. Numbers, then a guess.
+
+    `inside` is the fraction of the box's middle that is dark, with
+    the printed outline left out -- that is the tick.
+
+    `beside` is the same for the space to its right, where the
+    instructor writes a `?`. It starts clear of the outline, because
+    a rounded corner clipped by a window boundary reads as 2% of ink
+    that is not there.
+
+    `call` is one of:
+
+        ticked   enough ink in the box
+        empty    almost nothing, in the box or beside it
+        unsure   nothing in the box, but something next to it
+
+    **`unsure` is not a failure, and there is deliberately no
+    `queried`.** A `?` is small, hand-drawn and in a region where an
+    empty box already shows a percent or two, so a threshold that
+    caught every one of them would also catch smudges. Calling it
+    unsure puts the crop in front of the instructor, which is where
+    the decision between a question mark and a coffee ring belongs.
+    Only the tick is claimed, and only the tick exports as a pass.
+    """
+    import numpy
+
+    dark = numpy.asarray(crop.convert("L"), dtype=numpy.uint8) < INK
+    x0, y0, x1, y1 = _window(dark.shape, pad)
+    edge = max(1, int((x1 - x0) * EDGE))
+    inside = dark[y0 + edge:y1 - edge, x0 + edge:x1 - edge]
+    beside = dark[y0:y1, x1 + edge:]
+    inside = float(inside.mean()) if inside.size else 0.0
+    beside = float(beside.mean()) if beside.size else 0.0
+
+    # Ink in the box decides the tick, and ink beside it does not
+    # argue -- beside the box is where the tail goes. Ink out there
+    # only means anything when the box itself is empty, because that
+    # is the only time it could be a question mark.
+    if inside >= TICKED:
+        call = "ticked"
+    elif beside >= BESIDE:
+        call = "unsure"
+    else:
+        call = "empty"
+    return {"inside": round(inside, 4), "beside": round(beside, 4),
+            "call": call}
 
 
 def _dark_fraction(image):
