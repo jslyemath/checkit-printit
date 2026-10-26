@@ -301,3 +301,162 @@ class TestTheThreeQuestions:
                         page=n, entry=index.get(n))
             for n in students[1:]])
         assert short.missing(lambda n: index) == {RUN_NO: [students[0]]}
+
+# ------------------------------------------------------ cutting it out --
+
+def box_crop(ink_in_box=0.0, ink_beside=0.0, size=(171, 120)):
+    """A crop shaped like a real one, with ink placed where asked.
+
+    Built rather than scanned, so a test about thresholds is not also
+    a test about pdfium. The box's slice of the crop comes from
+    `_window`, which is the same arithmetic `measure` uses -- if that
+    is wrong both are wrong together, which is what the compiled
+    tests below are for.
+    """
+    from PIL import Image, ImageDraw
+    import numpy
+
+    image = Image.new("L", size, 243)
+    draw = ImageDraw.Draw(image)
+    x0, y0, x1, y1 = scans._window((size[1], size[0]))
+    draw.rounded_rectangle([x0 + 10, y0 + 5, x1 - 10, y1 - 5], radius=6,
+                           outline=30, width=3)
+    for fraction, (ax0, ax1) in ((ink_in_box, (x0 + 20, x1 - 20)),
+                                 (ink_beside, (x1 + 20, size[0] - 4))):
+        if not fraction:
+            continue
+        span = int((y1 - y0 - 30) * fraction ** 0.5 * 3) + 4
+        draw.rectangle([ax0, y0 + 20, min(ax0 + span, ax1), y0 + 20 + span],
+                       fill=10)
+    return image
+
+
+class TestReadingAMark:
+    def test_an_untouched_box_is_empty(self):
+        assert scans.measure(box_crop())["call"] == "empty"
+
+    def test_the_printed_outline_is_not_counted(self):
+        """The box is on every page, so counting it would raise the
+        floor under every reading by the same amount and eat the gap
+        a tick has to clear."""
+        assert scans.measure(box_crop())["inside"] == 0.0
+
+    def test_ink_in_the_box_is_a_tick(self):
+        out = scans.measure(box_crop(ink_in_box=0.3))
+        assert out["call"] == "ticked"
+        assert out["inside"] > scans.TICKED
+
+    def test_ink_only_beside_the_box_is_not_a_tick(self):
+        """A `?` is written next to the box, not in it. It must never
+        read as a pass -- only the pass mark exports as a pass."""
+        out = scans.measure(box_crop(ink_beside=0.3))
+        assert out["call"] == "unsure"
+        assert out["inside"] < scans.TICKED
+
+    def test_a_tick_with_a_long_tail_is_still_a_tick(self):
+        """The instructor's tick is "a check whose tail comes out
+        past the box", so ink to the right is expected. An earlier
+        version refused to call anything ticked while there was ink
+        out there, and sent every properly drawn tick to review."""
+        out = scans.measure(box_crop(ink_in_box=0.3, ink_beside=0.2))
+        assert out["call"] == "ticked"
+
+    def test_grey_is_not_ink(self):
+        """Blur spreads the printed outline inwards and a halfway
+        threshold counts the halo as writing -- an empty box measured
+        0.08 of its own middle that way, which is more than a faint
+        tick manages."""
+        from PIL import Image
+        import numpy
+        crop = box_crop()
+        a = numpy.asarray(crop, dtype=numpy.uint8).copy()
+        x0, y0, x1, y1 = scans._window(a.shape)
+        a[y0 + 25:y1 - 25, x0 + 25:x1 - 25] = 120      # grey, not ink
+        assert scans.INK < 120
+        assert scans.measure(Image.fromarray(a))["call"] == "empty"
+
+    def test_the_window_follows_the_padding(self):
+        """`_window` is derived from PAD rather than written down
+        again, so the two cannot drift apart."""
+        narrow = scans._window((100, 100), (0.0, 0.0, 0.0, 0.0))
+        assert narrow == (0, 0, 100, 100)
+        wide = scans._window((100, 100), (1.0, 1.0, 1.0, 1.0))
+        assert wide == (33, 33, 66, 66)
+
+
+class TestCarryingThePageOntoTheScan:
+    def test_the_same_corners_are_the_identity(self):
+        corners = ((10, 20), (110, 20), (110, 120), (10, 120))
+        anchor = scans.Anchor(corners=corners, dpi=200, page_height=792)
+        carry = scans.placement(anchor, corners)
+        for x, y in ((0, 0), (500, 700), (-30, 40)):
+            got = carry(x, y)
+            assert abs(got[0] - x) < 1e-6 and abs(got[1] - y) < 1e-6
+
+    def test_a_turned_scan_turns_the_rectangle_back(self):
+        """Quarter turn, which is bigger than any feeder manages and
+        is the one angle whose answer can be written down by hand."""
+        import math
+        corners = ((100, 100), (200, 100), (200, 200), (100, 200))
+        turned = tuple((300 - y, x) for x, y in corners)
+        anchor = scans.Anchor(corners=corners, dpi=200, page_height=792)
+        carry = scans.placement(anchor, turned)
+        got = carry(100, 100)
+        assert abs(got[0] - 200) < 1e-6 and abs(got[1] - 100) < 1e-6
+
+    def test_a_bigger_scan_scales(self):
+        corners = ((0, 0), (100, 0), (100, 100), (0, 100))
+        twice = tuple((x * 2, y * 2) for x, y in corners)
+        anchor = scans.Anchor(corners=corners, dpi=200, page_height=792)
+        carry = scans.placement(anchor, twice)
+        got = carry(200, 0)
+        assert abs(got[0] - 400) < 1e-6 and abs(got[1] - 0) < 1e-6
+
+
+@pytest.mark.skipif(not pdflatex, reason="no pdflatex")
+class TestCuttingItOutOfARealPage:
+    def test_the_crop_lands_on_the_box(self, printed):
+        """Against the run's own PDF, used as its own scan: then the
+        mapping is the identity and the crop has to land exactly,
+        which separates the geometry from the skew handling."""
+        pdfium = pytest.importorskip("pypdfium2")
+        zxingcpp = pytest.importorskip("zxingcpp")
+        numpy = pytest.importorskip("numpy")
+        index = pageindex.load(printed)
+        found_any = scans.anchors(printed)
+        assert found_any, "no code on any page to anchor against"
+
+        pdf = pdfium.PdfDocument(os.path.join(printed, "main.pdf"))
+        checked = 0
+        for n, entry in sorted(index.pages.items()):
+            if entry.box is None:
+                continue
+            page = pdf[n - 1]
+            image = page.render(scale=scans.DPI / 72).to_pil()
+            codes = [c for c in zxingcpp.read_barcodes(image)
+                     if pageindex.read_payload(c.text)]
+            anchor = found_any[n % 2]
+            carry = scans.placement(anchor, scans._corners(codes[0]))
+            crop = scans.cut_out(image, entry.box, anchor, carry)
+            # Nothing has been written on these, so the only ink in
+            # the crop is the printed box -- and it must be where
+            # `measure` looks, which is what reading zero proves.
+            out = scans.measure(crop)
+            assert out["call"] == "empty", (n, out)
+            dark = numpy.asarray(crop, dtype=numpy.uint8) < 128
+            assert dark.any(), f"page {n}: the crop is blank paper"
+            checked += 1
+        pdf.close()
+        assert checked, "no page carried a grading box"
+
+    def test_the_crop_keeps_room_for_a_question_mark(self, printed):
+        """The `?` goes beside the box, so a crop that stops at the
+        rectangle cannot contain one. The space to the right has to
+        be wider than the box itself."""
+        index = pageindex.load(printed)
+        entry = next(e for e in index.pages.values() if e.box)
+        anchor = scans.anchors(printed)[entry.page % 2]
+        left, top, right, bottom = entry.box.rect(anchor.dpi,
+                                                  anchor.page_height)
+        assert scans.PAD[2] > 1.0, "no room beside the box for a mark"
+        assert scans.PAD[2] > scans.PAD[0], "more room left than right"
