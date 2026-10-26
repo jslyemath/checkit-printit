@@ -18,6 +18,7 @@ No real student appears here.
 
 import json
 import os
+import pathlib
 import sys
 import threading
 import urllib.error
@@ -260,3 +261,123 @@ class TestTheBuildReportNamesCollisions:
         assert out["collisions"] == [
             "Ada Lovelace and Grace Hopper were both printed version B "
             "at table 2"]
+
+class TestThePageShowsThePrintOrder:
+    """The Print tab lists students in the order they will print.
+
+    It did not. `api_print` enumerated the roster while the build
+    handed the same roster to `chart.order()`, so changing the
+    seating chart changed the paper and not the page -- which reads
+    exactly like a tab that has not noticed, and sent the instructor
+    looking for a save that had worked all along.
+    """
+
+    def course_with(self, tmp_path, monkeypatch, seats):
+        from checkit_printit import course as course_mod
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(tmp_path))
+        course_mod.init("T")
+        folder = pathlib.Path(course_mod.path_for("T"))
+        (folder / "roster.toml").write_text("".join(
+            f'[[student]]\nname = "{n}"\nsection = "1"\n'
+            f'sid = "{s}"\nskills = ["AD"]\n\n'
+            for n, s in (("Ada", "1"), ("Bo", "2"), ("Cy", "3"))),
+            encoding="utf-8")
+        (folder / "seating.toml").write_text(
+            "[[group]]\nseats = [" + ", ".join(f'"{n}"' for n in seats)
+            + "]\n", encoding="utf-8")
+        return gui_mod.Course("T")
+
+    def names(self, course):
+        return [s["name"] for s in gui_mod.api_print(course, {})["students"]]
+
+    def test_the_order_is_the_charts(self, tmp_path, monkeypatch):
+        course = self.course_with(tmp_path, monkeypatch, ["Cy", "Ada", "Bo"])
+        assert self.names(course) == ["Cy", "Ada", "Bo"]
+
+    def test_changing_the_chart_changes_the_page(self, tmp_path,
+                                                  monkeypatch):
+        """The bug, in one assertion. Both orders are legal rosters,
+        so a table that ignored the chart would pass the test above
+        and fail this one."""
+        course = self.course_with(tmp_path, monkeypatch, ["Cy", "Ada", "Bo"])
+        assert self.names(course) == ["Cy", "Ada", "Bo"]
+        pathlib.Path(course.file("seating")).write_text(
+            '[[group]]\nseats = ["Bo", "Cy", "Ada"]\n', encoding="utf-8")
+        assert self.names(course) == ["Bo", "Cy", "Ada"]
+
+    def test_an_unseated_student_is_last(self, tmp_path, monkeypatch):
+        """What the build does, so what the page must show."""
+        course = self.course_with(tmp_path, monkeypatch, ["Cy", "Ada"])
+        assert self.names(course) == ["Cy", "Ada", "Bo"]
+
+    def test_the_page_agrees_with_the_paper(self, tmp_path, monkeypatch):
+        """Both asked of the same chart, through the same call. This
+        is the assertion nobody had written: each side was right
+        about its own thing and they were never put side by side."""
+        from checkit_printit import roster as roster_mod
+        from checkit_printit import seating as seating_mod
+        course = self.course_with(tmp_path, monkeypatch, ["Bo", "Cy", "Ada"])
+        page = self.names(course)
+        chart = seating_mod.load(course.file("seating"))
+        people = roster_mod.load(course.file("roster"))
+        seated, unseated = chart.order(list(people.live()))
+        assert page == [s.name for s in list(seated) + list(unseated)]
+
+    def test_a_chart_that_cannot_be_read_says_so(self, tmp_path,
+                                                 monkeypatch):
+        """Roster order is the fallback, and it is announced. A table
+        that quietly reverted would be the original bug again."""
+        course = self.course_with(tmp_path, monkeypatch, ["Ada", "Ada"])
+        out = gui_mod.api_print(course, {})
+        assert out["seatingNote"]
+        assert [s["name"] for s in out["students"]] == ["Ada", "Bo", "Cy"]
+
+
+class TestTheDateOnThePaper:
+    """m/d on the page, ISO in the folder."""
+
+    def pub(self, date):
+        return pub_mod.Publication(
+            course="MAT 106", semester="Fall", professor="Slye",
+            title="Skill Checkpoint", date=date, bank_path="")
+
+    def test_the_page_gets_month_and_day(self):
+        assert self.pub("2026-10-26").printed_title == "Skill Checkpoint 10/26"
+
+    def test_no_leading_zeros(self):
+        assert self.pub("2026-01-05").printed_title == "Skill Checkpoint 1/5"
+
+    def test_the_folder_keeps_the_year(self):
+        """`full_title` names the output folder and the `run_id` in
+        the print record, and four runs are already filed under it.
+        A slash is also not a character a folder may contain."""
+        assert self.pub("2026-10-26").full_title == "Skill Checkpoint 2026-10-26"
+
+    def test_a_date_that_is_not_a_date_is_left_alone(self):
+        """A job may carry "Week 4". A date field is not a promise of
+        a format, and mangling one is worse than printing it."""
+        assert self.pub("Week 4").printed_title == "Skill Checkpoint Week 4"
+        assert self.pub("").printed_title == "Skill Checkpoint"
+
+    def test_it_is_the_short_one_that_reaches_the_document(self, bank_dir,
+                                                           tmp_path):
+        """Through `assemble`, because a property nothing calls is a
+        property nothing prints."""
+        import random
+        from checkit_printit import assemble as assemble_mod
+        from checkit_printit import roster as roster_mod
+        from checkit_printit import seating, theme
+        chart = tmp_path / "seating.toml"
+        chart.write_text('[[group]]\nseats = ["Ada"]\n', encoding="utf-8")
+        people = roster_mod.Roster([
+            roster_mod.Student(name="Ada", section="1", skills=["AD"])])
+        publication = pub_mod.Publication(
+            course="T", semester="Fall", professor="N",
+            title="Skill Checkpoint", date="2026-10-26", bank_path=bank_dir)
+        out = str(tmp_path / "out")
+        source, _ = theme.load(bank_dir)
+        assemble_mod.assemble(publication, people, seating.load(str(chart)),
+                              out, source, rng=random.Random(1))
+        main = (pathlib.Path(out) / "main.tex").read_text(encoding="utf-8")
+        assert "\\title{Skill Checkpoint 10/26}" in main
+        assert "2026-10-26" not in main.split("begin{document}")[0]

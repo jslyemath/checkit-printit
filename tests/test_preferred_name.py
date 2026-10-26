@@ -42,6 +42,14 @@ class Pub:
     semester = "Fall 2026"
     professor = "Slye"
     full_title = "Skill Checkpoint"
+    # What goes on the paper, as against what names the folder: the
+    # page carries m/d and the folder keeps the ISO date.
+    #
+    # Third time a stand-in here has gone missing a field the real
+    # Publication grew, and the third time it failed as an
+    # AttributeError in a test about something else. A fake short of
+    # what the boundary has cannot fail the way the boundary fails.
+    printed_title = "Skill Checkpoint 10/26"
 
 
 def chart_of(*names, versions=("A", "B")):
