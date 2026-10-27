@@ -11,15 +11,18 @@ races, and the loser's write disappears without a word.
 Everything a human authors stays TOML, so it can be diffed and hand-fixed.
 The rule is: if a human is the author, TOML; if the tool is, SQLite.
 
-**Printed is not attempted.** This table says a paper was handed out. It
-cannot know who was in the room, so nothing here counts as an attempt and the
-wording never says so. Outcomes are a later stage with a table of their own.
+**Printed is not attempted.** The `printed` table says a paper was handed
+out. It cannot know who was in the room, so nothing in it counts as an
+attempt and its wording never says so. `attempt` is the separate table that
+does, written by Scans when the instructor has looked at the papers, and it
+is the only place an outcome is ever read from.
 
 It also does not feed back into printing. Recording is a side effect of a
 build, never an input to one -- that is what keeps the print path a function
 of its inputs.
 """
 
+import datetime
 import os
 import sqlite3
 
@@ -78,9 +81,49 @@ CREATE TABLE IF NOT EXISTS meta (
     value TEXT NOT NULL
 );
 
+-- What was decided about one paper. Written by Scans, read by
+-- Progress and by a student's own history.
+--
+-- Keyed by (run, student, skill) and not by page, because a page is
+-- how a sheet is *found* and this is about the occasion: one run,
+-- one skill, one student, one decision. `page` is kept so the scan
+-- can be linked back to, and is NULL for a paper that never reached
+-- the scanner -- the instructor asked to be able to mark one of
+-- those by hand, holding the sheet.
+CREATE TABLE IF NOT EXISTS attempt (
+    attempt_id INTEGER PRIMARY KEY,
+    run_id  TEXT NOT NULL REFERENCES run(run_id) ON DELETE CASCADE,
+    sid     TEXT NOT NULL,
+    slug    TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    decided TEXT NOT NULL,
+    page    INTEGER,
+    -- What the reader called it, beside what the instructor
+    -- decided. Kept so a disagreement can be looked at instead of
+    -- argued about, and so a threshold that turns out to be wrong
+    -- can be re-examined against the measurements it was wrong on.
+    reading TEXT NOT NULL DEFAULT '',
+    ink     REAL,
+    beside  REAL,
+    UNIQUE(run_id, sid, slug)
+);
+
 CREATE INDEX IF NOT EXISTS printed_by_student ON printed(sid, slug);
 CREATE INDEX IF NOT EXISTS printed_by_run ON printed(run_id);
+CREATE INDEX IF NOT EXISTS attempt_by_student ON attempt(sid, slug);
 """
+
+#: What an attempt may be. Defined here, with the storage, because
+#: this is what is written to disk and has to stay stable; the web
+#: app's own list supplies the labels for these ids and a test holds
+#: the two together.
+#:
+#: `queried` is the instructor's "?" beside the box -- not a pass,
+#: not a refusal to pass, a paper he wants to look at again. It is
+#: stored as itself rather than folded into one of the others,
+#: because folding it would throw away the only record that it was
+#: ever in question.
+OUTCOMES = ("passed", "queried", "failed", "absent")
 
 
 #: Columns added to `run` after the first databases were written.
@@ -338,6 +381,194 @@ def set_flags(path, run_id, delisted=None, graded=None):
         db.commit()
         return dict(db.execute("SELECT * FROM run WHERE run_id = ?",
                                (run_id,)).fetchone())
+    finally:
+        db.close()
+
+
+def save_attempts(path, rows):
+    """Record what was decided about a batch of papers.
+
+    `rows` carry `run_id`, `sid`, `slug`, `outcome`, and optionally
+    `page`, `reading`, `ink`, `beside`. Every run named is marked
+    graded, because having a decision in it is exactly what graded
+    means.
+
+    Returns `(written, unknown)`. `unknown` holds any row whose
+    (run, student, skill) was never printed -- the page index and
+    the print record disagreeing, which is worth saying out loud.
+    The row is still written: losing a hundred decisions because one
+    of them is strange is the worse trade, and the decision is the
+    instructor's, not the index's.
+    """
+    if not rows:
+        return 0, []
+    db = connect(path)
+    try:
+        now = datetime.datetime.now().isoformat(timespec="seconds")
+        printed = {(r["run_id"], r["sid"], r["slug"]) for r in db.execute(
+            "SELECT run_id, sid, slug FROM printed")}
+        known_runs = {r["run_id"] for r in db.execute(
+            "SELECT run_id FROM run")}
+        unknown, written, runs_touched = [], 0, set()
+        for row in rows:
+            outcome = row["outcome"]
+            if outcome not in OUTCOMES:
+                # Not a "report it and carry on": an outcome the rest
+                # of the app cannot read is not a decision, and
+                # writing it would put a value in the table that
+                # Progress has no branch for.
+                raise RecordError(
+                    f"{outcome!r} is not an outcome. It is one of "
+                    f"{', '.join(OUTCOMES)}.")
+            key = (row["run_id"], str(row["sid"]), row["slug"])
+            if row["run_id"] not in known_runs:
+                raise RecordError(
+                    f"no run called {row['run_id']!r}, so there is "
+                    f"nothing to attach these papers to.")
+            if key not in printed:
+                unknown.append(key)
+            db.execute(
+                "INSERT INTO attempt"
+                " (run_id, sid, slug, outcome, decided, page,"
+                "  reading, ink, beside)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(run_id, sid, slug) DO UPDATE SET"
+                "   outcome = excluded.outcome,"
+                "   decided = excluded.decided,"
+                "   page    = excluded.page,"
+                "   reading = excluded.reading,"
+                "   ink     = excluded.ink,"
+                "   beside  = excluded.beside",
+                (key[0], key[1], key[2], outcome, now, row.get("page"),
+                 row.get("reading", "") or "", row.get("ink"),
+                 row.get("beside")))
+            written += 1
+            runs_touched.add(row["run_id"])
+        # Graded means "something has been read back from this run",
+        # which is now true of every run in the batch. Done in the
+        # same transaction: a saved decision on an ungraded run would
+        # let the run be delisted out from under it.
+        for run_id in runs_touched:
+            db.execute("UPDATE run SET graded = 1 WHERE run_id = ?",
+                       (run_id,))
+        db.commit()
+        return written, sorted(unknown)
+    finally:
+        db.close()
+
+
+def attempts_for(path, sid):
+    """One student's attempts, oldest first. Their history page.
+
+    Joined to `run` for the date and to `printed` for the seed, so a
+    caller can say "W2, 9 October, seed 412, not passed" without
+    three more queries.
+    """
+    if not os.path.isfile(path):
+        return []
+    db = connect(path)
+    try:
+        return [dict(r) for r in db.execute(
+            "SELECT a.*, r.title, r.date, r.run_no, p.seed, p.version"
+            " FROM attempt a"
+            " JOIN run r ON r.run_id = a.run_id"
+            " LEFT JOIN printed p"
+            "   ON p.run_id = a.run_id AND p.sid = a.sid"
+            "  AND p.slug = a.slug"
+            " WHERE a.sid = ?"
+            " ORDER BY r.date, r.built, a.slug", (str(sid),))]
+    finally:
+        db.close()
+
+
+def progress(path):
+    """Per (student, skill): how it has gone. What Progress draws.
+
+    `attempts` counts occasions, `passes` how many of them passed.
+    A query is an attempt and is not a pass -- it is a paper still
+    in question, and calling it either would be deciding something
+    the instructor deliberately did not.
+
+    `last` is the most recent outcome and `last_date` when.
+    `passed_in` is the run of the *latest passing* attempt, or None:
+    a student who passed in October and sat it again in November
+    still passed in October, and `last` would say November.
+    """
+    if not os.path.isfile(path):
+        return []
+    db = connect(path)
+    try:
+        return [dict(r) for r in db.execute("""
+            SELECT a.sid, a.slug,
+                   COUNT(*) AS attempts,
+                   SUM(a.outcome = 'passed') AS passes,
+                   SUM(a.outcome = 'queried') AS queries,
+                   SUM(a.outcome = 'absent') AS absents,
+                   (SELECT b.outcome FROM attempt b
+                     JOIN run br ON br.run_id = b.run_id
+                     WHERE b.sid = a.sid AND b.slug = a.slug
+                     ORDER BY br.date DESC, br.built DESC LIMIT 1) AS last,
+                   (SELECT b.run_id FROM attempt b
+                     JOIN run br ON br.run_id = b.run_id
+                     WHERE b.sid = a.sid AND b.slug = a.slug
+                       AND b.outcome = 'passed'
+                     ORDER BY br.date DESC, br.built DESC
+                     LIMIT 1) AS passed_in,
+                   MAX(r.date) AS last_date
+              FROM attempt a
+              JOIN run r ON r.run_id = a.run_id
+             GROUP BY a.sid, a.slug
+             ORDER BY a.sid, a.slug""")]
+    finally:
+        db.close()
+
+
+def history(path, sid, slug):
+    """Every time this student was printed this skill, oldest first.
+
+    Driven off `printed` rather than `attempt`, so a run that was
+    handed out and never scanned is in the list with nothing
+    recorded against it. That row is the point: it is the paper he
+    is holding, months later, with no stack left to re-read.
+
+    `outcome` is None for such a row. Everything else -- the seed,
+    the version, the date -- comes from the printing, so the paper
+    can be found again whether or not anybody graded it.
+    """
+    if not os.path.isfile(path):
+        return []
+    db = connect(path)
+    try:
+        return [dict(r) for r in db.execute(
+            "SELECT p.run_id, r.title, r.date, r.run_no, r.delisted,"
+            "       p.seed, p.version,"
+            "       a.outcome, a.decided, a.page, a.reading"
+            "  FROM printed p"
+            "  JOIN run r ON r.run_id = p.run_id"
+            "  LEFT JOIN attempt a"
+            "    ON a.run_id = p.run_id AND a.sid = p.sid"
+            "   AND a.slug = p.slug"
+            " WHERE p.sid = ? AND p.slug = ?"
+            " ORDER BY r.date, r.built", (str(sid), str(slug)))]
+    finally:
+        db.close()
+
+
+def grading_sets(path, keep=2):
+    """The last `keep` runs that have been graded, newest first.
+
+    What "recently passed" means. A grading set is a run something
+    has been read back from, which is exactly what `graded` records
+    -- so this is the record's own answer rather than a guess from
+    dates, and it stays right when two runs share one date.
+    """
+    if not os.path.isfile(path):
+        return []
+    db = connect(path)
+    try:
+        return [r["run_id"] for r in db.execute(
+            "SELECT run_id FROM run WHERE graded = 1"
+            " ORDER BY date DESC, built DESC LIMIT ?", (int(keep),))]
     finally:
         db.close()
 

@@ -22,6 +22,8 @@ const VIEWS = [
   { id: "print", label: "Print job", short: "Print", icon: "print" },
   { id: "runs", label: "Runs", short: "Runs", icon: "record" },
   { id: "scans", label: "Scans", short: "Scans", icon: "scan" },
+  { id: "progress", label: "Progress", short: "Progress",
+    icon: "grid" },
   { id: "seating", label: "Seating", short: "Seats", icon: "seating" },
   { id: "setup", label: "Settings", short: "Settings", icon: "setup",
     foot: true },
@@ -336,6 +338,14 @@ const GLYPH = {
          { d: "M20 15v2.8a2.2 2.2 0 0 1-2.2 2.2H15" },
          { d: "M9 20H6.2A2.2 2.2 0 0 1 4 17.8V15" },
          { d: "M3.4 12h17.2" }],
+  /* A grid with a tick in the first cell. The conventional picture
+     of "progress" is a rising bar chart, which would be a lie about
+     what opens: this tab is a table of marks, 45 rows by 29
+     columns, and nothing in it is a trend. Two dividers rather than
+     a 3x3, because lines every five pixels at 21px is a smudge. */
+  grid: [{ r: [3.5, 3.5, 17, 17, 2.2] },
+         { d: "M12 3.5v17M3.5 12h17" },
+         { d: "M5.9 8.1l1.6 1.7 3-3.3" }],
   collapse: "M14.5 7.5 9.5 12l5 4.5",
   // Points up while a group is open; CSS turns it when it closes.
   chev: "M6 14.5l6-6 6 6",
@@ -618,9 +628,310 @@ function show(id) {
     // Every visit, like Print: a build made since the last look is the
     // whole reason to open this tab.
     if (id === "runs") loadRuns();
+    // Every visit: a stack saved in Scans is the reason to look.
+    if (id === "progress") loadProgress();
   }
   shownView = id;
   location.hash = id;
+}
+
+// ------------------------------------------------------------- progress --
+
+let progressData = null;
+/* Kept in the browser, not the course: whether the highlight is on is
+   a preference of the person looking, not a fact about the class, and
+   two people reading the same course should not fight over it. */
+let lightRecent = false;
+
+async function loadProgress() {
+  const out = await api("/api/progress", {});
+  if (!out) return;
+  progressData = out;
+  renderProgress();
+}
+
+/* What one cell is, from what the record says about it.
+
+   Returned rather than drawn, so the rules are in one readable place
+   and the drawing below is only ever "put this mark in that box".
+   `kind` drives the styling; `mark` and `count` are what is shown. */
+function cellState(cell, threshold) {
+  if (!cell || !cell.attempts) return { kind: "none" };
+  const passed = cell.passes >= threshold;
+  const state = {
+    kind: passed ? "passed" : "open",
+    // A query is still a "?" he has to come back to. It reads as not
+    // passed -- which it is -- and carries a corner mark so the fact
+    // that he flagged it does not vanish into the same box as an
+    // ordinary blank.
+    queried: Boolean(cell.queries),
+    // Nothing was ever handed in. Not a seventh state -- it is still
+    // not passed and still ends in "offer it again" -- but the box
+    // drawn is a box on a paper, and there was no paper.
+    unsat: cell.attempts > 0 && cell.absents === cell.attempts,
+    attempts: cell.attempts,
+    passes: cell.passes,
+  };
+  if (passed) {
+    // Only where more than one check is needed. Where one passes a
+    // skill, "1 of 1" is the word "passed" written twice.
+    if (threshold > 1) state.count = `${cell.passes}/${threshold}`;
+    // Passed first time needs no number.
+    else if (cell.attempts > 1) state.count = String(cell.attempts);
+    return state;
+  }
+  if (cell.passes) {
+    // Part way: two needed, one so far. Its own state, because it is
+    // neither "nothing yet" nor "failing".
+    state.kind = "part";
+    state.count = `${cell.passes}/${threshold}`;
+    return state;
+  }
+  // Not passed. One attempt is ordinary; several is the loudest
+  // thing on the page, and the count is why.
+  if (cell.attempts > 1) {
+    state.kind = "stuck";
+    state.count = String(cell.attempts);
+  }
+  return state;
+}
+
+function renderProgress() {
+  const data = progressData;
+  const grid = document.getElementById("progress-grid");
+  const any = Object.keys(data.cells).length > 0;
+  document.getElementById("progress-empty").hidden = any;
+  document.getElementById("progress-body").hidden = !any;
+  document.getElementById("progress-count").textContent = any
+    ? `${data.students.length} students, ${data.skills.length} skills`
+    : "";
+  if (!any) return;
+
+  const recent = new Set(data.recent || []);
+  const note = document.getElementById("progress-recent-note");
+  note.textContent = recent.size
+    ? (recent.size === 1 ? "the last grading set"
+                         : `the last ${recent.size} grading sets`)
+    : "nothing graded yet";
+  document.getElementById("progress-recent").checked = lightRecent;
+
+  grid.innerHTML = "";
+  const thead = document.createElement("thead");
+  const head = document.createElement("tr");
+  const corner = document.createElement("th");
+  corner.className = "who";
+  corner.textContent = "Name";
+  head.appendChild(corner);
+  for (const skill of data.skills) {
+    const th = document.createElement("th");
+    th.className = "skillcol";
+    th.textContent = skill.slug;
+    // The slug is what is printed on the paper and what he says out
+    // loud; the title is the sentence, and 29 sentences across the
+    // top is a wall. So the slug shows and the title is the tooltip.
+    th.title = skill.threshold > 1
+      ? `${skill.title} \u2014 needs ${skill.threshold} passes`
+      : skill.title;
+    head.appendChild(th);
+  }
+  thead.appendChild(head);
+  grid.appendChild(thead);
+
+  const body = document.createElement("tbody");
+  for (const student of data.students) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("th");
+    name.className = "who";
+    name.scope = "row";
+    name.textContent = student.name || student.sid;
+    tr.appendChild(name);
+    const mine = data.cells[student.sid] || {};
+    for (const skill of data.skills) {
+      tr.appendChild(progressCell(student, skill, mine[skill.slug], recent));
+    }
+    body.appendChild(tr);
+  }
+  grid.appendChild(body);
+}
+
+function progressCell(student, skill, cell, recent) {
+  const td = document.createElement("td");
+  const state = cellState(cell, skill.threshold);
+  td.className = "cell " + state.kind;
+  if (state.queried) td.classList.add("queried");
+  if (state.unsat) td.classList.add("unsat");
+  if (lightRecent && cell && cell.passedIn && recent.has(cell.passedIn)) {
+    td.classList.add("justin");
+  }
+  if (state.kind !== "none") {
+    const mark = document.createElement("span");
+    mark.className = "cellmark";
+    // A tick for passed, an outlined box for not. Drawn as text
+    // rather than SVG: 1,300 inline SVGs is a slow page, and the
+    // shape is carried by CSS on `.cell` anyway.
+    mark.textContent = state.kind === "passed" ? "\u2713" : "";
+    td.appendChild(mark);
+    if (state.count) {
+      const n = document.createElement("span");
+      n.className = "cellcount";
+      n.textContent = state.count;
+      td.appendChild(n);
+    }
+    td.title = describeCell(student, skill, cell, state);
+  }
+  // Every cell opens, taken or not: a skill he never offered this
+  // student still has runs it could be recorded against, and an
+  // empty cell is the most likely one to need filling in by hand.
+  td.tabIndex = 0;
+  td.setAttribute("role", "button");
+  td.onclick = () => openCell(student, skill);
+  td.onkeydown = (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openCell(student, skill);
+    }
+  };
+  return td;
+}
+
+// --------------------------------------------------------- the drill-in --
+
+let cellOpen = null;
+
+async function openCell(student, skill) {
+  cellOpen = { student, skill };
+  const box = document.getElementById("cell");
+  document.getElementById("cell-title").textContent =
+    `${student.name || student.sid} \u2014 ${skill.slug}`;
+  document.getElementById("cell-sub").textContent = skill.threshold > 1
+    ? `${skill.title} \u2014 needs ${skill.threshold} passes`
+    : skill.title;
+  document.getElementById("cell-papers").textContent = "";
+  document.getElementById("cell-none").hidden = true;
+  if (!box.open) box.showModal();
+  await drawCell();
+}
+
+async function drawCell() {
+  const { student, skill } = cellOpen;
+  const out = await api("/api/progress/cell",
+                        { sid: student.sid, slug: skill.slug });
+  if (!out || !cellOpen) return;
+  const list = document.getElementById("cell-papers");
+  list.textContent = "";
+  const none = document.getElementById("cell-none");
+  none.hidden = out.papers.length > 0;
+  if (!out.papers.length) {
+    // Not "no results": there is nothing to have a result about,
+    // and the fix is a print job, not this dialog.
+    none.textContent = `${skill.slug} has never been printed for `
+      + `${student.name || student.sid}, so there is nothing to record `
+      + `yet. Put it in a print job first.`;
+    return;
+  }
+  for (const paper of out.papers) list.appendChild(cellPaper(paper));
+}
+
+function cellPaper(paper) {
+  const row = document.createElement("div");
+  row.className = "cellpaper";
+
+  const when = document.createElement("div");
+  when.className = "cellwhen";
+  const date = document.createElement("div");
+  // The app's own date wording, which is the wording on the
+  // confirmation the student ticked.
+  date.textContent = spokenDay(paper.date) || paper.date;
+  const what = document.createElement("div");
+  what.className = "muted";
+  // The seed is how this exact paper is found again -- it is what
+  // `--seed` takes and what the manifest pins. Worth the room.
+  what.textContent = `${paper.title}, version ${paper.version}, `
+    + `seed ${paper.seed}`;
+  when.append(date, what);
+
+  const said = document.createElement("div");
+  said.className = "muted cellread";
+  if (paper.reading) {
+    said.textContent = `scanner read it as ${paper.reading}`;
+  } else if (paper.outcome) {
+    said.textContent = "recorded by hand";
+  } else {
+    said.textContent = "never scanned";
+  }
+
+  const picks = document.createElement("div");
+  picks.className = "review-picks";
+  picks.setAttribute("role", "radiogroup");
+  for (const outcome of OUTCOME_LIST) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "review-pick";
+    b.textContent = outcome.label;
+    b.title = outcome.mark;
+    b.setAttribute("role", "radio");
+    const on = paper.outcome === outcome.id;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", on ? "true" : "false");
+    b.onclick = () => setCellOutcome(paper.runId, outcome.id);
+    picks.appendChild(b);
+  }
+
+  row.append(when, said, picks);
+  return row;
+}
+
+async function setCellOutcome(runId, outcome) {
+  const { student, skill } = cellOpen;
+  const out = await api("/api/progress/set", {
+    runId, sid: student.sid, slug: skill.slug, outcome });
+  if (!out) return;
+  // Saved as it is clicked. There is no draft here -- one click is
+  // one decision about one paper -- and a Save button would be a
+  // second state to get wrong.
+  const list = document.getElementById("cell-papers");
+  list.textContent = "";
+  for (const paper of out.papers) list.appendChild(cellPaper(paper));
+  toast("Saved.");
+  // The grid behind is now wrong. Redrawn rather than patched: the
+  // cell's state depends on counts, thresholds and which run the
+  // pass came from, and three of those are the server's answer.
+  await loadProgress();
+}
+
+/* The four outcomes, as the review grid gets them from the server.
+   Held here as well so the drill-in can be opened without a scan in
+   hand -- which is the whole point of it. */
+const OUTCOME_LIST = [
+  { id: "passed", label: "Passed", mark: "a tick" },
+  { id: "queried", label: "Query", mark: "a ? beside the box" },
+  { id: "failed", label: "Not passed", mark: "an empty box" },
+  { id: "absent", label: "Did not sit it", mark: "no paper" },
+];
+
+/* The sentence a cell says when you point at it. Written out in full
+   because the grid itself is deliberately almost wordless, and the
+   one place to recover what a mark means is here. */
+function describeCell(student, skill, cell, state) {
+  const who = student.name || student.sid;
+  const tries = cell.attempts === 1 ? "1 attempt"
+                                    : `${cell.attempts} attempts`;
+  // "Not passed, 1 attempt" about somebody who never saw the paper
+  // is a false sentence, and the tooltip is the one place a cell
+  // explains itself.
+  if (state.unsat) {
+    return cell.attempts === 1
+      ? `${who}, ${skill.slug}: did not sit it`
+      : `${who}, ${skill.slug}: did not sit it, ${cell.attempts} times`;
+  }
+  let said;
+  if (state.kind === "passed") said = "passed";
+  else if (state.kind === "part") {
+    said = `${cell.passes} of ${skill.threshold} passes so far`;
+  } else said = "not passed";
+  const q = cell.queries ? ", one marked with a query" : "";
+  const a = cell.absents ? `, ${cell.absents} not sat` : "";
+  return `${who}, ${skill.slug}: ${said} \u2014 ${tries}${q}${a}`;
 }
 
 // ------------------------------------------------------------- overview --
@@ -2030,15 +2341,32 @@ function reviewRow(row) {
   skill.className = "muted";
   skill.textContent = row.skill;
   who.append(name, skill);
+  // Said here rather than over the pictures: it is a fact about the
+  // paper, and `.review-shot` is white because a crop of a sheet
+  // belongs on something sheet-coloured.
+  if ((row.crops || []).length > 1 && !row.read) {
+    const note = document.createElement("div");
+    note.className = "warnline review-disagree";
+    note.textContent = "scanned twice, and the two do not match";
+    who.appendChild(note);
+  }
 
   const shot = document.createElement("div");
   shot.className = "review-shot";
-  if (row.crop) {
-    const img = document.createElement("img");
-    img.src = row.crop;
-    img.alt = `the grading box on ${row.name || row.sid}'s ${row.skill}`;
-    img.loading = "lazy";
-    shot.appendChild(img);
+  const crops = row.crops || [];
+  if (crops.length) {
+    // Usually one. Two when the sheet went through the copier
+    // twice, and then both are here on purpose: if they disagree
+    // the suggestion was withheld, and the two pictures are the
+    // reason why.
+    shot.classList.toggle("twice", crops.length > 1);
+    for (const crop of crops) {
+      const img = document.createElement("img");
+      img.src = crop;
+      img.alt = `the grading box on ${row.name || row.sid}'s ${row.skill}`;
+      img.loading = "lazy";
+      shot.appendChild(img);
+    }
   } else {
     const gap = document.createElement("span");
     gap.className = "muted review-nocrop";
@@ -2101,10 +2429,85 @@ function countReview() {
     `${done} of ${reviewRows.length} decided`;
   const accept = document.getElementById("review-accept");
   if (accept) accept.disabled = !undecided;
+  refreshScansDirty();
+}
+
+/* Decided, and not the same as what was last written for that paper.
+ *
+ * Per row rather than one flag for the tab, so that saving, spotting
+ * one wrong and fixing it offers one paper rather than all of them --
+ * and so a second Save after no change has nothing to do and says so
+ * by not appearing.
+ *
+ * `saved` is the outcome the server has, not a boolean: changing a
+ * paper from passed to failed has to count as dirty again, and a
+ * boolean would call it clean. */
+function unsavedReview() {
+  return reviewRows.filter(r => r.outcome && r.outcome !== r.saved);
+}
+
+function refreshScansDirty() {
+  const n = unsavedReview().length;
+  saveBar("scans", n > 0,
+          n === 1 ? "1 result not saved" : `${n} results not saved`);
+}
+
+async function saveScans() {
+  const rows = unsavedReview();
+  if (!rows.length) return;
+  let out;
+  try {
+    out = await api("/api/scan/save", {
+      decisions: rows.map(r => ({ id: r.id, outcome: r.outcome })) });
+  } catch (err) {
+    // The one failure worth spelling out: the server was restarted
+    // between reading the stack and saving it, so its copy of the
+    // read is gone and it will not take the page's word for whose
+    // paper was whose. Nothing is lost that re-reading cannot get
+    // back, and the message says so.
+    toast(err.message || "could not save", true);
+    return;
+  }
+  for (const row of rows) row.saved = row.outcome;
+  reviewNote(out);
+  countReview();
+  toast(out.saved === 1 ? "1 result saved" : `${out.saved} results saved`);
+}
+
+/* What the save had to say, kept on the page rather than in a toast.
+ *
+ * A toast is right for "it worked" and wrong for "two of these name
+ * a student the print record never printed" -- that is something to
+ * look at, and nine seconds is not long enough to look at anything.
+ */
+function reviewNote(out) {
+  const line = document.getElementById("review-unsaved");
+  const parts = [];
+  if (out.unprinted && out.unprinted.length) {
+    parts.push(`${out.unprinted.length} of these name a paper the print `
+      + `record has no trace of printing (`
+      + out.unprinted.map(u => `${u.sid} ${u.skill}`).join(", ")
+      + `). They were saved anyway -- your decision is yours -- but `
+      + `the page index and the record disagree, which is worth a `
+      + `look.`);
+  }
+  if (out.noRun && out.noRun.length) {
+    parts.push(`Run ${out.noRun.join(", ")} is not in this course's `
+      + `record, so nothing from it could be saved.`);
+  }
+  line.textContent = parts.join(" ");
+  line.hidden = !parts.length;
 }
 
 function renderReview(data) {
-  reviewRows = (data.review || []).map(r => ({ ...r, touched: false }));
+  // `saved` is empty for every row of a fresh read: this is a stack
+  // just off the scanner, and nothing in it has been written yet.
+  // Re-reading a stack that was already saved therefore offers it
+  // again, which is correct -- the second save is an upsert, and the
+  // alternative is a page that silently declines to save.
+  reviewRows = (data.review || []).map(
+    r => ({ ...r, touched: false, saved: "" }));
+  document.getElementById("review-unsaved").hidden = true;
   reviewOutcomes = data.outcomes || [];
   const box = document.getElementById("scan-review");
   box.hidden = !reviewRows.length;
@@ -3864,6 +4267,18 @@ async function boot() {
     openNow.clear(); renderSkills(); refreshPreview();
   };
   document.getElementById("form-push").onclick = pushForm;
+  document.getElementById("scans-save").onclick = saveScans;
+  document.getElementById("cell-close").onclick = () => {
+    cellOpen = null;
+    document.getElementById("cell").close();
+  };
+  document.getElementById("cell").addEventListener("close", () => {
+    cellOpen = null;
+  });
+  document.getElementById("progress-recent").onchange = (e) => {
+    lightRecent = e.target.checked;
+    renderProgress();
+  };
   document.getElementById("print-save").onclick = savePrint;
   document.getElementById("print-revert").onclick = revertPrint;
   const preset = document.getElementById("print-reset");

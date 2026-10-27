@@ -789,10 +789,7 @@
         <p class="muted">Each paper with the actual square off the
           page beside it, so you are agreeing with the paper and not
           with my guess. Change anything that is wrong.</p>
-        <p class="warnline" id="review-unsaved">Nothing here is saved
-          yet &mdash; there is nowhere for it to go until attempts and
-          passes are recorded, which is the next thing being built.
-          Reloading this page loses whatever you have decided.</p>
+        <p class="warnline" id="review-unsaved" hidden></p>
 
         <div id="review-asks" hidden>
           <div class="review-head">
@@ -817,6 +814,48 @@
         <div class="scroller"><table id="scan-sheets"></table></div>
       </details>
     </div>
+
+    <!-- Discard is a reload here, not a revert to a saved draft:
+         there is no draft. What is on screen is a reading of a stack,
+         and the way to get it back is to read the stack again. -->
+    <div class="savebar" id="scans-bar" hidden>
+      <span class="dirty"></span>
+      <span class="spacer"></span>
+      <button id="scans-save" class="primary">Save these results</button>
+    </div>
+  </section>
+
+  <!-- Students down, every skill in the bank across -- including the
+       ones not offered yet, because the empty columns are the shape
+       of the term. Read for trouble, so passing is quiet and the
+       loud cell is the one somebody has failed more than once. -->
+  <section id="view-progress" class="view" hidden>
+    <header class="pagehead">
+      <h2>Progress</h2>
+      <span class="spacer"></span>
+      <span id="progress-count" class="sec-count"></span>
+    </header>
+
+    <div id="progress-empty" class="emptystate" hidden>
+      <p>Nothing has been read back yet.</p>
+      <p class="muted">This fills in from Scans: read a stack, check
+        the marking, save it, and every result lands here.</p>
+    </div>
+
+    <div id="progress-body" hidden>
+      <div class="toolbar">
+        <label title="Put the accent behind every skill passed in the
+                      most recent grading sets.">Light up what just came back
+          <span class="tickwrap">
+            <input type="checkbox" id="progress-recent"></span></label>
+        <span id="progress-recent-note" class="muted"></span>
+        <span class="spacer"></span>
+        <span id="progress-key" class="muted"></span>
+      </div>
+      <div class="scroller gridscroll">
+        <table id="progress-grid"></table>
+      </div>
+    </div>
   </section>
 
   <section id="view-soon" class="view" hidden>
@@ -831,6 +870,20 @@
      the desktop pane suppresses it -- that is why the drop button
      looked dead for weeks. A `<dialog>` is an element on the page, so
      it shows. Driven by `ask()`. -->
+<!-- One cell of the Progress grid, opened by clicking it. A dialog
+     rather than a panel on the page: the grid is 45 by 29 and
+     pushing it aside to make room would lose the place. -->
+<dialog id="cell" class="ask cellbox">
+  <h3 id="cell-title"></h3>
+  <p class="muted" id="cell-sub"></p>
+  <div id="cell-papers"></div>
+  <p class="muted" id="cell-none" hidden></p>
+  <div class="toolbar">
+    <span class="spacer"></span>
+    <button id="cell-close" class="primary">Done</button>
+  </div>
+</dialog>
+
 <dialog id="ask" class="ask">
   <h3 id="ask-title"></h3>
   <div id="ask-body"></div>

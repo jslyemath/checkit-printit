@@ -750,6 +750,86 @@ wrong in the ways a real stack is wrong -- shuffled, split in two, a
 blank, a page read twice, one paper held back. `--home` keeps it out
 of the real print-it home, which anything that builds should do.
 
+### `attempt` is the only table an outcome is read from
+
+`printed` says a paper was handed out. It cannot know who was in the
+room, so nothing in it is an attempt and its wording never says so.
+`attempt` is the separate table that does.
+
+Keyed **(run, student, skill)**, not by page. A page is how a sheet
+is *found*; an attempt is about the occasion. Two papers for one
+skill in one run -- only reachable by hand-editing a job file, since
+`append_for_everyone` dedupes -- are still one decision. The write is
+an upsert, so a correction replaces rather than stacking a second
+attempt and making Progress say the student sat it twice.
+
+`page`, `reading`, `ink` and `beside` are NULL for a paper that never
+reached the scanner. Not zero: "page 0, no ink" is a reading, and a
+measurement nobody took is a number somebody later averages.
+
+Four outcomes, `record.OUTCOMES`: `passed`, `queried`, `failed`,
+`absent`. **`queried` is stored as itself** -- it is his "?" beside
+the box, a paper still in question, and folding it into pass or fail
+would throw away the only record that it was ever in doubt. Progress
+counts it as an attempt and not a pass.
+
+Writing marks every run in the batch `graded`, in the same
+transaction, because a saved decision on an ungraded run could be
+delisted out from under itself.
+
+### The browser sends judgment and nothing else
+
+`/api/scan/save` takes `{id, outcome}` and no more. Which student,
+which skill, which page and what was measured all come from
+`SCANNING.result`, the server's own copy of the read. A reloaded or
+stale page then cannot attach a decision to a different student --
+which is the one mistake here that nobody would ever notice.
+
+The cost is that the read lives in memory: restart the server between
+scanning and saving and it is gone. Refused with a message saying to
+read the stack again, which is the honest trade.
+
+### A review row is a paper, not a sheet
+
+`batch.placed` is every placed *sheet*, and a real stack has the same
+sheet in it more than once often enough that `duplicates` is one of
+the three questions a batch answers. Grouped by (run, page), so one
+paper is one row however many times the copier saw it.
+
+The row carries **every** crop taken of that paper, and when the
+copies disagree -- a double feed that lost a tick -- it suggests
+nothing and shows both. Picking one for him would pick the blank one
+half the time.
+
+### The Progress grid, and the two rules that make it readable
+
+45 students by 29 skills is about 1,300 cells. Two rules from 14.3
+keep it from being a wall:
+
+* a **pass count** appears only where the threshold is above 1;
+* an **attempt count** appears only when it is surprising -- passed
+  first time needs no number, four attempts and still not passed is
+  the thing worth seeing from across the room.
+
+**Passing is quiet.** A gradebook is read for trouble. The loud cell
+is `.stuck`: not passed, more than once.
+
+A query adds a corner dot, not a state. An absence dashes the box
+rather than drawing it solid -- there was no paper, so there is no
+solid edge -- and neither is a seventh thing to learn.
+
+Thresholds live in `course.toml` under `[passing]`, default 1, and
+**not** in `bank.xml`: that file is shared and published, and how
+many checks this semester's class needs is about this semester's
+class.
+
+Clicking a cell opens its history: every time that student was
+printed that skill, with what was decided. Driven off `printed`, so a
+run handed out and never scanned is in the list with nothing against
+it -- that row is the paper he is holding months later with no stack
+left to re-read, and recording it there goes through the same
+`save_attempts` a scan does.
+
 ### The Runs tab, and what it is allowed to do
 
 `record.db` already held everything: the `run` table plus `printed`.
