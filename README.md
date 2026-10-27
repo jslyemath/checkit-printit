@@ -115,6 +115,12 @@ path = "seating.toml"
 keys       = true   # answer keys after the student copies
 key_copies = 1
 names      = true   # false prints a ruled blank instead of each name
+
+[selection]
+# Absent means the whole class. Present means these students only,
+# matched on id, alternate id or email -- and present-but-empty is a
+# mistake the build refuses rather than reading as "everybody".
+only_students = ["806001234"]
 ```
 
 Commented-out sections handle the rest: pinning a version to a known seed for an
@@ -186,8 +192,9 @@ reason.
 | `--no-ids` | leave the student id field out of the header |
 | `--no-codes` | leave the scanning code out of the footer |
 | `--no-record` | do not note this run in the course's print record |
+| `--only KEY` | print for these students only. Repeatable |
 
-Each of the last three has an on-form too — `--ids`, `--codes`,
+Each of `--no-ids`, `--no-codes` and `--no-record` has an on-form too — `--ids`, `--codes`,
 `--record` — for forcing one back on when the publication turns it
 off. `-o` and `-p` are also spelled `--out` and `--publication`, and
 `--no-compile` is `--compile`'s other half.
@@ -200,6 +207,29 @@ file written before they existed still prints what it always did.
 `--no-record` is for a throwaway build. It also leaves the scanning
 code off the page: the code is a key into the print record, and there
 would be nothing to look it up in.
+
+`--only` takes a student id, alternate id or email address, and can be
+given more than once. It decides **who** is in the run, and nothing
+about what they get -- a run for one student still reads that
+student's own skill choices, or whatever `[overrides]` names for them.
+That is why it is not a fourth selection mode: printing one student a
+list you type is an override plus `--only`, not a new way of choosing
+skills.
+
+A key that matches nobody is reported and the build goes on, so a
+stale address does not cost you the paper you meant to print. The
+report says which kind of miss it was, because the two have different
+fixes:
+
+```
+  students 1   (this run is for 1 of 42; the rest of the class is not in it)
+  WARNING  nothing printed for 806001234 -- dropped
+  WARNING  nothing printed for old@x.edu -- not in the roster
+```
+
+A run where *no* key matches is refused rather than built empty, and
+the refusal says which it was -- dropped, not in the roster, or no
+student named at all.
 
 ## Marks for scanning, and how to turn them off
 

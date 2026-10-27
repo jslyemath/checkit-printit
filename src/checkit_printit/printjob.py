@@ -36,8 +36,17 @@ class PrintJobError(Exception):
 #:            applies, so none of it is written into the job.
 MODES = ("chose", "same")
 
+#: Who the run is for. Orthogonal to MODES, which is about what a
+#: student gets -- a run for three students can still read their
+#: own form choices, and folding the two together would have meant
+#: retyping those to print for one person.
+WHO = ("all", "these")
+
 DEFAULTS = {
     "mode": "chose",
+    #: "all", or "these" with `only` naming them.
+    "who": "all",
+    "only": [],
     "title": "Skill Checkpoint",
     "date": "",
     "keys": True,
@@ -66,6 +75,7 @@ def draft_path(space):
 #: `simply_print` under `[selection]` and `load_draft` looking for it at the
 #: root, so a draft naming two skills built a run that printed neither.
 IN_TABLE = {
+    "only": "selection",
     "simply_print": "selection",
     "default_when_missing": "selection",
     "append_for_everyone": "selection",
@@ -110,6 +120,10 @@ def load_draft(space):
         out["mode"] = "same" if out["simply_print"] else "chose"
     if out["mode"] not in MODES:
         out["mode"] = "chose"
+    # A draft from before the filter existed is a run for everybody,
+    # which is what every run was then.
+    if out.get("who") not in WHO:
+        out["who"] = "all"
     return out
 
 
@@ -133,6 +147,11 @@ def save_draft(space, draft):
         "# and that copy is what the manifest's fingerprints refer to.",
         "",
         f"mode       = {_quote(merged['mode'])}",
+        # Beside `mode` because it is the other half of the shape of
+        # the run: that one is what a student gets, this one is
+        # whether they are in it. It went unwritten at first, so the
+        # app forgot on every reload which of the two it was.
+        f"who        = {_quote(merged['who'])}",
         f"title      = {_quote(merged['title'])}",
         f"date       = {_quote(merged['date'])}",
         f"keys       = {'true' if merged['keys'] else 'false'}",
@@ -160,6 +179,14 @@ def save_draft(space, draft):
     else:
         wanted = [("default_when_missing", merged["default_when_missing"]),
                   ("append_for_everyone", merged["append_for_everyone"])]
+    # `only` is written whichever mode is on, because who the run is
+    # for is not a mode -- and cleared when it is for everybody, so a
+    # list left over from last week cannot be switched back on by one
+    # click on a radio button. That is the 10-23 `simply_print`
+    # mistake, and it would be worse here: the wrong answer prints
+    # one student instead of forty-three.
+    wanted.append(("only", merged["only"] if merged["who"] == "these"
+                   else []))
     lines.append("[selection]")
     for key, value in wanted:
         lines.append(f"{key:<20} = {_list(value)}")
@@ -240,8 +267,15 @@ def publication_text(space, draft, course_name, semester="", professor=""):
     wanted = (("simply_print",) if mode == "same"
               else ("default_when_missing", "append_for_everyone"))
     selection = {k: draft[k] for k in wanted if draft[k]}
-    if selection:
+    # Absent means every student; present, even empty, means the run
+    # names its own list. An empty one is a mistake the build
+    # refuses, which is the point of being able to say it at all.
+    lines_only = draft.get("who") == "these"
+    if selection or lines_only:
         lines.append("[selection]")
+        if lines_only:
+            lines.append("# This run is for these students only.")
+            lines.append(f"only_students = {_list(draft.get('only') or [])}")
         for key, values in selection.items():
             lines.append(f"{key} = {_list(values)}")
         lines.append("")

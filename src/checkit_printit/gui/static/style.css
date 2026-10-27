@@ -1577,8 +1577,13 @@ th button.reset { margin-left: 4px; }
                                          color: var(--accent-ink); }
 
 /* One rule for the heading and the cells, so they cannot drift apart. */
-#who.hide-override th:nth-child(5),
-#who.hide-override td:nth-child(5) { display: none; }
+/* By class, not by position. It was `nth-child(5)`, and then the
+   tick column added a cell in front of it: with `same` mode and a
+   ticked run at once -- which is "a few skills for one student",
+   the case the tick column exists for -- the fifth child is Will
+   get, and the wrong column vanished. */
+#who.hide-override th.overridecell,
+#who.hide-override td.overridecell { display: none; }
 
 /* The one thing left to do, so it does not look like another card. */
 .panel.attention {
@@ -1759,3 +1764,18 @@ body.hasbar.tall main { padding-bottom: 68px; }
   font-size: var(--t-base);
   margin: var(--s4) 0 var(--s1);
 }
+
+/* ---- printing for a few students --------------------------------- */
+
+/* `button.act` shows nothing until hovered, which is right in a table
+   header and wrong next to a label: `all 48  All  None` was three
+   pieces of identical grey text. These two get an outline so the
+   status beside them is readable as a status. */
+button.act.chip { border-color: var(--line); color: var(--ink-2); }
+button.act.chip:hover { border-color: var(--line-strong); }
+
+#who td.pickcell { width: 1%; text-align: center; padding-right: 0; }
+/* Dimmed, not hidden: the row is still the place you tick to put them
+   back in, and a table that loses forty-two rows when you untick them
+   is a table you cannot undo in. */
+#who tr.notprinting > td:not(.pickcell) { opacity: 0.38; }

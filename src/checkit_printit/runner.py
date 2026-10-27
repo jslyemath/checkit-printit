@@ -60,6 +60,16 @@ class BuildResult:
     #: Override keys that matched nobody in the roster -- a mistyped id, or
     #: a student who has left since. Reported, never dropped.
     unmatched_overrides: tuple = ()
+    #: Likewise for the "print for these students" list.
+    unmatched_students: tuple = ()
+    #: Named by the run and found, but dropped -- so still printed
+    #: nothing. Reported separately because "matched nobody" is not
+    #: what a student sitting on the roster page looks like.
+    dropped_students: tuple = ()
+    #: How many students this run printed for, and how many the
+    #: roster holds. Equal unless the run names particular students.
+    printed_for: int = 0
+    roster_size: int = 0
     #: The number the print record gave this run, which is what the
     #: footer code carries. None when there is no record to key into.
     run_id: int = None
@@ -106,7 +116,7 @@ def choose_run_seed(record, seed):
 
 def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
         replay=None, install_theme=True, ids=None, codes=None,
-        keep_record=True):
+        keep_record=True, only=None):
     """Build a class set. Returns a BuildResult; raises BuildError.
 
     `preview` writes nothing at all -- no folder, no theme, no record -- and
@@ -127,6 +137,14 @@ def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
             publication,
             ids=publication.ids if ids is None else bool(ids),
             codes=publication.codes if codes is None else bool(codes))
+
+    # Likewise `only`: None is "whatever the file says". An empty
+    # sequence is not a way to say "nobody" here -- a command line
+    # that names no students is one that forgot the argument, and
+    # the deliberate empty list is a thing only the app can write.
+    if only:
+        publication = dataclasses.replace(
+            publication, only_students=tuple(only))
 
     record = None
     notes = ()
@@ -157,6 +175,51 @@ def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
     people, unmatched_overrides = roster_mod.apply_overrides(
         people, publication.student_overrides)
 
+    # Who the run is for, reported here so an unmatched name is seen
+    # even though the filtering itself happens in `assemble`. A name
+    # that matches nobody prints nothing, silently, which is the
+    # failure this feature exists to prevent rather than cause.
+    #
+    # Against the live roster, because that is what `assemble`
+    # filters -- naming a dropped student prints nothing, and
+    # checking the full roster would report that as fine.
+    live = people.live()
+    unmatched_students, dropped_students = [], []
+    printed_for = len(live)
+    if publication.only_students is not None:
+        chosen, unmatched_students = live.only(publication.only_students)
+        printed_for = len(chosen)
+        if unmatched_students:
+            # "Matched nobody in the roster" is misleading for a
+            # student who is visibly on the roster page and merely
+            # dropped. Separated so the message can say which it is,
+            # instead of sending someone hunting for a typo.
+            _, truly_absent = people.only(unmatched_students)
+            dropped_students = sorted(
+                set(unmatched_students) - set(truly_absent))
+            unmatched_students = truly_absent
+        if not printed_for:
+            # Before `assemble`, which would refuse this too and say
+            # only "none of them is in the roster" -- true of a typo,
+            # false of a student who is sitting on the roster page
+            # greyed out, and the difference is the whole fix.
+            why = []
+            if dropped_students:
+                why.append(f"{', '.join(dropped_students)} "
+                           f"{'has' if len(dropped_students) == 1 else 'have'}"
+                           f" been dropped")
+            if unmatched_students:
+                why.append(f"{', '.join(unmatched_students)} "
+                           f"{'is' if len(unmatched_students) == 1 else 'are'}"
+                           f" not in the roster")
+            raise BuildError(
+                "this run is set to print for particular students and it "
+                "would print nothing: "
+                + ("; ".join(why) if why
+                   else "no student is named. Tick somebody, or set the "
+                        "run back to the whole class.")
+                + ".")
+
     people = roster_mod.apply_selection_modes(
         people,
         simply_print=publication.simply_print,
@@ -179,6 +242,9 @@ def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
 
     result = BuildResult(publication=publication, out=out, run_seed=0,
                          unmatched_overrides=tuple(unmatched_overrides),
+                         unmatched_students=tuple(unmatched_students),
+                         dropped_students=tuple(dropped_students),
+                         printed_for=printed_for, roster_size=len(live),
                          anonymous=not publication.names
                          and not publication.ids,
                          report={}, replayed=record is not None,

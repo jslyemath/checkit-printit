@@ -274,11 +274,12 @@
         <div id="who-stale" class="banner warn" hidden></div>
         <div class="scroller">
           <table id="who">
-            <thead><tr><th>Name</th><th>Section</th>
+            <thead><tr><th id="who-pick-head" hidden></th>
+              <th>Name</th><th>Section</th>
               <th>Version <button id="reset-versions" type="button" class="reset off"
                   title="Put every student back on their seat's version.">&#8634;</button></th>
               <th>Will get</th>
-              <th>Override <button id="reset-overrides" type="button" class="reset off"
+              <th class="overridecell">Override <button id="reset-overrides" type="button" class="reset off"
                   title="Clear every override; use what each student chose.">&#8634;</button></th>
             </tr></thead>
             <tbody></tbody>

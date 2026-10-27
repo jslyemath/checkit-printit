@@ -300,6 +300,7 @@ class TestThePinnedVersionIsUsed:
         class Pub:
             student_versions = pinned
             names = True
+            only_students = None
         seeds = {("A", "AD"): 401, ("B", "AD"): 402}
         # build_handouts returns (handouts, unseated).
         return build_handouts(Roster([student]), chart, Pub(), seeds)[0]
