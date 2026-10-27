@@ -1825,6 +1825,19 @@ def _review_rows(batch, record_path, names):
     """
     resolve = scans_mod.index_reader(record_path)
 
+    # What the record already holds for these runs, so a stack read
+    # a second time does not come up offering to save results that
+    # went in the first time.
+    runs = {}
+    for sheet in batch.placed:
+        if sheet.run_no not in runs:
+            row = record_mod.run_by_no(record_path, sheet.run_no)
+            runs[sheet.run_no] = (row or {}).get("run_id", "")
+    already = record_mod.recorded_in(record_path, runs.values())
+
+    def recorded(run_no, sid, slug):
+        return already.get((runs.get(run_no, ""), sid, slug), "") or ""
+
     # By paper, not by sheet: the same sheet arrives twice often
     # enough that `duplicates` is one of the three questions the
     # batch answers, and a paper is one row however many times the
@@ -1862,6 +1875,7 @@ def _review_rows(batch, record_path, names):
             "ink": first.get("inside", 0),
             "beside": first.get("beside", 0),
             "outcome": SUGGESTS.get(agreed, ""),
+            "recorded": recorded(run_no, entry.sid, entry.slug),
         })
 
     for run_no, pages in batch.missing(resolve).items():
@@ -1875,6 +1889,7 @@ def _review_rows(batch, record_path, names):
                 "skill": entry.slug, "scanned": False, "crops": [],
                 "read": "", "reads": [], "ink": 0, "beside": 0,
                 "outcome": "",
+                "recorded": recorded(run_no, entry.sid, entry.slug),
             })
 
     # By student, then skill: a student's papers belong together, and

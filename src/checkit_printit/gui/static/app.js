@@ -2500,13 +2500,20 @@ function reviewNote(out) {
 }
 
 function renderReview(data) {
-  // `saved` is empty for every row of a fresh read: this is a stack
-  // just off the scanner, and nothing in it has been written yet.
-  // Re-reading a stack that was already saved therefore offers it
-  // again, which is correct -- the second save is an upsert, and the
-  // alternative is a page that silently declines to save.
+  /* `saved` starts as whatever the record already holds for that
+     paper, which the server sends. A stack read a second time then
+     comes up clean instead of offering six results that went in the
+     first time -- and a row the record disagrees with still shows
+     as unsaved, which is exactly when it should.
+
+     `outcome` is the suggestion, so a paper already recorded as
+     something else keeps its old answer visible as "not saved"
+     until he looks. */
   reviewRows = (data.review || []).map(
-    r => ({ ...r, touched: false, saved: "" }));
+    r => ({ ...r,
+            touched: false,
+            saved: r.recorded || "",
+            outcome: r.recorded || r.outcome }));
   document.getElementById("review-unsaved").hidden = true;
   reviewOutcomes = data.outcomes || [];
   const box = document.getElementById("scan-review");
