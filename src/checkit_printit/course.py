@@ -111,6 +111,17 @@ professor = ""
 
 [bank]
 path = "{bank}"
+
+# How many passing checks each skill needs. Anything not listed needs
+# one, which is the usual answer -- list a skill here only when it
+# needs more.
+#
+# Here and not in the bank's bank.xml: that file is shared and
+# published, and this is a decision about this semester's class.
+#
+#   [passing]
+#   W4 = 2
+[passing]
 '''
 
 AVAILABILITY_TEMPLATE = '''# Which skills are open for retake, and what the next assessment is.
@@ -137,6 +148,41 @@ limit  = "at most"
 
 skills = []
 '''
+
+
+#: What a skill needs when nothing says otherwise.
+DEFAULT_THRESHOLD = 1
+
+
+def thresholds(name, root=None):
+    """`{slug: passes needed}` for the skills that need more than the
+    default. Everything absent needs `DEFAULT_THRESHOLD`.
+
+    Only the exceptions are returned, rather than a row per skill,
+    because the course does not know the bank's slug list and
+    inventing one here would be a second copy of it that goes stale
+    the moment an outcome is added.
+
+    A value that is not a positive whole number is refused rather
+    than rounded or ignored: `W4 = 0` would make a skill impossible
+    to pass, and silently reading it as 1 would hide a typo in the
+    one file a human edits by hand.
+    """
+    import tomllib
+    config = os.path.join(path_for(name, root), CONFIG)
+    if not os.path.isfile(config):
+        return {}
+    with open(config, "rb") as f:
+        raw = tomllib.load(f)
+    out = {}
+    for slug, value in (raw.get("passing") or {}).items():
+        if not isinstance(value, int) or isinstance(value, bool) \
+                or value < 1:
+            raise CourseError(
+                f"{config}: [passing] {slug} = {value!r}. A skill needs "
+                f"a whole number of passes, at least one.")
+        out[str(slug)] = value
+    return out
 
 
 def bank_for(name, root=None):

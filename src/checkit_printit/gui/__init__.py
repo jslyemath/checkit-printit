@@ -1824,24 +1824,44 @@ def _review_rows(batch, record_path, names):
     to do it.
     """
     resolve = scans_mod.index_reader(record_path)
-    rows = []
+
+    # By paper, not by sheet: the same sheet arrives twice often
+    # enough that `duplicates` is one of the three questions the
+    # batch answers, and a paper is one row however many times the
+    # copier saw it.
+    papers = {}
     for sheet in batch.placed:
-        entry = sheet.entry
-        if entry.kind != "student":
+        if sheet.entry.kind != "student":
             continue
-        read = (scans_mod.measure(sheet.cuts["box"])
-                if "box" in sheet.cuts else None)
+        papers.setdefault((sheet.run_no, sheet.page), []).append(sheet)
+
+    rows = []
+    for (run_no, page), copies in papers.items():
+        entry = copies[0].entry
+        reads = [scans_mod.measure(s.cuts["box"])
+                 for s in copies if "box" in s.cuts]
+        calls = {r["call"] for r in reads}
+        # One call only when the copies agree. Two scans of one sheet
+        # that read differently is precisely the case a suggestion
+        # must not paper over: one of them is wrong, and which one is
+        # a question for somebody holding the paper.
+        agreed = calls.pop() if len(calls) == 1 else ""
+        first = reads[0] if reads else {}
         rows.append({
-            "id": f"{sheet.run_no}-{sheet.page}",
-            "run": sheet.run_no, "page": sheet.page,
+            "id": f"{run_no}-{page}",
+            "run": run_no, "page": page,
             "sid": entry.sid, "name": names.get(entry.sid, ""),
             "skill": entry.slug, "scanned": True,
-            "crop": _as_jpeg(sheet.cuts["box"]) if "box" in sheet.cuts
-                    else "",
-            "read": (read or {}).get("call", ""),
-            "ink": (read or {}).get("inside", 0),
-            "beside": (read or {}).get("beside", 0),
-            "outcome": SUGGESTS.get((read or {}).get("call"), ""),
+            # Every square taken of this paper. One, nearly always;
+            # two when it went through twice, and then both are
+            # shown rather than one chosen on his behalf.
+            "crops": [_as_jpeg(s.cuts["box"]) for s in copies
+                      if "box" in s.cuts],
+            "read": agreed,
+            "reads": sorted(calls) or ([agreed] if agreed else []),
+            "ink": first.get("inside", 0),
+            "beside": first.get("beside", 0),
+            "outcome": SUGGESTS.get(agreed, ""),
         })
 
     for run_no, pages in batch.missing(resolve).items():
@@ -1852,8 +1872,9 @@ def _review_rows(batch, record_path, names):
                 "id": f"{run_no}-{page}",
                 "run": run_no, "page": page,
                 "sid": entry.sid, "name": names.get(entry.sid, ""),
-                "skill": entry.slug, "scanned": False, "crop": "",
-                "read": "", "ink": 0, "beside": 0, "outcome": "",
+                "skill": entry.slug, "scanned": False, "crops": [],
+                "read": "", "reads": [], "ink": 0, "beside": 0,
+                "outcome": "",
             })
 
     # By student, then skill: a student's papers belong together, and
@@ -1862,10 +1883,222 @@ def _review_rows(batch, record_path, names):
     return rows
 
 
+def api_scan_save(course, body):
+    """Write the instructor's decisions into the print record.
+
+    Takes `decisions`, a list of `{id, outcome}`. Everything else
+    about the paper is read from `SCANNING.result`, the server's own
+    copy of what it scanned -- see this module's note on why the
+    browser is not asked for it.
+
+    A row with no outcome is not a decision and is skipped. That is
+    not the same as `absent`, which is a decision: "no paper came
+    and I am recording that".
+    """
+    result = SCANNING.result
+    if not result:
+        # The read lives in memory for the life of the process, so a
+        # restart between reading and saving loses it. Said plainly,
+        # because the alternative -- taking the page's word for who
+        # each paper belonged to -- is how a decision ends up on the
+        # wrong student.
+        raise GuiError(
+            "there is no stack in hand to save. Read the PDFs again, "
+            "then save; the decisions on screen were not kept.")
+
+    want = {}
+    for item in (body.get("decisions") or []):
+        outcome = str(item.get("outcome") or "")
+        if not outcome:
+            continue
+        if outcome not in record_mod.OUTCOMES:
+            # Checked here as well as in `save_attempts`, and not as
+            # a copy of it: a decision whose id matches no row in the
+            # read is dropped below and never reaches the record, so
+            # without this a stale page could send nonsense and be
+            # told everything was fine.
+            raise GuiError(
+                f"{outcome!r} is not an outcome. It is one of "
+                f"{', '.join(record_mod.OUTCOMES)}.")
+        want[str(item.get("id"))] = outcome
+    if not want:
+        raise GuiError("nothing was decided, so there is nothing to save.")
+
+    path = course.file("record")
+    rows, no_run = [], set()
+    for row in result.get("review", []):
+        outcome = want.get(row["id"])
+        if not outcome:
+            continue
+        run = record_mod.run_by_no(path, row["run"])
+        if run is None:
+            # The code named a run this course does not have. The
+            # read already reports it; here it means the decision
+            # has nowhere to go, so it is named rather than dropped.
+            no_run.add(row["run"])
+            continue
+        rows.append({
+            "run_id": run["run_id"], "sid": row["sid"],
+            "slug": row["skill"], "outcome": outcome,
+            # A paper that never came back has no page and no
+            # reading. Stored as NULL rather than 0, which would
+            # read as "page zero, no ink".
+            "page": row["page"] if row["scanned"] else None,
+            "reading": row["read"] if row["scanned"] else "",
+            "ink": row["ink"] if row["scanned"] else None,
+            "beside": row["beside"] if row["scanned"] else None,
+        })
+
+    try:
+        written, unknown = record_mod.save_attempts(path, rows)
+    except record_mod.RecordError as exc:
+        raise GuiError(str(exc)) from None
+
+    return {
+        "saved": written,
+        "skipped": len(result.get("review", [])) - written,
+        # Reported, not hidden: a paper the index names and the
+        # record never printed means the two disagree, and that is
+        # worth a line on screen even though the decision was kept.
+        "unprinted": [{"sid": sid, "skill": slug}
+                      for _, sid, slug in unknown],
+        "noRun": sorted(no_run),
+        "runs": sorted({r["run_id"] for r in rows}),
+    }
+
+
+def api_progress(course, _body):
+    """The grid: students down, every skill in the bank across."""
+    path = course.file("record")
+    bank = course.bank()
+
+    slugs, titles = [], {}
+    if bank is not None:
+        slugs = list(bank.slugs())
+        for slug in slugs:
+            try:
+                titles[slug] = bank.skill_title(slug)
+            except BankError:
+                titles[slug] = slug
+
+    try:
+        needed = course_mod.thresholds(course.name)
+    except course_mod.CourseError as exc:
+        raise GuiError(str(exc)) from None
+
+    cells = {}
+    for row in record_mod.progress(path):
+        cells.setdefault(row["sid"], {})[row["slug"]] = {
+            "attempts": row["attempts"],
+            "passes": row["passes"],
+            "queries": row["queries"],
+            "absents": row["absents"],
+            "last": row["last"],
+            "lastDate": row["last_date"],
+            "passedIn": row["passed_in"],
+        }
+
+    # A skill somebody has attempted that the bank no longer lists
+    # still has to appear, or the work disappears from the grid
+    # without anything saying it did. Appended, so the bank's own
+    # order survives.
+    for by_skill in cells.values():
+        for slug in by_skill:
+            if slug not in titles:
+                slugs.append(slug)
+                titles[slug] = slug
+
+    # Live students only, in roster order: a grid is read down a
+    # class list, and somebody who has left is not on it.
+    people = course.roster()
+    students = [{"sid": roster_mod.key_of(s), "name": s.display,
+                 "section": s.section}
+                for s in people.live()]
+
+    return {
+        "hasBank": bank is not None,
+        "students": students,
+        "skills": [{"slug": s, "title": titles.get(s, s),
+                    "threshold": needed.get(s,
+                                            course_mod.DEFAULT_THRESHOLD)}
+                   for s in slugs],
+        "cells": cells,
+        # Which runs count as "just come back", so the view can offer
+        # to light them up. Worked out from `graded` rather than from
+        # dates -- see `record.grading_sets`.
+        "recent": record_mod.grading_sets(path),
+    }
+
+
+def api_progress_cell(course, body):
+    """One student's history of one skill, for the drill-in."""
+    sid = str(body.get("sid") or "")
+    slug = str(body.get("slug") or "")
+    if not sid or not slug:
+        raise GuiError("that request did not say which cell.")
+    rows = record_mod.history(course.file("record"), sid, slug)
+    return {"sid": sid, "slug": slug, "papers": [
+        {"runId": r["run_id"], "title": r["title"], "date": r["date"],
+         "runNo": r["run_no"], "delisted": bool(r["delisted"]),
+         "seed": r["seed"], "version": r["version"],
+         "outcome": r["outcome"] or "", "decided": r["decided"] or "",
+         "page": r["page"], "reading": r["reading"] or ""}
+        for r in rows]}
+
+
+def api_progress_set(course, body):
+    """Change or record one result by hand.
+
+    The same table Scans writes, through the same function, so a
+    decision typed here and a decision read off a stack are the same
+    kind of thing and neither can produce a row the other could not.
+
+    No `page` and no reading: this is him saying what happened, not
+    a measurement of anything, and inventing a reading would put a
+    number in the audit column that nothing ever measured.
+    """
+    run_id = str(body.get("runId") or "")
+    sid = str(body.get("sid") or "")
+    slug = str(body.get("slug") or "")
+    outcome = str(body.get("outcome") or "")
+    if not (run_id and sid and slug):
+        raise GuiError("that request did not say which paper.")
+    # No outcome check here. `save_attempts` owns what an outcome may
+    # be -- it is the thing that writes it -- and refuses with the
+    # same sentence, so a second copy of the list here was a second
+    # place for it to go stale and nothing more. `api_scan_save` does
+    # check, and that one is not a copy: see the note there.
+
+    path = course.file("record")
+    # Keep whatever the scanner measured, when there was a scan. He
+    # is overruling the *call*, not claiming the ink was different,
+    # and throwing the measurement away would lose the only evidence
+    # of why the reader said what it did.
+    was = next((r for r in record_mod.history(path, sid, slug)
+                if r["run_id"] == run_id), None)
+    if was is None:
+        raise GuiError(
+            f"{sid} was never printed {slug} in that run, so there is "
+            f"nothing to record against it.")
+    try:
+        record_mod.save_attempts(path, [{
+            "run_id": run_id, "sid": sid, "slug": slug,
+            "outcome": outcome, "page": was["page"],
+            "reading": was["reading"] or "", "ink": None,
+            "beside": None}])
+    except record_mod.RecordError as exc:
+        raise GuiError(str(exc)) from None
+    return api_progress_cell(course, {"sid": sid, "slug": slug})
+
+
 ROUTES = {
     "/api/course": api_course,
+    "/api/progress": api_progress,
+    "/api/progress/cell": api_progress_cell,
+    "/api/progress/set": api_progress_set,
     "/api/scan/start": api_scan_start,
     "/api/scan/status": api_scan_status,
+    "/api/scan/save": api_scan_save,
     "/api/roster": api_roster,
     "/api/roster/save": api_roster_save,
     "/api/roster/drop": api_roster_drop,

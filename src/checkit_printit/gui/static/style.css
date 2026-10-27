@@ -1779,3 +1779,182 @@ button.act.chip:hover { border-color: var(--line-strong); }
    back in, and a table that loses forty-two rows when you untick them
    is a table you cannot undo in. */
 #who tr.notprinting > td:not(.pickcell) { opacity: 0.38; }
+
+/* ---- a paper scanned twice --------------------------------------- */
+
+/* Two squares, stacked, and the line saying why. The row grows; it
+   is one row in a hundred and the alternative is shrinking a crop
+   that exists to be looked at closely. */
+/* The two squares, stacked, with a hairline between them so they
+   read as two pictures of one box and not as one tall picture. */
+.review-shot.twice { flex-direction: column; gap: 2px; }
+.review-shot.twice img + img { border-top: 1px solid var(--line); }
+.review-disagree { font-size: var(--t-sm); margin-top: var(--s1); }
+
+/* ---- the progress grid ------------------------------------------- */
+
+/* 45 rows by 29 columns. Both headers stay put, because a cell in
+   the middle of it says nothing without the name at its left and
+   the slug above it, and scrolling to check which is which is how a
+   gradebook gets misread. */
+.gridscroll { overflow: auto; max-height: calc(100vh - 230px); }
+
+#progress-grid { border-collapse: separate; border-spacing: 0; }
+#progress-grid th.who {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface-1);
+  text-align: left;
+  font-weight: 500;
+  border-right: 1px solid var(--line);
+}
+#progress-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--surface-2);
+}
+#progress-grid thead th.who { z-index: 4; }
+/* A name is not a heading, whatever the markup says. `th` is right
+   here -- the cell heads its row -- but the app's `th` style is
+   12px muted uppercase, and that turns a person into a shout. */
+#progress-grid tbody th.who {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--t-base);
+  font-weight: 400;
+  color: var(--ink);
+  padding: var(--s1) var(--s3) var(--s1) var(--s2);
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#progress-grid th.skillcol {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: center;
+  padding: var(--s2) var(--s1);
+}
+
+/* A cell is a square, and square means square: the grid is read by
+   scanning across, and columns of different widths make a row look
+   like it has gaps in it. */
+/* A faint rule down each column. Tracking one student across 29
+   cells is the thing this grid is actually used for, and without
+   any vertical structure the eye slides. Faint rather than a full
+   border: the loud cell has to stay the loudest thing here. */
+#progress-grid td.cell + td.cell,
+#progress-grid thead th.skillcol + th.skillcol {
+  border-left: 1px solid var(--surface-3);
+}
+
+#progress-grid td.cell {
+  width: 34px;
+  min-width: 34px;
+  height: 30px;
+  text-align: center;
+  padding: 0;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  font-size: var(--t-sm);
+  line-height: 1;
+}
+
+/* Never taken: nothing at all. Most of the grid in September, and
+   the shape of what is still to come. */
+#progress-grid td.none { }
+
+/* Passing is quiet. The instructor's call and the right one -- a
+   gradebook is scanned for trouble, and 1,300 green cells would
+   drown the four that matter. */
+#progress-grid td.passed .cellmark { color: var(--accent); }
+
+/* Not passed, once. An outlined box: the same shape as the one on
+   the paper, which is what he is remembering when he looks. */
+#progress-grid td.open .cellmark,
+#progress-grid td.part .cellmark,
+#progress-grid td.stuck .cellmark {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+/* Never handed in. The same box, dashed: there was no paper, so
+   there is no solid edge to draw. */
+#progress-grid td.unsat .cellmark {
+  border-style: dashed;
+  border-color: var(--line);
+}
+
+/* Not passed, more than once. The loudest thing on the page, which
+   is the whole point of the grid. */
+#progress-grid td.stuck { background: var(--warn-soft); }
+#progress-grid td.stuck .cellmark { border-color: var(--warn); }
+#progress-grid td.stuck .cellcount { color: var(--warn); font-weight: 600; }
+
+#progress-grid .cellcount {
+  font-size: var(--t-xs);
+  margin-left: 2px;
+  color: var(--muted);
+  vertical-align: middle;
+}
+
+/* A query: a paper he flagged to look at again. It reads as not
+   passed, because it is, and carries a corner so the fact that he
+   marked it does not disappear into the same box as a blank. */
+#progress-grid td.queried::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+/* What has just come back, when he asks for it. Off by default:
+   it is the answer to "what happened this week", not to "where is
+   the class", and the grid's usual job is the second one. */
+#progress-grid td.justin { background: var(--accent-soft); }
+
+/* ---- one cell, close up ------------------------------------------ */
+
+/* Wider than `ask`, which holds a sentence; this holds a table of
+   printings with four buttons on each. */
+.cellbox { max-width: 620px; width: calc(100vw - 2 * var(--s6)); }
+
+.cellpaper {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s1) var(--s3);
+  align-items: center;
+  padding: var(--s3) 0;
+  border-top: 1px solid var(--line);
+}
+.cellpaper:first-child { border-top: 0; }
+.cellwhen { font-size: var(--t-base); }
+.cellwhen .muted { font-size: var(--t-sm); }
+/* Under the date rather than beside it: "scanner read it as empty"
+   is about the same paper as the line above, and a third column
+   would make the four buttons wrap at this width. */
+.cellread { grid-column: 1; font-size: var(--t-sm); }
+.cellpaper .review-picks { grid-column: 2; grid-row: 1 / span 2; }
+
+/* The grid's cells are buttons. Said quietly -- a pointer and a
+   focus ring, no hover fill -- because 1,300 cells that light up
+   is a grid that flickers as the mouse crosses it. */
+#progress-grid td.cell { cursor: pointer; }
+#progress-grid td.cell:hover { outline: 1px solid var(--line-strong);
+                               outline-offset: -1px; }
+#progress-grid td.cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
