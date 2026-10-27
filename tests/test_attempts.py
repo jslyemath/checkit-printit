@@ -316,6 +316,72 @@ class TestOneRowPerPaper:
         assert self.rows([self.sheet(3, "ticked", kind="key")]) == []
 
 
+class TestARereadKnowsWhatIsSaved:
+    """Reading a stack twice must not offer to save it twice.
+
+    A re-read -- after finding a missing sheet, or just because --
+    rebuilt every row knowing nothing, so the bar said "6 results
+    not saved" about six already in the record. The save itself was
+    harmless, an upsert over identical values; the count was a lie,
+    and the one thing a save bar must be is true.
+    """
+
+    @pytest.fixture
+    def saved(self, db):
+        record.save_attempts(db, [
+            decide("first", "001", "W1", "passed", page=1,
+                   reading="ticked")])
+        return db
+
+    def rows(self, path, sheets):
+        batch = scans_mod.Batch(sheets=sheets)
+        return gui_mod._review_rows(batch, path, {})
+
+    def sheet(self, page, call, sid="001", slug="W1"):
+        from checkit_printit import pageindex
+        entry = pageindex.Page(page=page, kind="student", sid=sid,
+                               slug=slug, vseed="401", sheet=1, marks={})
+        return scans_mod.Sheet(
+            source="copier-1.pdf", at=1, status="placed", run_no=1,
+            page=page, entry=entry, code=f"C1-1-{page}",
+            cuts={"box": call})
+
+    @pytest.fixture
+    def measured(self, monkeypatch):
+        monkeypatch.setattr(
+            gui_mod.scans_mod, "measure",
+            lambda cut: {"call": cut, "inside": 0.03, "beside": 0.0})
+        monkeypatch.setattr(gui_mod, "_as_jpeg", lambda img: "jpeg")
+
+    def test_a_saved_paper_comes_back_marked_saved(self, saved, measured):
+        rows = self.rows(saved, [self.sheet(1, "ticked")])
+        assert rows[0]["recorded"] == "passed"
+
+    def test_an_unsaved_paper_carries_nothing(self, saved, measured):
+        rows = self.rows(saved, [self.sheet(2, "ticked", slug="W2")])
+        assert rows[0]["recorded"] == ""
+
+    def test_the_record_wins_over_the_suggestion(self, db, measured):
+        """He decided "not passed" on a paper the reader calls
+        ticked. Re-reading must not quietly offer his own decision
+        back to him as a change."""
+        record.save_attempts(db, [decide("first", "001", "W1", "failed")])
+        rows = self.rows(db, [self.sheet(1, "ticked")])
+        assert (rows[0]["recorded"], rows[0]["outcome"]) == (
+            "failed", "passed")
+
+    def test_a_paper_whose_run_is_not_in_the_record_is_blank(
+            self, saved, measured):
+        """`run_by_no` finds nothing, so there is nothing to compare
+        against -- and that must read as "not saved", not crash."""
+        sheet = self.sheet(1, "ticked")
+        sheet = scans_mod.Sheet(
+            source=sheet.source, at=sheet.at, status="placed", run_no=77,
+            page=1, entry=sheet.entry, code="C1-77-1", cuts=sheet.cuts)
+        rows = self.rows(saved, [sheet])
+        assert rows[0]["recorded"] == ""
+
+
 # ----------------------------------------------------------- endpoint ----
 
 class TestTheSaveEndpoint:

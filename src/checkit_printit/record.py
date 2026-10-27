@@ -554,6 +554,27 @@ def history(path, sid, slug):
         db.close()
 
 
+def recorded_in(path, run_ids):
+    """`{(run_id, sid, slug): outcome}` for these runs.
+
+    One query for a whole batch, because the review grid asks about
+    every paper in a stack at once and a lookup per row would be a
+    few hundred round trips to answer one question.
+    """
+    run_ids = [r for r in run_ids if r]
+    if not run_ids or not os.path.isfile(path):
+        return {}
+    db = connect(path)
+    try:
+        holes = ", ".join("?" * len(run_ids))
+        return {(r["run_id"], r["sid"], r["slug"]): r["outcome"]
+                for r in db.execute(
+                    "SELECT run_id, sid, slug, outcome FROM attempt"
+                    f" WHERE run_id IN ({holes})", run_ids)}
+    finally:
+        db.close()
+
+
 def grading_sets(path, keep=2):
     """The last `keep` runs that have been graded, newest first.
 
