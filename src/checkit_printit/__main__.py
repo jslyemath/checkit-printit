@@ -981,18 +981,22 @@ def import_csv(csv_path, out):
 @click.option("--codes/--no-codes", default=None,
               help="The scanning code in the footer. Overrides the "
                    "publication for this build only.")
+@click.option("--only", multiple=True, metavar="KEY",
+              help="Print for these students only, by id, alternate id or "
+                   "email. Repeatable. Overrides the publication.")
 @click.option("--record/--no-record", "keep_record", default=True,
               help="Note the run in the course's print record. --no-record "
                    "is for a throwaway build: nothing is written to the "
                    "record, and the papers carry no scanning code, because "
                    "there would be nothing to look one up in.")
 def build(pub_path, out, do_compile, seed, preview, replay, ids, codes,
-          keep_record):
+          only, keep_record):
     """Assemble the class set, and compile it."""
     try:
         result = runner.run(pub_path, out=out, do_compile=do_compile,
                             seed=seed, preview=preview, replay=replay,
-                            ids=ids, codes=codes, keep_record=keep_record)
+                            ids=ids, codes=codes, keep_record=keep_record,
+                            only=only)
     except runner.BuildError as exc:
         raise click.ClickException(str(exc))
 
@@ -1048,7 +1052,12 @@ def _report(result):
         click.echo(f"seed    {result.run_seed}   (repeat this draw with "
                    f"--seed {result.run_seed})")
     click.echo("")
-    click.echo(f"  students {report['students']}")
+    if result.printed_for < result.roster_size:
+        click.echo(f"  students {report['students']}   (this run is for "
+                   f"{result.printed_for} of {result.roster_size}; the rest "
+                   f"of the class is not in it)")
+    else:
+        click.echo(f"  students {report['students']}")
     if report["extras"]:
         click.echo(f"  extras   {report['extras']}")
     click.echo(f"  skills   {len(report['skills'])}: {', '.join(report['skills'])}")
@@ -1080,6 +1089,16 @@ def _report(result):
     for a, b, version in report["collisions"]:
         click.echo(f"  WARNING  {a.name} and {b.name} are adjacent in group "
                    f"{a.group} and were both printed version {version}")
+    # Short, and grammatical whether it is one name or six. "this run
+    # names X, Y, who has been dropped" stops working at two, and
+    # these are lists because there can be two.
+    if result.dropped_students:
+        click.echo(f"  WARNING  nothing printed for "
+                   f"{', '.join(result.dropped_students)} -- dropped")
+    if result.unmatched_students:
+        click.echo(f"  WARNING  nothing printed for "
+                   f"{', '.join(result.unmatched_students)} -- not in the "
+                   f"roster")
     if result.unmatched_overrides:
         click.echo(f"  WARNING  override(s) for "
                    f"{', '.join(result.unmatched_overrides)} matched nobody "

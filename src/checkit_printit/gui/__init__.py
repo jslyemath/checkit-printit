@@ -1236,6 +1236,16 @@ def api_print_save(course, body):
             f"{mode!r} is not a mode. It is one of "
             f"{', '.join(printjob_mod.MODES)}.")
 
+    # `load_draft` quietly reads an unknown value as "all", which is
+    # right for a file an older version wrote and wrong for a request
+    # arriving now: that is a caller bug, and the quiet reading turns
+    # it into a class set nobody asked for.
+    who = draft.get("who", "all")
+    if who not in printjob_mod.WHO:
+        raise GuiError(
+            f"{who!r} is not who a run is for. It is one of "
+            f"{', '.join(printjob_mod.WHO)}.")
+
     # A letter beyond the chart's is allowed: that is how a version is
     # added from the app, and `assemble` draws seeds for whatever the pins
     # name. It still has to be a version letter and not prose, because the

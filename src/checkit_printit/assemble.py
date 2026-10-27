@@ -45,6 +45,22 @@ class Handout:
     version: str = ""
 
 
+def as_roster(people):
+    """A `Roster`, whichever of the two shapes came in.
+
+    Tests and older callers pass a plain list of students, which is
+    why the filtering steps below were each written to tolerate one.
+    Tolerating it per-call is how `only` came to be skippable: miss
+    the guard on one site and that site quietly prints everybody.
+    So it happens once, here, and every step after it has the whole
+    interface. Anything that is not a list is returned untouched --
+    a fake missing a method should raise, not be worked around.
+    """
+    if isinstance(people, (list, tuple)):
+        return roster_mod.Roster(list(people))
+    return people
+
+
 def variant_for(publication, slug):
     """The variant chosen for one skill, or None if none was.
 
@@ -189,7 +205,12 @@ def build_handouts(roster, chart, publication, seeds):
     copy?" rule yields here, because the cost of the two disagreeing is
     a paper in a departed student's hands.
     """
-    roster = roster.live() if hasattr(roster, "live") else roster
+    roster = as_roster(roster).live()
+    # And then only the students this run is for. The deliberate
+    # second copy, for the same reason `live()` is doubled: this is
+    # the function that decides what prints, and it is public.
+    if publication.only_students is not None:
+        roster, _ = roster.only(publication.only_students)
     ordered, unseated = chart.order(roster) if chart else (list(roster), [])
     handouts = []
     pinned = publication.student_versions or {}
@@ -535,7 +556,18 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None,
     # in the second group instead of removing them. On 2026-10-23 that
     # shipped a three-page packet, built from the previous week's
     # choices, for a student who had been dropped.
-    roster = roster.live() if hasattr(roster, "live") else roster
+    roster = as_roster(roster).live()
+    # Then down to the students this run is for, if it names any.
+    # Before the pin check, so a pin for somebody not in the run is
+    # not reported as a problem with the run.
+    if publication.only_students is not None:
+        roster, missing_students = roster.only(publication.only_students)
+        if not len(roster):
+            raise AssemblyError(
+                "this run is set to print for particular students and none "
+                "of them is in the roster"
+                + (f" -- it names {', '.join(missing_students)}."
+                   if missing_students else "."))
     check_flat_pins(publication, roster)
     missing = {}
     env_misses = set()

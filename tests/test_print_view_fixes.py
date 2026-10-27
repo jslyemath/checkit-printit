@@ -108,6 +108,7 @@ class TestTheWrongFaultWasReported:
         class Pub:
             student_versions = {"806001": "E"}
             names = True
+            only_students = None
         with pytest.raises(assemble_mod.AssemblyError,
                            match="pinned to version 'E'"):
             assemble_mod.build_handouts(people, chart, Pub(),

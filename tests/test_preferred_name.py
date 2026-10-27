@@ -50,6 +50,11 @@ class Pub:
     # AttributeError in a test about something else. A fake short of
     # what the boundary has cannot fail the way the boundary fails.
     printed_title = "Skill Checkpoint 10/26"
+    #: Fourth. None is "this run is for everybody", which is what
+    #: every run in this file is -- and is also the value that makes
+    #: `build_handouts` skip the filter, so a double that left it out
+    #: and a double that sets it None do not agree by accident.
+    only_students = None
 
 
 def chart_of(*names, versions=("A", "B")):

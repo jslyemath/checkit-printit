@@ -363,6 +363,27 @@ The names are `.navrail` and `.secband`. Run the markup tests after
 touching either stylesheet, and still open Seats afterwards -- the test
 catches the name, not every way a rule can reach too far.
 
+### Never hide a table column by `nth-child`
+
+The Override column was hidden in `same` mode with
+`#who.hide-override th:nth-child(5)`. On 2026-10-26 the tick column
+added a new *first* cell, so with `same` mode and a ticked run at
+once the fifth child became **Will get** and the wrong column
+vanished -- in the one combination the tick column exists for.
+
+The comment above that rule already warned about this: "a rule that
+hid cells and left the heading once made every column after it read
+one place to the left." The hazard was written down and the fix
+written for it was still positional, so a new column in front
+re-armed it.
+
+Give the heading and the cells a shared class and hide that. There
+is no `nth-child` anywhere in `style.css` now; keep it that way.
+Neither the tests nor the screenshots caught this -- every
+screenshot was in `chose` mode, where the column is not hidden at
+all. When a column appears or disappears, look at the table in every
+combination of the switches that govern it.
+
 ### A change with reasoning gets a dated section in the notes
 
 `../checkit/CODEBASE_NOTES.md`, a `##` heading with today's date. The commit
@@ -754,6 +775,35 @@ table that exists and the real course had runs in it already.
 * A run's job folder is found by rebuilding its name with
   `printjob.folder_for`, not by storing a second path that could go
   stale -- `run_id` is already `"{title} {date}"`.
+
+### Who a run is for is not one of the modes
+
+`who` is `"all"` or `"these"`, beside `mode` rather than inside it.
+The modes decide **what** a student gets; this decides **whether they
+are in the run**, and the two compose -- a reprint for one student
+still reads that student's own form choices, or an override typed for
+them. Folded in as a third mode it would have meant retyping those
+choices to print one paper, which is the thing it exists to avoid.
+
+In the job file the key is `[selection] only_students`, and it has
+**three** states, not two:
+
+| in the file | means |
+|---|---|
+| absent | the whole class |
+| `["806001234"]` | these students, matched on id, alternate id or email |
+| `[]` | nobody -- a mistake, and `assemble` refuses it |
+
+The third is the point of the first. If an empty list read as "the
+whole class", unticking everybody would print forty-three papers.
+
+**The filter has a deliberate second copy**, like `live()`: `assemble`
+applies it and so does `build_handouts`, because `build_handouts` is
+public and is called directly by tests and by the print view. Both
+sites used to be written `and hasattr(roster, "only")`, copying the
+`hasattr(roster, "live")` above them -- harmless there, and here it
+meant a caller passing a plain list silently printed the class.
+`assemble.as_roster` now normalises once and the guards are gone.
 
 ### The draft carries only what its mode uses
 

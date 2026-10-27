@@ -12,3 +12,9 @@ out/
 *.aux
 *.log
 *.out
+
+# Mutation-testing backups. The harness writes <file>.mut, edits the
+# original and restores it in a `finally`; a crash before that leaves
+# one behind. One was committed into src/ and shadowed a module for
+# several days.
+*.mut

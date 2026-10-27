@@ -2847,6 +2847,38 @@ const MODE_LABELS = [
    "One list, for the whole class. Individual choices do not apply."],
 ];
 
+/* Who the run is for. A second row beside the skill modes and not a
+ * third option within them: those decide *what* a student gets, this
+ * decides *whether* they are in the run, and the two compose. Folded
+ * together, printing for one student would have meant retyping the
+ * skills they had already chosen on the form.
+ */
+const WHO_LABELS = [
+  ["all", "the whole class",
+   "Every student still enrolled."],
+  ["these", "just the ones I tick",
+   "A reprint for one or two. They still get whatever the mode above "
+   + "says -- their own choices, or an override you type."],
+];
+
+function whoChosen() {
+  return new Set(draft.only || []);
+}
+
+function isPrinting(student) {
+  return draft.who !== "these" || whoChosen().has(student.key);
+}
+
+function setPrinting(student, on) {
+  const chosen = whoChosen();
+  if (on) chosen.add(student.key);
+  else chosen.delete(student.key);
+  draft.only = [...chosen];
+  renderModes();
+  renderWho();
+  refreshPrintDirty();
+}
+
 const MODE_PICKERS = {
   chose: [
     ["default_when_missing", "Default when nobody chose",
@@ -2978,6 +3010,68 @@ function renderModes() {
   why.className = "muted";
   why.textContent = activeNote;
   box.append(head, why);
+
+  // --- who it is for
+  const whoHead = document.createElement("div");
+  whoHead.className = "modehead";
+  const whoLead = document.createElement("span");
+  whoLead.className = "muted";
+  whoLead.textContent = "Printing for:";
+  const whoSeg = document.createElement("div");
+  whoSeg.className = "segmented";
+  let whoNote = "";
+  for (const [value, label, note] of WHO_LABELS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.title = note;
+    b.setAttribute("aria-pressed", String(draft.who === value));
+    if (draft.who === value) whoNote = note;
+    b.onclick = () => {
+      if (draft.who === value) return;
+      draft.who = value;
+      // Switching on starts with everybody ticked, so the switch by
+      // itself never changes what prints -- you then untick. Turning
+      // it off clears the list rather than keeping it, because a list
+      // left over from last week is one radio click from printing a
+      // class set as a single sheet.
+      draft.only = value === "these"
+        ? printState.students.map(s => s.key) : [];
+      renderModes();
+      renderWho();
+      refreshPrintDirty();
+    };
+    whoSeg.appendChild(b);
+  }
+  whoHead.append(whoLead, whoSeg);
+  if (draft.who === "these") {
+    const n = whoChosen().size;
+    const all = printState.students.length;
+    const count = document.createElement("span");
+    count.className = n ? "muted" : "warnline";
+    count.textContent = n ? `${n} of ${all} ticked` : "nobody ticked yet";
+    const pick = (label, keys) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "act chip";
+      b.textContent = label;
+      b.onclick = () => {
+        draft.only = keys();
+        renderModes();
+        renderWho();
+        refreshPrintDirty();
+      };
+      return b;
+    };
+    whoHead.append(count,
+                   pick("Tick all",
+                        () => printState.students.map(s => s.key)),
+                   pick("Untick all", () => []));
+  }
+  const whoWhy = document.createElement("p");
+  whoWhy.className = "muted";
+  whoWhy.textContent = whoNote;
+  box.append(whoHead, whoWhy);
 
   for (const [key, label, note] of MODE_PICKERS[draft.mode]) {
     const wrap = document.createElement("div");
@@ -3185,13 +3279,35 @@ function renderStale() {
 function renderWho() {
   const body = document.querySelector("#who tbody");
   body.textContent = "";
+  // The column only exists while the run names its students. Forty-three
+  // permanently-ticked boxes would be furniture.
+  const picking = draft.who === "these";
+  document.getElementById("who-pick-head").hidden = !picking;
   let papers = 0;
   let getting = 0;
   for (const student of printState.students) {
     const gets = willGet(student);
-    papers += gets.length;
-    if (gets.length) getting += 1;
+    const printing = isPrinting(student);
+    // A student who is not in the run contributes no paper, however
+    // many skills they chose. Counting them would make the header
+    // promise pages the build will not produce.
+    if (printing) {
+      papers += gets.length;
+      if (gets.length) getting += 1;
+    }
     const tr = document.createElement("tr");
+    tr.classList.toggle("notprinting", !printing);
+    if (picking) {
+      const td = document.createElement("td");
+      td.className = "pickcell";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = printing;
+      box.setAttribute("aria-label", `print for ${student.display}`);
+      box.onchange = () => setPrinting(student, box.checked);
+      td.appendChild(box);
+      tr.appendChild(td);
+    }
     const add = (text, cls) => {
       const td = document.createElement("td");
       td.textContent = text;
@@ -3285,6 +3401,9 @@ function renderWho() {
     }
 
     const td = document.createElement("td");
+    // Paired with the heading's class: one rule hides both, which is
+    // what stops a hidden column shifting the ones after it.
+    td.className = "overridecell";
     const owrap = document.createElement("div");
     owrap.className = "cellwrap";
     const input = document.createElement("input");

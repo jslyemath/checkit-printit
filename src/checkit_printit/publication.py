@@ -77,6 +77,18 @@ class Publication:
     skill_seeds: dict = dataclasses.field(default_factory=dict)  # slug -> {version: seed}
     variants: dict = dataclasses.field(default_factory=dict)     # slug -> variant
 
+    #: Which students this run is for, or `None` for all of them.
+    #:
+    #: `None` and `()` are different answers and the difference is
+    #: load-bearing: no filter at all, against a filter that has been
+    #: turned on and nobody ticked. The second is a mistake and the
+    #: build says so rather than printing the class.
+    #:
+    #: Not one of the selection modes below. Those decide *what* a
+    #: student gets; this decides *whether* they are in the run, and
+    #: it composes with all three.
+    only_students: tuple = None
+
     # selection overrides
     simply_print: tuple = ()
     default_when_missing: tuple = ()
@@ -234,6 +246,10 @@ def load(path):
                           in (raw.get("versions") or {}).items()},
         student_overrides={str(k): [str(s) for s in v] for k, v
                            in (raw.get("overrides") or {}).items()},
+        # Absent means no filter; present, even empty, means one.
+        only_students=(tuple(raw["selection"]["only_students"])
+                       if "only_students" in raw.get("selection", {})
+                       else None),
         simply_print=tuple(raw.get("selection", {}).get("simply_print", [])),
         default_when_missing=tuple(raw.get("selection", {}).get("default_when_missing", [])),
         append_for_everyone=tuple(raw.get("selection", {}).get("append_for_everyone", [])),

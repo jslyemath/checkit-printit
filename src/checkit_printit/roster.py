@@ -143,6 +143,34 @@ class Roster:
         """
         return Roster([s for s in self.students if not s.dropped])
 
+    def only(self, keys):
+        """Just these students, in roster order. `None` means everyone.
+
+        Matched on any of a student's keys, the way overrides are: a
+        run saved on Monday naming somebody by email must still find
+        them on Friday when the import has given them an id.
+
+        Returns `(roster, unmatched)`. An unmatched key is reported
+        rather than dropped -- a name typed into a run that silently
+        prints nothing is the failure this whole feature exists to
+        stop happening by accident.
+        """
+        if keys is None:
+            return self, []
+        wanted = set(keys)
+        kept, used = [], set()
+        for student in self.students:
+            # Every key they answer to, not the first one: a job that
+            # names somebody by id and by email matched on the id and
+            # then reported the email as matching nobody, which reads
+            # as "this student is not in the roster" about a student
+            # whose paper is in the stack.
+            hits = [k for k in keys_of(student) if k in wanted]
+            if hits:
+                kept.append(student)
+                used.update(hits)
+        return Roster(kept), sorted(wanted - used)
+
     def skills_used(self):
         """Every skill anyone asked for, in first-seen order.
 
