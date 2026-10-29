@@ -1802,10 +1802,18 @@ OUTCOMES = [
 ]
 
 #: What the reader's call suggests, before the instructor touches it.
-#: `unsure` suggests nothing on purpose: that is the whole point of
-#: it, and a default there would be the guess the reader declined to
-#: make.
-SUGGESTS = {"ticked": "passed", "empty": "failed", "unsure": ""}
+#:
+#: `beside` -- coloured ink around the box and none in it -- is his
+#: `?`, and it is claimed. The reading used to hedge because it
+#: measured darkness and could not tell a question mark from the
+#: blurred corner of the printed box; measuring colour, it can, and
+#: every `?` in the 62 pages of 2026-10-26 came back as one.
+#:
+#: `heavy` and `nobox` suggest nothing, and mean it: a box scribbled
+#: over and a box that could not be found are both "look at this",
+#: which is what an empty suggestion puts in front of him.
+SUGGESTS = {"ticked": "passed", "empty": "failed", "beside": "queried",
+            "heavy": "", "nobox": ""}
 
 
 def _as_jpeg(image, quality=72):
@@ -1884,10 +1892,14 @@ def _review_rows(batch, record_path, names):
             # thing being checked is the index, not the scanner.
             "nameCrop": next((_as_jpeg(s.cuts["name"]) for s in copies
                               if "name" in s.cuts), ""),
+            # Where the sheet came from, so the whole page can be
+            # fetched when he asks for it. Not the page itself:
+            # sixty full renders is a response nobody wants.
+            "at": [{"file": s.source, "page": s.at} for s in copies],
             "read": agreed,
             "reads": sorted(calls) or ([agreed] if agreed else []),
             "ink": first.get("inside", 0),
-            "beside": first.get("beside", 0),
+            "beside": first.get("around", 0),
             "outcome": SUGGESTS.get(agreed, ""),
             "recorded": recorded(run_no, entry.sid, entry.slug),
         })
@@ -1901,9 +1913,14 @@ def _review_rows(batch, record_path, names):
                 "run": run_no, "page": page,
                 "sid": entry.sid, "name": names.get(entry.sid, ""),
                 "skill": entry.slug, "scanned": False, "crops": [],
-                "nameCrop": "",
+                "nameCrop": "", "at": [],
                 "read": "", "reads": [], "ink": 0, "beside": 0,
-                "outcome": "",
+                # Not a question. The record already knows no paper
+                # came back; asking him to confirm it is asking him
+                # to agree with something nobody doubts. He can
+                # still change it -- a sheet can turn up late, or be
+                # in his hand right now.
+                "outcome": "absent",
                 "recorded": recorded(run_no, entry.sid, entry.slug),
             })
 
@@ -1911,6 +1928,46 @@ def _review_rows(batch, record_path, names):
     # the instructor works down a class list.
     rows.sort(key=lambda r: ((r["name"] or r["sid"]).lower(), r["skill"]))
     return rows
+
+
+def api_scan_sheet(course, body):
+    """One scanned page, whole, rendered on demand.
+
+    Only from this course's own scans folder. The request names a
+    file, and a request that names a file is a request that can
+    name any file -- so the path is resolved and checked to be
+    inside the folder the read came from, rather than trusted.
+    """
+    import io
+    import base64
+
+    want = str(body.get("file") or "")
+    page = int(body.get("page") or 0)
+    folder = os.path.join(course.path, "scans")
+    full = os.path.abspath(want)
+    if not want or not full.startswith(os.path.abspath(folder) + os.sep):
+        raise GuiError("that is not a page from this course's scans.")
+    if not os.path.isfile(full):
+        raise GuiError(f"{os.path.basename(full)} is not there any more.")
+
+    try:
+        import pypdfium2 as pdfium
+    except ImportError as exc:                              # pragma: no cover
+        raise GuiError(f"cannot open PDFs here: {exc}") from None
+    doc = pdfium.PdfDocument(full)
+    try:
+        if not 1 <= page <= len(doc):
+            raise GuiError(f"{os.path.basename(full)} has no page {page}.")
+        # Smaller than the read's own render: this is for looking at,
+        # and the reading was done long ago at full resolution.
+        image = doc[page - 1].render(scale=110 / 72).to_pil()
+    finally:
+        doc.close()
+    buf = io.BytesIO()
+    image.convert("RGB").save(buf, format="JPEG", quality=70)
+    return {"file": os.path.basename(full), "page": page,
+            "image": "data:image/jpeg;base64,"
+                     + base64.b64encode(buf.getvalue()).decode()}
 
 
 def api_scan_save(course, body):
@@ -2130,6 +2187,7 @@ ROUTES = {
     "/api/scan/start": api_scan_start,
     "/api/scan/status": api_scan_status,
     "/api/scan/save": api_scan_save,
+    "/api/scan/sheet": api_scan_sheet,
     "/api/roster": api_roster,
     "/api/roster/save": api_roster_save,
     "/api/roster/drop": api_roster_drop,

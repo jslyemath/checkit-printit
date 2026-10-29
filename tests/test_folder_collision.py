@@ -432,6 +432,9 @@ class TestTheNameCropIsItsOwnShape:
             anchors={1: object()}, want=("box", "name"))
 
         assert set(cuts) == {"box", "name"}
-        assert asked[marks["box"]] == (scans.PAD, 120)
+        # None means "work the height out from the padding",
+        # which is what keeps the box the same number of pixels
+        # across however much margin the crop is given.
+        assert asked[marks["box"]] == (scans.PAD, None)
         assert asked[marks["name"]] == (scans.NAME_PAD,
                                         scans.NAME_HEIGHT)

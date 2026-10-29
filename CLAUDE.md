@@ -785,6 +785,56 @@ overwriting build replaced. So the run is marked `rebuilt` in the
 record, and the drill-in says the seed printed is not known rather
 than showing a number that is fiction.
 
+### The mark is read in colour, and the box is found, not assumed
+
+Three faults, all in one reading, all found by looking at crops
+rather than at thresholds. On the first real stack -- 62 pages, 26
+October -- **fifty-five came back "ticked", including boxes with
+nothing in them.**
+
+**Darkness was the wrong signal.** His check is coloured pen; the
+printed rule, the printed question and a student's pencil are grey.
+A greyscale measure cannot tell a check from the box it sits in,
+which is why `INK` had to be pushed to 80 to stop the box's own
+blurred outline reading as a tick -- and at 80 a real pencil-grey
+mark is invisible too. `_pen` masks on HSV saturation: the box
+disappears, the pen does not. **The stack must be scanned in
+colour**; a grey scan has nothing in it to find.
+
+**The recorded mark is not the drawn rectangle.** `\cipmark{box}`
+wraps trailing space, so the mark is about a third wider than
+`\roundbox{20pt}` actually draws.
+
+**And `_window` assumed a square box.** `pad[1] + 1 + pad[3]` uses
+one box *width* as its height; the box is 0.766 of its width tall.
+Between them the measured region was wider and taller than the box,
+clipped its printed outline, and counted that as a tick.
+
+So `find_box` **finds** it: template-matched on the rule mask --
+dark and *unsaturated*, so a check drawn across a side is not part
+of the shape being matched. `_window` survives as the hint it
+searches around, and is allowed to be the rough thing it is.
+
+`PX_PER_WIDTH` fixes the crop's scale rather than its output
+height, so `PAD` can be widened -- and it had to be, because
+`find_box` needs the whole rectangle inside the picture and the box
+moves up to fifty pixels with whatever skew survived straightening
+-- without resizing everything the reading is tuned against.
+
+Five calls: `ticked`, `beside` (his `?`), `heavy` (scribbled),
+`empty`, `nobox`. `beside` is claimed as a query now rather than
+hedged; the old reading hedged because it could not tell a question
+mark from a blurred corner, and colour can.
+
+**`BESIDE_MAX` is the one threshold fitted to a single stack.** One
+student wrote their working in orange beside an empty box: every
+real `?` measured 0.23 to 0.27 of the box's area, that measured
+1.20. If a large, loopy `?` ever reads as empty, this is what did
+it.
+
+After all of it: **62 of 62 read correctly**, checked crop by crop
+against a contact sheet rather than counted.
+
 ### The review grid shows the name off the paper
 
 Under the name the index claims, as a crop. A wrong index is then

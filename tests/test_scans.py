@@ -304,30 +304,46 @@ class TestTheThreeQuestions:
 
 # ------------------------------------------------------ cutting it out --
 
-def box_crop(ink_in_box=0.0, ink_beside=0.0, size=(171, 120)):
-    """A crop shaped like a real one, with ink placed where asked.
+def box_crop(ink_in_box=0.0, ink_beside=0.0, size=None, pen=(230, 90, 20)):
+    """A crop shaped like a real one, with pen placed where asked.
 
-    Built rather than scanned, so a test about thresholds is not also
-    a test about pdfium. The box's slice of the crop comes from
-    `_window`, which is the same arithmetic `measure` uses -- if that
-    is wrong both are wrong together, which is what the compiled
-    tests below are for.
+    Built rather than scanned, so a test about thresholds is not
+    also a test about pdfium.
+
+    **The box is printed black and the mark is coloured**, because
+    that is the difference the reading is built on: the rule, the
+    skill slug and a student's pencil are grey whatever their
+    darkness, and the instructor's check is not. A fixture that drew
+    both in grey could not tell the two apart -- which is precisely
+    how the version this replaces came to call an empty box a tick
+    on fifty-five real pages.
+
+    Nothing here is placed from `_window` any more. `measure` finds
+    the box in the picture, so the fixture draws one and lets it be
+    found; a fixture that told the code where to look would be
+    testing the arithmetic they shared rather than the finding.
     """
     from PIL import Image, ImageDraw
-    import numpy
 
-    image = Image.new("L", size, 243)
+    size = size or (247, 177)
+    image = Image.new("RGB", size, (243, 243, 240))
     draw = ImageDraw.Draw(image)
-    x0, y0, x1, y1 = scans._window((size[1], size[0]))
-    draw.rounded_rectangle([x0 + 10, y0 + 5, x1 - 10, y1 - 5], radius=6,
-                           outline=30, width=3)
-    for fraction, (ax0, ax1) in ((ink_in_box, (x0 + 20, x1 - 20)),
-                                 (ink_beside, (x1 + 20, size[0] - 4))):
+    # A square box, as `\roundbox` draws, near the middle-left.
+    side = 56
+    bx, by = 60, (size[1] - side) // 2
+    draw.rounded_rectangle([bx, by, bx + side, by + side], radius=7,
+                           outline=(30, 30, 30), width=3)
+    # `measure` divides both numbers by the area of the box's inset
+    # middle, so a fixture asking for "0.3" has to draw 0.3 of
+    # *that*, not of the box. Getting this wrong made a 0.3 request
+    # come out at 0.63 and read as a scribble.
+    middle = side * (1 - 2 * scans.INSET)
+    for fraction, (ax, ay) in ((ink_in_box, (bx + 9, by + 9)),
+                               (ink_beside, (bx + side + 14, by + 9))):
         if not fraction:
             continue
-        span = int((y1 - y0 - 30) * fraction ** 0.5 * 3) + 4
-        draw.rectangle([ax0, y0 + 20, min(ax0 + span, ax1), y0 + 20 + span],
-                       fill=10)
+        span = max(3, round(middle * fraction ** 0.5))
+        draw.rectangle([ax, ay, ax + span, ay + span], fill=pen)
     return image
 
 
@@ -341,43 +357,68 @@ class TestReadingAMark:
         a tick has to clear."""
         assert scans.measure(box_crop())["inside"] == 0.0
 
-    def test_ink_in_the_box_is_a_tick(self):
+    def test_pen_in_the_box_is_a_tick(self):
         out = scans.measure(box_crop(ink_in_box=0.3))
         assert out["call"] == "ticked"
-        assert out["inside"] > scans.TICKED
+        assert out["inside"] > scans.INK_MIN
 
-    def test_ink_only_beside_the_box_is_not_a_tick(self):
-        """A `?` is written next to the box, not in it. It must never
-        read as a pass -- only the pass mark exports as a pass."""
+    def test_a_pencil_mark_in_the_box_is_not_a_tick(self):
+        """Grey, however dark. A student can tick their own box in
+        pencil, and the whole reason the reading looks at colour is
+        so that doing so changes nothing."""
+        out = scans.measure(box_crop(ink_in_box=0.3, pen=(60, 60, 60)))
+        assert out["call"] == "empty"
+
+    def test_the_printed_box_is_not_ink_however_dark_it_is(self):
+        """It is black, and black is not a colour. This is the one
+        the old reading could not do: it raised `INK` to 80 to stop
+        the box's own blurred outline reading as a tick, and at 80
+        a faint real mark vanished too."""
+        assert scans.measure(box_crop())["inside"] == 0.0
+
+    def test_pen_only_beside_the_box_is_his_question_mark(self):
+        """A `?` is written next to the box, not in it. It must
+        never read as a pass -- and it is now claimed as a query
+        rather than hedged, because colour can tell a drawn mark
+        from the blurred corner of a printed box and darkness
+        could not."""
         out = scans.measure(box_crop(ink_beside=0.3))
-        assert out["call"] == "unsure"
-        assert out["inside"] < scans.TICKED
+        assert out["call"] == "beside"
+        assert out["inside"] < scans.INK_MIN
+
+    def test_a_page_of_working_beside_the_box_is_not_a_question_mark(self):
+        """One student wrote their answer in orange pen next to an
+        empty box, and it measured 1.2 of the box's area where every
+        real `?` measured about 0.25. A `?` is a small mark; a page
+        of working is not."""
+        out = scans.measure(box_crop(ink_beside=3.0))
+        assert out["around"] > scans.BESIDE_MAX
+        assert out["call"] == "empty"
 
     def test_a_tick_with_a_long_tail_is_still_a_tick(self):
         """The instructor's tick is "a check whose tail comes out
-        past the box", so ink to the right is expected. An earlier
-        version refused to call anything ticked while there was ink
-        out there, and sent every properly drawn tick to review."""
+        past the box", so ink to the right is expected -- on the
+        real stack a tick measured 0.14 inside and up to 0.6
+        around. Ink in the box decides; ink beyond it does not
+        argue."""
         out = scans.measure(box_crop(ink_in_box=0.3, ink_beside=0.2))
         assert out["call"] == "ticked"
 
-    def test_grey_is_not_ink(self):
-        """Blur spreads the printed outline inwards and a halfway
-        threshold counts the halo as writing -- an empty box measured
-        0.08 of its own middle that way, which is more than a faint
-        tick manages."""
-        from PIL import Image
-        import numpy
-        crop = box_crop()
-        a = numpy.asarray(crop, dtype=numpy.uint8).copy()
-        x0, y0, x1, y1 = scans._window(a.shape)
-        a[y0 + 25:y1 - 25, x0 + 25:x1 - 25] = 120      # grey, not ink
-        assert scans.INK < 120
-        assert scans.measure(Image.fromarray(a))["call"] == "empty"
+    def test_grey_is_not_ink_at_any_darkness(self):
+        """The old reading could only ask how dark a pixel was, and
+        every answer was a compromise: light enough to catch a faint
+        tick caught the printed box's blurred halo too. Saturation
+        does not have the problem -- grey is grey at 10 and at 200."""
+        for level in (200, 120, 60, 10):
+            out = scans.measure(box_crop(ink_in_box=0.5,
+                                         pen=(level, level, level)))
+            assert out["call"] == "empty", f"grey {level} counted as ink"
 
-    def test_the_window_follows_the_padding(self):
+    def test_the_hint_follows_the_padding(self):
         """`_window` is derived from PAD rather than written down
-        again, so the two cannot drift apart."""
+        again, so the two cannot drift apart. It is only the hint
+        `find_box` starts from now -- it was the measurement, and
+        it was wrong twice over."""
         narrow = scans._window((100, 100), (0.0, 0.0, 0.0, 0.0))
         assert narrow == (0, 0, 100, 100)
         wide = scans._window((100, 100), (1.0, 1.0, 1.0, 1.0))

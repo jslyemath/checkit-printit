@@ -382,6 +382,68 @@ class TestARereadKnowsWhatIsSaved:
         assert rows[0]["recorded"] == ""
 
 
+class TestTheWholePageView:
+    """`/api/scan/sheet` renders one scanned page on demand.
+
+    It is the one endpoint that takes a **path** from the browser,
+    which is the kind of thing that is fine until it is not. The
+    read throws its page renders away -- a few hundred will not fit
+    in memory -- so the file has to be opened again, and a request
+    that names a file is a request that can name any file.
+    """
+
+    @pytest.fixture
+    def course(self, tmp_path, monkeypatch):
+        from checkit_printit import course as course_mod
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(tmp_path))
+        course_mod.init("Test", bank="", adopt=None)
+        c = gui_mod.Course("Test")
+        scans = os.path.join(c.path, "scans")
+        os.makedirs(scans, exist_ok=True)
+        from PIL import Image
+        page = Image.new("RGB", (120, 160), "white")
+        page.save(os.path.join(scans, "copier-1.pdf"), save_all=True,
+                  append_images=[Image.new("RGB", (120, 160), "white")])
+        return c
+
+    def test_it_returns_the_page_as_an_image(self, course):
+        out = gui_mod.api_scan_sheet(course, {
+            "file": os.path.join(course.path, "scans", "copier-1.pdf"),
+            "page": 2})
+        assert out["page"] == 2
+        assert out["file"] == "copier-1.pdf"
+        assert out["image"].startswith("data:image/jpeg;base64,")
+
+    def test_a_file_outside_the_scans_folder_is_refused(self, course,
+                                                        tmp_path):
+        """The browser names the file. Somewhere else on the disk is
+        not this course's scans, whatever the request says."""
+        other = tmp_path / "elsewhere.pdf"
+        other.write_bytes(b"%PDF-1.4\n")
+        with pytest.raises(gui_mod.GuiError, match="not a page from this"):
+            gui_mod.api_scan_sheet(course, {"file": str(other), "page": 1})
+
+    def test_climbing_out_with_dots_is_refused(self, course):
+        sneaky = os.path.join(course.path, "scans", "..", "roster.toml")
+        with pytest.raises(gui_mod.GuiError, match="not a page from this"):
+            gui_mod.api_scan_sheet(course, {"file": sneaky, "page": 1})
+
+    def test_no_file_at_all_is_refused(self, course):
+        with pytest.raises(gui_mod.GuiError, match="not a page from this"):
+            gui_mod.api_scan_sheet(course, {"page": 1})
+
+    def test_a_page_the_file_does_not_have_is_refused(self, course):
+        with pytest.raises(gui_mod.GuiError, match="has no page"):
+            gui_mod.api_scan_sheet(course, {
+                "file": os.path.join(course.path, "scans", "copier-1.pdf"),
+                "page": 99})
+
+    def test_a_file_that_has_gone_is_refused(self, course):
+        gone = os.path.join(course.path, "scans", "nothing.pdf")
+        with pytest.raises(gui_mod.GuiError, match="not there any more"):
+            gui_mod.api_scan_sheet(course, {"file": gone, "page": 1})
+
+
 # ----------------------------------------------------------- endpoint ----
 
 class TestTheSaveEndpoint:

@@ -346,6 +346,18 @@ const GLYPH = {
   grid: [{ r: [3.5, 3.5, 17, 17, 2.2] },
          { d: "M12 3.5v17M3.5 12h17" },
          { d: "M5.9 8.1l1.6 1.7 3-3.3" }],
+  /* The four marks he makes on a paper, drawn as the marks rather
+     than named in words alone. The chair is Seating's, struck
+     through: "did not sit it" is the same object that means a seat
+     everywhere else, with the obvious thing done to it. */
+  pass: "M5 12.6l4.6 4.6L19 6.8",
+  fail: "M6.5 6.5l11 11M17.5 6.5l-11 11",
+  query: [{ d: "M8.8 9a3.2 3.2 0 1 1 3.2 3.2V14.4" },
+          { o: [12, 18.2, 1.05] }],
+  absent: [{ r: [7.5, 3.5, 9, 6.4, 1.9] },
+           { r: [4.2, 11.2, 15.6, 2.9, 1.5] },
+           { d: "M7 19.8v-5.7M17 19.8v-5.7" },
+           { d: "M3.4 20.6L20.6 3.4" }],
   collapse: "M14.5 7.5 9.5 12l5 4.5",
   // Points up while a group is open; CSS turns it when it closes.
   chev: "M6 14.5l6-6 6 6",
@@ -794,6 +806,31 @@ function progressCell(student, skill, cell, recent) {
   return td;
 }
 
+/* The whole scanned page, when the square is not enough context.
+
+   One request per look, and no caching: he opens one or two in a
+   stack of sixty, and a cache of full-page JPEGs is memory spent
+   on pages nobody came back to. */
+async function openSheet(row, where) {
+  const box = document.getElementById("sheet");
+  document.getElementById("sheet-title").textContent =
+    `${row.name || row.sid} \u2014 ${row.skill}`;
+  document.getElementById("sheet-where").textContent = "loading\u2026";
+  const image = document.getElementById("sheet-image");
+  image.removeAttribute("src");
+  if (!box.open) box.showModal();
+  const out = await api("/api/scan/sheet", where);
+  if (!out) {
+    document.getElementById("sheet-where").textContent =
+      "that page could not be opened.";
+    return;
+  }
+  document.getElementById("sheet-where").textContent =
+    `${out.file}, page ${out.page} of that file`;
+  image.src = out.image;
+  image.alt = `the whole of ${row.name || row.sid}'s ${row.skill}`;
+}
+
 // --------------------------------------------------------- the drill-in --
 
 let cellOpen = null;
@@ -875,7 +912,8 @@ function cellPaper(paper) {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "review-pick";
-    b.textContent = outcome.label;
+    b.appendChild(icon(OUTCOME_GLYPH[outcome.id] || "query"));
+    b.appendChild(document.createTextNode(outcome.label));
     b.title = outcome.mark;
     b.setAttribute("role", "radio");
     const on = paper.outcome === outcome.id;
@@ -910,6 +948,12 @@ async function setCellOutcome(runId, outcome) {
 /* The four outcomes, as the review grid gets them from the server.
    Held here as well so the drill-in can be opened without a scan in
    hand -- which is the whole point of it. */
+/* Which glyph each outcome wears. Keyed by the record's own ids,
+   so the four names exist once. */
+const OUTCOME_GLYPH = {
+  passed: "pass", failed: "fail", queried: "query", absent: "absent",
+};
+
 const OUTCOME_LIST = [
   { id: "passed", label: "Passed", mark: "a tick" },
   { id: "queried", label: "Query", mark: "a ? beside the box" },
@@ -2382,13 +2426,23 @@ function reviewRow(row) {
     // the suggestion was withheld, and the two pictures are the
     // reason why.
     shot.classList.toggle("twice", crops.length > 1);
-    for (const crop of crops) {
+    crops.forEach((crop, i) => {
       const img = document.createElement("img");
       img.src = crop;
       img.alt = `the grading box on ${row.name || row.sid}'s ${row.skill}`;
       img.loading = "lazy";
+      // The crop is cut wide for the reading and shown tight. Hover
+      // gives back what was cut off -- two or three times the area,
+      // out of the picture already loaded, so it costs no request.
+      // Clicking asks for the whole page.
+      const where = (row.at || [])[i];
+      if (where) {
+        img.classList.add("openable");
+        img.title = "hover for more of the page, click for all of it";
+        img.onclick = () => openSheet(row, where);
+      }
       shot.appendChild(img);
-    }
+    });
   } else {
     const gap = document.createElement("span");
     gap.className = "muted review-nocrop";
@@ -2409,7 +2463,8 @@ function reviewRow(row) {
     button.type = "button";
     button.className = "review-pick";
     button.dataset.outcome = outcome.id;
-    button.textContent = outcome.label;
+    button.appendChild(icon(OUTCOME_GLYPH[outcome.id] || "query"));
+    button.appendChild(document.createTextNode(outcome.label));
     button.title = outcome.mark;
     button.setAttribute("role", "radio");
     button.onclick = () => setOutcome(row.id, outcome.id);
@@ -4297,6 +4352,8 @@ async function boot() {
   };
   document.getElementById("form-push").onclick = pushForm;
   document.getElementById("scans-save").onclick = saveScans;
+  document.getElementById("sheet-close").onclick = () =>
+    document.getElementById("sheet").close();
   document.getElementById("cell-close").onclick = () => {
     cellOpen = null;
     document.getElementById("cell").close();
