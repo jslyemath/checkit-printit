@@ -39,6 +39,7 @@ from .. import availability as availability_mod
 from .. import provision as provision_mod
 from .. import room as room_mod
 from .. import publication as pub_mod
+from .. import assemble as assemble_mod
 from .. import record as record_mod
 from .. import scans as scans_mod
 from .. import responses as responses_mod
@@ -1308,6 +1309,13 @@ def _build(course, preview, seed=None):
         result = runner_mod.run(
             os.path.join(folder, "publication.toml"),
             do_compile=not preview, seed=seed, preview=preview)
+    except assemble_mod.FolderInUse as exc:
+        # Its own branch so the wording can be about this app, which
+        # has no --replace: here the way out is the title and date
+        # fields at the top of the page, and they are one click away.
+        raise GuiError(
+            f"{exc} The title and date at the top of this tab are what "
+            f"name the folder.") from None
     except runner_mod.BuildError as exc:
         raise GuiError(str(exc)) from None
 
@@ -1651,7 +1659,7 @@ class Scanning:
             try:
                 batch = scans_mod.read_pdfs(paths, record_path,
                                             on_page=progress,
-                                            want=("box",))
+                                            want=("box", "name"))
                 self.result = _batch_json(batch, record_path)
             except (scans_mod.ScanError, OSError) as exc:
                 self.error = str(exc)
@@ -1870,6 +1878,12 @@ def _review_rows(batch, record_path, names):
             # shown rather than one chosen on his behalf.
             "crops": [_as_jpeg(s.cuts["box"]) for s in copies
                       if "box" in s.cuts],
+            # The name as it was printed, so the row can be checked
+            # against the paper instead of trusted. One is enough:
+            # two scans of a sheet carry the same name, and the
+            # thing being checked is the index, not the scanner.
+            "nameCrop": next((_as_jpeg(s.cuts["name"]) for s in copies
+                              if "name" in s.cuts), ""),
             "read": agreed,
             "reads": sorted(calls) or ([agreed] if agreed else []),
             "ink": first.get("inside", 0),
@@ -1887,6 +1901,7 @@ def _review_rows(batch, record_path, names):
                 "run": run_no, "page": page,
                 "sid": entry.sid, "name": names.get(entry.sid, ""),
                 "skill": entry.slug, "scanned": False, "crops": [],
+                "nameCrop": "",
                 "read": "", "reads": [], "ink": 0, "beside": 0,
                 "outcome": "",
                 "recorded": recorded(run_no, entry.sid, entry.slug),
@@ -2055,6 +2070,7 @@ def api_progress_cell(course, body):
     return {"sid": sid, "slug": slug, "papers": [
         {"runId": r["run_id"], "title": r["title"], "date": r["date"],
          "runNo": r["run_no"], "delisted": bool(r["delisted"]),
+         "rebuilt": bool(r["rebuilt"]),
          "seed": r["seed"], "version": r["version"],
          "outcome": r["outcome"] or "", "decided": r["decided"] or "",
          "page": r["page"], "reading": r["reading"] or ""}

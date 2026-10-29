@@ -193,6 +193,8 @@ reason.
 | `--no-codes` | leave the scanning code out of the footer |
 | `--no-record` | do not note this run in the course's print record |
 | `--only KEY` | print for these students only. Repeatable |
+| `--replace` | build into a folder that already holds a different run |
+| `--rebuilt` | recover a lost page index, and mark the run as rebuilt |
 
 Each of `--no-ids`, `--no-codes` and `--no-record` has an on-form too — `--ids`, `--codes`,
 `--record` — for forcing one back on when the publication turns it
@@ -230,6 +232,51 @@ fixes:
 A run where *no* key matches is refused rather than built empty, and
 the refusal says which it was -- dropped, not in the roster, or no
 student named at all.
+
+## One folder, one run
+
+The output folder is named `{title} {date}`, and that name *is* the
+run's identity. Build a second job without changing the title or the
+date and it lands on the first one's folder, which would rewrite
+`main.pages` -- the only record of which printed page belonged to
+whom -- and delete the first run's rows. The run number survives,
+because the folder already had one, so papers already handed out go
+on resolving: to the new index, confidently and wrongly.
+
+So a build whose papers differ from the ones the record says that
+folder produced is refused:
+
+```
+.../Skill Checkpoint 2026-10-26 already holds a different run:
+86 paper(s) for 43 student(s), against 3 for 1 here. Building would
+erase it, losing the only record of who held 86 printed paper(s).
+Change the title or the date to give this run its own folder, or
+replace that run on purpose.
+```
+
+Rebuilding the *same* run is not refused -- after a failed compile,
+or to pick up a theme change. `--replace` is the way through on
+purpose, and `--replay` is exempt, because reprinting a finished run
+into its own folder is the one case where replacing what is there is
+the whole point.
+
+### Recovering an index that was lost
+
+If it has already happened, `--rebuilt` builds into the folder again
+and marks the run. Who held which page comes back exactly: the page
+order is the seating chart, the roster and each student's skills, and
+students are laid out before extras and keys, so nothing after them
+can shift their page numbers.
+
+The **seeds do not come back**. They lived in the manifest the
+overwriting build replaced, and a rebuild draws fresh ones. That is
+what the mark is for: the run is recorded as rebuilt, and anything
+that would otherwise print a seed from it says that the seed printed
+is not known.
+
+Check the page count afterwards. If a paper now runs to two pages
+where it did not before, the mapping has drifted and the rebuild is
+not usable.
 
 ## Marks for scanning, and how to turn them off
 

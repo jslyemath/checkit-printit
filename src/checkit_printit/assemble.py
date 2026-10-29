@@ -29,6 +29,24 @@ class AssemblyError(Exception):
     pass
 
 
+class FolderInUse(AssemblyError):
+    """This folder already holds a different run.
+
+    Its own class because the web app has to offer a way through --
+    rename, or replace on purpose -- and catching the general
+    `AssemblyError` to do that would also catch "no variant chosen".
+    """
+
+    def __init__(self, message, out_dir, was, now):
+        super().__init__(message)
+        self.out_dir = out_dir
+        #: `{(sid, slug)}` for the run already recorded, and for the
+        #: one that was about to replace it. The caller shows the
+        #: difference; the message states the size of it.
+        self.was = was
+        self.now = now
+
+
 @dataclasses.dataclass
 class Handout:
     """One student's packet: who, and which version of which skills."""
@@ -541,8 +559,20 @@ def versions_for(chart, publication):
     return versions
 
 
+def papers_of(handouts):
+    """`{(sid, slug)}` -- what a run hands to whom.
+
+    The identity of a run, for the purpose of asking "is this the
+    same run again, or a different one wearing its folder?". Seeds
+    are deliberately not in it: redrawing the same papers for the
+    same people is a rebuild, not a different run.
+    """
+    return {(h.sid, slug) for h in handouts for slug, _ in h.versions
+            if h.sid}
+
+
 def assemble(publication, roster, chart, out_dir, theme, rng=None,
-             dry_run=False, run_seed=None, run_id=None):
+             dry_run=False, run_seed=None, run_id=None, already=None):
     """Write a complete, compilable folder. Returns a short report."""
     rng = rng or random.Random()
     bank = Bank(publication.bank_path)
@@ -581,6 +611,30 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None,
     # Before the dry-run return, so a preview that passes and a build that
     # refuses is not a thing that can happen.
     check_variants_chosen(bank, publication, handouts, extras)
+
+    # Before anything is written, and before the dry-run return, so a
+    # preview warns about the same collision a build refuses.
+    #
+    # `already` is what the record says this folder produced, or None
+    # when there is nothing to compare against. Equal sets mean the
+    # same run built again, which is ordinary. Different sets mean a
+    # second job has been given the first one's name, and going ahead
+    # would destroy the only record of who held which paper.
+    if already is not None:
+        now = papers_of(handouts)
+        if now != already:
+            gone = len(already - now)
+            raise FolderInUse(
+                f"{out_dir} already holds a different run: "
+                f"{len(already)} paper(s) for "
+                f"{len({s for s, _ in already})} student(s), against "
+                f"{len(now)} for {len({s for s, _ in now})} here. "
+                f"Building would erase it"
+                + (f", losing the only record of who held {gone} "
+                   f"printed paper(s)." if gone else ".")
+                + " Change the title or the date to give this run its "
+                  "own folder, or replace that run on purpose.",
+                out_dir, already, now)
 
     keys = None
     if publication.keys:

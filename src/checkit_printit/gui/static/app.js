@@ -846,8 +846,16 @@ function cellPaper(paper) {
   what.className = "muted";
   // The seed is how this exact paper is found again -- it is what
   // `--seed` takes and what the manifest pins. Worth the room.
-  what.textContent = `${paper.title}, version ${paper.version}, `
-    + `seed ${paper.seed}`;
+  // The seed is how this exact paper is found again -- it is what
+  // `--seed` takes and what the manifest pins. Unless the run's
+  // index was rebuilt after the papers were printed, in which case
+  // the seed is a fresh draw and saying it plainly would be a
+  // claim about a paper nobody has.
+  what.textContent = paper.rebuilt
+    ? `${paper.title}, version ${paper.version} \u2014 index rebuilt, `
+      + `so the seed printed is not known`
+    : `${paper.title}, version ${paper.version}, seed ${paper.seed}`;
+  if (paper.rebuilt) what.classList.add("warnline");
   when.append(date, what);
 
   const said = document.createElement("div");
@@ -2341,6 +2349,20 @@ function reviewRow(row) {
   skill.className = "muted";
   skill.textContent = row.skill;
   who.append(name, skill);
+  // The name as it is printed on the sheet, under the name the
+  // index says it is. A wrong index then shows as a column that
+  // stops agreeing with itself, which is the only warning there
+  // would otherwise be -- see the run overwritten on 2026-10-27.
+  if (row.nameCrop) {
+    const shot = document.createElement("img");
+    shot.className = "review-nameshot";
+    shot.src = row.nameCrop;
+    shot.alt = `the name printed on this paper`;
+    shot.title = "the name printed on this paper -- it should be the "
+               + "one above";
+    shot.loading = "lazy";
+    who.appendChild(shot);
+  }
   // Said here rather than over the pictures: it is a fact about the
   // paper, and `.review-shot` is white because a crop of a sheet
   // belongs on something sheet-coloured.

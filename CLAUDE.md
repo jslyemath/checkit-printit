@@ -750,6 +750,54 @@ wrong in the ways a real stack is wrong -- shuffled, split in two, a
 blank, a page read twice, one paper held back. `--home` keeps it out
 of the real print-it home, which anything that builds should do.
 
+### One folder is one run, and a second job is refused
+
+The output folder is named `{title} {date}`, and that name *is* the
+run's identity. A job built without changing the title or the date
+lands on the previous run's folder and:
+
+* rewrites `main.pages`, which is the only record of which printed
+  page belonged to whom;
+* deletes the run row, cascading away every `printed` row under it;
+* **keeps the run number**, because the folder already had one -- so
+  papers already in the world go on resolving, to the new index.
+
+On 2026-10-27 that destroyed a live run of 86 papers: a
+three-student test of the new `--only` filter, built with Monday's
+title and date still in the fields. Scanning Monday's papers the
+next day placed four of sixty-two pages, every one against the
+wrong student, and called the other fifty-eight "numbered past the
+end of the job they name".
+
+`assemble` now refuses a build whose papers differ from the ones
+the record says that folder produced -- `FolderInUse`, raised
+before anything is written, with the count of what would be lost in
+the message. A plain rebuild is not refused. `--replace` is the way
+through, `--replay` is exempt, and the web app catches it and says
+that the title and date are what name the folder.
+
+**`--rebuilt` recovers an index that was already lost.** Page order
+is the seating chart, the roster and each student's skills, and
+`main_tex` lays out students before extras and keys, so nothing
+after them can shift a student's page number -- the mapping comes
+back exactly. The seeds do not: they were in the manifest the
+overwriting build replaced. So the run is marked `rebuilt` in the
+record, and the drill-in says the seed printed is not known rather
+than showing a number that is fiction.
+
+### The review grid shows the name off the paper
+
+Under the name the index claims, as a crop. A wrong index is then
+visible in one look -- the column stops agreeing with itself -- and
+that is the only warning there would otherwise be.
+
+**The grading box's padding does not transfer.** Every pad in
+`cut_out` is a multiple of the mark's own *width*, which suits a
+roughly square box; a name is ten times wider than it is tall, so
+the box's 1.05 to the right would take half the page. `scans.PADS`
+holds the per-mark pad and output height, and anything not listed
+gets the box's.
+
 ### `attempt` is the only table an outcome is read from
 
 `printed` says a paper was handed out. It cannot know who was in the

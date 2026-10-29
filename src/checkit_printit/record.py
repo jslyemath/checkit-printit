@@ -59,7 +59,13 @@ CREATE TABLE IF NOT EXISTS run (
     delisted INTEGER NOT NULL DEFAULT 0,
     -- Set when Scans has read this run back. A graded run cannot be
     -- delisted -- see `set_flags`.
-    graded   INTEGER NOT NULL DEFAULT 0
+    graded   INTEGER NOT NULL DEFAULT 0,
+    -- Set when this run's folder was built again to recover a lost
+    -- page index. Who held which page is right -- it comes from the
+    -- roster and the seating chart, which are unchanged -- but the
+    -- seeds are a fresh draw and not what was printed. Anything
+    -- that shows a seed from such a run must say so.
+    rebuilt  INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS printed (
@@ -139,6 +145,7 @@ ADDED = {
     # or none at all, and `run_by_no` will not match it -- which is
     # correct: those runs cannot be scanned by code.
     "run_no": "INTEGER",
+    "rebuilt": "INTEGER NOT NULL DEFAULT 0",
 }
 
 
@@ -217,7 +224,7 @@ def run_by_no(path, run_no):
 
 
 def write_run(path, run_id, title, date, built, seed, output, handouts,
-              extras=0, run_no=None):
+              extras=0, run_no=None, rebuilt=False):
     """Record one print run. Re-recording the same run replaces it.
 
     A run is identified by its output folder, so building into the same folder
@@ -248,10 +255,11 @@ def write_run(path, run_id, title, date, built, seed, output, handouts,
             db.execute("DELETE FROM run WHERE run_id = ?", (run_id,))
             db.execute(
                 "INSERT INTO run (run_id, run_no, title, date, built,"
-                " seed, output, extras, unnamed)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " seed, output, extras, unnamed, rebuilt)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (run_id, run_no and int(run_no), title, date, built,
-                 int(seed), output, int(extras), unnamed))
+                 int(seed), output, int(extras), unnamed,
+                 int(bool(rebuilt))))
             db.executemany(
                 "INSERT INTO printed (run_id, sid, name, section, slug, seed,"
                 " version) VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
@@ -541,6 +549,7 @@ def history(path, sid, slug):
     try:
         return [dict(r) for r in db.execute(
             "SELECT p.run_id, r.title, r.date, r.run_no, r.delisted,"
+            "       r.rebuilt,"
             "       p.seed, p.version,"
             "       a.outcome, a.decided, a.page, a.reading"
             "  FROM printed p"
@@ -550,6 +559,27 @@ def history(path, sid, slug):
             "   AND a.slug = p.slug"
             " WHERE p.sid = ? AND p.slug = ?"
             " ORDER BY r.date, r.built", (str(sid), str(slug)))]
+    finally:
+        db.close()
+
+
+def papers_in(path, run_id):
+    """`{(sid, slug)}` for one run, or None if it has never been built.
+
+    None and an empty set are different answers: nothing recorded
+    under that folder at all, against a run that recorded no
+    attributable papers. Only the first means "nothing to collide
+    with".
+    """
+    if not os.path.isfile(path):
+        return None
+    db = connect(path)
+    try:
+        if db.execute("SELECT 1 FROM run WHERE run_id = ?",
+                      (run_id,)).fetchone() is None:
+            return None
+        return {(r["sid"], r["slug"]) for r in db.execute(
+            "SELECT sid, slug FROM printed WHERE run_id = ?", (run_id,))}
     finally:
         db.close()
 
