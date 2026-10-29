@@ -323,7 +323,12 @@ def placement(anchor, scan_corners):
 #:
 #: Left is the tight side: the skill slug is printed there, half an
 #: em away, and there is nothing to be gained by taking more of it.
-PAD = (0.22, 0.45, 1.05, 0.38)
+#: Wider than it looks like it needs to be, on every side. The crop
+#: is searched now, not just shown: `find_box` has to have the whole
+#: rectangle inside the picture, and the rectangle moves up to fifty
+#: pixels between pages. The nine pages that still could not be read
+#: after template matching were all boxes half outside the frame.
+PAD = (0.70, 0.80, 1.60, 0.80)
 
 #: The name's own padding, and its own output height.
 #:
@@ -337,14 +342,31 @@ PAD = (0.22, 0.45, 1.05, 0.38)
 #: tall. Checked by looking at the crop, which is the only way this
 #: kind of thing is ever checked.
 #:
+#: Generous on purpose, and asked for: a name sitting exactly in
+#: its own typeset box reads as cramped, and the point of showing
+#: it is to be glanced at beside the name we claim.
+#:
 #: 44px rather than 120: it only has to be readable, and a few
 #: hundred of them go into one response alongside the boxes.
-NAME_PAD = (0.01, 0.14, 0.01, 0.12)
+NAME_PAD = (0.04, 0.26, 0.06, 0.22)
 NAME_HEIGHT = 44
 
 #: Per mark, falling back to the box's. Here rather than at the call
 #: site so that adding a third mark is one line in one place.
+#: How many pixels one mark-width comes out as. Fixing this rather
+#: than the output height means the padding can be changed without
+#: resizing everything the reading was tuned against.
+PX_PER_WIDTH = 75
+
+#: Per mark, falling back to the box's. Here rather than at the call
+#: site so that adding a third mark is one line in one place.
 PADS = {"name": (NAME_PAD, NAME_HEIGHT)}
+
+
+def _crop_height(pad, tall_over_wide):
+    """The output height that puts `PX_PER_WIDTH` across one width."""
+    return max(16, round((pad[1] + tall_over_wide + pad[3])
+                         * PX_PER_WIDTH))
 
 
 def cut_out(image, mark, anchor, carry, pad=PAD, height=120):
@@ -367,27 +389,80 @@ def cut_out(image, mark, anchor, carry, pad=PAD, height=120):
     top -= unit * pad[1]
     right += unit * pad[2]
     bottom += unit * pad[3]
+    if height is None:
+        # Scale by the mark, not by a fixed output size: the box has
+        # to come out the same number of pixels across whatever
+        # margin was asked for, because the reading is tuned to it.
+        height = _crop_height(pad, (bottom - top - unit * (pad[1] + pad[3]))
+                              / unit)
     size = (max(8, round(height * (right - left) / (bottom - top))), height)
     quad = []
     for x, y in ((left, top), (left, bottom), (right, bottom), (right, top)):
         quad.extend(carry(x, y))
-    # Grey first, and `fillcolor` white.
+    # Colour, and `fillcolor` white on all three bands.
+    #
+    # It used to convert to grey here, for memory, because everything
+    # downstream measured grey. That was the mistake underneath the
+    # bad readings: the mark being looked for is **coloured pen**, and
+    # the things that are not it -- the printed rule, the printed
+    # text, a student's pencil -- are grey. Throwing the colour away
+    # at the crop threw away the only thing that separates them.
     #
     # A box near the edge of a skewed sheet maps to a quad that runs
     # off the scan, and the default fill is black -- one crop came
     # back with a black wedge across its foot, which is harmless to
     # look at and enough to make any ink measure call that page the
-    # most heavily marked of the lot.
-    #
-    # `fillcolor=255` alone did not fix it: on an RGB image that is
-    # one band's worth, and the other two stay at zero, so the fill
-    # came out darker than before. Everything downstream measures
-    # grey anyway, and a grey crop is a third of the memory when
-    # several hundred of them are being kept.
-    return image.convert("L").transform(size, Image.QUAD, quad,
-                                        resample=Image.BICUBIC,
-                                        fillcolor=255)
+    # most heavily marked of the lot. `fillcolor=255` alone did not
+    # fix it: on an RGB image that is one band's worth and the other
+    # two stay at zero, so the fill came out darker than before.
+    return image.convert("RGB").transform(size, Image.QUAD, quad,
+                                          resample=Image.BICUBIC,
+                                          fillcolor=(255, 255, 255))
 
+
+#: A pixel is the instructor's pen when it is **coloured** and not
+#: paper-white. Saturation, out of 255.
+#:
+#: This is the whole of the reading. The printed box, the printed
+#: question and a pencil mark are all grey -- near-zero saturation,
+#: whatever their darkness -- and a pen is not. Masking on colour
+#: removes in one step what two years of darkness thresholds could
+#: not: the box's own blurred outline, the skill slug beside it, and
+#: the student's working written across the crop.
+#:
+#: It costs one thing, and it is worth saying out loud: **the stack
+#: has to be scanned in colour.** A greyscale scan has no pen in it
+#: to find, and `read_pdfs` says so rather than reporting every page
+#: as empty.
+SAT_MIN = 70
+VALUE_MAX = 245
+
+#: The printed rectangle: dark, and *not* coloured. Used to find the
+#: box, never to measure the mark.
+RULE_DARK = 140
+RULE_SAT = 60
+
+#: How much of the found box to trim before counting, so its own
+#: printed outline is outside the measurement.
+INSET = 0.16
+
+#: Pen inside the box, as a fraction of the box's middle. A check
+#: covers several percent of it; nothing covers none.
+INK_MIN = 0.012
+
+#: More than this inside and the box is not ticked, it is scribbled
+#: over -- which is a decision for the instructor, not a pass.
+HEAVY_INK = 0.35
+
+#: And more than this *around* it is not a `?` -- it is the
+#: student's own working, in pen, next to an empty box.
+#:
+#: The one threshold here fitted to a single stack. Every question
+#: mark in the 62 pages of 2026-10-26 measured 0.23 to 0.27 of the
+#: box's area and one student's orange working measured 1.20, so
+#: the gap is wide; it is still one stack. If a large, loopy `?`
+#: ever reads as "empty", this is the number that did it.
+BESIDE_MAX = 0.60
 
 #: How dark a pixel has to be to count as ink, out of 255.
 #:
@@ -432,12 +507,139 @@ BESIDE = 0.002
 EDGE = 0.22
 
 
-def _window(shape, pad=None):
-    """Where the box sits inside a crop, in pixels.
+def _pen(rgb):
+    """True where there is coloured ink: the instructor's mark.
 
-    Derived from PAD rather than written down again, so the two
-    cannot drift apart -- the crop is the rectangle grown by those
-    fractions, so the rectangle is that slice of the crop.
+    Saturated and not paper-white. Opened once, so the single-pixel
+    colour fringing JPEG leaves around black text does not read as a
+    mark -- without it a page of dense printing scores a percent or
+    two of "pen" that nobody wrote.
+    """
+    import numpy
+
+    s, v = rgb.convert("HSV").split()[1:]
+    m = ((numpy.asarray(s, dtype=numpy.uint8) > SAT_MIN)
+         & (numpy.asarray(v, dtype=numpy.uint8) < VALUE_MAX))
+    e = m.copy()
+    e[1:, :] &= m[:-1, :]
+    e[:-1, :] &= m[1:, :]
+    e[:, 1:] &= m[:, :-1]
+    e[:, :-1] &= m[:, 1:]
+    d = e.copy()
+    d[1:, :] |= e[:-1, :]
+    d[:-1, :] |= e[1:, :]
+    d[:, 1:] |= e[:, :-1]
+    d[:, :-1] |= e[:, 1:]
+    return d
+
+
+def _integral(mask):
+    """Summed-area table, so any rectangle's total is four lookups."""
+    import numpy
+
+    return numpy.pad(mask.astype(numpy.int32).cumsum(0).cumsum(1),
+                     ((1, 0), (1, 0)))
+
+
+def _rect_sums(table, wide, tall):
+    """Every rectangle's total, as an array over its top-left corners."""
+    return (table[tall:, wide:] - table[:-tall, wide:]
+            - table[tall:, :-wide] + table[:-tall, :-wide])
+
+
+#: How thick the printed rule is taken to be, in pixels, when
+#: scoring a candidate rectangle's edge. Two is generous at 200dpi
+#: and tolerant of the blur a photocopy adds.
+RULE_PX = 2
+
+#: A candidate has to have this much of its edge drawn, and this
+#: little of its middle, to be the box. The first number is what
+#: survives a check drawn across one side; the second is what keeps
+#: a solid blot from matching.
+#:
+#: 0.50 sits in a gap. Across the 62 pages of 2026-10-26 the worst
+#: real box scored 0.520 and nothing at all scored between 0.50 and
+#: 0.52, so the cut is not balanced on the edge of the evidence. It
+#: was 0.55, which lost seven boxes -- two with a check drawn
+#: through one side, the rest simply printed faint.
+EDGE_HIT = 0.50
+MIDDLE_CLEAR = 0.30
+
+
+def find_box(crop, hint=None):
+    """Where the printed rectangle actually is, or None.
+
+    **Found, not assumed.** The crop is placed from the position
+    `main.pages` recorded, and that is good enough to put the box
+    somewhere in the picture and not good enough to measure from:
+    `\\cipmark{box}` wraps trailing space, so the recorded mark is
+    about a third wider than the drawn rectangle, and what is left
+    of the scan's skew after straightening moves it tens of pixels
+    between pages.
+
+    Matched on the rule mask -- dark **and unsaturated** -- so a
+    coloured check drawn across the outline is not part of the
+    shape being matched, and a box with a tick through it still
+    matches on its other three sides.
+    """
+    import numpy
+
+    rgb = crop if crop.mode == "RGB" else crop.convert("RGB")
+    sat, val = rgb.convert("HSV").split()[1:]
+    rule = ((numpy.asarray(val, dtype=numpy.uint8) < RULE_DARK)
+            & (numpy.asarray(sat, dtype=numpy.uint8) < RULE_SAT))
+    height, width = rule.shape
+    table = _integral(rule)
+
+    hx0, hy0, hx1, hy1 = hint or _window(rule.shape)
+
+    guess = max(12, min(hx1 - hx0, hy1 - hy0))
+
+    best = None
+    for side in range(max(12, int(guess * 0.55)),
+                      min(min(height, width), int(guess * 1.25)) + 1):
+        if side + 2 * RULE_PX >= min(height, width):
+            break
+        inner = side - 2 * RULE_PX
+        outer_sum = _rect_sums(table, side, side)
+        inner_sum = _rect_sums(table, inner, inner)
+        # Line up the inner rectangle with the outer one's middle.
+        inner_sum = inner_sum[RULE_PX:RULE_PX + outer_sum.shape[0],
+                              RULE_PX:RULE_PX + outer_sum.shape[1]]
+        if inner_sum.shape != outer_sum.shape:
+            continue
+        edge = (outer_sum - inner_sum) / max(1, side * side - inner * inner)
+        middle = inner_sum / max(1, inner * inner)
+        score = numpy.where((edge >= EDGE_HIT) & (middle <= MIDDLE_CLEAR),
+                            edge - middle, -1.0)
+        y, x = numpy.unravel_index(int(score.argmax()), score.shape)
+        if score[y, x] <= 0:
+            continue
+        # Nearest to where the index said, among equally good
+        # matches: two boxes never share a crop, but a printed
+        # letter can score respectably and the hint breaks the tie.
+        away = abs(x + side / 2 - (hx0 + hx1) / 2) \
+            + abs(y + side / 2 - (hy0 + hy1) / 2)
+        value = float(score[y, x]) - away / 2000.0
+        if best is None or value > best[0]:
+            best = (value, int(x), int(y), side)
+    if best is None:
+        return None
+    _, x, y, side = best
+    return x, y, x + side, y + side
+
+
+def _window(shape, pad=None):
+    """Roughly where the box sits inside a crop, in pixels.
+
+    A hint for `find_box` and nothing more. It was the measurement
+    once, and it was wrong twice over: it derives the box's size
+    from the recorded mark, which is wider than the drawn
+    rectangle, and `pad[1] + 1 + pad[3]` uses one box *width* as the
+    box's height when the box is 0.766 of its width tall. The
+    measured region was therefore both wider and taller than the
+    box, clipped its printed outline, and called an empty box a
+    tick.
     """
     pad = pad or PAD
     height, width = shape
@@ -452,50 +654,58 @@ def _window(shape, pad=None):
 def measure(crop, pad=None):
     """What a crop of the grading box shows. Numbers, then a guess.
 
-    `inside` is the fraction of the box's middle that is dark, with
-    the printed outline left out -- that is the tick.
-
-    `beside` is the same for the space to its right, where the
-    instructor writes a `?`. It starts clear of the outline, because
-    a rounded corner clipped by a window boundary reads as 2% of ink
-    that is not there.
+    `inside` is the fraction of the found box's middle that is
+    coloured pen, with its printed outline inset out of the count.
+    `around` is the same for the space surrounding it -- a box's
+    width to the left and above and below, two to the right, where
+    the `?` goes.
 
     `call` is one of:
 
-        ticked   enough ink in the box
-        empty    almost nothing, in the box or beside it
-        unsure   nothing in the box, but something next to it
+        ticked   pen in the box
+        beside   pen around it and none in it -- his `?`
+        heavy    the box is covered; scribbled out, probably
+        empty    no pen anywhere near
+        nobox    no rectangle could be found to measure
 
-    **`unsure` is not a failure, and there is deliberately no
-    `queried`.** A `?` is small, hand-drawn and in a region where an
-    empty box already shows a percent or two, so a threshold that
-    caught every one of them would also catch smudges. Calling it
-    unsure puts the crop in front of the instructor, which is where
-    the decision between a question mark and a coffee ring belongs.
-    Only the tick is claimed, and only the tick exports as a pass.
+    Unlike the darkness version this replaces, `beside` is claimed
+    rather than hedged. A coloured mark next to the box is a thing
+    somebody drew; the old reading could not distinguish one from a
+    smudge because it could not distinguish ink from print at all.
+    The instructor still sees every row, and he can still change it.
     """
     import numpy
 
-    dark = numpy.asarray(crop.convert("L"), dtype=numpy.uint8) < INK
-    x0, y0, x1, y1 = _window(dark.shape, pad)
-    edge = max(1, int((x1 - x0) * EDGE))
-    inside = dark[y0 + edge:y1 - edge, x0 + edge:x1 - edge]
-    beside = dark[y0:y1, x1 + edge:]
-    inside = float(inside.mean()) if inside.size else 0.0
-    beside = float(beside.mean()) if beside.size else 0.0
+    rgb = crop if crop.mode == "RGB" else crop.convert("RGB")
+    # The padding has to reach `find_box`: it is what says roughly
+    # where in the crop the box should be, and a caller that cut
+    # the crop differently would otherwise be given a hint for a
+    # crop it does not have.
+    box = find_box(rgb, hint=_window((rgb.height, rgb.width), pad))
+    if box is None:
+        return {"inside": 0.0, "around": 0.0, "call": "nobox", "box": None}
 
-    # Ink in the box decides the tick, and ink beside it does not
-    # argue -- beside the box is where the tail goes. Ink out there
-    # only means anything when the box itself is empty, because that
-    # is the only time it could be a question mark.
-    if inside >= TICKED:
+    pen = _pen(rgb)
+    x0, y0, x1, y1 = box
+    wide, tall = x1 - x0, y1 - y0
+    ix, iy = max(1, int(wide * INSET)), max(1, int(tall * INSET))
+    inner = pen[y0 + iy:y1 - iy, x0 + ix:x1 - ix]
+    area = max(1, inner.size)
+    near = pen[max(0, y0 - tall):y1 + tall,
+               max(0, x0 - wide):x1 + 2 * wide]
+
+    inside = float(inner.sum()) / area
+    around = (float(near.sum()) - float(inner.sum())) / area
+    if inside >= HEAVY_INK:
+        call = "heavy"
+    elif inside >= INK_MIN:
         call = "ticked"
-    elif beside >= BESIDE:
-        call = "unsure"
+    elif INK_MIN <= around <= BESIDE_MAX:
+        call = "beside"
     else:
         call = "empty"
-    return {"inside": round(inside, 4), "beside": round(beside, 4),
-            "call": call}
+    return {"inside": round(inside, 4), "around": round(around, 4),
+            "call": call, "box": box}
 
 
 def _dark_fraction(image):
@@ -570,7 +780,7 @@ def _cuts(image, entry, page, symbols, anchors, want):
     for label in want:
         mark = entry.marks.get(label)
         if mark is not None:
-            pad, height = PADS.get(label, (PAD, 120))
+            pad, height = PADS.get(label, (PAD, None))
             cuts[label] = cut_out(image, mark, anchor, carry,
                                   pad=pad, height=height)
     return cuts

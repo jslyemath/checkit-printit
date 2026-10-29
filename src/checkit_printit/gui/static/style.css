@@ -1972,3 +1972,55 @@ button.act.chip:hover { border-color: var(--line-strong); }
   border-radius: var(--r-xs);
   padding: 1px;
 }
+
+/* ---- the four marks, and a crop the size of a name --------------- */
+
+.review-pick { display: inline-flex; align-items: center; gap: 5px; }
+/* `--glyph-size` with the width, always: the stroke weight is
+   derived from it, and a glyph sized without it comes out lighter
+   than its neighbours. */
+.review-pick .glyph {
+  --glyph-size: 15;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+/* The chosen one carries its glyph in the accent too, so the row
+   reads at a glance without looking at which button is filled. */
+.review-pick.on .glyph { color: inherit; }
+
+/* Asked for: the box and the printed name the same height, so the
+   pair reads as one line of evidence rather than a picture with a
+   caption. The crop is cut generously for the reading -- `find_box`
+   needs the whole rectangle inside it -- and shown tight. */
+.review-shot img { width: auto; height: 44px; }
+.review-shot.twice img { height: 36px; }
+
+/* ---- more of the page ------------------------------------------- */
+
+/* Shown tight, widened on hover. `object-fit: cover` with a narrow
+   box shows the middle of the crop -- the grading box -- and
+   releasing the width shows what was cut either side. The crop
+   itself never changes, so there is no second image to fetch. */
+.review-shot img {
+  object-fit: cover;
+  object-position: 34% 50%;
+  width: 96px;
+  transition: width 90ms ease-out;
+}
+.review-shot img.openable { cursor: zoom-in; }
+.review-shot img.openable:hover,
+.review-shot img.openable:focus-visible {
+  width: 240px;
+  object-position: 50% 50%;
+}
+
+.sheetbox { max-width: 900px; width: calc(100vw - 2 * var(--s6)); }
+#sheet-holder {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+#sheet-image { display: block; width: 100%; height: auto; }

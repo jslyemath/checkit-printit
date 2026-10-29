@@ -119,21 +119,32 @@ MARKS = ["tick", "empty", "tick", "query", "tick", "empty", "tick",
          "tick", "empty", "query"]
 
 
-def draw_mark(image, rect, kind, rng):
+#: The pens he marks with. Read off the 2026-10-26 stack: orange,
+#: green and blue, in that rough order of use.
+PENS = ((222, 92, 24), (24, 122, 70), (26, 120, 198))
+
+
+def draw_mark(image, rect, kind, rng, pen=None):
     """Put a pen mark in the grading box at `rect`.
 
-    Grey 40 rather than black: a pen on a photocopy is not black,
-    and a mark darker than the printed rule would make the reader's
-    job easier than it is. A harness that is kinder than reality is
-    a harness that passes when the real thing fails -- which is how
-    a 7mm code once looked fine.
+    **Coloured**, because that is the whole of what the reading
+    looks for: the printed rule and a pencil are grey, and a mark
+    drawn in grey is one the reader is built to ignore. It used to
+    be grey 40, on the argument that a pen on a photocopy is not
+    black -- true, and the wrong axis. A demo whose marks cannot be
+    seen proves the reader works by never asking it anything.
+
+    Not fully saturated, and not dark: a photocopied pen is a
+    washed-out version of itself, and a harness kinder than reality
+    passes when the real thing fails.
     """
+    pen = pen or PENS[rng.randrange(len(PENS))]
     from PIL import ImageDraw
 
     draw = ImageDraw.Draw(image)
     left, top, right, bottom = rect
     w, h = right - left, bottom - top
-    width = max(2, round(h * 0.07))
+    width = max(3, round(h * 0.10))
     if kind in ("tick", "query"):
         # A tick, roughly: down-right then up-right, with the ends
         # wandering the way a hand does.
@@ -142,7 +153,7 @@ def draw_mark(image, rect, kind, rng):
         draw.line([(jitter(left + w * 0.22), jitter(top + h * 0.52)),
                    (jitter(left + w * 0.42), jitter(top + h * 0.78)),
                    (jitter(left + w * 0.80), jitter(top + h * 0.20))],
-                  fill=40, width=width, joint="curve")
+                  fill=pen, width=width, joint="curve")
     if kind == "query":
         # Beside the box, not in it -- which is why the crop takes a
         # margin to the right, and why this is here to prove it does.
@@ -150,12 +161,12 @@ def draw_mark(image, rect, kind, rng):
         q = ImageDraw.Draw(image)
         x, y = right + w * 0.10, top + h * 0.15
         q.arc([x, y, x + size * 0.62, y + size * 0.55], 160, 20,
-              fill=40, width=width)
+              fill=pen, width=width)
         q.line([(x + size * 0.46, y + size * 0.40),
                 (x + size * 0.34, y + size * 0.68)],
-               fill=40, width=width)
+               fill=pen, width=width)
         q.ellipse([x + size * 0.28, y + size * 0.80,
-                   x + size * 0.40, y + size * 0.92], fill=40)
+                   x + size * 0.40, y + size * 0.92], fill=pen)
 
 
 def make_stack(run, index, into, dpi):
@@ -184,7 +195,7 @@ def make_stack(run, index, into, dpi):
     images, marked = [], []
     for n in pages:
         page = doc[n - 1]
-        big = page.render(scale=dpi * 2 / 72).to_pil().convert("L")
+        big = page.render(scale=dpi * 2 / 72).to_pil().convert("RGB")
         box = index.get(n).marks.get("box") if index.get(n) else None
         kind = wanted.get(n)
         if box is not None and kind:
@@ -198,12 +209,12 @@ def make_stack(run, index, into, dpi):
         a = 35 + a * (243 - 35) / 255 + numpy.random.default_rng(
             rng.randrange(2 ** 31)).normal(0, 5, a.shape)
         images.append(Image.fromarray(
-            numpy.clip(a, 0, 255).astype("uint8")).convert("L"))
+            numpy.clip(a, 0, 255).astype("uint8")).convert("RGB"))
 
     # One more copy of the first page, rendered the same way but with
     # nothing written in the box, for the double feed below.
     first = doc[pages[0] - 1]
-    bare = first.render(scale=dpi * 2 / 72).to_pil().convert("L")
+    bare = first.render(scale=dpi * 2 / 72).to_pil().convert("RGB")
     bare = bare.filter(ImageFilter.GaussianBlur(radius=2 * 0.55))
     bare = bare.rotate(rng.uniform(-1.2, 1.2), resample=Image.BICUBIC,
                        fillcolor=255)
@@ -212,13 +223,13 @@ def make_stack(run, index, into, dpi):
     a = 35 + a * (243 - 35) / 255 + numpy.random.default_rng(
         7).normal(0, 5, a.shape)
     unmarked = [Image.fromarray(
-        numpy.clip(a, 0, 255).astype("uint8")).convert("L")]
+        numpy.clip(a, 0, 255).astype("uint8")).convert("RGB")]
     doc.close()
 
-    paper = numpy.full((images[0].height, images[0].width), 243.0)
+    paper = numpy.full((images[0].height, images[0].width, 3), 243.0)
     paper += numpy.random.default_rng(2).normal(0, 5, paper.shape)
     images.insert(2, Image.fromarray(
-        numpy.clip(paper, 0, 255).astype("uint8")).convert("L"))
+        numpy.clip(paper, 0, 255).astype("uint8")).convert("RGB"))
     # The double feed, and the one case worth building by hand: the
     # second pass of this sheet is taken *before* its mark, so the
     # two copies of one paper genuinely disagree. Every real stack

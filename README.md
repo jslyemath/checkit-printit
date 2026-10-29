@@ -278,6 +278,16 @@ Check the page count afterwards. If a paper now runs to two pages
 where it did not before, the mapping has drifted and the rebuild is
 not usable.
 
+## Scan in colour
+
+The reading looks for **coloured** ink. The printed box, the printed
+question and a pencil mark are grey whatever their darkness; a pen
+is not, and that difference is the whole of how a check is told from
+the box it sits in.
+
+A greyscale scan has nothing in it to find, and every page will come
+back empty. 200dpi or better, in colour.
+
 ## Marks for scanning, and how to turn them off
 
 A run printed through `build` carries two things a scanner uses:
