@@ -325,6 +325,27 @@ def placement(anchor, scan_corners):
 #: em away, and there is nothing to be gained by taking more of it.
 PAD = (0.22, 0.45, 1.05, 0.38)
 
+#: The name's own padding, and its own output height.
+#:
+#: A name is a wide, short mark, so the box's pad -- which is a
+#: multiple of the mark's width on every side -- does not transfer:
+#: 1.05 of two inches to the right is most of the page. The mark
+#: already spans the typeset box, ascenders and descenders included,
+#: so these are breathing room and nothing more -- though more than
+#: it first looked: 0.05 clipped the ascenders, because the fraction
+#: is of the name's *width* and a name is ten times wider than it is
+#: tall. Checked by looking at the crop, which is the only way this
+#: kind of thing is ever checked.
+#:
+#: 44px rather than 120: it only has to be readable, and a few
+#: hundred of them go into one response alongside the boxes.
+NAME_PAD = (0.01, 0.14, 0.01, 0.12)
+NAME_HEIGHT = 44
+
+#: Per mark, falling back to the box's. Here rather than at the call
+#: site so that adding a third mark is one line in one place.
+PADS = {"name": (NAME_PAD, NAME_HEIGHT)}
+
 
 def cut_out(image, mark, anchor, carry, pad=PAD, height=120):
     """The piece of the scan where `mark` ended up, straightened.
@@ -549,7 +570,9 @@ def _cuts(image, entry, page, symbols, anchors, want):
     for label in want:
         mark = entry.marks.get(label)
         if mark is not None:
-            cuts[label] = cut_out(image, mark, anchor, carry)
+            pad, height = PADS.get(label, (PAD, 120))
+            cuts[label] = cut_out(image, mark, anchor, carry,
+                                  pad=pad, height=height)
     return cuts
 
 

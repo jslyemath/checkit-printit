@@ -24,7 +24,7 @@ from . import publication as pub_mod
 from . import record as record_mod
 from . import roster as roster_mod
 from . import seating, theme
-from .assemble import assemble, AssemblyError
+from .assemble import assemble, AssemblyError, FolderInUse
 from .bank import Bank, BankError
 from .compile import compile_pdf, CompileError
 
@@ -73,6 +73,11 @@ class BuildResult:
     #: The number the print record gave this run, which is what the
     #: footer code carries. None when there is no record to key into.
     run_id: int = None
+    #: True when this build was recovering a lost page index. Who
+    #: held which page is sound -- it comes from the roster and the
+    #: chart -- but the seeds are a fresh draw, not what was
+    #: printed, and the record says so rather than looking normal.
+    rebuilt: bool = False
     #: True when a run prints neither names nor an id field, so nothing
     #: on any of its papers says who sat it and Scans can never
     #: attribute one. Warned about rather than refused: an anonymous
@@ -116,7 +121,7 @@ def choose_run_seed(record, seed):
 
 def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
         replay=None, install_theme=True, ids=None, codes=None,
-        keep_record=True, only=None):
+        keep_record=True, only=None, replace=False, rebuilt=False):
     """Build a class set. Returns a BuildResult; raises BuildError.
 
     `preview` writes nothing at all -- no folder, no theme, no record -- and
@@ -245,6 +250,7 @@ def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
                          unmatched_students=tuple(unmatched_students),
                          dropped_students=tuple(dropped_students),
                          printed_for=printed_for, roster_size=len(live),
+                         rebuilt=bool(rebuilt),
                          anonymous=not publication.names
                          and not publication.ids,
                          report={}, replayed=record is not None,
@@ -289,11 +295,37 @@ def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
             course_mod.file_in(publication.course_folder, "record"),
             os.path.basename(os.path.normpath(out)))
 
+    # What this folder produced last time, so `assemble` can tell a
+    # rebuild from a second job wearing the first one's name. None
+    # when there is nothing to compare against -- no course, no
+    # record, or a folder never built before -- and None means "do
+    # not check", which is how `--replace` gets through.
+    #
+    # A replay is exempt on purpose: reprinting a finished run into
+    # its own folder is the one case where replacing what is there
+    # is the whole point, and the manifest has already been checked
+    # against the bank.
+    already = None
+    # Recovering an index is replacing a run on purpose, so it does
+    # not also need `--replace`: asking for both would be asking the
+    # same question twice and getting the answer wrong once.
+    if (publication.course_folder and not replace and not rebuilt
+            and record is None):
+        already = record_mod.papers_in(
+            course_mod.file_in(publication.course_folder, "record"),
+            os.path.basename(os.path.normpath(out)))
+
     try:
         result.report = assemble(
             publication, people, chart, out, theme_source,
             rng=random.Random(result.run_seed), dry_run=preview,
-            run_seed=result.run_seed, run_id=result.run_id)
+            run_seed=result.run_seed, run_id=result.run_id,
+            already=already)
+    except FolderInUse:
+        # Raised as itself, not flattened into BuildError: the web
+        # app has two ways out to offer and needs to know which
+        # refusal this is.
+        raise
     except (AssemblyError, BankError) as exc:
         raise BuildError(str(exc)) from None
 
@@ -337,6 +369,7 @@ def _record(publication, result):
             output=os.path.abspath(result.out),
             handouts=result.report.get("handouts", []),
             extras=result.report.get("extras", 0),
+            rebuilt=result.rebuilt,
         )
     except Exception as exc:                 # never lose a built PDF to it
         result.record_error = str(exc)

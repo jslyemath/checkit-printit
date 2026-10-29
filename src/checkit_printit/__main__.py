@@ -18,7 +18,7 @@ from . import course as course_mod
 from . import manifest as manifest_mod
 from . import provision as provision_mod
 from . import runner
-from .assemble import assemble, AssemblyError
+from .assemble import assemble, AssemblyError, FolderInUse
 from .bank import Bank, BankError
 from .compile import compile_pdf, CompileError
 
@@ -984,19 +984,34 @@ def import_csv(csv_path, out):
 @click.option("--only", multiple=True, metavar="KEY",
               help="Print for these students only, by id, alternate id or "
                    "email. Repeatable. Overrides the publication.")
+@click.option("--replace", is_flag=True,
+              help="Build into a folder that already holds a different "
+                   "run, replacing it. Refused without this, because the "
+                   "folder's page index is the only record of who held "
+                   "which printed paper.")
+@click.option("--rebuilt", is_flag=True,
+              help="Recover a lost page index: build into the folder "
+                   "again, replacing what is there, and mark the run as "
+                   "rebuilt. Who held which page comes back exactly, from "
+                   "the roster and the seating chart; the seeds are a "
+                   "fresh draw and not what was printed, which is what "
+                   "the mark is for.")
 @click.option("--record/--no-record", "keep_record", default=True,
               help="Note the run in the course's print record. --no-record "
                    "is for a throwaway build: nothing is written to the "
                    "record, and the papers carry no scanning code, because "
                    "there would be nothing to look one up in.")
 def build(pub_path, out, do_compile, seed, preview, replay, ids, codes,
-          only, keep_record):
+          only, replace, rebuilt, keep_record):
     """Assemble the class set, and compile it."""
     try:
         result = runner.run(pub_path, out=out, do_compile=do_compile,
                             seed=seed, preview=preview, replay=replay,
                             ids=ids, codes=codes, keep_record=keep_record,
-                            only=only)
+                            only=only, replace=replace,
+                            rebuilt=rebuilt)
+    except FolderInUse as exc:
+        raise click.ClickException(str(exc))
     except runner.BuildError as exc:
         raise click.ClickException(str(exc))
 
@@ -1103,6 +1118,10 @@ def _report(result):
         click.echo(f"  WARNING  override(s) for "
                    f"{', '.join(result.unmatched_overrides)} matched nobody "
                    f"in the roster, so nothing was changed for them")
+    if result.rebuilt:
+        click.echo("  NOTE     recorded as a rebuilt index. Who held which "
+                   "page is right; the seeds are a fresh draw and not "
+                   "the ones that were printed.")
     if result.anonymous:
         click.echo("  WARNING  no names and no id field, so nothing on "
                    "these papers says who sat them. Scans will read the "

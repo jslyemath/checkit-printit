@@ -1958,3 +1958,17 @@ button.act.chip:hover { border-color: var(--line-strong); }
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+
+/* The name cut off the paper, under the name the index claims.
+   On white, because it is a photograph of paper, and small -- it
+   is read for "is that the same name", not for anything else. */
+.review-nameshot {
+  display: block;
+  margin-top: var(--s1);
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  padding: 1px;
+}
