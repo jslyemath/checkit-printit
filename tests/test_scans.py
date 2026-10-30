@@ -414,6 +414,66 @@ class TestReadingAMark:
                                          pen=(level, level, level)))
             assert out["call"] == "empty", f"grey {level} counted as ink"
 
+    def test_a_clean_tick_is_sure_and_a_bare_one_is_not(self):
+        """The number is about the *call*, not the ink. A box inked
+        twelve times over the threshold and one inked by a hair are
+        both `ticked`, and only one should be believed without
+        looking."""
+        # 0.2, like a real tick: the stack measured 0.08 to 0.21.
+        # 0.4 is past HEAVY_INK and reads as a scribble.
+        clear = scans.measure(box_crop(ink_in_box=0.2))
+        bare = scans.measure(box_crop(ink_in_box=0.015))
+        assert clear["call"] == bare["call"] == "ticked"
+        assert clear["sure"] > bare["sure"]
+
+    def test_an_untouched_box_is_the_surest_reading_there_is(self):
+        out = scans.measure(box_crop())
+        assert out["call"] == "empty"
+        assert out["sure"] > 0.7
+
+    def test_an_empty_box_stays_sure_when_somebody_writes_near_it(self):
+        """What `empty` claims is that the *box* is empty, and it
+        is. An earlier version drove this off the larger of the two
+        measurements, so the one page with a student's working
+        beside an empty box came out the least confident reading in
+        the stack -- about a box visibly containing nothing."""
+        out = scans.measure(box_crop(ink_beside=3.0))
+        assert out["call"] == "empty"
+        assert out["sure"] > 0.4
+
+    def test_a_mark_beside_the_box_is_never_fully_sure(self):
+        """It means "a mark next to an empty box". Whether that is
+        a question mark, a correction or the edge of somebody's
+        working is not a thing the pixels settle, and the number
+        should not pretend otherwise."""
+        out = scans.measure(box_crop(ink_beside=0.3))
+        assert out["call"] == "beside"
+        assert 0 < out["sure"] <= scans.BESIDE_CEILING
+
+    def test_a_box_that_could_not_be_found_is_sure_of_nothing(self):
+        from PIL import Image
+        blank = Image.new("RGB", (247, 177), (243, 243, 240))
+        out = scans.measure(blank)
+        assert out["call"] == "nobox"
+        assert out["sure"] == 0.0
+
+    def test_sure_never_leaves_nought_to_one(self):
+        """It is shown as a dial out of ten, and a dial takes a
+        fraction."""
+        for kw in ({}, {"ink_in_box": 0.02}, {"ink_in_box": 0.9},
+                   {"ink_beside": 0.3}, {"ink_beside": 5.0},
+                   {"ink_in_box": 0.5, "ink_beside": 0.4}):
+            out = scans.measure(box_crop(**kw))
+            assert 0.0 <= out["sure"] <= 1.0, (kw, out)
+
+    def test_a_worse_found_box_drags_its_call_down(self):
+        """Every call rests on having found the right rectangle, so
+        a rectangle that only just matched takes whatever was
+        concluded from it down too."""
+        good = scans._confidence("ticked", 0.2, 0.0, scans.EDGE_GOOD)
+        bare = scans._confidence("ticked", 0.2, 0.0, scans.EDGE_HIT)
+        assert good > bare
+
     def test_the_hint_follows_the_padding(self):
         """`_window` is derived from PAD rather than written down
         again, so the two cannot drift apart. It is only the hint

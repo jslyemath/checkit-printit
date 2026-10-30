@@ -42,7 +42,12 @@ def main():
     parser.add_argument("--home", default=None,
                         help="a print-it home of its own, instead of the "
                              "real one")
-    parser.add_argument("--dpi", type=int, default=150)
+    # 200, because that is what his copier does and the reading is
+    # tuned to a box about 55 pixels across. At 150 the demo was
+    # harder than reality and failed two of its own eight pages --
+    # a harness that is harsher than the thing it stands in for
+    # teaches the wrong lesson just as surely as one that is softer.
+    parser.add_argument("--dpi", type=int, default=200)
     parser.add_argument("--remove", action="store_true",
                         help="delete the course and stop")
     args = parser.parse_args()

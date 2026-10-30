@@ -806,6 +806,80 @@ function progressCell(student, skill, cell, recent) {
   return td;
 }
 
+/* Hover a crop and the whole of it floats over the page, larger.
+
+   One element on `<body>`, not one per row and not the row's own
+   image grown in place: growing it in place can only show what
+   fits in the row, which is what the row then clipped. Nothing
+   inside a box escapes the box, so the popover is not inside one.
+
+   Positioned beside the thing it belongs to, flipped to whichever
+   side has room, and clamped to the window -- a popover that runs
+   off the screen is the same bug in a different direction. */
+let peekHold = null;
+
+function peekBox() {
+  let box = document.getElementById("peek");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "peek";
+    box.hidden = true;
+    const img = document.createElement("img");
+    img.id = "peek-image";
+    img.alt = "";
+    const say = document.createElement("div");
+    say.id = "peek-say";
+    say.className = "muted";
+    box.append(img, say);
+    document.body.appendChild(box);
+  }
+  return box;
+}
+
+function peekable(element, source, say) {
+  element.classList.add("peekable");
+  element.title = say;
+  const show = () => showPeek(element, source, say);
+  element.addEventListener("mouseenter", show);
+  element.addEventListener("focus", show);
+  element.addEventListener("mouseleave", hidePeek);
+  element.addEventListener("blur", hidePeek);
+  element.tabIndex = 0;
+}
+
+function showPeek(element, source, say) {
+  clearTimeout(peekHold);
+  const box = peekBox();
+  document.getElementById("peek-image").src = source;
+  document.getElementById("peek-say").textContent = say;
+  box.hidden = false;
+  // Measured after it is shown: its size depends on the picture,
+  // and a position worked out before the picture is in it is a
+  // position for the previous one.
+  const at = element.getBoundingClientRect();
+  const mine = box.getBoundingClientRect();
+  const gap = 10;
+  let left = at.right + gap;
+  if (left + mine.width > window.innerWidth - gap) {
+    left = at.left - gap - mine.width;
+  }
+  left = Math.max(gap, Math.min(left, window.innerWidth - mine.width - gap));
+  let top = at.top + at.height / 2 - mine.height / 2;
+  top = Math.max(gap, Math.min(top, window.innerHeight - mine.height - gap));
+  box.style.left = `${left}px`;
+  box.style.top = `${top}px`;
+}
+
+function hidePeek() {
+  // A moment's grace, so crossing between two crops does not
+  // flicker the popover off and on again.
+  clearTimeout(peekHold);
+  peekHold = setTimeout(() => {
+    const box = document.getElementById("peek");
+    if (box) box.hidden = true;
+  }, 80);
+}
+
 /* The whole scanned page, when the square is not enough context.
 
    One request per look, and no caching: he opens one or two in a
@@ -913,8 +987,8 @@ function cellPaper(paper) {
     b.type = "button";
     b.className = "review-pick";
     b.appendChild(icon(OUTCOME_GLYPH[outcome.id] || "query"));
-    b.appendChild(document.createTextNode(outcome.label));
-    b.title = outcome.mark;
+    b.setAttribute("aria-label", outcome.label);
+    b.title = `${outcome.label} \u2014 ${outcome.mark}`;
     b.setAttribute("role", "radio");
     const on = paper.outcome === outcome.id;
     b.classList.toggle("on", on);
@@ -2402,9 +2476,12 @@ function reviewRow(row) {
     shot.className = "review-nameshot";
     shot.src = row.nameCrop;
     shot.alt = `the name printed on this paper`;
-    shot.title = "the name printed on this paper -- it should be the "
-               + "one above";
     shot.loading = "lazy";
+    // The same look-closer as the box crop. This is the thing being
+    // checked against the index, and it is cut small.
+    peekable(shot, row.nameCrop,
+             "the name printed on this paper \u2014 it should be the "
+             + "one above");
     who.appendChild(shot);
   }
   // Said here rather than over the pictures: it is a fact about the
@@ -2431,14 +2508,15 @@ function reviewRow(row) {
       img.src = crop;
       img.alt = `the grading box on ${row.name || row.sid}'s ${row.skill}`;
       img.loading = "lazy";
-      // The crop is cut wide for the reading and shown tight. Hover
-      // gives back what was cut off -- two or three times the area,
-      // out of the picture already loaded, so it costs no request.
-      // Clicking asks for the whole page.
+      // The crop is cut wide for the reading and shown tight.
+      // Hovering floats the whole of it over the page, out of the
+      // picture already loaded, so it costs no request. Clicking
+      // asks for the whole sheet.
       const where = (row.at || [])[i];
+      peekable(img, crop, where
+        ? "click for the whole page" : "the grading box, close up");
       if (where) {
         img.classList.add("openable");
-        img.title = "hover for more of the page, click for all of it";
         img.onclick = () => openSheet(row, where);
       }
       shot.appendChild(img);
@@ -2463,18 +2541,66 @@ function reviewRow(row) {
     button.type = "button";
     button.className = "review-pick";
     button.dataset.outcome = outcome.id;
+    // The glyph alone. The word is the tooltip and the accessible
+    // name -- it was beside the glyph and that spent the width the
+    // glyph was there to save.
     button.appendChild(icon(OUTCOME_GLYPH[outcome.id] || "query"));
-    button.appendChild(document.createTextNode(outcome.label));
-    button.title = outcome.mark;
+    button.setAttribute("aria-label", outcome.label);
+    button.title = `${outcome.label} \u2014 ${outcome.mark}`;
     button.setAttribute("role", "radio");
     button.onclick = () => setOutcome(row.id, outcome.id);
     picks.appendChild(button);
   }
 
-  el.append(who, shot, picks);
+  el.append(who, sureDial(row), shot, picks);
   paintRow(el, row);
   return el;
 }
+
+/* How sure the reading is, as a ring and a number out of ten.
+
+   Out of ten and not a percent: a percent reads as a measurement,
+   and this is a judgement about a judgement. The ring is there so
+   the column can be scanned without reading any of it -- a row
+   that needs a look is a gap in the ring, from across the page.
+
+   A paper that never came back gets no dial at all. Nothing was
+   read, so there is nothing to be sure about, and a dial at zero
+   would say the opposite of the truth. */
+function sureDial(row) {
+  const box = document.createElement("div");
+  box.className = "suredial";
+  if (row.sure === null || row.sure === undefined) {
+    box.classList.add("nodial");
+    box.title = "nothing was scanned, so there is nothing to read";
+    return box;
+  }
+  const outOfTen = Math.round(row.sure * 10);
+  // The ring is a conic gradient behind a ring-shaped mask, in the
+  // stylesheet. Only how far round it goes belongs here.
+  box.style.setProperty("--part", String(row.sure));
+  const n = document.createElement("span");
+  n.className = "surenum";
+  n.textContent = String(outOfTen);
+  box.appendChild(n);
+  box.classList.add(outOfTen >= 8 ? "high"
+                  : outOfTen >= 6 ? "fair" : "low");
+  box.title = `${outOfTen} out of 10: how sure the reading is of `
+            + `"${SCAN_READ_SAID[row.read] || "what it found"}". `
+            + `It is not how sure you should be.`;
+  return box;
+}
+
+/* What each reading is called, for the dial's tooltip. The grid
+   shows the picture and the suggestion; this says what the machine
+   thought it saw to arrive at them. */
+const SCAN_READ_SAID = {
+  ticked: "a mark in the box",
+  empty: "an empty box",
+  beside: "a mark beside the box",
+  heavy: "a box covered in ink",
+  nobox: "no box it could find",
+};
 
 function paintRow(el, row) {
   el.classList.toggle("undecided", !row.outcome);

@@ -1900,6 +1900,11 @@ def _review_rows(batch, record_path, names):
             "reads": sorted(calls) or ([agreed] if agreed else []),
             "ink": first.get("inside", 0),
             "beside": first.get("around", 0),
+            # How sure the reading is of its own call, 0 to 1. The
+            # lowest of several copies: two scans of one sheet that
+            # disagree are the least certain thing in the stack,
+            # whatever either one measured on its own.
+            "sure": min((r.get("sure", 0.0) for r in reads), default=0.0),
             "outcome": SUGGESTS.get(agreed, ""),
             "recorded": recorded(run_no, entry.sid, entry.slug),
         })
@@ -1915,6 +1920,11 @@ def _review_rows(batch, record_path, names):
                 "skill": entry.slug, "scanned": False, "crops": [],
                 "nameCrop": "", "at": [],
                 "read": "", "reads": [], "ink": 0, "beside": 0,
+                # Nothing was read, so there is nothing to be sure
+                # about. The row is not a guess -- the record knows
+                # the paper never came back -- so it shows no dial
+                # rather than a dial reading zero.
+                "sure": None,
                 # Not a question. The record already knows no paper
                 # came back; asking him to confirm it is asking him
                 # to agree with something nobody doubts. He can

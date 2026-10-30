@@ -835,6 +835,52 @@ it.
 After all of it: **62 of 62 read correctly**, checked crop by crop
 against a contact sheet rather than counted.
 
+### How sure the reading is, and why the dial is not a percent
+
+`measure` returns `sure`, 0 to 1, from two things: how far the
+measurement sits from the boundary it was decided on, and how well
+the box was found -- every call rests on having the right
+rectangle. Shown as a ring and a number **out of ten**: a percent
+reads as a measurement and this is a judgement about a judgement.
+
+Two numbers in it were got wrong first time and are worth not
+repeating. Quality was scaled against a perfect match, and
+`\roundbox` has rounded corners so a square template cannot cover
+them -- the real ceiling is about 0.72 (`EDGE_GOOD`), and scaling
+against 1.0 put the whole stack in a band three tenths wide. And
+`empty` was driven by the larger of `inside` and `around`, so a box
+visibly containing nothing scored 0.00 because a student had
+written beside it; what `empty` claims is about the *box*.
+
+`beside` is capped at `BESIDE_CEILING` however cleanly it measures.
+It means "a mark next to an empty box", and whether that is a query,
+a correction or the edge of somebody's working is not a thing the
+pixels settle.
+
+The ring is a conic gradient behind a mask, not an SVG stroke:
+`test_the_one_weight_is_stated_once` allows exactly one
+`stroke-width` in the stylesheet, and a gauge should not be tied to
+the glyphs' line weight anyway.
+
+### A crop is looked at closely in a popover, not in place
+
+`#peek` is one element on `<body>`, shared by every crop. Not the
+row's own image made wider, which was the first attempt: anything
+grown inside a box is clipped by the box, and the row clipped it.
+On both the grading box and the name.
+
+The name crop is **cut at 96 and shown at 44**. It used to be cut
+at the size it was shown at, so looking closer only enlarged the
+pixels -- the one thing a closer look must not do when the picture
+exists to be compared against a name.
+
+Clicking a box crop opens the whole scanned page, re-rendered on
+demand by `/api/scan/sheet` from the file in the course's scans
+folder. The read throws its page renders away, so there is nothing
+kept to show; that endpoint is also the only one taking a path from
+the browser, and it checks the path is inside the course's own
+scans rather than trusting it.
+
 ### The review grid shows the name off the paper
 
 Under the name the index claims, as a crop. A wrong index is then

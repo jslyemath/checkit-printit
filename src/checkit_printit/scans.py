@@ -348,8 +348,15 @@ PAD = (0.70, 0.80, 1.60, 0.80)
 #:
 #: 44px rather than 120: it only has to be readable, and a few
 #: hundred of them go into one response alongside the boxes.
-NAME_PAD = (0.04, 0.26, 0.06, 0.22)
-NAME_HEIGHT = 44
+#: Asymmetric, because the page is: the name sits just above the
+#: skill's coloured banner, so room underneath buys the banner and
+#: room above buys paper.
+NAME_PAD = (0.05, 0.28, 0.08, 0.10)
+#: Cut at 96 and shown at 44. It used to be cut at the size it was
+#: shown at, so looking closer at it only enlarged the pixels --
+#: which is the one thing a closer look must not do, when the whole
+#: job of the picture is to be compared with a name.
+NAME_HEIGHT = 96
 
 #: Per mark, falling back to the box's. Here rather than at the call
 #: site so that adding a third mark is one line in one place.
@@ -567,6 +574,12 @@ MIDDLE_CLEAR = 0.30
 
 
 def find_box(crop, hint=None):
+    """Where the printed rectangle is, or None. See `scored_box`."""
+    found = scored_box(crop, hint)
+    return found[0] if found else None
+
+
+def scored_box(crop, hint=None):
     """Where the printed rectangle actually is, or None.
 
     **Found, not assumed.** The crop is placed from the position
@@ -625,8 +638,11 @@ def find_box(crop, hint=None):
             best = (value, int(x), int(y), side)
     if best is None:
         return None
-    _, x, y, side = best
-    return x, y, x + side, y + side
+    value, x, y, side = best
+    # The score back out as well as the rectangle: how much of the
+    # outline was actually there is the floor under every call made
+    # from it, and a caller saying how sure it is needs to know.
+    return (x, y, x + side, y + side), min(1.0, max(0.0, value))
 
 
 def _window(shape, pad=None):
@@ -660,6 +676,12 @@ def measure(crop, pad=None):
     width to the left and above and below, two to the right, where
     the `?` goes.
 
+    `sure` is how far the call is from being a different call,
+    between 0 and 1 -- see `_confidence`. It is about the decision,
+    not about the ink: a box inked twelve times over the threshold
+    and one inked by a hair are both `ticked`, and only one of them
+    should be believed without looking.
+
     `call` is one of:
 
         ticked   pen in the box
@@ -681,9 +703,11 @@ def measure(crop, pad=None):
     # where in the crop the box should be, and a caller that cut
     # the crop differently would otherwise be given a hint for a
     # crop it does not have.
-    box = find_box(rgb, hint=_window((rgb.height, rgb.width), pad))
-    if box is None:
-        return {"inside": 0.0, "around": 0.0, "call": "nobox", "box": None}
+    found = scored_box(rgb, hint=_window((rgb.height, rgb.width), pad))
+    if found is None:
+        return {"inside": 0.0, "around": 0.0, "call": "nobox",
+                "box": None, "sure": 0.0}
+    box, quality = found
 
     pen = _pen(rgb)
     x0, y0, x1, y1 = box
@@ -705,7 +729,8 @@ def measure(crop, pad=None):
     else:
         call = "empty"
     return {"inside": round(inside, 4), "around": round(around, 4),
-            "call": call, "box": box}
+            "call": call, "box": box,
+            "sure": _confidence(call, inside, around, quality)}
 
 
 def _dark_fraction(image):
@@ -784,6 +809,74 @@ def _cuts(image, entry, page, symbols, anchors, want):
             cuts[label] = cut_out(image, mark, anchor, carry,
                                   pad=pad, height=height)
     return cuts
+
+
+#: How far past the threshold a reading has to be before the call
+#: is as safe as it is going to get. Four times: real ticks on the
+#: 2026-10-26 stack measured 0.08 to 0.21 against a 0.012
+#: threshold, so anything genuinely drawn clears this easily and
+#: anything near the line does not.
+SURE_AT = 4.0
+
+#: What a *well* matched box scores, not what a perfect one would.
+#:
+#: `\roundbox` has rounded corners and a square template cannot
+#: cover them, so no real box reaches 1.0. Over the 62 pages of
+#: 2026-10-26 the best scored 0.718 and the median 0.592. Scaling
+#: against 1.0 marked every page down against a number no box can
+#: reach, and put the whole stack in a band three tenths wide.
+EDGE_GOOD = 0.70
+
+#: What `beside` is allowed to reach however cleanly it measures.
+#: It means "a mark next to an empty box", and whether that is a
+#: question mark, a correction, or the edge of somebody's working
+#: is not a thing the pixels settle.
+BESIDE_CEILING = 0.70
+
+
+def _confidence(call, inside, around, quality):
+    """How sure the call is, 0 to 1.
+
+    Two parts. How far the measurement sits from the boundary it
+    was decided on, and how well the box was found -- every call
+    rests on having the right rectangle, so a rectangle that only
+    just matched drags down whatever was concluded from it.
+    """
+    def past(value):
+        """0 at the threshold, 1 at `SURE_AT` times it."""
+        if value <= INK_MIN:
+            return 0.0
+        return min(1.0, (value / INK_MIN - 1.0) / (SURE_AT - 1.0))
+
+    if call == "ticked":
+        margin = past(inside)
+    elif call == "empty":
+        # What `empty` claims is that the *box* has nothing in it,
+        # so `inside` is what decides how sure that is. Ink outside
+        # it is a different question and is dealt with below.
+        margin = 1.0 - min(1.0, inside / INK_MIN)
+        if around > BESIDE_MAX:
+            # There is a mark out there and the reading decided it
+            # was too big to be a question mark -- which rests on
+            # `BESIDE_MAX`, the one threshold here fitted to a
+            # single stack. Worth saying out loud, and this is the
+            # number whose job is to say it.
+            margin *= 0.55
+    elif call == "beside":
+        margin = min(BESIDE_CEILING, past(around))
+    elif call == "heavy":
+        # A box buried in ink is unmistakable as a *measurement*
+        # and says nothing about what was meant by it.
+        margin = 0.35
+    else:
+        return 0.0
+
+    # The found box's own score, against what a good box really
+    # scores rather than against a perfect one. A bare match costs
+    # about a third; a clean one costs nothing.
+    good = min(1.0, max(0.0, (quality - EDGE_HIT)
+                        / max(1e-6, EDGE_GOOD - EDGE_HIT)))
+    return round(margin * (0.70 + 0.30 * good), 3)
 
 
 def index_reader(record_path):
