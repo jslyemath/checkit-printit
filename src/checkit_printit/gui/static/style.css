@@ -1965,8 +1965,11 @@ button.act.chip:hover { border-color: var(--line-strong); }
 .review-nameshot {
   display: block;
   margin-top: var(--s1);
+  /* Cut at 96 and shown at 44, so the popover has detail to show
+     and the row still matches the box crop's height. */
+  height: 44px;
+  width: auto;
   max-width: 100%;
-  height: auto;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-xs);
@@ -1998,22 +2001,46 @@ button.act.chip:hover { border-color: var(--line-strong); }
 
 /* ---- more of the page ------------------------------------------- */
 
-/* Shown tight, widened on hover. `object-fit: cover` with a narrow
-   box shows the middle of the crop -- the grading box -- and
-   releasing the width shows what was cut either side. The crop
-   itself never changes, so there is no second image to fetch. */
+/* Shown tight. `object-fit: cover` with a narrow box shows the
+   middle of the crop -- the grading box -- and the rest is held
+   back for the popover, which is a floating element and not this
+   one made wider: anything grown in place is clipped by the row. */
 .review-shot img {
   object-fit: cover;
   object-position: 34% 50%;
   width: 96px;
-  transition: width 90ms ease-out;
 }
 .review-shot img.openable { cursor: zoom-in; }
-.review-shot img.openable:hover,
-.review-shot img.openable:focus-visible {
-  width: 240px;
-  object-position: 50% 50%;
+
+/* ---- the popover ------------------------------------------------- */
+
+/* On `<body>`, over everything, positioned by hand. Nothing in the
+   row can clip it, which is the entire reason it is not in the row. */
+#peek {
+  position: fixed;
+  z-index: 60;
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.32);
+  padding: var(--s2);
+  pointer-events: none;
+  max-width: min(640px, 72vw);
 }
+#peek img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: 60vh;
+  border-radius: var(--r-sm);
+}
+#peek-say {
+  font-size: var(--t-sm);
+  color: #5a5a5a;
+  padding: var(--s1) 2px 0;
+}
+.peekable { cursor: zoom-in; }
+.peekable:focus-visible { outline: 2px solid var(--accent); }
 
 .sheetbox { max-width: 900px; width: calc(100vw - 2 * var(--s6)); }
 #sheet-holder {
@@ -2024,3 +2051,56 @@ button.act.chip:hover { border-color: var(--line-strong); }
   border-radius: var(--r-sm);
 }
 #sheet-image { display: block; width: 100%; height: auto; }
+
+/* ---- how sure the reading is ------------------------------------- */
+
+/* A ring and a number out of ten. The number answers "how sure";
+   the ring answers it without being read, so the column can be
+   scanned for gaps from across the page. */
+.suredial {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+}
+/* A conic gradient behind a ring-shaped mask.
+ *
+ * Not an SVG circle with a dash array, which is the usual way: that
+ * needs a `stroke-width`, and the stylesheet states its one line
+ * weight exactly once on purpose -- a second declaration is how a
+ * second weight arrives without anyone deciding on it. A gauge is
+ * not a glyph and should not be tied to the glyphs' weight either.
+ */
+.suredial::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(currentColor calc(var(--part, 0) * 360deg),
+                             var(--surface-3) 0);
+  -webkit-mask: radial-gradient(closest-side, #0000 66%, #000 67%);
+  mask: radial-gradient(closest-side, #0000 66%, #000 67%);
+}
+.surenum {
+  position: relative;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* Green where the reading is as sure as it gets, amber where the
+   call is a judgement. Not red at the bottom: a low number is not
+   an error, it is the reading admitting something, and the loud
+   colour belongs to the papers that need action. */
+.suredial.high { color: var(--accent); }
+.suredial.fair { color: var(--ink-2); }
+.suredial.low { color: var(--warn); }
+.suredial.nodial::after {
+  content: "\2014";
+  color: var(--dim);
+}
+
+/* Four columns now: who, how sure, the picture, the four marks. */
+.review-row { grid-template-columns: minmax(9rem, 14rem) auto auto 1fr; }
