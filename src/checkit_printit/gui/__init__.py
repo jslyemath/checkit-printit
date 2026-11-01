@@ -1843,10 +1843,25 @@ def _as_jpeg(image, quality=72):
 
 
 #: How much room to leave round the box in the table's own picture,
-#: as a fraction of the box's width. Enough to show that it is a box
-#: on paper and that something is or is not beside it; not enough to
-#: be worth scanning the column for anything else.
-SHOT_MARGIN = 0.45
+#: in box-widths, going (left, top, right, bottom).
+#:
+#: Measured, not chosen. Over the 62 pages of 2026-10-26 the
+#: instructor's coloured pen reaches, from the box's own edge:
+#:
+#:   right   0.60 to 0.89 on the six `?`, worst 0.56 on a check
+#:   up      median 0.89 -- the tail of a check overshoots upward
+#:   left    median 0.80, but that is student working, not a mark
+#:   down    median 0.09
+#:
+#: So the right has to clear 0.89 or a `?` is cut in half, which is
+#: what a flat 0.45 on every side was doing to all six of them. The
+#: left stays tight because the skill slug is printed there and it
+#: is clutter, not evidence.
+#:
+#: Widening the right costs almost nothing on screen: the row sizes
+#: the picture by its *height*, so an extra half a box-width to the
+#: side adds about seven pixels.
+SHOT_MARGIN = (0.35, 0.60, 0.95, 0.40)
 
 
 def _tight(crop, read):
@@ -1871,11 +1886,12 @@ def _tight(crop, read):
     if not box:
         return crop
     x0, y0, x1, y1 = box
-    margin = (x1 - x0) * SHOT_MARGIN
-    return crop.crop((max(0, round(x0 - margin)),
-                      max(0, round(y0 - margin)),
-                      min(crop.width, round(x1 + margin)),
-                      min(crop.height, round(y1 + margin))))
+    unit = x1 - x0
+    left, top, right, bottom = SHOT_MARGIN
+    return crop.crop((max(0, round(x0 - unit * left)),
+                      max(0, round(y0 - unit * top)),
+                      min(crop.width, round(x1 + unit * right)),
+                      min(crop.height, round(y1 + unit * bottom))))
 
 
 def _review_rows(batch, record_path, names, sections=None):
