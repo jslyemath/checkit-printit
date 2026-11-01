@@ -506,6 +506,18 @@ visual. The short version:
   was designed.
 * **Explanations live behind a `?`**, not in the open. A short subtitle
   is allowed; a paragraph is not.
+* **Say it with the layout, not with a sentence.** A count, a
+  proportion, a state or a comparison gets a visual -- a bar, a dial, a
+  colour, a position in a sorted column -- and the words go only where
+  a visual genuinely cannot carry it. "24 papers were printed and never
+  came back. They are at the top of the review below, where you can
+  mark one by hand or say the student was away" is three facts and two
+  instructions in a paragraph; the same thing is a segment of a bar
+  with `24` on it and those rows sorted to where he is looking. Prose
+  in a view is nearly always a layout that was not designed.
+* **Headings are as short as they can be.** Two or three words.
+  `Paper name`, not `The name as it is printed on the paper`. The
+  explanation, if one is needed at all, goes behind the `?`.
 
 ### A section on the Print tab is a `.annot`, not a `.panel`
 

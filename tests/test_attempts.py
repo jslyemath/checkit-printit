@@ -563,3 +563,68 @@ class TestTheSaveEndpoint:
             {"id": "9-1", "outcome": "passed"}]})
         assert out["saved"] == 0
         assert out["noRun"] == [9]
+
+
+class TestTheRowsOwnPictureOfTheBox:
+    """The crop the row shows, cut round the box that was found.
+
+    Four margins, not one. The instructor's `?` sits to the *right*
+    of the box and reaches 0.60 to 0.89 box-widths out, so a flat
+    0.45 on every side cut all six of them in half -- which is what
+    he reported. The left stays tight because the skill slug is
+    printed there.
+
+    What is guarded here is the way four numbers go wrong: in the
+    wrong order. A transposed pair leaves the picture the same total
+    size, so nothing else in the suite would notice.
+    """
+
+    def crop(self):
+        from PIL import Image
+        return Image.new("RGB", (400, 300), (255, 255, 255))
+
+    def test_the_right_margin_is_the_widest(self):
+        """Or a question mark beside the box is cut off."""
+        left, top, right, bottom = gui_mod.SHOT_MARGIN
+        assert right > left
+        assert right > top
+        assert right > bottom
+
+    def test_it_clears_the_widest_question_mark_measured(self):
+        """0.89 box-widths, on the 2026-10-26 stack."""
+        assert gui_mod.SHOT_MARGIN[2] > 0.89
+
+    def test_each_margin_goes_to_its_own_side(self):
+        """The transposition test.
+
+        Asserted as where the box ends up rather than how big the
+        picture is: the size is the same whichever way a pair is
+        swapped, so it cannot see the mistake. Where the box sits
+        can. With more room to the right than the left the box is
+        left of centre, and with more above than below it is low.
+
+        Not written as the arithmetic `_tight` does -- a test that
+        recomputes the thing it is checking agrees with any bug in
+        it, and the first draft of this one did exactly that and
+        failed, because each edge rounds on its own.
+        """
+        painted = self.crop()
+        got = gui_mod._tight(painted, {"box": (100, 100, 150, 150)})
+        left, top, right, bottom = gui_mod.SHOT_MARGIN
+        # Where the box's own middle landed inside the picture.
+        across = (125 - round(100 - 50 * left)) / got.width
+        down = (125 - round(100 - 50 * top)) / got.height
+        assert right > left and across < 0.5
+        assert top > bottom and down > 0.5
+
+    def test_a_box_near_an_edge_is_not_asked_for_pixels_that_are_not_there(self):
+        """The crop is clamped to the picture, so a box in the corner
+        comes back smaller rather than raising."""
+        got = gui_mod._tight(self.crop(), {"box": (2, 2, 52, 52)})
+        assert got.width > 0 and got.height > 0
+
+    def test_no_box_means_the_whole_crop(self):
+        """Nothing to centre on, and the reading failed -- which is
+        exactly when he should see everything there was to look at."""
+        whole = self.crop()
+        assert gui_mod._tight(whole, {"box": None}).size == whole.size
