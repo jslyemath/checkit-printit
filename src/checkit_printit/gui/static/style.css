@@ -107,6 +107,12 @@
   --accent-soft: oklch(0.945 0.025 165);
   --warn: oklch(0.500 0.090 55);
   --warn-soft: oklch(0.955 0.030 70);
+  /* The step between `--warn` and `--accent`, for a scale that runs
+     from one to the other -- the confidence dial today. Its hue is
+     the midpoint of theirs (55 and 165) and its lightness and
+     chroma sit between, so the three read as even steps rather
+     than as three unrelated colours. */
+  --midway: oklch(0.480 0.085 110);
   --dirty: oklch(0.520 0.090 90);
   --dropped: oklch(0.955 0.004 260);
 
@@ -143,6 +149,9 @@
     --accent-soft: oklch(0.330 0.045 165);
     --warn: oklch(0.800 0.110 75);
     --warn-soft: oklch(0.300 0.045 75);
+    /* Midway again, between this theme's own two: hues 75 and 165
+       give 120, light enough to read on the dark surfaces. */
+    --midway: oklch(0.810 0.113 120);
     --dirty: oklch(0.820 0.110 95);
     --dropped: oklch(0.280 0.011 260);
 
@@ -1650,17 +1659,64 @@ body.hasbar.tall main { padding-bottom: 68px; }
 
 .scan-pick {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: var(--s3);
   margin: var(--s3) 0;
   flex-wrap: wrap;
 }
-/* The file input is hidden and its label is the button, which is the
-   only way to style one. The label has to look like a button and be
-   reachable by keyboard, so it keeps `.btn` and the input stays
-   focusable rather than `display: none`. */
-.scan-pick label.btn { cursor: pointer; }
-#scan-chosen { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
+
+/* The drop target. A dashed rectangle because that is what a drop
+   target has looked like for fifteen years, and a control nobody
+   has to learn is worth more here than one that matches the rest of
+   the toolbar -- this is the first thing the tab asks you to do.
+
+   The file input stays in the DOM and merely `hidden`, with this as
+   its `<label for>`: that is what makes the whole rectangle
+   clickable and keyboard-reachable without a line of script. */
+.dropzone {
+  flex: 1 1 22rem;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms, color 120ms;
+}
+.dropzone:hover,
+.dropzone:focus-within { border-color: var(--accent); color: var(--ink-2); }
+/* While a file is over it. Set from script, because there is no CSS
+   state for "something is being dragged over this". */
+.dropzone.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.dropzone-plus {
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 300;
+  color: var(--dim);
+  flex: 0 0 auto;
+}
+.dropzone:hover .dropzone-plus,
+.dropzone.over .dropzone-plus { color: var(--accent); }
+.dropzone-say { font-size: var(--t-sm); }
+/* The names of what was chosen, once something has been. Its own
+   line rather than beside the prompt, so a long filename does not
+   push the prompt out of the box. */
+.dropzone-chosen {
+  margin-left: auto;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 
 .scan-counts {
   list-style: none;
@@ -1716,7 +1772,11 @@ body.hasbar.tall main { padding-bottom: 68px; }
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   padding: 2px;
-  min-width: 171px;
+  /* Narrow, now that the picture is cut round the box rather than
+     being a window onto a wide crop: the row needs room for a
+     square and the context is a hover away. It was 171px, most of
+     which was paper. */
+  min-width: 52px;
   min-height: 44px;
   display: flex;
   align-items: center;
@@ -2001,15 +2061,19 @@ button.act.chip:hover { border-color: var(--line-strong); }
 
 /* ---- more of the page ------------------------------------------- */
 
-/* Shown tight. `object-fit: cover` with a narrow box shows the
-   middle of the crop -- the grading box -- and the rest is held
-   back for the popover, which is a floating element and not this
-   one made wider: anything grown in place is clipped by the row. */
-.review-shot img {
-  object-fit: cover;
-  object-position: 34% 50%;
-  width: 96px;
-}
+/* Shown tight, and tight means *cut* tight -- the server sends a
+   second picture cropped round the box it found, and this shows
+   that one at its own shape.
+
+   It used to be the wide crop windowed with `object-fit: cover` at
+   a fixed `object-position: 34%`. Two things were wrong with that.
+   The percentage was a constant where the box's place in the crop
+   is measured and moves: N3's boxes sit at 22% of their crop and
+   N4's at 50%, so one skill was always off-centre -- the cut point
+   he reported. And `cover` can only ever crop a picture, never
+   enlarge it, so narrowing the window shrank the box rather than
+   filling the row with it. */
+.review-shot img { width: auto; }
 .review-shot img.openable { cursor: zoom-in; }
 
 /* ---- the popover ------------------------------------------------- */
@@ -2088,18 +2152,41 @@ button.act.chip:hover { border-color: var(--line-strong); }
   font-size: var(--t-sm);
   font-weight: 600;
   line-height: 1;
+  /* Nudged down a sixteenth of an em, because centring the text
+     *box* does not centre the digit. At `line-height: 1` the box
+     runs ascender to descender, and a digit occupies only
+     cap-height to baseline -- which sits above the box's middle by
+     about this much. He spotted it before I did: "is the 8 a bit
+     higher than it is lower?" It was. */
+  transform: translateY(0.055em);
 }
 
-/* Green where the reading is as sure as it gets, amber where the
-   call is a judgement. Not red at the bottom: a low number is not
-   an error, it is the reading admitting something, and the loud
-   colour belongs to the papers that need action. */
+/* Green where the reading is as sure as it gets, gold where the
+   call is a judgement, and a yellow-green between them.
+
+   Not red at the bottom: a low number is not an error, it is the
+   reading admitting something, and the loud colour belongs to the
+   papers that need action.
+
+   The middle band was grey, which read as "no answer" rather than
+   as "most of the way there" and broke the ramp in half. It is not
+   picked by eye either: these are OKLCH, so the hue between gold
+   and green is simply the hue halfway between them -- 55 and 165
+   give 110 -- at a lightness and chroma in step with both. Mixing
+   that halfway point in sRGB instead is what produces the muddy
+   olive everybody ends up nudging by hand. */
 .suredial.high { color: var(--accent); }
-.suredial.fair { color: var(--ink-2); }
+.suredial.fair { color: var(--midway); }
 .suredial.low { color: var(--warn); }
+/* `n/a` rather than a dash: a dash in a ring looks like a reading
+   of nothing, and this is not a reading at all. Small enough to
+   sit inside the hole, which the mask puts at 66% of 34px. */
 .suredial.nodial::after {
-  content: "\2014";
+  content: "n/a";
   color: var(--dim);
+  font-size: calc(var(--t-sm) * 0.78);
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 /* Four columns now: who, how sure, the picture, the four marks. */

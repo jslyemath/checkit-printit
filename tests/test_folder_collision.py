@@ -379,31 +379,54 @@ class TestRecoveringALostIndex:
 
 
 class TestTheNameCropIsItsOwnShape:
-    """The grading box's padding does not transfer to the name.
+    """The grading box's framing does not transfer to the name.
 
-    Every pad is a multiple of the mark's own *width*, which suits a
-    roughly square box. A name is ten times wider than it is tall, so
-    the box's 1.05 to the right would take half the page and its 0.45
-    above would reach the header rule.
+    The box's pad is a multiple of its own *width*, which suits a
+    roughly square mark. A name measured the same way is framed by
+    how long it is: across the real roster the mark runs 23pt to
+    147pt wide and barely varies in height, so padding by the width
+    gave a short name an inch of paper either side and a long one
+    nothing -- and, because the output was scaled the same way, set
+    the short one in large type and the long one in small.
     """
 
-    def test_the_name_has_its_own_pad_and_height(self):
+    def test_the_name_is_framed_by_its_height_and_the_box_by_width(self):
         from checkit_printit import scans
-        pad, height = scans.PADS["name"]
-        assert pad == scans.NAME_PAD
-        assert height == scans.NAME_HEIGHT
+        assert scans.PADS["name"].unit == "height"
+        assert scans.PADS["box"].unit == "width"
+        assert scans.PADS["name"].pad == scans.NAME_PAD
+        assert scans.PADS["box"].pad == scans.PAD
 
-    def test_it_reaches_far_less_sideways_than_the_box(self):
-        from checkit_printit import scans
-        assert scans.NAME_PAD[2] < scans.PAD[2] / 10
-
-    def test_anything_without_its_own_pad_gets_the_box_s(self):
+    def test_anything_without_its_own_framing_gets_the_box_s(self):
         """So adding a mark cannot silently get a name-shaped crop."""
         from checkit_printit import scans
-        assert "box" not in scans.PADS
+        assert scans.PADS.get("id", scans.BOX_CUT) is scans.BOX_CUT
 
-    def test_cuts_gives_each_mark_the_pad_the_table_says(self,
-                                                         monkeypatch):
+    def test_a_long_name_is_set_no_smaller_than_a_short_one(self):
+        """The fault underneath the clipping, as a test.
+
+        Two names, one six times longer. Framed by height, both come
+        out the same number of pixels tall and the longer one is
+        simply wider; framed by width, the longer one was squashed
+        into the same box and lost six-sevenths of its size.
+        """
+        from checkit_printit import pageindex, scans
+
+        anchor = scans.Anchor(corners=((0, 0), (1, 0), (1, 1), (0, 1)),
+                              dpi=200, page_height=792)
+        # 10pt tall with a descender, 24pt and 144pt wide.
+        short = pageindex.Mark(x=0, y=0, width=24 * 65536,
+                               height=10 * 65536, depth=2 * 65536)
+        long_ = pageindex.Mark(x=0, y=0, width=144 * 65536,
+                               height=10 * 65536, depth=2 * 65536)
+        sizes = [scans._frame(m, anchor, lambda x, y: (x, y),
+                              scans.NAME_CUT)[1]
+                 for m in (short, long_)]
+        assert sizes[0][1] == sizes[1][1]
+        assert sizes[1][0] > sizes[0][0] * 3
+
+    def test_cuts_gives_each_mark_the_framing_the_table_says(self,
+                                                             monkeypatch):
         """The three above check what is in the table. This checks
         that the cutting reads it -- a version that ignored the
         table passed all three."""
@@ -412,14 +435,20 @@ class TestTheNameCropIsItsOwnShape:
 
         asked = {}
 
-        def fake_cut(image, mark, anchor, carry, pad=None, height=None):
-            asked[mark] = (pad, height)
+        def fake_cut(image, mark, anchor, carry, cut=None):
+            asked[mark] = cut
             return "crop"
 
         monkeypatch.setattr(scans, "cut_out", fake_cut)
         monkeypatch.setattr(scans, "_corners", lambda s: None)
         monkeypatch.setattr(scans, "placement",
                             lambda anchor, corners: (lambda x, y: (x, y)))
+        # The box crop is cut before anything else now, to pin the
+        # scale for the rest; with a string standing in for the crop
+        # there is no box to find, so this says so rather than
+        # letting `_pinned` fail on it.
+        monkeypatch.setattr(scans, "_pinned",
+                            lambda *a, **k: None)
 
         marks = {"box": pageindex.Mark(1, 2, 3, 4, 5),
                  "name": pageindex.Mark(6, 7, 8, 9, 10)}
@@ -432,9 +461,5 @@ class TestTheNameCropIsItsOwnShape:
             anchors={1: object()}, want=("box", "name"))
 
         assert set(cuts) == {"box", "name"}
-        # None means "work the height out from the padding",
-        # which is what keeps the box the same number of pixels
-        # across however much margin the crop is given.
-        assert asked[marks["box"]] == (scans.PAD, None)
-        assert asked[marks["name"]] == (scans.NAME_PAD,
-                                        scans.NAME_HEIGHT)
+        assert asked[marks["box"]] is scans.BOX_CUT
+        assert asked[marks["name"]] is scans.NAME_CUT
