@@ -2274,15 +2274,52 @@ function scanSetup() {
   scanWired = true;
   const input = document.getElementById("scan-files");
   const go = document.getElementById("scan-go");
-  input.addEventListener("change", () => {
-    scanChosen = Array.from(input.files || []);
-    const chosen = document.getElementById("scan-chosen");
-    chosen.textContent = scanChosen.length
-      ? scanChosen.map(f => f.name).join(", ")
-      : "";
-    go.disabled = !scanChosen.length;
-  });
+  const drop = document.getElementById("scan-drop");
+
+  input.addEventListener("change", () => scanChose(input.files));
   go.addEventListener("click", scanStart);
+
+  // Dragging onto the rectangle. `dragover` has to be cancelled or
+  // the browser navigates to the file instead of offering it --
+  // dropping a PDF on a page that does not handle it opens the PDF,
+  // which here would lose the tab and whatever was on it.
+  drop.addEventListener("dragover", event => {
+    event.preventDefault();
+    drop.classList.add("over");
+  });
+  // `dragleave` fires on every child the pointer crosses as well, so
+  // the state is dropped only when the pointer has left the
+  // rectangle itself -- otherwise it flickers on the way across.
+  drop.addEventListener("dragleave", event => {
+    if (!drop.contains(event.relatedTarget)) drop.classList.remove("over");
+  });
+  drop.addEventListener("drop", event => {
+    event.preventDefault();
+    drop.classList.remove("over");
+    scanChose(event.dataTransfer && event.dataTransfer.files);
+  });
+}
+
+/* What was chosen, however it was chosen.
+ *
+ * Non-PDFs are dropped here with a word about it rather than sent
+ * to the server to be refused: a folder dragged in brings whatever
+ * is in it, and "that is not a PDF" is a better answer at the point
+ * of the gesture than after an upload. */
+function scanChose(files) {
+  const all = Array.from(files || []);
+  scanChosen = all.filter(f => /\.pdf$/i.test(f.name));
+  const dropped = all.length - scanChosen.length;
+  const chosen = document.getElementById("scan-chosen");
+  chosen.textContent = scanChosen.length
+    ? scanChosen.map(f => f.name).join(", ")
+    : "";
+  if (dropped) {
+    toast(dropped === 1 ? "One file was not a PDF, so it was left out."
+                        : `${dropped} files were not PDFs, so they were `
+                          + `left out.`, true);
+  }
+  document.getElementById("scan-go").disabled = !scanChosen.length;
 }
 
 async function scanStart() {
@@ -2505,13 +2542,14 @@ function reviewRow(row) {
     shot.classList.toggle("twice", crops.length > 1);
     crops.forEach((crop, i) => {
       const img = document.createElement("img");
-      img.src = crop;
+      // Two pictures of the same square: the row shows the close
+      // one, cut round the box the reader actually found, and the
+      // popover shows the wide one it was cut from. The row's job
+      // is "is there a tick in it", which wants no paper around it
+      // at all; the context is one hover away.
+      img.src = (row.shots || [])[i] || crop;
       img.alt = `the grading box on ${row.name || row.sid}'s ${row.skill}`;
       img.loading = "lazy";
-      // The crop is cut wide for the reading and shown tight.
-      // Hovering floats the whole of it over the page, out of the
-      // picture already loaded, so it costs no request. Clicking
-      // asks for the whole sheet.
       const where = (row.at || [])[i];
       peekable(img, crop, where
         ? "click for the whole page" : "the grading box, close up");
@@ -2521,14 +2559,11 @@ function reviewRow(row) {
       }
       shot.appendChild(img);
     });
-  } else {
-    const gap = document.createElement("span");
-    gap.className = "muted review-nocrop";
-    // Said plainly, because the next thing he does depends on it:
-    // this is a paper he may still be holding.
-    gap.textContent = "no paper came back";
-    shot.appendChild(gap);
   }
+  // Nothing here when no paper came back. The dial already says
+  // `n/a` and the chair glyph is lit: three ways of saying one
+  // thing is two too many, and the words were the ones taking the
+  // room.
 
   const picks = document.createElement("div");
   picks.className = "review-picks";
@@ -2578,7 +2613,14 @@ function sureDial(row) {
   const outOfTen = Math.round(row.sure * 10);
   // The ring is a conic gradient behind a ring-shaped mask, in the
   // stylesheet. Only how far round it goes belongs here.
-  box.style.setProperty("--part", String(row.sure));
+  //
+  // Drawn from the **rounded** tenth, not the raw fraction, so the
+  // ring and the number always agree. Drawn from the raw fraction,
+  // a reading of 0.96 wrote "10" beside a ring with a sliver
+  // missing -- which reads as a flaw in the drawing rather than as
+  // four hundredths of doubt, and four hundredths of doubt is not
+  // something this dial claims to resolve anyway.
+  box.style.setProperty("--part", String(outOfTen / 10));
   const n = document.createElement("span");
   n.className = "surenum";
   n.textContent = String(outOfTen);

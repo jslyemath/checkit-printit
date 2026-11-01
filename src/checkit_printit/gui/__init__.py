@@ -1655,12 +1655,22 @@ class Scanning:
         def progress(done, total):
             self.done, self.total = done, total
 
+        # Read on the way in, rather than inside `_batch_json`: the
+        # section belongs to the course and the batch knows nothing
+        # about rosters. No roster is not an error here -- reading a
+        # stack does not need one -- so the column comes out empty.
+        try:
+            sections = {s.sid: (s.section or "")
+                        for s in (course.roster() or []) if s.sid}
+        except (OSError, ValueError):
+            sections = {}
+
         def run():
             try:
                 batch = scans_mod.read_pdfs(paths, record_path,
                                             on_page=progress,
                                             want=("box", "name"))
-                self.result = _batch_json(batch, record_path)
+                self.result = _batch_json(batch, record_path, sections)
             except (scans_mod.ScanError, OSError) as exc:
                 self.error = str(exc)
             except Exception as exc:                      # noqa: BLE001
@@ -1674,12 +1684,13 @@ class Scanning:
 
 SCANNING = Scanning()
 
-def _batch_json(batch, record_path):
+def _batch_json(batch, record_path, sections=None):
     """The batch as the page wants it.
 
     Names are resolved here rather than in `scans`: the reader deals
     in student ids, because an id is what a paper carries, and only
-    the course knows what the id is called.
+    the course knows what the id is called. `sections` is the same
+    idea from the roster, for sorting the review by class.
     """
     resolve = scans_mod.index_reader(record_path)
     names = record_mod.names_printed(record_path)
@@ -1739,7 +1750,8 @@ def _batch_json(batch, record_path):
     return {"counts": counts, "runs": runs, "sheets": sheets,
             "missing": missing, "duplicates": duplicates,
             "outcomes": OUTCOMES,
-            "review": _review_rows(batch, record_path, names),
+            "review": _review_rows(batch, record_path, names,
+                                   sections or {}),
             "gradable": sum(1 for s in batch.sheets if s.gradable)}
 
 
@@ -1830,7 +1842,43 @@ def _as_jpeg(image, quality=72):
         buf.getvalue()).decode()
 
 
-def _review_rows(batch, record_path, names):
+#: How much room to leave round the box in the table's own picture,
+#: as a fraction of the box's width. Enough to show that it is a box
+#: on paper and that something is or is not beside it; not enough to
+#: be worth scanning the column for anything else.
+SHOT_MARGIN = 0.45
+
+
+def _tight(crop, read):
+    """The crop again, cut close around the box that was found.
+
+    The reading needs a wide picture -- `find_box` has to have the
+    whole rectangle inside it, and the rectangle moves between pages
+    -- but a wide picture in a table row is mostly paper. This is the
+    same picture cut down to what the row is for.
+
+    Cut here rather than windowed with `object-fit` in the
+    stylesheet, because `cover` can only crop a picture, never
+    enlarge it: narrowing the window shrank the box instead of
+    filling the row with it. And cut from the picture already in
+    hand, so it costs no second transform of the scan.
+
+    The whole crop when no box was found. There is nothing to centre
+    on, and the reading failed, which is exactly when the instructor
+    should see everything there was to look at.
+    """
+    box = read.get("box")
+    if not box:
+        return crop
+    x0, y0, x1, y1 = box
+    margin = (x1 - x0) * SHOT_MARGIN
+    return crop.crop((max(0, round(x0 - margin)),
+                      max(0, round(y0 - margin)),
+                      min(crop.width, round(x1 + margin)),
+                      min(crop.height, round(y1 + margin))))
+
+
+def _review_rows(batch, record_path, names, sections=None):
     """One row per paper: what it is, what was read, what to crop.
 
     Papers that never came back are rows too, with no crop. The
@@ -1867,8 +1915,12 @@ def _review_rows(batch, record_path, names):
     rows = []
     for (run_no, page), copies in papers.items():
         entry = copies[0].entry
-        reads = [scans_mod.measure(s.cuts["box"])
-                 for s in copies if "box" in s.cuts]
+        # Kept with the crop each was taken from: the box comes back
+        # in that crop's own pixels, and turning it into the fraction
+        # the view needs takes the crop's size.
+        looked = [(s.cuts["box"], scans_mod.measure(s.cuts["box"]))
+                  for s in copies if "box" in s.cuts]
+        reads = [r for _, r in looked]
         calls = {r["call"] for r in reads}
         # One call only when the copies agree. Two scans of one sheet
         # that read differently is precisely the case a suggestion
@@ -1880,12 +1932,21 @@ def _review_rows(batch, record_path, names):
             "id": f"{run_no}-{page}",
             "run": run_no, "page": page,
             "sid": entry.sid, "name": names.get(entry.sid, ""),
+            "section": (sections or {}).get(entry.sid, ""),
             "skill": entry.slug, "scanned": True,
             # Every square taken of this paper. One, nearly always;
             # two when it went through twice, and then both are
             # shown rather than one chosen on his behalf.
-            "crops": [_as_jpeg(s.cuts["box"]) for s in copies
-                      if "box" in s.cuts],
+            # The wide crop, for looking closely at.
+            "crops": [_as_jpeg(crop) for crop, _ in looked],
+            # And the same thing cut close around the box, for the
+            # row itself. Two pictures rather than one windowed by
+            # the stylesheet, because where the box sits in the wide
+            # crop is *measured* and differs by sheet: the window
+            # was pinned at 34% while N3's boxes sat at 22% and
+            # N4's at 50%, which is the cut point he reported.
+            "shots": [_as_jpeg(_tight(crop, read))
+                      for crop, read in looked],
             # The name as it was printed, so the row can be checked
             # against the paper instead of trusted. One is enough:
             # two scans of a sheet carry the same name, and the
@@ -1917,8 +1978,9 @@ def _review_rows(batch, record_path, names):
                 "id": f"{run_no}-{page}",
                 "run": run_no, "page": page,
                 "sid": entry.sid, "name": names.get(entry.sid, ""),
+                "section": (sections or {}).get(entry.sid, ""),
                 "skill": entry.slug, "scanned": False, "crops": [],
-                "nameCrop": "", "at": [],
+                "shots": [], "nameCrop": "", "at": [],
                 "read": "", "reads": [], "ink": 0, "beside": 0,
                 # Nothing was read, so there is nothing to be sure
                 # about. The row is not a guess -- the record knows

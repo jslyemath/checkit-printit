@@ -745,13 +745,23 @@
       shuffled, split across as many files as the copier needed, and
       have blank sheets in it.</p>
 
+    <!-- A drop target, not a file button. The stack arrives as an
+         attachment on the copier's email, so dragging it here is one
+         gesture where the picker is three -- and the picker is still
+         underneath for anyone who would rather click. The whole
+         label is the control: that is what makes a <label for> both
+         clickable and reachable by keyboard without scripting it. -->
     <div class="scan-pick">
-      <label class="btn" for="scan-files">Choose files&hellip;</label>
+      <label class="dropzone" id="scan-drop" for="scan-files">
+        <span class="dropzone-plus" aria-hidden="true">+</span>
+        <span class="dropzone-say">Drop the copier's PDFs here,
+          or click to choose</span>
+        <span id="scan-chosen" class="dropzone-chosen"></span>
+      </label>
       <input id="scan-files" type="file" accept="application/pdf" multiple
              hidden>
-      <span id="scan-chosen" class="muted"></span>
       <button id="scan-go" class="btn primary" type="button"
-              disabled>Match them up</button>
+              disabled>Import scans</button>
     </div>
 
     <p id="scan-progress" class="muted" hidden></p>

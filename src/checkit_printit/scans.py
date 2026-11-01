@@ -24,6 +24,7 @@ paper went missing is the one who does not complain.
 
 import dataclasses
 import os
+import typing
 
 from . import pageindex
 from . import record as record_mod
@@ -211,6 +212,33 @@ class Anchor:
     dpi: float
     page_height: float      #: the PDF's own height, in PostScript points
 
+    #: Where the grading box's centre sits inside its own crop on the
+    #: *printed* page, as (across, down) fractions -- or None when no
+    #: box could be found there.
+    #:
+    #: A fraction of the crop rather than a place on the page,
+    #: because the crop is cut around the recorded mark and the box
+    #: sits at a fixed place inside that mark whatever the page. Both
+    #: parities of the 2026-10-26 run measure (0.362, 0.500) to the
+    #: pixel, which is the point: it is a property of `\\roundbox`,
+    #: not of the sheet, so one measurement is good for every skill.
+    #:
+    #: A second fiducial, and the reason for it is arithmetic. The
+    #: scale is estimated from the footer code's own diagonal, which
+    #: is about 100 pixels across; the grading box is 1300 pixels
+    #: away from it. An error in reading those four corners is
+    #: therefore multiplied thirteenfold by the time it reaches the
+    #: box -- and on the stack of 2026-10-26 it was. The scale came
+    #: out 1.5% high on every page of it, which pulled the box 19
+    #: pixels in towards the code and the name, 1970 pixels out, by
+    #: about 29: a third of the height of its own crop, which is why
+    #: names came back clipped.
+    #:
+    #: The box can be *found*, by matching its printed outline, so it
+    #: can pin the scale over that long baseline instead of the
+    #: code's short one. See `_pinned`.
+    box_at: tuple = None
+
 
 def _corners(found):
     p = found.position
@@ -235,6 +263,11 @@ def anchors(run_folder, dpi=DPI):
     case -- a run can be recorded and its folder moved -- and it means
     the pages can still be *placed*, because placing only needs the
     index, but nothing can be cut out of them.
+
+    Each anchor also carries `box_at`, measured here off the same
+    page: the printed sheet is the only place the box's true position
+    can be read without a scanner's errors in the way, and this is
+    already the one function that opens it.
     """
     import pypdfium2 as pdfium
     import zxingcpp
@@ -242,6 +275,13 @@ def anchors(run_folder, dpi=DPI):
     pdf_path = os.path.join(run_folder, "main.pdf")
     if not os.path.isfile(pdf_path):
         return {}
+    try:
+        index = pageindex.load(run_folder)
+    except pageindex.PageIndexError:
+        # No index: the pages cannot be cut out anyway, so an anchor
+        # without a reference is all there is to offer and is enough
+        # for the callers that only want the corners.
+        index = None
     out = {}
     pdf = pdfium.PdfDocument(pdf_path)
     try:
@@ -251,14 +291,42 @@ def anchors(run_folder, dpi=DPI):
             if n % 2 in out:
                 continue
             page = pdf[n - 1]
-            found = zxingcpp.read_barcodes(page.render(scale=dpi / 72).to_pil())
+            image = page.render(scale=dpi / 72).to_pil()
+            found = zxingcpp.read_barcodes(image)
             ours = [f for f in found if pageindex.read_payload(f.text)]
-            if ours:
-                out[n % 2] = Anchor(corners=_corners(ours[0]), dpi=dpi,
-                                    page_height=page.get_height())
+            if not ours:
+                continue
+            anchor = Anchor(corners=_corners(ours[0]), dpi=dpi,
+                            page_height=page.get_height())
+            out[n % 2] = dataclasses.replace(
+                anchor, box_at=_reference(image, index, n, anchor))
     finally:
         pdf.close()
     return out
+
+
+def _reference(image, index, page, anchor):
+    """Where the box sits in its own crop, on the page as printed.
+
+    `(across, down)` fractions, or None if there is no box on this
+    page or none could be found. None is survivable: it only means
+    the scale cannot be corrected and the footer code's own estimate
+    stands, which is what every read did before this existed.
+
+    The crop is taken with the identity transform, because the page
+    being measured *is* the reference page -- there is no scan here
+    to carry anything onto.
+    """
+    entry = index.get(page) if index is not None else None
+    mark = entry.marks.get("box") if entry is not None else None
+    if mark is None:
+        return None
+    crop = cut_out(image, mark, anchor, lambda x, y: (x, y), cut=BOX_CUT)
+    found = scored_box(crop)
+    if found is None:
+        return None
+    (x0, y0, x1, y1), _ = found
+    return ((x0 + x1) / 2 / crop.width, (y0 + y1) / 2 / crop.height)
 
 
 def placement(anchor, scan_corners):
@@ -269,6 +337,13 @@ def placement(anchor, scan_corners):
     and nothing else. Fitting a perspective to four points that only
     differ by those three would read the noise in the corner estimates
     as keystone.
+
+    The scale and the turn here are estimated from the code's own
+    diagonal, which is about a hundred pixels long, and then applied
+    a thousand or more pixels away. That extrapolation is the weak
+    part and it is measurably weak: see `_pinned`, which replaces
+    both as soon as there is a found box to replace them with. This
+    is what stands when there is not.
     """
     import math
 
@@ -300,8 +375,24 @@ def placement(anchor, scan_corners):
         n += 1
     if not n:
         return None
-    scale, angle = scale / n, angle / n
+    return _similarity((px, py), (sx, sy), scale / n, angle / n)
+
+
+def _similarity(page_at, scan_at, scale, angle):
+    """The transform that carries page pixels onto scan pixels.
+
+    Four numbers: where a known page point went, how much bigger it
+    came out, and how far round. Built here rather than inside
+    `placement` because two things make one of these -- the footer
+    code on its own, and the code together with a box that has been
+    found -- and they should not each have their own copy of the
+    arithmetic.
+    """
+    import math
+
     cos, sin = math.cos(angle) * scale, math.sin(angle) * scale
+    px, py = page_at
+    sx, sy = scan_at
 
     def carry(x, y):
         dx, dy = x - px, y - py
@@ -330,53 +421,138 @@ def placement(anchor, scan_corners):
 #: after template matching were all boxes half outside the frame.
 PAD = (0.70, 0.80, 1.60, 0.80)
 
-#: The name's own padding, and its own output height.
+#: The name's own padding, measured against its **height**.
 #:
-#: A name is a wide, short mark, so the box's pad -- which is a
-#: multiple of the mark's width on every side -- does not transfer:
-#: 1.05 of two inches to the right is most of the page. The mark
-#: already spans the typeset box, ascenders and descenders included,
-#: so these are breathing room and nothing more -- though more than
-#: it first looked: 0.05 clipped the ascenders, because the fraction
-#: is of the name's *width* and a name is ten times wider than it is
-#: tall. Checked by looking at the crop, which is the only way this
-#: kind of thing is ever checked.
+#: Against its height because its width is not a usable yardstick:
+#: across the real roster the name mark runs from 23pt to 147pt
+#: wide, a factor of six, while its height barely moves -- one line
+#: of one size, give or take whether the name has a descender in it.
+#: Padding by the width therefore gave a short name an inch of paper
+#: on each side and a long one almost nothing, which is precisely
+#: backwards, because what overruns a crop is a letter and a letter
+#: is the same size either way. That one mistake is most of why so
+#: many names came back cut off.
 #:
-#: Generous on purpose, and asked for: a name sitting exactly in
-#: its own typeset box reads as cramped, and the point of showing
-#: it is to be glanced at beside the name we claim.
+#: Generous, and asked for twice: a name sitting exactly in its own
+#: typeset box reads as cramped, and the whole job of the picture is
+#: to be looked at beside the name the index claims.
 #:
-#: 44px rather than 120: it only has to be readable, and a few
-#: hundred of them go into one response alongside the boxes.
-#: Asymmetric, because the page is: the name sits just above the
-#: skill's coloured banner, so room underneath buys the banner and
-#: room above buys paper.
-NAME_PAD = (0.05, 0.28, 0.08, 0.10)
-#: Cut at 96 and shown at 44. It used to be cut at the size it was
-#: shown at, so looking closer at it only enlarged the pixels --
-#: which is the one thing a closer look must not do, when the whole
-#: job of the picture is to be compared with a name.
-NAME_HEIGHT = 96
+#: Asymmetric, because the page is. More below than above, since the
+#: skill's coloured banner sits just under the name and a sliver of
+#: it is orientation rather than clutter.
+#:
+#: The left is the measured one, and it is deliberately too wide.
+#: `Name:` is printed immediately before the name, with 0.35 to 0.46
+#: name-heights of clear paper after its colon, so 0.25 would just
+#: clear the colon on a perfectly placed crop. Real crops are not
+#: perfectly placed: the content sits up to 14 pixels off, because
+#: the box pins the scale across the page and says nothing about the
+#: scale down it -- the box is nearly due sideways from the footer
+#: code, and a copier does not always reduce both ways equally.
+#:
+#: 0.60 covers that drift twice over. The cost is that the colon is
+#: usually in shot, which is no cost at all: it marks where the name
+#: starts, so a crop that is missing its first letter looks missing.
+#: The other way round, a crop tight enough to drop the colon is
+#: tight enough to drop a letter, and the letter is the whole reason
+#: the picture is there.
+NAME_PAD = (0.60, 0.50, 0.90, 0.60)
 
-#: Per mark, falling back to the box's. Here rather than at the call
-#: site so that adding a third mark is one line in one place.
-#: How many pixels one mark-width comes out as. Fixing this rather
-#: than the output height means the padding can be changed without
-#: resizing everything the reading was tuned against.
+#: How many pixels one mark-unit comes out as, per mark.
+#:
+#: Fixing this rather than the output height is what lets the
+#: padding be changed without resizing everything the reading was
+#: tuned against -- and, for the name, what stops a long name being
+#: typeset smaller than a short one. It used to be cut to a fixed
+#: 96 pixels tall whatever the region, so a six-to-one range of
+#: widths came out as a six-to-one range of *text sizes*.
 PX_PER_WIDTH = 75
+#: 40 puts the name's own line at 40px and its crop at about 84, for
+#: a picture shown at 44. Cut larger than it is shown on purpose:
+#: looking closer has to reveal something, not just enlarge pixels.
+PX_PER_NAME = 40
+
+class Cut(typing.NamedTuple):
+    """How one kind of mark is framed, and how big it comes out.
+
+    Three numbers rather than two because the second was never
+    really a height: what both marks want is a *scale* -- so many
+    output pixels per something the mark itself measures -- and the
+    only question is which measurement. The box's crop is a multiple
+    of its width, which suits a roughly square mark; the name's is a
+    multiple of its height, which is the only thing about a name
+    that does not depend on whose it is.
+    """
+
+    pad: tuple          #: (left, top, right, bottom), in units
+    unit: str           #: "width" or "height" of the mark itself
+    per_unit: float     #: output pixels one of those units becomes
+
+
+BOX_CUT = Cut(PAD, "width", PX_PER_WIDTH)
+NAME_CUT = Cut(NAME_PAD, "height", PX_PER_NAME)
 
 #: Per mark, falling back to the box's. Here rather than at the call
 #: site so that adding a third mark is one line in one place.
-PADS = {"name": (NAME_PAD, NAME_HEIGHT)}
+PADS = {"box": BOX_CUT, "name": NAME_CUT}
 
 
-def _crop_height(pad, tall_over_wide):
-    """The output height that puts `PX_PER_WIDTH` across one width."""
-    return max(16, round((pad[1] + tall_over_wide + pad[3])
-                         * PX_PER_WIDTH))
+def _frame(mark, anchor, carry, cut=BOX_CUT):
+    """Where a crop comes from and how big it comes out.
+
+    `(quad, size, page_rect)`: the four corners in *scan* pixels that
+    `Image.QUAD` samples, clockwise from the top-left; the output
+    size they are resampled to; and the same region in the printed
+    page's own pixels, as (left, top, right, bottom).
+
+    Split out of `cut_out` because two things need it and a second
+    copy of this arithmetic is a second thing to get wrong: the crop
+    itself, and `_pinned`, which has to turn a position measured
+    inside the crop into a point on the scan and the point it was
+    supposed to be into a point on the page.
+    """
+    pad = cut.pad
+    left, top, right, bottom = mark.rect(anchor.dpi, anchor.page_height)
+    # Scale by the mark, never by a fixed output size: the box has to
+    # come out the same number of pixels across whatever margin the
+    # crop is given, because the reading is tuned to that -- and the
+    # name has to come out the same size whoever it belongs to.
+    unit = (right - left) if cut.unit == "width" else (bottom - top)
+    left -= unit * pad[0]
+    top -= unit * pad[1]
+    right += unit * pad[2]
+    bottom += unit * pad[3]
+    scale = cut.per_unit / max(1e-6, unit)
+    size = (max(8, round((right - left) * scale)),
+            max(8, round((bottom - top) * scale)))
+    quad = []
+    for x, y in ((left, top), (left, bottom), (right, bottom), (right, top)):
+        quad.extend(carry(x, y))
+    return quad, size, (left, top, right, bottom)
 
 
-def cut_out(image, mark, anchor, carry, pad=PAD, height=120):
+def _on_scan(quad, across, down):
+    """A point inside a crop, as a point on the scan it was cut from.
+
+    `across` and `down` are fractions of the crop. The quad is a
+    parallelogram -- the transform that made it is a similarity -- so
+    interpolating along two of its edges is exact, not an
+    approximation.
+    """
+    x0, y0 = quad[0], quad[1]            # the crop's top-left
+    x1, y1 = quad[2], quad[3]            # its bottom-left, so `down`
+    x3, y3 = quad[6], quad[7]            # its top-right, so `across`
+    return (x0 + (x3 - x0) * across + (x1 - x0) * down,
+            y0 + (y3 - y0) * across + (y1 - y0) * down)
+
+
+def _on_page(page_rect, across, down):
+    """The same point, on the printed page instead."""
+    left, top, right, bottom = page_rect
+    return (left + (right - left) * across, top + (bottom - top) * down)
+
+
+def cut_out(image, mark, anchor, carry, cut=BOX_CUT):
     """The piece of the scan where `mark` ended up, straightened.
 
     Straightened by mapping the four corners through `Image.QUAD`,
@@ -390,22 +566,7 @@ def cut_out(image, mark, anchor, carry, pad=PAD, height=120):
     """
     from PIL import Image
 
-    left, top, right, bottom = mark.rect(anchor.dpi, anchor.page_height)
-    unit = right - left
-    left -= unit * pad[0]
-    top -= unit * pad[1]
-    right += unit * pad[2]
-    bottom += unit * pad[3]
-    if height is None:
-        # Scale by the mark, not by a fixed output size: the box has
-        # to come out the same number of pixels across whatever
-        # margin was asked for, because the reading is tuned to it.
-        height = _crop_height(pad, (bottom - top - unit * (pad[1] + pad[3]))
-                              / unit)
-    size = (max(8, round(height * (right - left) / (bottom - top))), height)
-    quad = []
-    for x, y in ((left, top), (left, bottom), (right, bottom), (right, top)):
-        quad.extend(carry(x, y))
+    quad, size, _ = _frame(mark, anchor, carry, cut)
     # Colour, and `fillcolor` white on all three bands.
     #
     # It used to convert to grey here, for memory, because everything
@@ -798,17 +959,123 @@ def _cuts(image, entry, page, symbols, anchors, want):
     ours = next((s for s in symbols if pageindex.read_payload(s.text)), None)
     if ours is None:
         return {}
-    carry = placement(anchor, _corners(ours))
+    corners = _corners(ours)
+    carry = placement(anchor, corners)
     if carry is None:
         return {}
+
     cuts = {}
+    # The box first, and on the code's own estimate of the scale.
+    #
+    # The order matters and is the point. This crop is what the
+    # reading is taken from, so it is cut exactly as it always was --
+    # a correction derived from a box has no business moving the
+    # picture that box is found in. What it does is pin the scale for
+    # everything cut *after* it, which is where the error was doing
+    # real damage: the name is three times further from the code than
+    # the box, so it drifted three times as far.
+    box_mark = entry.marks.get("box")
+    if box_mark is not None:
+        box_crop = cut_out(image, box_mark, anchor, carry, cut=BOX_CUT)
+        if "box" in want:
+            cuts["box"] = box_crop
+        better = _pinned(anchor, corners, box_mark, carry, box_crop)
+        if better is not None:
+            carry = better
+
     for label in want:
+        if label == "box":
+            continue
         mark = entry.marks.get(label)
         if mark is not None:
-            pad, height = PADS.get(label, (PAD, None))
             cuts[label] = cut_out(image, mark, anchor, carry,
-                                  pad=pad, height=height)
+                                  cut=PADS.get(label, BOX_CUT))
     return cuts
+
+
+#: How far the box may disagree with the footer code before the
+#: disagreement is read as a bad match rather than as a scale to fix:
+#: a fraction of the distance between them, and radians of turn.
+#:
+#: 5% and 3 degrees are many times the error being corrected -- the
+#: 2026-10-26 stack wanted 1.5% and 0.6 of a degree -- and still well
+#: inside the range a genuine misread could sit in. Past either,
+#: something other than placement is wrong: a sheet from a different
+#: build, a crop with two rectangles in it, or a printed letter
+#: matched as a box. Then the code's own estimate stands, because it
+#: is at least wrong in a way that is understood.
+PIN_SCALE_LIMIT = 0.05
+PIN_TURN_LIMIT = 0.052
+
+
+def _pinned(anchor, scan_corners, mark, carry, crop):
+    """A transform pinned by the box that was found, or None.
+
+    None whenever there is nothing better to say: no reference was
+    measured off the printed page, no box could be found in this
+    crop, or the two disagree by more than the limits above -- which
+    is not a placement error but a sign that one of them is not the
+    box.
+
+    **Why one found point is enough.** A similarity has four numbers
+    in it: two of shift, one of scale, one of turn. The footer code's
+    centre fixes the shift, so two are left, and a single point
+    somewhere else on the page carries exactly two numbers. So the
+    box pins both, and it pins them over its own distance from the
+    code -- 1300 pixels against the code's own 100-pixel diagonal.
+    That ratio is the whole value of this: every error in reading
+    those four corners was being multiplied by thirteen on its way
+    across the page, and on the 2026-10-26 stack that showed up as
+    1.5% of scale and 0.6 of a degree of turn, which between them
+    moved the box 20 pixels and the name nearer 30.
+
+    The code still supplies the shift, and that is on purpose. It is
+    the one thing the code is *good* for: a centre averaged from four
+    corners of a symbol read in place, with no long extrapolation in
+    front of it.
+    """
+    import math
+
+    if anchor.box_at is None:
+        return None
+    found = scored_box(crop)
+    if found is None:
+        return None
+    (x0, y0, x1, y1), _ = found
+
+    quad, _, page_rect = _frame(mark, anchor, carry, BOX_CUT)
+    page_at, scan_at = _centre(anchor.corners), _centre(scan_corners)
+
+    # Three vectors out from the footer code, all to the same corner
+    # of the same box: where it is on the printed page, where this
+    # crop found it on the scan, and where the code alone predicted
+    # it would be. The first owes the scanner nothing.
+    ux, uy = _away(_on_page(page_rect, *anchor.box_at), page_at)
+    vx, vy = _away(_on_scan(quad, (x0 + x1) / 2 / crop.width,
+                            (y0 + y1) / 2 / crop.height), scan_at)
+    wx, wy = _away(_on_scan(quad, *anchor.box_at), scan_at)
+
+    page_reach, said = math.hypot(ux, uy), math.hypot(wx, wy)
+    if page_reach <= 0 or said <= 0:
+        return None
+
+    # Measured against what the code predicted rather than against 1
+    # and 0: a sheet genuinely fed in crooked has a real turn in it,
+    # and the only question here is whether this box agrees with the
+    # code about roughly where the page is.
+    if abs(math.hypot(vx, vy) / said - 1.0) > PIN_SCALE_LIMIT:
+        return None
+    off = math.atan2(vy, vx) - math.atan2(wy, wx)
+    if abs((off + math.pi) % (2 * math.pi) - math.pi) > PIN_TURN_LIMIT:
+        return None
+
+    turn = math.atan2(vy, vx) - math.atan2(uy, ux)
+    return _similarity(page_at, scan_at, math.hypot(vx, vy) / page_reach,
+                       (turn + math.pi) % (2 * math.pi) - math.pi)
+
+
+def _away(point, origin):
+    return (point[0] - origin[0], point[1] - origin[1])
 
 
 #: How far past the threshold a reading has to be before the call

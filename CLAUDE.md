@@ -835,6 +835,67 @@ it.
 After all of it: **62 of 62 read correctly**, checked crop by crop
 against a contact sheet rather than counted.
 
+### The code places the page; the box pins it
+
+`placement` works the scan's scale and turn out from the footer
+code's own diagonal, which is about 100 pixels long, and then
+applies them as far as 2000 pixels away. That extrapolation is the
+weak part, and it was measurably weak: across the 62 pages of
+2026-10-26 the scale came out **1.5% high on every page**, which
+pulled the grading box 19 pixels in towards the code and the name,
+three times further out, by about 29 -- a third of its own crop.
+That is why crops looked off-centre and why names came back clipped.
+It is one fault, not two.
+
+So the box pins it instead. `anchors` measures, off the run's own
+printed PDF, where the box sits inside its own crop (`Anchor.box_at`
+-- 0.362, 0.500, the same on both parities and on the demo, because
+it is a property of `\roundbox` and not of the sheet). `_pinned`
+then compares that with where the box was actually found on the
+scan and rebuilds the transform. One found point is exactly enough:
+a similarity has four numbers in it, the code's centre fixes the two
+of position, and a single point elsewhere carries the other two.
+Over the box's own 1300-pixel reach rather than the code's 100, the
+estimate is about thirteen times better conditioned. It took the
+box from 0.223..0.498 across its crop to 0.360..0.364.
+
+**The order in `_cuts` is load-bearing.** The box crop is cut
+*before* any correction exists, on the code's own estimate, because
+that crop is what the reading measures -- a correction derived from
+a box must not move the picture the box was found in. The reading is
+therefore bit-identical to what it was. Everything cut after it gets
+the pinned transform, which is where the error was doing damage.
+
+What this does **not** fix: the box sits nearly due sideways from
+the footer code, so it pins the scale across the page and says
+nothing about the scale down it. A copier does not always reduce
+both ways equally, and a similarity cannot express two scales. About
+10 pixels of vertical drift survives. Nothing clips, so it stands;
+a second fiducial up the page would be the fix if it ever matters.
+
+### A crop is framed by the part of the mark that does not vary
+
+`Cut(pad, unit, per_unit)` says how each mark is cropped: the
+padding in multiples of something the mark measures, and how many
+output pixels that something becomes. `PADS` holds one per mark and
+anything else falls back to `BOX_CUT`.
+
+The box is framed by its **width**, which suits a square mark. The
+name is framed by its **height**, and the reason is the whole of why
+names were cut off. Across the real roster the name mark runs 23pt
+to 147pt wide -- a factor of six -- while its height barely moves,
+one line of one size. Framed by width, a short name got an inch of
+paper on each side and a long one got none; and because the output
+was scaled the same way, the short one was *set larger* than the
+long one. What overruns a crop is a letter, and a letter is the same
+size either way.
+
+Framed by height, right-edge and top-edge clipping both measure zero
+across his 62 papers. The left margin always holds part of the
+printed `Name:` label, on purpose: a margin tight enough to drop the
+colon is tight enough to drop a letter, and the letter is the reason
+the picture exists.
+
 ### How sure the reading is, and why the dial is not a percent
 
 `measure` returns `sure`, 0 to 1, from two things: how far the
