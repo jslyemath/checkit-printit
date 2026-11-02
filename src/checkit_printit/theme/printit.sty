@@ -350,6 +350,11 @@ title=#2,#1}
 %
 % `qrcode` is pure TeX and draws with no external tool, which matters:
 % a build must not depend on something the instructor has to install.
+%
+% It opens with `\let\xa=\expandafter`, taking that bare name globally
+% and never giving it back, which cost printitfigures.sty the name it
+% had been using for the left end of a number line. See the note on
+% \xfirst there; do not reintroduce a bare \xa anywhere in this theme.
 \usepackage{qrcode}
 
 \newcommand{\runid}{0}

@@ -1502,6 +1502,30 @@ folder written before courses existed keeps working.
 students, because a job resolves its roster relative to itself. A student who
 dropped had to be remembered and re-applied at the next copy.
 
+## A LaTeX package can take a name you are already using
+
+`printitfigures.sty` keeps twelve tikzmath range variables. Eleven are
+named the obvious way; the twelfth is `\xfirst`, because `qrcode.sty`
+opens with `\let\xa=\expandafter` and took that one globally.
+
+Three things follow, and all three cost a failed print run to learn.
+
+* **Do not write a bare, unnamespaced control sequence in either `.sty`
+  unless it is part of the figure API.** The theme loads around thirty
+  packages, and any of them may have taken a short name.
+* **A figure and the footer code have to be in the same test document.**
+  Either alone compiles. The suite had a compile test for over a month
+  and it stayed green through this, because its pages carry no picture.
+  `test_a_document_with_a_figure_in_it_compiles` is the one that bites.
+* **`@` is not a letter everywhere in `printit.sty`.** The file toggles
+  it by hand all the way down. A private name written outside a
+  `\makeatletter` pair parses as a command plus text and reports itself
+  as `Missing \begin{document}`, a long way from where it was written.
+
+When a figure dies at a line that has not changed, suspect a package
+that has. Bisect by loading them one at a time with an assignment in
+between; reading thirty package sources is slower.
+
 ## Rules that are load-bearing
 
 **If a human is the author, TOML. If the tool is, SQLite.** Roster, seating,

@@ -44,20 +44,48 @@
 \usetikzlibrary{calc,trees,positioning,arrows,fit,shapes,calc,angles,quotes,backgrounds,datavisualization,datavisualization.formats.functions,math,intersections}
 \tikzstyle{aligntotop}=[baseline={([yshift={-\ht\strutbox}]current bounding box.north)},outer sep=0pt,inner sep=0pt]
 
+% The twelve range variables, with defaults. \setmyx and \setmyy
+% below reset the x and y halves; the pgfplots styles further down read
+% them to place ticks and limits.
+%
+% \xfirst is the odd one out, and deliberately. Its name used to be
+% \xa, matching \xz at the other end -- until printit.sty started
+% drawing a QR code in the footer, and `qrcode` turned out to open with
+%
+%     \let\xa=\expandafter
+%
+% taking the bare name globally and never giving it back. tikzmath will
+% only assign to a token whose \meaning is "undefined" or "macro:->..."
+% (tikzlibrarymath.code.tex, lines 22-40), and a primitive is neither,
+% so every \setmyx in the document then died with
+%
+%     ! Package tikz Error: tikz math library:
+%       Unknown function or keyword '='.
+%
+% which is fatal: pdflatex writes no PDF at all. A job of F1, F3 and
+% F3-E produced nothing. F1 has no figure; F3 opens with \setmyx.
+%
+% The name cannot be shared. Lending it back inside a group is not
+% enough, because `qrcode` caches each computed code in the .aux file
+% and expands its own macros again when that is read, outside any group
+% this package controls. So qrcode keeps \xa and this one is renamed.
+%
+% Only \xa was taken. \xz and the ten others keep their names, which is
+% why the pair now reads \xfirst .. \xz instead of \xa .. \xz.
 \tikzmath{
-    \xa = -5; \xz = 5;
+    \xfirst = -5; \xz = 5;
     \ya = -5; \yz = 5;
     \xs = 1; \ys = 1;
-    \xn = \xa + 1; \yn = \ya+1;
-    \xm1 = \xa - \xs; \xm2 = \xz + \xs;
+    \xn = \xfirst + 1; \yn = \ya+1;
+    \xm1 = \xfirst - \xs; \xm2 = \xz + \xs;
     \ym1 = \ya - \ys; \ym2 = \yz + \ys;
     }
 
 \newcommand{\setmyx}[3][1]{\tikzmath{
-    \xa = #2; \xz = #3;
+    \xfirst = #2; \xz = #3;
     \xs = #1;
-    \xn = \xa + 1;
-    \xm1 = \xa - \xs; \xm2 = \xz + \xs;
+    \xn = \xfirst + 1;
+    \xm1 = \xfirst - \xs; \xm2 = \xz + \xs;
     }}
 
 \newcommand{\setmyy}[3][1]{\tikzmath{
@@ -84,7 +112,7 @@
   yticklabel style = {font=\tiny,xshift=0.5ex},
   xlabel style={font=\tiny, xshift=-1.75ex},
   ylabel style={font=\tiny, yshift=-1.75ex},
-  xtick={\xa,\xn,...,\xz},
+  xtick={\xfirst,\xn,...,\xz},
   ytick={\ya,\yn,...,\yz},
   every major tick/.append style={thick, major tick length=5pt, black},
   xlabel={$x$},
@@ -105,7 +133,7 @@
   yticklabel style = {font=\tiny,xshift=0.5ex},
   xlabel style={font=\tiny, xshift=-1.75ex},
   ylabel style={font=\tiny, yshift=-1.75ex},
-  xtick={\xa,\xn,...,\xz},
+  xtick={\xfirst,\xn,...,\xz},
   ytick={\ya,\yn,...,\yz},
   every major tick/.append style={thick, major tick length=5pt, black},
   xlabel={$x$},
@@ -126,7 +154,7 @@
   axis line style={Stealth-Stealth},
   xticklabel style = {font=\tiny,yshift=0.5ex},
   xlabel style={font=\tiny, xshift=-1.75ex},
-  xtick={\xa,\xn,...,\xz},
+  xtick={\xfirst,\xn,...,\xz},
   every major tick/.append style={thick, major tick length=50pt, black},
   xlabel style={below right},
   xmin=\xm1-0.5,
@@ -142,7 +170,7 @@
   axis y line=none,
   axis line style={Stealth-Stealth},
   xticklabel style = {font=\tiny,yshift=0.5ex},
-  xtick={\xa,\xn,...,\xz},
+  xtick={\xfirst,\xn,...,\xz},
   every major tick/.append style={thick, major tick length=50pt, black},
   xticklabels=\empty,
   yticklabels=\empty,
@@ -164,7 +192,7 @@
 %   ylabel style={font=\tiny, yshift=-1.75ex},
   xticklabels=\empty,
   yticklabels=\empty,
-  xtick={\xa,\xn,...,\xz},
+  xtick={\xfirst,\xn,...,\xz},
   ytick={\ya,\yn,...,\yz},
   every major tick/.append style={thick, major tick length=5pt, black},
 %   xlabel={$x$},
