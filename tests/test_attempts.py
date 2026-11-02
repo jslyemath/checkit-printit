@@ -628,3 +628,87 @@ class TestTheRowsOwnPictureOfTheBox:
         exactly when he should see everything there was to look at."""
         whole = self.crop()
         assert gui_mod._tight(whole, {"box": None}).size == whole.size
+
+
+class TestASecondStackJoinsTheFirst:
+    """The copier mails a tray at a time.
+
+    So a run arrives as two or three PDFs over ten minutes, and the
+    second read has to add to the first. Replacing it is wrong in the
+    direction that costs most: the missing list would name students
+    whose papers are sitting in the file read first, and those are
+    exactly the students who would then be chased for work they handed
+    in.
+    """
+
+    class Leaf:
+        """Enough of a `Sheet` for the joining: where it came from."""
+
+        def __init__(self, source, tag):
+            self.source, self.tag = source, tag
+
+        def __repr__(self):
+            return f"<{self.tag}>"
+
+    def leaves(self, source, *tags):
+        return [self.Leaf(source, tag) for tag in tags]
+
+    def test_pages_from_a_new_file_are_added_to_what_was_there(self):
+        was = self.leaves("/scans/tray1.pdf", "a", "b")
+        now = self.leaves("/scans/tray2.pdf", "c")
+        got = gui_mod._joined(was, now, ["/scans/tray2.pdf"])
+        assert [s.tag for s in got] == ["a", "b", "c"]
+
+    def test_reading_a_file_again_replaces_its_pages(self):
+        """Not doubles them. Dropping the same stack twice is a slip,
+        and the duplicates table is for paper that really did go
+        through the feeder twice -- burying that under self-inflicted
+        pairs would make the one signal worth having useless."""
+        was = (self.leaves("/scans/tray1.pdf", "a", "b")
+               + self.leaves("/scans/tray2.pdf", "c"))
+        now = self.leaves("/scans/tray1.pdf", "a2", "b2", "extra")
+        got = gui_mod._joined(was, now, ["/scans/tray1.pdf"])
+        assert [s.tag for s in got] == ["c", "a2", "b2", "extra"]
+
+    def test_the_very_first_read_starts_from_nothing(self):
+        got = gui_mod._joined([], self.leaves("/scans/one.pdf", "a"),
+                              ["/scans/one.pdf"])
+        assert [s.tag for s in got] == ["a"]
+
+    def test_file_names_keep_the_order_they_were_first_read_in(self):
+        order = gui_mod._file_order([], ["/scans/b.pdf", "/scans/a.pdf"])
+        order = gui_mod._file_order(order, ["/scans/c.pdf"])
+        assert order == ["b.pdf", "a.pdf", "c.pdf"]
+
+    def test_a_file_read_twice_is_still_listed_once(self):
+        order = gui_mod._file_order(["b.pdf"], ["/scans/b.pdf"])
+        assert order == ["b.pdf"]
+
+    def test_clearing_forgets_the_pile(self):
+        """There has to be a way to say "wrong stack". Without one the
+        only way out of an accumulating read is to restart the
+        server."""
+        job = gui_mod.Scanning()
+        job.sheets = self.leaves("/scans/tray1.pdf", "a")
+        job.files, job.result = ["tray1.pdf"], {"counts": {}}
+        job.clear()
+        assert job.sheets == [] and job.files == [] and job.result is None
+
+    def test_clearing_is_refused_while_a_read_is_running(self):
+        """Half a pile is worse than either whole one: the thread
+        would finish and join its sheets onto the empty list, so the
+        instructor would be looking at one tray with a missing list
+        built as though the others had never been read."""
+        job = gui_mod.Scanning()
+        job.running = True
+        with pytest.raises(gui_mod.GuiError, match="being read right now"):
+            job.clear()
+
+    def test_the_status_says_how_much_is_in_the_pile(self):
+        """The strip counts from this rather than from what was last
+        dropped, because what was last dropped is one tray of three."""
+        job = gui_mod.Scanning()
+        job.sheets = self.leaves("/scans/tray1.pdf", "a", "b")
+        job.files = ["tray1.pdf"]
+        said = job.status()
+        assert said["pages"] == 2 and said["files"] == ["tray1.pdf"]

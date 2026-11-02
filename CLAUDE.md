@@ -1377,6 +1377,41 @@ polling loop was timing its own throttle. `document.hidden` said so;
 a stamp inside the render said 3.1ms. Same family as the stale
 `index.html` and the integer-truncated pointer coordinates.
 
+`getComputedStyle(el, "::before")` belongs in that family too. It
+returns a stale snapshot within a script turn, so the scan drop
+area's progress bar read 0px while it was painting correctly, and
+two of the three apparent failures in the first trace of it were the
+measurement rather than the page. Sample across animation frames,
+and read the value on the element itself where you can.
+
+### A scan read adds to the pile; it does not replace it
+
+The copier mails a tray at a time, so a run arrives as two or three
+PDFs over ten minutes. `Scanning` keeps its `sheets` across reads and
+rebuilds the batch from all of them, because `Batch.missing` computed
+from one tray names students who handed their paper in -- the worst
+direction for that list to be wrong in.
+
+Three things follow:
+
+* Reading a file **again** replaces that file's pages rather than
+  adding a second copy. The duplicates table is for paper that really
+  went through the feeder twice.
+* `clear()` is the only way back, and it refuses while a read is
+  running -- the thread would otherwise join its sheets onto the list
+  that was just emptied.
+* The strip counts from `status()`, not from what was last dropped.
+
+There is no Import button. Choosing the files is the whole decision
+and nothing reaches the record until Save, so the drop area reads
+them straight away, folds to a one-line strip that is its own
+progress bar, and stays there for the next tray.
+
+`--read`, the bar's fraction, is registered with `@property`. An
+unregistered custom property is a text substitution: a `width` that
+reads it through `calc()` inside a transition does not reliably
+follow it.
+
 ### The markup has tests now, and they are the only ones that do
 
 `tests/test_gui_markup.py`. Until 2026-10-19 **nothing in the suite
