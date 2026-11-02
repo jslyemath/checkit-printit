@@ -1164,6 +1164,78 @@ class TestTheOutputCompiles:
         assert os.path.isfile(pdf), _why(moved)
         assert os.path.getsize(pdf) > 1000
 
+    def test_a_document_with_a_figure_in_it_compiles(self, tmp_path):
+        """The test above compiles a whole folder and still missed this.
+
+        Its two students' pages carry no picture, and the break was in
+        the figures package: `qrcode`, pulled in for the footer code,
+        opens with `\\let\\xa=\\expandafter` and took the name
+        printitfigures had been using for the left end of an axis. Every
+        \\setmyx in the document then died with
+
+            ! Package tikz Error: tikz math library:
+              Unknown function or keyword '='.
+
+        which is fatal -- pdflatex wrote no PDF at all, and a job of
+        three skills produced nothing. Nothing in the suite drew a
+        figure, so nothing noticed until a print run failed.
+
+        Both halves have to be in the one document: a figure, and the
+        footer code that loads `qrcode`. Either alone compiles fine.
+        """
+        folder = tmp_path / "figure"
+        folder.mkdir()
+        source, _ = theme.load()
+        figures, _ = theme.figures_source()
+        (folder / theme.THEME_FILENAME).write_text(source, encoding="utf-8")
+        (folder / theme.FIGURES_FILENAME).write_text(figures,
+                                                     encoding="utf-8")
+        # printit.sty \inputs this one unconditionally.
+        (folder / "Skill Descriptions.tex").write_text("", encoding="utf-8")
+        (folder / "main.tex").write_text(FIGURE_DOC, encoding="utf-8")
+
+        for _ in range(2):
+            subprocess.run([pdflatex, "-interaction=nonstopmode",
+                            "-halt-on-error", "main.tex"],
+                           cwd=str(folder), capture_output=True, timeout=300)
+
+        pdf = folder / "main.pdf"
+        assert pdf.is_file(), _why(str(folder))
+        assert pdf.stat().st_size > 1000
+
+
+#: A page that draws two things and carries the footer code. \setrunid is
+#: what turns the code on, and the code is what loads `qrcode`; \setmyx
+#: and the axis style are what read the range variables the clash was
+#: over. The plain \draw covers the F3 case, which sets a range and then
+#: does not use it -- that was the exercise the real job died on.
+FIGURE_DOC = r"""\documentclass[12pt,twoside]{article}
+\usepackage{printit}
+\acadclass{MAT 000}
+\title{Probe}
+\author{Nobody}
+\date{Today}
+\begin{document}
+\setrunid{1}
+\setname{Aaa Bbb}
+\setsect{1}
+\setsid{000000000}
+
+\setmyx{0}{0}
+\begin{tikzpicture}[scale=2.3]
+    \draw [line width=2, Stealth-Stealth] (-3.5,0) -- (3.5,0);
+\end{tikzpicture}
+
+\setmyx{-3}{4}
+\setmyy{-2}{5}
+\begin{tikzpicture}
+  \begin{axis}[printed axis style]
+    \addplot[blue]{x};
+  \end{axis}
+\end{tikzpicture}
+\end{document}
+"""
+
 
 def _why(directory):
     log = os.path.join(directory, "main.log")
