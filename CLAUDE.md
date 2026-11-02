@@ -1526,6 +1526,30 @@ When a figure dies at a line that has not changed, suspect a package
 that has. Bisect by loading them one at a time with an assignment in
 between; reading thirty package sources is slower.
 
+## One gutter, and no tag-name rules
+
+`--gutter` is the distance from the rail to everything in a view -- the
+heading, the tables, the cards. One value, at every width. `main` is
+the only thing that applies it, and nothing overrides it at a
+breakpoint. The sole width-dependent change in the whole shell is the
+rail, at 900px, and it is meant to be seen.
+
+Two habits broke this, and `test_no_media_query_styles_a_bare_tag_name`
+and `test_main_has_one_gutter` now hold the line.
+
+* **A media query must not select by tag name.** One written for a top
+  bar the app no longer has went on firing, because page headings are
+  `<header>` and the rail's list is a `<nav>`. Nine headings picked up
+  a padding their own content did not have. Scope to a class; a tag
+  name is aimed at whatever the markup contains later.
+* **One property, one place.** `main` had three paddings across two
+  overlapping breakpoints, the later one further down the file and
+  winning where they met, so narrowing the window moved the content
+  right and then left again.
+* **A page heading is `.pagename`.** A bare `<h2>` falls through to the
+  smaller default, which is how Progress drew at 18px while every other
+  tab drew at 20px for months.
+
 ## Rules that are load-bearing
 
 **If a human is the author, TOML. If the tool is, SQLite.** Roster, seating,

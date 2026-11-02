@@ -537,3 +537,98 @@ def test_start_over_is_in_the_scans_save_bar(html):
     assert bar, "the scans save bar is gone"
     assert 'id="scan-clear"' in bar.group(0), (
         "Start over is not in the scans save bar")
+
+
+# ------------------------------------------------------- the layout ----
+
+def media_blocks(css):
+    """Each `@media (...)` block's condition and body, comments stripped."""
+    out, css = [], strip_comments(css)
+    for m in re.finditer(r"@media([^{]+)\{", css):
+        depth, i = 1, m.end()
+        while i < len(css) and depth:
+            if css[i] == "{":
+                depth += 1
+            elif css[i] == "}":
+                depth -= 1
+            i += 1
+        out.append((m.group(1).strip(), css[m.end():i - 1]))
+    return out
+
+
+def test_no_media_query_styles_a_bare_tag_name():
+    """A tag-name rule is aimed at whatever the markup contains later.
+
+    `@media (max-width: 820px)` was written for a top bar this app no
+    longer has, and styled `header`, `h1`, `nav` and `nav button`. The
+    bar went away; the selectors did not. Every page heading is a
+    `<header class="pagehead">` and `buildNav()` builds the rail's
+    destination list as a `<nav>`, so below 820px nine headings took on
+    a padding their own content did not have -- 12px to the right, 7px
+    down -- and the rail's buttons changed size at a second threshold
+    80px from the one the rail uses itself. That is a heading that
+    moves left, right, up and down as the window narrows.
+
+    Classes are fine here. The rule is about bare tag names, which
+    cannot say which elements they meant.
+    """
+    css = read("style.css")
+    tags = app_tags()
+    offenders = []
+    for condition, body in media_blocks(css):
+        for selector in re.findall(r"(?m)^\s*([^{}@/]+?)\s*\{", body):
+            for part in selector.split(","):
+                lead = part.strip().split()[0] if part.strip() else ""
+                # Only the leftmost compound decides. `.pagehead h2` is
+                # scoped by a class and can only reach markup that asked
+                # for it; `nav button` and `header` cannot.
+                if lead in tags:
+                    offenders.append(
+                        f"@media{condition} {{ {part.strip()} }}")
+    assert not offenders, (
+        "a media query styles elements by tag name, and the app builds "
+        "those tags: " + "; ".join(offenders))
+
+
+def app_tags():
+    """Every element name the app can put on the page.
+
+    Both sources, because the first version of this test read only
+    `index.html` and would have missed the `nav` half of the bug it was
+    written for: the rail's destination list is built by `buildNav()`,
+    so `<nav` appears nowhere in the markup.
+    """
+    html, js = read("index.html"), read("app.js")
+    return (set(re.findall(r"<([a-z][a-z0-9]*)[\s>]", html))
+            | set(re.findall(r'createElement\("([a-z][a-z0-9]*)"\)', js)))
+
+
+def test_main_has_one_gutter():
+    """One answer to "where does the content start", at every width.
+
+    `main` had three paddings across two overlapping breakpoints: 16px,
+    12px below 820, and 16px again below 720 -- the last added later and
+    three hundred lines further down the file, so it won where both
+    matched. Narrowing the window moved the content right, then left
+    again. Everything in a view now hangs off `--gutter`, and the only
+    thing that changes with width is the rail.
+    """
+    css = strip_comments(read("style.css"))
+    inside = [c for c, body in media_blocks(css)
+              if re.search(r"(?m)^\s*main\s*\{", body)]
+    assert not inside, (
+        "main's padding changes at a breakpoint again: " + "; ".join(inside))
+    assert "--gutter:" in css, "the gutter token is gone"
+    assert re.search(r"(?m)^main\s*\{[^}]*var\(--gutter\)", css), (
+        "main no longer uses --gutter for its side padding")
+
+
+def test_every_page_heading_is_a_pagename(html):
+    """Progress drew its heading at 18px while the other six drew 20px.
+
+    Nothing said so, because two tabs are never on screen together. The
+    `.pagename` class is what makes a heading a page heading; a bare
+    `<h2>` falls through to the stylesheet's smaller default.
+    """
+    bare = [m for m in re.findall(r"<h2(?![^>]*\bclass=)[^>]*>", html)]
+    assert not bare, "a page heading is not a .pagename: " + "; ".join(bare)
