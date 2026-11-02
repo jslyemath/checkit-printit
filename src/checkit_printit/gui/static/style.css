@@ -66,6 +66,11 @@
   --s4: 16px;
   --s5: 20px;
   --s6: 24px;
+
+  /* The distance from the rail to everything in a view: the heading,
+     the tables, the cards, all of it. One value, used once, so there
+     is only ever one answer to "where does the content start". */
+  --gutter: var(--s4);
   --s8: 32px;
 
   /* ---- radius ----------------------------------------------------- */
@@ -365,7 +370,7 @@ h2 { font-size: 18px; margin: 0 0 12px; font-weight: 600; }
 main {
   flex: 1 1 auto;
   min-width: 0;
-  padding: var(--s5) var(--s4) 60px;
+  padding: var(--s5) var(--gutter) 60px;
   max-width: 1100px;
 }
 
@@ -397,25 +402,43 @@ main {
   box-shadow: 0 8px 26px rgba(0, 0, 0, .45);
 }
 
-/* Two spellings of a label; the window picks. */
-.narrow-only { display: none; }
+/* There was a media query here, and it was doing real damage.
 
-/* The banner cost 141px of a 530px window -- more than a quarter of it,
-   above a canvas that needs every pixel. Nothing is hidden behind a
-   menu or a scroll: the words get shorter, the count moves to the
-   Overview card that already shows it, and the padding tightens. That
-   takes the banner to about 70px and puts the nav on one row instead of
-   two. */
-@media (max-width: 820px) {
-  .wide-only { display: none; }
-  .narrow-only { display: inline; }
-  header { padding: 7px 12px; gap: 10px; row-gap: 6px; }
-  h1 { font-size: 14px; }
-  nav { gap: 2px; }
-  nav button { padding: 3px 8px; font-size: 13px; }
-  main { padding: 10px 12px 40px; }
-  h2 { font-size: 16px; margin-bottom: 8px; }
-}
+   It was written for the banner this app had before the rail: a top
+   bar with an <h1>, a <nav> of destinations, and two spellings of each
+   label picked by `.wide-only` / `.narrow-only`. Below 820px it made
+   all of that smaller and tighter.
+
+   None of those elements exist any more. But two of its selectors are
+   tag names, and the markup grew new elements with those tags:
+
+     `header`  -- every page heading is a <header class="pagehead">,
+                  nine of them. Below 820px each one took on
+                  `padding: 7px 12px`, which the content beneath it did
+                  not have, so the heading sat 12px to the right of its
+                  own table and 7px lower. The same rule replaced the
+                  pagehead's `gap: var(--s3)` with `6px 10px`, moving
+                  everything beside the heading as well, and changing
+                  the row gap so a wrapped pagehead jumped vertically.
+
+     `nav`     -- `buildNav()` builds the rail's destination list and
+                  its footer as <nav> elements, so below 820px the rail's
+                  buttons changed padding and font size. The rail
+                  already has one threshold of its own, at 900px, and
+                  this was a second one 80px away restyling the same
+                  buttons.
+
+   That is the heading moving left, right, up and down on the way
+   through 820px, and it is why it only lined up once the window was
+   wide.
+
+   Deleted rather than re-scoped. Re-scoping it to `body > header` would
+   keep a rule for an element that no longer exists; the honest version
+   of "make it smaller when narrow" is the single gutter above, which
+   never changes.
+
+   If a top bar ever comes back, give it a class. A tag-name rule is a
+   rule aimed at whatever the markup happens to contain later. */
 
 .muted { color: var(--muted); font-size: 13px; }
 
@@ -861,9 +884,13 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   min-width: 0;
 }
 
-@media (max-width: 720px) {
-  main { padding: 16px; }
-}
+/* A second `main` padding lived here, `16px` below 720px, added long
+   after the 820px one above and three hundred lines further down. The
+   two overlapped, and because this one came later it won below 720px --
+   so narrowing the window moved the content left at 820 and then right
+   again at 720. It also flattened the bottom padding the save bar needs,
+   and only `body.hasbar main` winning on specificity kept the bar off
+   the last row. Both are gone; `--gutter` is the whole of it now. */
 
 /* ------------------------------------------------------------- skills -- */
 
@@ -921,7 +948,12 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pagetitle {
   font-size: var(--t-xl);
   font-weight: 600;
-  margin-left: calc(var(--s2) * -1);   /* the text, not the box, sets the margin */
+  /* Pulled back by its own padding *and* its border, so the first
+     letter of an editable title starts exactly where the content
+     below it does. Without the border in the sum it landed a
+     pixel right of everything else on the page -- the only view
+     of seven that did. */
+  margin-left: calc((var(--s2) + 1px) * -1);   /* the text, not the box, sets the margin */
   /* The box hugs the text, so the date sits beside the *title* rather
      than beside the right edge of an input that is mostly empty -- at
      26ch the two looked unrelated. Unsupported browsers keep the flex
