@@ -1629,6 +1629,21 @@ class Scanning:
     One at a time, and deliberately: two reads of the same stack
     would race for the same scratch folder, and there is no honest
     reason to start a second before the first has been looked at.
+
+    One at a time, but *cumulative*. The copier mails a tray at a
+    time, so a run routinely arrives as three PDFs over ten minutes,
+    and a second read has to join the first rather than replace it.
+    Replacing it is wrong in the worst direction: the missing list
+    would name students whose papers are sitting in the file read
+    first. So `sheets` is kept across reads and the batch is rebuilt
+    from the whole pile, which costs nothing -- `Batch` derives runs,
+    duplicates and missing from its sheet list and nothing else.
+
+    Re-reading a file replaces that file's pages instead of adding a
+    second copy of them. Dropping the same stack twice is a slip; the
+    duplicates table is for paper that really did go through twice,
+    and burying that signal under self-inflicted pairs would make it
+    useless.
     """
 
     def __init__(self):
@@ -1638,17 +1653,29 @@ class Scanning:
         self.result = None
         self.error = ""
         self.started_at = 0.0
+        #: Every sheet read since the last `clear()`, across files.
+        self.sheets = []
+        #: Those files' base names, in the order they were first read.
+        self.files = []
 
     def status(self):
         return {"running": self.running, "done": self.done,
                 "total": self.total, "result": self.result,
-                "error": self.error}
+                "error": self.error, "files": list(self.files),
+                "pages": len(self.sheets)}
+
+    def clear(self):
+        """Forget the pile, so the next read starts a fresh one."""
+        if self.running:
+            raise GuiError("a stack is being read right now.")
+        self.sheets, self.files = [], []
+        self.result, self.error = None, ""
 
     def start(self, course, paths):
         if self.running:
             raise GuiError("a stack is already being read.")
         self.running, self.done, self.total = True, 0, 0
-        self.result, self.error = None, ""
+        self.error = ""
         self.started_at = time.time()
         record_path = course.file("record")
 
@@ -1670,7 +1697,11 @@ class Scanning:
                 batch = scans_mod.read_pdfs(paths, record_path,
                                             on_page=progress,
                                             want=("box", "name"))
-                self.result = _batch_json(batch, record_path, sections)
+                self.sheets = _joined(self.sheets, batch.sheets, paths)
+                self.files = _file_order(self.files, paths)
+                self.result = _batch_json(
+                    scans_mod.Batch(sheets=self.sheets),
+                    record_path, sections)
             except (scans_mod.ScanError, OSError) as exc:
                 self.error = str(exc)
             except Exception as exc:                      # noqa: BLE001
@@ -1683,6 +1714,32 @@ class Scanning:
 
 
 SCANNING = Scanning()
+
+
+def _joined(kept, fresh, paths):
+    """The pile after a read: what was there, plus what just arrived.
+
+    Pages from a file in `paths` are dropped from `kept` first, so
+    reading a file a second time *replaces* its pages. Compared on
+    the real path rather than the base name, because two files of the
+    same name in different folders are two different stacks -- though
+    in practice both land in the course's own `scans/`, which is why
+    re-reading is the common case and worth getting right.
+    """
+    again = {os.path.realpath(p) for p in paths}
+    older = [s for s in kept if os.path.realpath(s.source) not in again]
+    return older + list(fresh)
+
+
+def _file_order(known, paths):
+    """File names in the order first seen, without repeats."""
+    names = list(known)
+    for path in paths:
+        name = os.path.basename(path)
+        if name not in names:
+            names.append(name)
+    return names
+
 
 def _batch_json(batch, record_path, sections=None):
     """The batch as the page wants it.
@@ -1792,6 +1849,18 @@ def api_scan_start(course, body):
 
 def api_scan_status(_course, _body):
     return SCANNING.status()
+
+
+def api_scan_clear(_course, _body):
+    """Put the pile down and start again.
+
+    Reads accumulate, so there has to be a way to say "that was the
+    wrong stack" -- otherwise the only way out is to restart the
+    server. The PDFs themselves stay in the course's scans folder;
+    this forgets the reading of them, not the files.
+    """
+    SCANNING.clear()
+    return {"cleared": True}
 
 
 #: What the instructor can say about one paper.
@@ -2274,6 +2343,7 @@ ROUTES = {
     "/api/progress/set": api_progress_set,
     "/api/scan/start": api_scan_start,
     "/api/scan/status": api_scan_status,
+    "/api/scan/clear": api_scan_clear,
     "/api/scan/save": api_scan_save,
     "/api/scan/sheet": api_scan_sheet,
     "/api/roster": api_roster,

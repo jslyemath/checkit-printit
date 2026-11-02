@@ -1674,19 +1674,29 @@ body.hasbar.tall main { padding-bottom: 68px; }
    its `<label for>`: that is what makes the whole rectangle
    clickable and keyboard-reachable without a line of script. */
 .dropzone {
+  position: relative;
+  overflow: hidden;
   flex: 1 1 22rem;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--s3);
-  padding: var(--s3) var(--s4);
+  padding: var(--s4);
   border: 2px dashed var(--line-strong);
   border-radius: var(--r-md);
   background: var(--surface-2);
   color: var(--muted);
   cursor: pointer;
-  transition: border-color 120ms, background 120ms, color 120ms;
+  /* Named once so the state that adds `--read` to it can say the
+     rest by reference rather than by copy. A `transition` is one
+     property: a state that wants an extra entry has to restate the
+     whole list, and two lists drift. */
+  --fold: border-color 120ms, background 120ms, color 120ms,
+          padding 220ms ease, border-width 220ms;
+  transition: var(--fold);
 }
+/* Everything the box says sits above the bar behind it. */
+.dropzone > * { position: relative; z-index: 1; }
 .dropzone:hover,
 .dropzone:focus-within { border-color: var(--accent); color: var(--ink-2); }
 /* While a file is over it. Set from script, because there is no CSS
@@ -1696,19 +1706,98 @@ body.hasbar.tall main { padding-bottom: 68px; }
   background: var(--accent-soft);
   color: var(--ink);
 }
-.dropzone-plus {
-  font-size: 26px;
-  line-height: 1;
-  font-weight: 300;
-  color: var(--dim);
-  flex: 0 0 auto;
+
+/* How far through the read the bar is, 0 to 1.
+ *
+ * Registered rather than left as a plain `--read`, because an
+ * unregistered custom property is a text substitution: the browser
+ * has no idea it is a number, so it cannot interpolate it, and a
+ * `width` that reads it through `calc()` updates only when something
+ * *else* forces a restyle. Measured, not assumed -- setting it from
+ * 0.41 to 1 left the bar sitting at 41% until the class changed.
+ *
+ * Typed, it animates itself, and the width follows for free because
+ * it is recomputed from the value every frame. */
+@property --read {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
 }
-.dropzone:hover .dropzone-plus,
-.dropzone.over .dropzone-plus { color: var(--accent); }
+
+/* ---- the box while it is reading, and after -----------------------
+
+   Small, because a stack takes minutes and a big empty rectangle
+   spends those minutes saying nothing. Small is also where it has to
+   end up: the results are the page, and the way back to this control
+   should be a strip at the top of them, not a wall above them.
+
+   The fill is the progress bar -- the same object, not a second one
+   underneath it. `--read` is the fraction done, set from script.
+   Soft accent rather than the accent itself: it is behind text that
+   has to stay readable, and a solid bar sweeping across a line of
+   type is hard to read for the whole minute it takes. */
+.dropzone::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--read) * 100%);
+  background: var(--surface-3);
+  z-index: 0;
+}
+.dropzone.reading::before { background: var(--accent-soft); }
+/* Done. The bar stays where it finished and loses its colour, which
+   leaves it indistinguishable from the strip's own background -- so
+   there is nothing to tidy away afterwards and no timer to get
+   wrong. */
+.dropzone.read::before {
+  background: var(--surface-3);
+  transition: background 700ms ease;
+}
+.dropzone.reading,
+.dropzone.read {
+  /* Take the rest of the row, not all of it: `100%` here is a basis
+     the row cannot honour with a button beside it, so the button
+     wraps underneath and the strip has an orphan again -- which is
+     the thing this layout exists to get rid of. */
+  flex: 1 1 0;
+  padding: var(--s2) var(--s3);
+  border-style: solid;
+  border-width: 1px;
+  border-color: var(--line);
+}
+/* The bar animates only while it is filling. Without that the next
+   read would start by sliding the finished bar down to nought in
+   front of him on its way to starting again -- which is why the
+   script sets it back to nought *before* adding this class. */
+.dropzone.reading { transition: var(--fold), --read 300ms linear; }
+.dropzone.reading .dropzone-plus,
+.dropzone.read .dropzone-plus { width: 24px; height: 24px; font-size: 17px; }
+
+/* The plus from the seating app's own corner button: a filled accent
+   circle that grows a little under the pointer. Borrowed as a shape
+   rather than as code -- seating's `--isle-*` palette is local to
+   that view, so this takes the app's accent pair instead. */
+.dropzone-plus {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 23px;
+  line-height: 1;
+  font-weight: 500;
+  transition: transform 140ms ease, width 220ms, height 220ms,
+              font-size 220ms;
+}
+.dropzone:hover .dropzone-plus { transform: scale(1.06); }
 .dropzone-say { font-size: var(--t-sm); }
-/* The names of what was chosen, once something has been. Its own
-   line rather than beside the prompt, so a long filename does not
-   push the prompt out of the box. */
+/* The names of what was chosen, once something has been. Pushed to
+   the far end rather than left beside the prompt, so a long filename
+   does not shove the prompt out of the box. */
 .dropzone-chosen {
   margin-left: auto;
   font-size: var(--t-sm);
@@ -1717,6 +1806,9 @@ body.hasbar.tall main { padding-bottom: 68px; }
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* Beside the strip, not inside it: a button inside a `<label for>`
+   opens the file picker, which is the one thing this must not do. */
+#scan-clear { align-self: center; flex: 0 0 auto; }
 
 .scan-counts {
   list-style: none;

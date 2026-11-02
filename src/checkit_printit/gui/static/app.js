@@ -2262,22 +2262,23 @@ function builtAt(stamp) {
 // before a reading of someone's tick is worth showing, and placing is
 // the part that can be checked without an opinion.
 
-let scanChosen = [];
 let scanPolling = null;
 let scanWired = false;
+//: Set while a read is in flight, so a second drop is refused in the
+//: browser rather than by the server. The server refuses it too.
+let scanReading = false;
 
 function scanSetup() {
   // `show()` calls this every time the tab is opened, so it has to be
   // safe to call twice. Without the guard the second visit adds a
-  // second click handler and "Read them" uploads the stack twice.
+  // second click handler and a drop uploads the stack twice.
   if (scanWired) return;
   scanWired = true;
   const input = document.getElementById("scan-files");
-  const go = document.getElementById("scan-go");
   const drop = document.getElementById("scan-drop");
 
   input.addEventListener("change", () => scanChose(input.files));
-  go.addEventListener("click", scanStart);
+  document.getElementById("scan-clear").addEventListener("click", scanClear);
 
   // Dragging onto the rectangle. `dragover` has to be cancelled or
   // the browser navigates to the file instead of offering it --
@@ -2300,41 +2301,67 @@ function scanSetup() {
   });
 }
 
-/* What was chosen, however it was chosen.
+/* How far through the read the box is, and what it says while it is.
  *
- * Non-PDFs are dropped here with a word about it rather than sent
- * to the server to be refused: a folder dragged in brings whatever
- * is in it, and "that is not a PDF" is a better answer at the point
- * of the gesture than after an upload. */
+ * `part` is the fraction done, or null to leave the bar alone. The
+ * three states are classes on the one element, so the box, the
+ * progress bar and the strip you add the next file to are all the
+ * same object -- which is the point: there is nothing to look for
+ * afterwards, because the control never went anywhere. */
+function scanState(state, say, part) {
+  const drop = document.getElementById("scan-drop");
+  drop.classList.toggle("reading", state === "reading");
+  drop.classList.toggle("read", state === "read");
+  if (part !== null && part !== undefined) {
+    drop.style.setProperty("--read", String(part));
+  }
+  document.getElementById("scan-say").textContent = say;
+  document.getElementById("scan-clear").hidden = state !== "read";
+}
+
+/* What was chosen, however it was chosen -- and the read starts here.
+ *
+ * No confirming button. Choosing the files is the whole decision, and
+ * nothing is written to the record until Save, so there is nothing
+ * for a second click to protect.
+ *
+ * Non-PDFs are dropped here with a word about it rather than sent to
+ * the server to be refused: a folder dragged in brings whatever is in
+ * it, and "that is not a PDF" is a better answer at the point of the
+ * gesture than after an upload. */
 function scanChose(files) {
   const all = Array.from(files || []);
-  scanChosen = all.filter(f => /\.pdf$/i.test(f.name));
-  const dropped = all.length - scanChosen.length;
-  const chosen = document.getElementById("scan-chosen");
-  chosen.textContent = scanChosen.length
-    ? scanChosen.map(f => f.name).join(", ")
-    : "";
+  const pdfs = all.filter(f => /\.pdf$/i.test(f.name));
+  const dropped = all.length - pdfs.length;
   if (dropped) {
     toast(dropped === 1 ? "One file was not a PDF, so it was left out."
                         : `${dropped} files were not PDFs, so they were `
                           + `left out.`, true);
   }
-  document.getElementById("scan-go").disabled = !scanChosen.length;
+  if (!pdfs.length) return;
+  if (scanReading) {
+    toast("A stack is being read. Add these when it has finished.", true);
+    return;
+  }
+  document.getElementById("scan-chosen").textContent =
+    pdfs.map(f => f.name).join(", ");
+  scanStart(pdfs);
 }
 
-async function scanStart() {
-  const go = document.getElementById("scan-go");
-  go.disabled = true;
+async function scanStart(chosen) {
+  scanReading = true;
   show_scan_error("");
-  document.getElementById("scan-result").hidden = true;
-  const progress = document.getElementById("scan-progress");
-  progress.hidden = false;
-  progress.textContent = "Reading the files\u2026";
+
+  // Back to nought *before* `.reading` puts a transition on the
+  // width, or the bar from the last read slides down to zero in
+  // front of him on the way to starting the next one.
+  scanState("", "Reading\u2026", 0);
+  scanState("reading", "Reading\u2026", 0);
 
   // Base64 rather than a path: the stack arrives in Downloads off the
   // copier's email, and a file picker is the gesture everybody has.
   const files = [];
-  for (const file of scanChosen) {
+  for (const file of chosen) {
     const buffer = await file.arrayBuffer();
     let binary = "";
     const bytes = new Uint8Array(buffer);
@@ -2345,26 +2372,59 @@ async function scanStart() {
   }
 
   const out = await api("/api/scan/start", { files });
-  if (!out) { go.disabled = false; progress.hidden = true; return; }
+  if (!out) { scanReading = false; scanIdle(); return; }
   scanPoll();
+}
+
+/* The strip once something has been read: how much is in the pile,
+ * and that more can go on it. Counted from the server's answer rather
+ * than from what was last dropped, because reads accumulate -- the
+ * copier sends a tray at a time. */
+function scanLoaded(status) {
+  const pages = status.pages || 0;
+  const files = (status.files || []).length;
+  scanState("read",
+    `${pages} page${pages === 1 ? "" : "s"} read`
+    + (files > 1 ? ` from ${files} files` : "")
+    + " \u2014 drop more to add them",
+    1);
+  document.getElementById("scan-chosen").textContent = "";
+}
+
+function scanIdle() {
+  scanState("", "Drop the copier's PDFs here, or click to choose", 0);
+  document.getElementById("scan-chosen").textContent = "";
+}
+
+/* Put the pile down. The PDFs stay in the course's scans folder; it
+ * is the reading of them that is forgotten, so the next drop starts a
+ * fresh count rather than joining a stack from an hour ago. */
+async function scanClear() {
+  if (!await api("/api/scan/clear", {})) return;
+  document.getElementById("scan-result").hidden = true;
+  show_scan_error("");
+  scanIdle();
 }
 
 function scanPoll() {
   clearTimeout(scanPolling);
   scanPolling = setTimeout(async () => {
     const out = await api("/api/scan/status", {});
-    if (!out) return;
-    const progress = document.getElementById("scan-progress");
+    if (!out) { scanReading = false; return; }
     if (out.running) {
-      progress.textContent = out.total
-        ? `Reading page ${out.done} of ${out.total}\u2026`
-        : "Reading\u2026";
+      // No page count yet for the first moment -- the server has to
+      // open every PDF before it knows how many pages there are --
+      // so the bar sits at nought rather than jumping once it does.
+      scanState("reading",
+        out.total ? `Reading page ${out.done} of ${out.total}\u2026`
+                  : "Reading\u2026",
+        out.total ? out.done / out.total : 0);
       scanPoll();
       return;
     }
-    progress.hidden = true;
-    document.getElementById("scan-go").disabled = !scanChosen.length;
-    if (out.error) { show_scan_error(out.error); return; }
+    scanReading = false;
+    if (out.error) { scanIdle(); show_scan_error(out.error); return; }
+    scanLoaded(out);
     if (out.result) renderScan(out.result);
   }, 400);
 }

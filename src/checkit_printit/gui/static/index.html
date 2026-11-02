@@ -751,20 +751,28 @@
          underneath for anyone who would rather click. The whole
          label is the control: that is what makes a <label for> both
          clickable and reachable by keyboard without scripting it. -->
+    <!-- One control, three states, and no separate button. Dropping
+         the files *is* the instruction -- there is no second decision
+         left to confirm -- so the rectangle reads them straight away,
+         becomes its own progress bar while it does, and then folds to
+         a one-line strip so the results own the screen. -->
     <div class="scan-pick">
       <label class="dropzone" id="scan-drop" for="scan-files">
         <span class="dropzone-plus" aria-hidden="true">+</span>
-        <span class="dropzone-say">Drop the copier's PDFs here,
-          or click to choose</span>
+        <span class="dropzone-say" id="scan-say">Drop the copier's PDFs
+          here, or click to choose</span>
         <span id="scan-chosen" class="dropzone-chosen"></span>
       </label>
       <input id="scan-files" type="file" accept="application/pdf" multiple
              hidden>
-      <button id="scan-go" class="btn primary" type="button"
-              disabled>Import scans</button>
+      <!-- Outside the label on purpose: a button inside one is still
+           the label's click target, and this is the one thing in the
+           strip that must not open the file picker. -->
+      <button id="scan-clear" class="act chip" type="button" hidden
+              title="Forget what has been read and start a new pile."
+              >Start over</button>
     </div>
 
-    <p id="scan-progress" class="muted" hidden></p>
     <p id="scan-error" class="warnline" hidden></p>
 
     <div id="scan-result" hidden>
