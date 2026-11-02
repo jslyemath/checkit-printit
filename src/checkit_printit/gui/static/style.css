@@ -1755,10 +1755,6 @@ body.hasbar.tall main { padding-bottom: 68px; }
 }
 .dropzone.reading,
 .dropzone.read {
-  /* Take the rest of the row, not all of it: `100%` here is a basis
-     the row cannot honour with a button beside it, so the button
-     wraps underneath and the strip has an orphan again -- which is
-     the thing this layout exists to get rid of. */
   flex: 1 1 0;
   padding: var(--s2) var(--s3);
   border-style: solid;
@@ -1806,9 +1802,6 @@ body.hasbar.tall main { padding-bottom: 68px; }
   min-width: 0;
   overflow-wrap: anywhere;
 }
-/* Beside the strip, not inside it: a button inside a `<label for>`
-   opens the file picker, which is the one thing this must not do. */
-#scan-clear { align-self: center; flex: 0 0 auto; }
 
 .scan-counts {
   list-style: none;

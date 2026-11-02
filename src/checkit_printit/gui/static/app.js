@@ -1098,10 +1098,16 @@ function key(index, field) { return index + ":" + field; }
  * A bar that appears only when dirty is the placement that was chosen,
  * and a disabled Save is a control that cannot say why it is disabled.
  * So the bar is absent instead.
+ *
+ * `shown` splits the two things that used to be one. Scans has a
+ * control that belongs in the bar without anything being unsaved --
+ * Start over, which puts down a stack that has been read and not yet
+ * decided on -- so that tab passes a reason of its own. Left out, it
+ * is "dirty", which is what every other tab means.
  */
-function saveBar(view, dirty, what) {
+function saveBar(view, dirty, what, shown = dirty) {
   const bar = document.getElementById(view + "-bar");
-  bar.hidden = !dirty;
+  bar.hidden = !shown;
   bar.querySelector(".dirty").textContent = dirty ? what : "";
   /* The bar is on one tab; the fact belongs to the app. A bar that
      hides itself when clean also hides itself when you have stepped
@@ -2316,7 +2322,6 @@ function scanState(state, say, part) {
     drop.style.setProperty("--read", String(part));
   }
   document.getElementById("scan-say").textContent = say;
-  document.getElementById("scan-clear").hidden = state !== "read";
 }
 
 /* What was chosen, however it was chosen -- and the read starts here.
@@ -2376,23 +2381,26 @@ async function scanStart(chosen) {
   scanPoll();
 }
 
-/* The strip once something has been read: how much is in the pile,
- * and that more can go on it. Counted from the server's answer rather
- * than from what was last dropped, because reads accumulate -- the
- * copier sends a tray at a time. */
+/* The strip once something has been read: what is in the pile, and
+ * nothing else.
+ *
+ * Counts, not a sentence. "148 pages read from 3 files -- drop more
+ * to add them" was eleven words for two numbers and an instruction
+ * the control already gives: the `+` says more can go on, and the
+ * strip is still a drop target. Counted from the server's answer
+ * rather than from what was last dropped, because reads accumulate. */
 function scanLoaded(status) {
   const pages = status.pages || 0;
   const files = (status.files || []).length;
   scanState("read",
-    `${pages} page${pages === 1 ? "" : "s"} read`
-    + (files > 1 ? ` from ${files} files` : "")
-    + " \u2014 drop more to add them",
+    `${pages} page${pages === 1 ? "" : "s"}`
+    + (files > 1 ? ` \u00b7 ${files} files` : ""),
     1);
   document.getElementById("scan-chosen").textContent = "";
 }
 
 function scanIdle() {
-  scanState("", "Drop the copier's PDFs here, or click to choose", 0);
+  scanState("", "Drop the copier's PDFs here", 0);
   document.getElementById("scan-chosen").textContent = "";
 }
 
@@ -2403,6 +2411,8 @@ async function scanClear() {
   if (!await api("/api/scan/clear", {})) return;
   document.getElementById("scan-result").hidden = true;
   show_scan_error("");
+  reviewRows = [];
+  refreshScansDirty();
   scanIdle();
 }
 
@@ -2415,9 +2425,10 @@ function scanPoll() {
       // No page count yet for the first moment -- the server has to
       // open every PDF before it knows how many pages there are --
       // so the bar sits at nought rather than jumping once it does.
+      // The bar says it is reading. The words only have to carry the
+      // two numbers it cannot show.
       scanState("reading",
-        out.total ? `Reading page ${out.done} of ${out.total}\u2026`
-                  : "Reading\u2026",
+        out.total ? `${out.done} / ${out.total}` : "Reading\u2026",
         out.total ? out.done / out.total : 0);
       scanPoll();
       return;
@@ -2753,8 +2764,14 @@ function unsavedReview() {
 
 function refreshScansDirty() {
   const n = unsavedReview().length;
+  // Up whenever there is a pile, because Start over lives here and a
+  // stack read by mistake is exactly the case where nothing is
+  // decided yet. Save is hidden rather than disabled in that case --
+  // same rule as the bar itself.
   saveBar("scans", n > 0,
-          n === 1 ? "1 result not saved" : `${n} results not saved`);
+          n === 1 ? "1 result not saved" : `${n} results not saved`,
+          n > 0 || reviewRows.length > 0);
+  document.getElementById("scans-save").hidden = !n;
 }
 
 async function saveScans() {

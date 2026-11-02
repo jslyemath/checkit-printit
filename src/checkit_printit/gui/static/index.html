@@ -760,17 +760,11 @@
       <label class="dropzone" id="scan-drop" for="scan-files">
         <span class="dropzone-plus" aria-hidden="true">+</span>
         <span class="dropzone-say" id="scan-say">Drop the copier's PDFs
-          here, or click to choose</span>
+          here</span>
         <span id="scan-chosen" class="dropzone-chosen"></span>
       </label>
       <input id="scan-files" type="file" accept="application/pdf" multiple
              hidden>
-      <!-- Outside the label on purpose: a button inside one is still
-           the label's click target, and this is the one thing in the
-           strip that must not open the file picker. -->
-      <button id="scan-clear" class="act chip" type="button" hidden
-              title="Forget what has been read and start a new pile."
-              >Start over</button>
     </div>
 
     <p id="scan-error" class="warnline" hidden></p>
@@ -833,13 +827,23 @@
       </details>
     </div>
 
-    <!-- Discard is a reload here, not a revert to a saved draft:
-         there is no draft. What is on screen is a reading of a stack,
-         and the way to get it back is to read the stack again. -->
+    <!-- Start over is this tab's Discard, and it is honest about what
+         it does: there is no saved draft to revert to, so it puts the
+         pile down and the way to get it back is to read the stack
+         again. It is here rather than beside the drop area because
+         that is where every other tab keeps the same pair, and
+         because a second button next to the drop area is the thing
+         that layout exists to get rid of.
+
+         So this bar comes up for two reasons, not one: something read
+         (Start over) or something decided (Save). Save is absent
+         rather than disabled when there is nothing to save, which is
+         the rule the other bars follow. -->
     <div class="savebar" id="scans-bar" hidden>
       <span class="dirty"></span>
       <span class="spacer"></span>
-      <button id="scans-save" class="primary">Save these results</button>
+      <button id="scans-save" class="primary" hidden>Save these results</button>
+      <button id="scan-clear">Start over</button>
     </div>
   </section>
 

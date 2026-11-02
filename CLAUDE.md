@@ -518,6 +518,21 @@ visual. The short version:
 * **Headings are as short as they can be.** Two or three words.
   `Paper name`, not `The name as it is printed on the paper`. The
   explanation, if one is needed at all, goes behind the `?`.
+* **A status line is not exempt, and nor is a progress line.** The
+  rule above keeps being read as being about paragraphs. It is not.
+  `148 pages read from 3 files -- drop more to add them` is eleven
+  words for two numbers and an instruction the control already gives;
+  `13 pages / 2 files` is the same line. `Reading page 61 of 148` next
+  to a bar that is 41% full is the bar said twice; `61 / 148` is not.
+  Numbers, a separator, and whatever the picture cannot carry.
+* **A control added beside another control is the smell.** Twice in
+  one day a button went in next to the scan drop area -- Import, then
+  Start over -- after a redesign whose whole point was that the drop
+  area is the only control there. Every tab already has a bar at the
+  bottom for the pair of buttons that commit or undo, and `saveBar`
+  takes a `shown` argument so a tab can raise it for a reason other
+  than being dirty. `test_the_drop_area_has_no_button_beside_it`
+  guards that one spot; the habit it is guarding against is general.
 
 ### A section on the Print tab is a `.annot`, not a `.panel`
 
@@ -1402,10 +1417,19 @@ Three things follow:
   that was just emptied.
 * The strip counts from `status()`, not from what was last dropped.
 
-There is no Import button. Choosing the files is the whole decision
-and nothing reaches the record until Save, so the drop area reads
-them straight away, folds to a one-line strip that is its own
-progress bar, and stays there for the next tray.
+There is no button beside the drop area at all. Choosing the files
+is the whole decision and nothing reaches the record until Save, so
+the drop area reads them straight away, folds to a one-line strip
+that is its own progress bar, and stays there for the next tray. The
+strip says `13 pages / 2 files` and no more than that.
+
+Start over is this tab's Discard and lives in `#scans-bar` with Save,
+where every other tab keeps that pair. The bar is therefore up for
+two reasons here -- something read, or something decided -- which is
+what the `shown` argument to `saveBar` is for. Save is hidden rather
+than disabled when there is nothing to save; the rail's unsaved dot
+follows `dirty`, not `shown`, so a pile nobody has decided on does
+not claim to be unsaved work.
 
 `--read`, the bar's fraction, is registered with `@property`. An
 unregistered custom property is a text substitution: a `width` that
