@@ -512,3 +512,28 @@ def test_a_counter_is_not_inside_a_heading(html):
     the same row. `<h3>Extras <span id=extras-count>` was the old way."""
     bad = re.findall(r"<h3[^>]*>[^<]*<span", html)
     assert not bad, f"{len(bad)} heading(s) still contain a counter span"
+
+
+def test_the_drop_area_has_no_button_beside_it(html):
+    """The whole point of the drop area is that it is the only control.
+
+    An Import button went in beside it, was taken out, and a Start over
+    button went straight back into the same slot -- twice in one day,
+    because "it is only a small button" is true of every one of them.
+    The pair that belongs beside a Save belongs in the save bar.
+    """
+    picker = re.search(r'<div class="scan-pick">(.*?)</div>', html, re.S)
+    assert picker, "the scan picker is gone"
+    loose = re.findall(r"<button[^>]*>", picker.group(1))
+    assert not loose, (
+        "a button is back beside the drop area; it belongs in "
+        "#scans-bar: " + "; ".join(loose))
+
+
+def test_start_over_is_in_the_scans_save_bar(html):
+    """Where every other tab keeps the same pair."""
+    bar = re.search(r'<div class="savebar" id="scans-bar".*?</div>',
+                    html, re.S)
+    assert bar, "the scans save bar is gone"
+    assert 'id="scan-clear"' in bar.group(0), (
+        "Start over is not in the scans save bar")
