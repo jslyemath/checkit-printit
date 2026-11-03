@@ -603,16 +603,20 @@ const GLYPH = {
      16px: side by side turned to mush, two bare heads lost the
      people, and a fat diagonal pair crowded its own arrow. This one
      shrinks the figures and spends what it saves on the arrowhead,
-     because the arrow is what carries the meaning. */
-  rematch: [{ o: [5.8, 5.2, 2.6] },
-            { d: "M1.8 11.8a4.0 4.0 0 0 1 8.0 0" },
+     because the arrow is what carries the meaning.
+
+     Everything then dropped 1.3 units, so the ink centres on 12 the
+     way `pass`, `fail` and `absent` all do. Before that it centred
+     on 13.3 and sat visibly low against the text beside it. */
+  rematch: [{ o: [5.8, 3.9, 2.6] },
+            { d: "M1.8 10.5a4.0 4.0 0 0 1 8.0 0" },
             // 17.4, not 18.4: the head has to clear its own
             // shoulders by the same margin the first one does. The
             // shoulder baseline is centre + 6.6 on both of them now,
             // and at 18.4 this head sat a unit inside the arc, which
             // is the squashing he saw.
-            { o: [18.2, 17.4, 2.6] },
-            { d: "M14.2 24.0a4.0 4.0 0 0 1 8.0 0" },
+            { o: [18.2, 16.1, 2.6] },
+            { d: "M14.2 22.7a4.0 4.0 0 0 1 8.0 0" },
             // The drop lands on 18.2, which is the second head's own
             // centre, so the arrow points at the person rather than
             // past their ear. The horizontal sits at 3.4 and the turn
@@ -622,8 +626,14 @@ const GLYPH = {
             // It stops at 9.6 rather than 11.4. Raising the head cost
             // the arrow the room it had, and an arrowhead landing on
             // a scalp is worse than a short arrow.
-            { d: "M12.6 3.4h3.6a2 2 0 0 1 2 2v4.2" },
-            { d: "M15.4 8.8l2.8 2.8 2.8-2.8" }],
+            { d: "M12.6 2.1h3.6a2 2 0 0 1 2 2v4.2" },
+            { d: "M15.4 7.5l2.8 2.8 2.8-2.8" }],
+  /* Two papers claiming one student for one skill. A triangle, which
+     is what a warning is everywhere, and the only glyph here that is
+     a sign rather than a picture of a thing. */
+  warn: [{ d: "M12 3.4L22.2 20.6H1.8Z" },
+         { d: "M12 10.2v4.2" },
+         { o: [12, 17.6, 0.95] }],
   collapse: "M14.5 7.5 9.5 12l5 4.5",
   // Points up while a group is open; CSS turns it when it closes.
   chev: "M6 14.5l6-6 6 6",
@@ -2915,7 +2925,7 @@ const MATCHED_COLUMNS = [
     cell: matchedNameCell },
   { key: "nameCrop", label: "Paper name", sortable: false, min: 150,
     cell: matchedNameCrop },
-  { key: "section", label: "Section", min: 74 },
+  { key: "section", label: "Sec", min: 62 },
   { key: "skill", label: "Skill", min: 64 },
   { key: "sure", label: "Conf", min: 80, cls: "mid",
     // Padded, because the compare is textual: "9" beats "10" unsorted.
@@ -2924,7 +2934,9 @@ const MATCHED_COLUMNS = [
     cell: r => sureDial(r) },
   { key: "_box", label: "Box", sortable: false, min: 120,
     cell: matchedBoxCell },
-  { key: "_mark", label: "Mark", min: 150, cls: "mid",
+  // Not `mid`: centring left a gap on the near side of the track
+  // that read as a missing control.
+  { key: "_mark", label: "Mark", min: 130,
     // By the order he would read them in, not alphabetically: passed,
     // query, not passed, did not sit it. Undecided rows group together
     // at one end rather than scattering among the decided ones.
@@ -3006,6 +3018,25 @@ function matchedNameCrop(row) {
 function matchedNameCell(row) {
   const wrap = document.createElement("span");
   wrap.className = "matched-name";
+
+  /* Two papers claiming this student for this skill -- which only a
+     re-match can make, by pointing one paper at somebody who already
+     has one. The mark goes at the left of the row rather than beside
+     the name it belongs to, so that when the table is sorted some
+     other way and the pair ends up far apart, both ends still carry
+     the flag. It is computed from the rows on every draw, so it
+     follows a row through any sort and disappears by itself the
+     moment the clash is resolved. */
+  if (row.clash) {
+    const flag = document.createElement("span");
+    flag.className = "clashflag";
+    flag.appendChild(icon("warn"));
+    flag.title = `Another paper is also matched to ${row.name} for `
+               + `${row.skill}. One of the two is somebody else's.`;
+    flag.setAttribute("role", "img");
+    flag.setAttribute("aria-label", flag.title);
+    wrap.appendChild(flag);
+  }
 
   const name = document.createElement("button");
   name.type = "button";
@@ -3169,6 +3200,21 @@ function rematchChoices(row, typed) {
 //: the papers the job printed.
 let rematchPool = {};
 
+/* Which rows claim a student for a skill somebody else already
+ * claims. Recomputed rather than remembered: a flag stored on the row
+ * would outlive the clash that earned it. */
+function markClashes(rows) {
+  const seen = {};
+  for (const row of rows) {
+    if (!row.sid) continue;
+    const key = `${row.sid}\u0000${row.skill}`;
+    seen[key] = (seen[key] || 0) + 1;
+  }
+  for (const row of rows) {
+    row.clash = Boolean(row.sid && seen[`${row.sid}\u0000${row.skill}`] > 1);
+  }
+}
+
 function buildRematchPool(rows) {
   const pool = {};
   for (const row of rows) {
@@ -3246,6 +3292,7 @@ function renderMatched() {
   const table = document.getElementById("scan-matched");
   if (!table) return;
   buildRematchPool(reviewRows);
+  markClashes(reviewRows);
   matchedSort.header(table.querySelector("thead tr"));
   const body = table.querySelector("tbody");
   body.textContent = "";
