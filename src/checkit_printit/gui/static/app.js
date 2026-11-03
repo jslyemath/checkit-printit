@@ -50,6 +50,190 @@ const VIEWS = [
 // into two editable columns would put a guessed surname in the file beside
 // the name that actually prints, and the two could then disagree. The server
 // derives the keys; nothing is stored. See `_sort_names`.
+/* ---- sorting a table ---------------------------------------------------
+ *
+ * One `makeSorter` per table. It owns that table's stack of sort keys,
+ * draws its header, and orders its rows; it knows nothing about what
+ * the rows are.
+ *
+ * This was the Roster's, welded to the `COLUMNS` global and calling
+ * `renderRoster()` by name from four places. Scans wants the same
+ * behaviour over a different shape of row, and the way to get that is
+ * not a second copy: two sort implementations drift, and the one
+ * nobody is looking at is the one that drifts.
+ *
+ * A column is a plain object. What this reads off it:
+ *
+ *   key            its field, and its sort key unless `sortKeys` says more
+ *   label          the heading
+ *   sortable       `false` for a column with no sort button
+ *   sortKeys       `[[key, note], ...]` for a column with more than one
+ *                  order -- Name cycles surname and given name
+ *   value(row)     the text to sort on, when it is not `row[key]`
+ *   pin            "left" or "right", added to the `th` as a class
+ *   cls            any other class for the `th`
+ *   resetHere      put the "back to the default order" button in this `th`
+ *   headExtra(th)  a control this column wants in its own heading
+ */
+
+// Index 0 is primary. Four is plenty; beyond that nobody can predict
+// the result, and an unbounded stack would quietly keep a key you set
+// minutes ago and have forgotten.
+const SORT_DEPTH = 4;
+
+function makeSorter({ columns, defaults, redraw, resetTitle }) {
+  // Sorts stack, the way a spreadsheet's do: the most recent click is
+  // the primary key and the ones before it survive as tiebreakers.
+  // Sorting by surname and then by section gives 820 A-Z, then 830 A-Z.
+  let sorts = defaults.map(s => ({ ...s }));
+
+  function cycleOf(column) {
+    /* Every (key, direction) this heading steps through, in order. */
+    const keys = column.sortKeys || [[column.key, null]];
+    const out = [];
+    for (const [key, note] of keys) out.push([key, false, note], [key, true, note]);
+    return out;
+  }
+
+  function columnOwning(key) {
+    return columns.find(c => c.key === key)
+      || columns.find(c => (c.sortKeys || []).some(([k]) => k === key));
+  }
+
+  function rankOf(key) {
+    const at = sorts.findIndex(s => s.key === key);
+    return at < 0 ? null : at + 1;
+  }
+
+  function isDefault() {
+    return sorts.length === defaults.length
+      && sorts.every((s, i) => s.key === defaults[i].key
+                            && s.desc === defaults[i].desc);
+  }
+
+  function by(column) {
+    const cycle = cycleOf(column);
+    const primary = sorts[0];
+    const isPrimary = primary && cycle.some(([k]) => k === primary.key);
+
+    let key, desc;
+    if (isPrimary) {
+      // Already the primary key, so step this heading's own cycle:
+      // ascending, descending, and for Name on to the given-name order.
+      const at = cycle.findIndex(([k, d]) => k === primary.key && d === primary.desc);
+      [key, desc] = cycle[(at + 1) % cycle.length];
+    } else {
+      // A new primary. Everything already in the stack drops one place
+      // and keeps working as a tiebreaker.
+      [key, desc] = cycle[0];
+    }
+
+    // One entry per key: re-sorting by section must not leave an older
+    // section entry further down, where it would do nothing but take
+    // up a slot.
+    const owned = new Set(cycle.map(([k]) => k));
+    sorts = [{ key, desc },
+             ...sorts.filter(s => !owned.has(s.key))].slice(0, SORT_DEPTH);
+    redraw();
+  }
+
+  function clear() {
+    sorts = defaults.map(s => ({ ...s }));
+    redraw();
+  }
+
+  function valueOf(key, column, row) {
+    // `key` may be a derived one the column offers (sort_last,
+    // sort_first) rather than the field the column displays.
+    if (key !== column.key && key in row) return String(row[key]).toLowerCase();
+    const raw = column.value ? column.value(row) : (row[column.key] || "");
+    return String(raw).toLowerCase();
+  }
+
+  function apply(rows) {
+    if (!sorts.length) return rows;
+    const keys = sorts
+      .map(s => ({ ...s, column: columnOwning(s.key) }))
+      .filter(s => s.column);
+    if (!keys.length) return rows;
+    return [...rows].sort((a, b) => {
+      for (const { key, desc, column } of keys) {
+        const cmp = valueOf(key, column, a).localeCompare(
+          valueOf(key, column, b), undefined, { numeric: true });
+        if (cmp) return desc ? -cmp : cmp;
+      }
+      return 0;
+    });
+  }
+
+  function header(row) {
+    row.textContent = "";
+    for (const column of columns) {
+      const th = document.createElement("th");
+      if (column.pin) th.classList.add("pin" + column.pin);
+      if (column.cls) th.classList.add(column.cls);
+
+      if (column.resetHere) {
+        // The reset lives over the column it belongs beside rather
+        // than in a toolbar next to controls it has nothing to do
+        // with. Right-aligned so it does not read as a heading for
+        // whatever is beneath it.
+        th.classList.add("actions-head");
+        const reset = document.createElement("button");
+        // `tiny`, matching the name-format switch in the Name heading:
+        // two controls in the same header row, so the same size.
+        reset.className = "iconbtn tiny undo";
+        reset.id = "reset-sort";
+        reset.appendChild(icon("reset"));
+        reset.title = resetTitle || "Back to the default order.";
+        reset.setAttribute("aria-label", reset.title);
+        reset.hidden = isDefault();
+        reset.onclick = clear;
+        th.appendChild(reset);
+      }
+      if (column.headExtra) column.headExtra(th);
+
+      if (column.sortable === false) {
+        row.appendChild(th);
+        continue;
+      }
+
+      const cycle = cycleOf(column);
+      const entry = sorts.find(s => cycle.some(([k]) => k === s.key));
+      const note = entry && (cycle.find(([k]) => k === entry.key) || [])[2];
+      const rank = entry ? rankOf(entry.key) : null;
+
+      const b = document.createElement("button");
+      b.className = "sort";
+      // A column with two orders has to say which one it is on: "Name"
+      // alone would not tell you whether it sorted by surname or given
+      // name. The rank appears only when more than one key is in play,
+      // because a lone "1" would be noise.
+      //
+      // The note names the key rather than being bolted on with a dot:
+      // "LAST NAME" says the same thing as "NAME - LAST" in the same
+      // room and without the separator this codebase keeps reaching for.
+      b.textContent = (note ? note + " " + column.label.toLowerCase()
+                            : column.label)
+        + (entry ? (entry.desc ? " ↓" : " ↑") : "")
+        + (entry && sorts.length > 1 ? " " + rank : "");
+      if (entry) b.classList.add("sorted");
+      if (rank === 1) b.classList.add("primary-sort");
+      // Per state, not one string for all of them: the primary column
+      // was being told it was a tiebreaker.
+      b.title = (rank === 1 ? "Primary sort column."
+               : rank ? `Tier ${rank} tiebreaker.`
+               : "Sort by this column.")
+        + (column.sortKeys ? " Cycles last and first name, each way." : "");
+      b.onclick = () => by(column);
+      th.appendChild(b);
+      row.appendChild(th);
+    }
+  }
+
+  return { get keys() { return sorts; }, isDefault, apply, header, clear, by };
+}
+
 /* `rank` is what survives a squeeze, lowest dropped first. It is not the
  * reading order and it is not width: it is "if only one column could be
  * on screen, which".
@@ -70,7 +254,28 @@ const COLUMNS = [
     // Measured as it is shown, or the column is sized for a string the
     // table is not displaying.
     value: s => displayName(s),
-    sortKeys: [["sort_last", "last"], ["sort_first", "first"]] },
+    sortKeys: [["sort_last", "last"], ["sort_first", "first"]],
+    /* The name format lives in the Name heading, not in a box above
+       the table. It is a property of this column, so it belongs on it
+       -- and a segmented pair floating in a toolbar was, in the
+       instructor's words, butt ugly.
+
+       Seating's "two ways round" arrows, because that is exactly what
+       it does and the glyph already means that elsewhere. It is also
+       why nothing else in a name column may wear `swapby`: there, it
+       means the name order and nothing else. */
+    headExtra: (th) => {
+      const swap = document.createElement("button");
+      swap.className = "iconbtn tiny namefmt";
+      swap.type = "button";
+      swap.appendChild(icon("swapby"));
+      swap.title = filedNames()
+        ? "Showing surname first. Switch to First Last."
+        : "Showing given name first. Switch to Last, First.";
+      swap.setAttribute("aria-label", swap.title);
+      swap.onclick = (e) => { e.stopPropagation(); setFiledNames(!filedNames()); };
+      th.appendChild(swap);
+    } },
   // Not "Nickname": that invites "Matt", and this replaces the whole
   // printed name. Same widths as Name, because it holds the same thing
   // -- when it holds anything; its floor is the heading, because on a
@@ -89,7 +294,7 @@ const COLUMNS = [
   // Wide enough for a 30px chip plus the cell's own 8px either side,
   // or the button is clipped by `td { overflow: hidden }`.
   { key: "_actions",  label: "",         sortable: false, min: 54, max: 54,
-    floor: 54, rank: 2, pin: "right" },
+    floor: 54, rank: 2, pin: "right", resetHere: true },
 ];
 
 let students = [];
@@ -111,23 +316,19 @@ function isDropped(student) {
 }
 
 function pendingCount() { return edits.size + pendingDrops.size; }
-// Sorts stack, the way a spreadsheet's do: the most recent click is the
-// primary key and the ones before it survive as tiebreakers. Sorting by
-// surname and then by section gives 820 A-Z, then 830 A-Z.
-//
-// Index 0 is primary. Four is plenty; beyond that nobody can predict the
-// result, and an unbounded stack would quietly keep a key you set minutes
-// ago and have forgotten.
-const SORT_DEPTH = 4;
-
-// What the table opens on: grouped by section, alphabetical by surname
-// within each. That is the order an instructor reads a roster in.
+// What the roster opens on: grouped by section, alphabetical by
+// surname within each. That is the order an instructor reads one in.
 const DEFAULT_SORT = [
   { key: "section", desc: false },
   { key: "sort_last", desc: false },
 ];
 
-let sorts = DEFAULT_SORT.map(s => ({ ...s }));
+const rosterSort = makeSorter({
+  columns: COLUMNS,
+  defaults: DEFAULT_SORT,
+  redraw: () => renderRoster(),
+  resetTitle: "Back to section, then surname.",
+});
 
 // ------------------------------------------------------------------ api --
 
@@ -363,6 +564,24 @@ const GLYPH = {
            { r: [4.2, 11.2, 15.6, 2.9, 1.5] },
            { d: "M7 19.8v-5.7M17 19.8v-5.7" },
            { d: "M3.4 20.6L20.6 3.4" }],
+  /* Re-matching a paper to a different student: one person, and a
+     caret for the list that opens.
+
+     Deliberately not `swapby`. The Last name heading already wears
+     that for the name-order switch, so the same glyph in a cell of
+     that column would read as the same action -- he spotted that
+     before it was built.
+
+     Picked the way `drop` and `restore` were: four drawn and looked
+     at side by side at 48px and 18px. A person with a circular arrow
+     and two people with an arrow between them both turned to mush at
+     18px -- too many strokes in too little room. A tag stayed legible
+     but says "re-label", and the thing being chosen is a person. The
+     caret doubles as a promise about what the click does, which is
+     open a list. */
+  pickwho: [{ o: [10, 8.2, 3.3] },
+            { d: "M3.6 20c0-3.5 2.9-5.6 6.4-5.6 1.3 0 2.5.3 3.5.8" },
+            { d: "M15.4 16.4l2.9 3 2.9-3" }],
   collapse: "M14.5 7.5 9.5 12l5 4.5",
   // Points up while a group is open; CSS turns it when it closes.
   chev: "M6 14.5l6-6 6 6",
@@ -1185,61 +1404,11 @@ function cellInput(student, field, column) {
   return input;
 }
 
-function sortValue(key, column, student) {
-  // `key` may be a derived one the column offers (sort_last, sort_first)
-  // rather than the field the column displays.
-  if (key !== column.key && key in student) return String(student[key]).toLowerCase();
-  const raw = column.value ? column.value(student) : (student[column.key] || "");
-  return String(raw).toLowerCase();
-}
 
-function cycleOf(column) {
-  /* Every (key, direction) this heading steps through, in order. */
-  const keys = column.sortKeys || [[column.key, null]];
-  const out = [];
-  for (const [key, note] of keys) out.push([key, false, note], [key, true, note]);
-  return out;
-}
 
-function columnOwning(key) {
-  return COLUMNS.find(c => c.key === key)
-    || COLUMNS.find(c => (c.sortKeys || []).some(([k]) => k === key));
-}
 
-function rankOf(key) {
-  const at = sorts.findIndex(s => s.key === key);
-  return at < 0 ? null : at + 1;
-}
 
-function sortBy(column) {
-  const cycle = cycleOf(column);
-  const primary = sorts[0];
-  const isPrimary = primary && cycle.some(([k]) => k === primary.key);
 
-  let key, desc;
-  if (isPrimary) {
-    // Already the primary key, so step this heading's own cycle: ascending,
-    // descending, and for Name on to the given-name order.
-    const at = cycle.findIndex(([k, d]) => k === primary.key && d === primary.desc);
-    [key, desc] = cycle[(at + 1) % cycle.length];
-  } else {
-    // A new primary. Everything already in the stack drops one place and
-    // keeps working as a tiebreaker.
-    [key, desc] = cycle[0];
-  }
-
-  // One entry per key: re-sorting by section must not leave an older section
-  // entry further down, where it would do nothing but take up a slot.
-  const owned = new Set(cycle.map(([k]) => k));
-  sorts = [{ key, desc },
-           ...sorts.filter(s => !owned.has(s.key))].slice(0, SORT_DEPTH);
-  renderRoster();
-}
-
-function clearSort() {
-  sorts = DEFAULT_SORT.map(s => ({ ...s }));
-  renderRoster();
-}
 
 // Text measurement, for sizing columns to what is actually in them.
 let ruler = null;
@@ -1359,88 +1528,7 @@ function sizeColumns(rows) {
   table.style.minWidth = total + "px";
 }
 
-function renderHeader() {
-  const row = document.querySelector("#roster thead tr");
-  row.textContent = "";
-  for (const column of COLUMNS) {
-    const th = document.createElement("th");
-    if (column.sortable === false) {
-      // The one unsortable heading is empty, so the reset lives there --
-      // over the column it belongs beside, rather than in the toolbar where
-      // it sat next to controls it has nothing to do with. Right-aligned so
-      // it does not read as a heading for the drop links beneath it.
-      th.className = "actions-head pinright";
-      const reset = document.createElement("button");
-      // `tiny`, matching the name-format switch in the Name heading:
-      // two controls in the same header row, so they are the same size.
-      reset.className = "iconbtn tiny undo";
-      reset.id = "reset-sort";
-      reset.appendChild(icon("reset"));
-      reset.title = "Back to section, then surname.";
-      reset.setAttribute("aria-label", reset.title);
-      reset.hidden = isDefaultSort();
-      reset.onclick = clearSort;
-      th.appendChild(reset);
-      row.appendChild(th);
-      continue;
-    }
-    const cycle = cycleOf(column);
-    const entry = sorts.find(s => cycle.some(([k]) => k === s.key));
-    const note = entry && (cycle.find(([k]) => k === entry.key) || [])[2];
-    const rank = entry ? rankOf(entry.key) : null;
 
-    if (column.pin) th.classList.add("pin" + column.pin);
-    /* The name format lives in the Name heading, not in a box above the
-       table. It is a property of this column, so it belongs on it --
-       and a segmented pair floating in a toolbar was, in the
-       instructor's words, butt ugly.
-
-       Seating's "two ways round" arrows, because that is exactly what
-       it does and the glyph already means that elsewhere. */
-    if (column.key === "name") {
-      const swap = document.createElement("button");
-      swap.className = "iconbtn tiny namefmt";
-      swap.type = "button";
-      swap.appendChild(icon("swapby"));
-      swap.title = filedNames()
-        ? "Showing surname first. Switch to First Last."
-        : "Showing given name first. Switch to Last, First.";
-      swap.setAttribute("aria-label", swap.title);
-      swap.onclick = (e) => { e.stopPropagation(); setFiledNames(!filedNames()); };
-      th.appendChild(swap);
-    }
-    const b = document.createElement("button");
-    b.className = "sort";
-    // A column with two orders has to say which one it is on: "Name" alone
-    // would not tell you whether it sorted by surname or given name. The
-    // rank appears only when more than one key is in play, because a lone
-    // "1" would be noise.
-    // The note names the key rather than being bolted on with a dot:
-    // "LAST NAME" says the same thing as "NAME · LAST" in the same room
-    // and without the separator this codebase keeps reaching for.
-    b.textContent = (note ? note + " " + column.label.toLowerCase()
-                          : column.label)
-      + (entry ? (entry.desc ? " ↓" : " ↑") : "")
-      + (entry && sorts.length > 1 ? " " + rank : "");
-    if (entry) b.classList.add("sorted");
-    if (rank === 1) b.classList.add("primary-sort");
-    // Per state, not one string for all of them: the primary column was
-    // being told it was a tiebreaker.
-    b.title = (rank === 1 ? "Primary sort column."
-             : rank ? `Tier ${rank} tiebreaker.`
-             : "Sort by this column.")
-      + (column.sortKeys ? " Cycles last and first name, each way." : "");
-    b.onclick = () => sortBy(column);
-    th.appendChild(b);
-    row.appendChild(th);
-  }
-}
-
-function isDefaultSort() {
-  return sorts.length === DEFAULT_SORT.length
-    && sorts.every((s, i) => s.key === DEFAULT_SORT[i].key
-                          && s.desc === DEFAULT_SORT[i].desc);
-}
 
 /* The Roster with nothing in it, or nothing left after a filter.
  *
@@ -1505,21 +1593,7 @@ function renderRosterEmpty(hasRows) {
 /* Sorting only reorders what is displayed. Edits are keyed to each
    student's own index, not to a row position, so they survive it.
    Applied to each group separately -- see `renderRoster`. */
-function sortRoster(rows) {
-  if (!sorts.length) return rows;
-  const keys = sorts
-    .map(s => ({ ...s, column: columnOwning(s.key) }))
-    .filter(s => s.column);
-  if (!keys.length) return rows;
-  return [...rows].sort((a, b) => {
-    for (const { key, desc, column } of keys) {
-      const cmp = sortValue(key, column, a).localeCompare(
-        sortValue(key, column, b), undefined, { numeric: true });
-      if (cmp) return desc ? -cmp : cmp;
-    }
-    return 0;
-  });
-}
+
 
 /* Which bands are shut. Dropped starts shut, because it is a list of
    people who are not in the class any more and it should not be the
@@ -1592,7 +1666,7 @@ function sectionBand(run) {
 }
 
 function renderRoster() {
-  renderHeader();
+  rosterSort.header(document.querySelector("#roster thead tr"));
   const body = document.querySelector("#roster tbody");
   body.textContent = "";
 
@@ -1602,8 +1676,8 @@ function renderRoster() {
      the bottom, sorted inside itself by the same keys. That replaced
      the "show dropped students" tick, which could only hide them or
      scatter them through everyone else. */
-  const active = sortRoster(students.filter(s => !isDropped(s)));
-  const dropped = sortRoster(students.filter(s => isDropped(s)));
+  const active = rosterSort.apply(students.filter(s => !isDropped(s)));
+  const dropped = rosterSort.apply(students.filter(s => isDropped(s)));
 
   const runs = sectionRuns(active) || [];
   let runAt = 0;
