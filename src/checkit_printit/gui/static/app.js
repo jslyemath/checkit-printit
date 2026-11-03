@@ -2839,16 +2839,6 @@ function setOutcome(id, outcome) {
 function countReview() {
   const undecided = reviewRows.filter(r => !r.outcome).length;
   const done = reviewRows.length - undecided;
-  /* How far through the marking, as a line. It was "86 of 86 decided"
-     -- a sentence you have to read to learn what a bar says at a
-     glance -- and at 86 of 86 it was saying nothing at all, which is
-     why the bar is absent once everything is settled. */
-  const bar = document.getElementById("review-done");
-  const settled = reviewRows.filter(r => r.outcome).length;
-  const part = reviewRows.length ? settled / reviewRows.length : 0;
-  bar.hidden = !reviewRows.length || settled === reviewRows.length;
-  bar.style.setProperty("--done", String(part));
-  bar.title = `${settled} of ${reviewRows.length} decided`;
   const accept = document.getElementById("review-accept");
   if (accept) accept.disabled = !undecided;
   refreshScansDirty();
@@ -2868,21 +2858,50 @@ function unsavedReview() {
   return reviewRows.filter(r => r.outcome && r.outcome !== r.saved);
 }
 
+//: Papers nobody has answered yet. Nothing can be written while any
+//: of these exist: a run recorded with half its marks missing reads
+//: afterwards as a run where those students did not sit it, and
+//: there is nothing in the record to say otherwise.
+function undecidedReview() {
+  return reviewRows.filter(r => !r.outcome);
+}
+
 function refreshScansDirty() {
   const n = unsavedReview().length;
-  // Up whenever there is a pile, because Start over lives here and a
-  // stack read by mistake is exactly the case where nothing is
-  // decided yet. Save is hidden rather than disabled in that case --
-  // same rule as the bar itself.
-  saveBar("scans", n > 0,
-          n === 1 ? "1 result not saved" : `${n} results not saved`,
-          n > 0 || reviewRows.length > 0);
-  document.getElementById("scans-save").hidden = !n;
+  const left = undecidedReview().length;
+
+  /* Three states, and the bar says which.
+   *
+   * Save is **absent** rather than disabled while anything is
+   * unanswered -- the rule this app is built on -- but absent with
+   * nothing said is a control that vanished for no reason, so the
+   * bar carries the count instead. The empty tracks are outlined in
+   * the same yellow, which is where to go and do something about it.
+   *
+   * Up whenever there is a pile at all, because Start over lives
+   * here too and a stack read by mistake is exactly the case where
+   * nothing has been decided.
+   */
+  const says = left
+    ? (left === 1 ? "1 unmarked" : `${left} unmarked`)
+    : (n === 1 ? "1 result not saved" : `${n} results not saved`);
+  saveBar("scans", n > 0 || left > 0, says,
+          n > 0 || left > 0 || reviewRows.length > 0);
+  document.getElementById("scans-save").hidden = !n || left > 0;
 }
 
 async function saveScans() {
   const rows = unsavedReview();
   if (!rows.length) return;
+  // The button is hidden while anything is unanswered, so this is
+  // belt and braces -- but the cost of being wrong is a run recorded
+  // with marks missing, and that is not visible afterwards.
+  const left = undecidedReview().length;
+  if (left) {
+    toast(left === 1 ? "one paper is still unmarked"
+                     : `${left} papers are still unmarked`, true);
+    return;
+  }
   let out;
   try {
     out = await api("/api/scan/save", {

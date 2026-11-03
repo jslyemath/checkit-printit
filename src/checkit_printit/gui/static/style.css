@@ -1920,36 +1920,6 @@ body.hasbar.tall main { padding-bottom: 68px; }
    a no-op rather than a mystery. */
 .rematch-pick.current { color: var(--accent); }
 
-/* How far through the marking. No words: the only question it
-   answers is "how much is left", which is a length.
-
-   `--done` is registered so the fill can be transitioned -- an
-   unregistered custom property is a text substitution, and a width
-   reading one through `calc()` does not reliably follow it. Same
-   reason the drop area's progress bar registers `--read`. */
-@property --done {
-  syntax: "<number>";
-  inherits: true;
-  initial-value: 0;
-}
-
-.donebar {
-  display: inline-block;
-  width: 110px;
-  height: 4px;
-  border-radius: var(--r-pill);
-  background: var(--surface-3);
-  overflow: hidden;
-  align-self: center;
-}
-.donebar-fill {
-  display: block;
-  height: 100%;
-  width: calc(var(--done, 0) * 100%);
-  background: var(--accent);
-  transition: --done 220ms ease;
-}
-
 /* ---- the matched table -----------------------------------------------
    One row per paper, one row height. Everything in a row is one line
    tall so the eye can run down a column: the crops are sized to the
@@ -2387,11 +2357,18 @@ table.matched .review-pick.on:hover { background: var(--accent); }
 /* A row nobody has decided yet is marked on its edge rather than
    coloured all over: the thing being looked at is the crop, and a
    tinted row would fight it. */
-/* Nobody has said yes or no to this paper yet. A bar down the left
-   edge, which on a table row means the first cell, because a box
-   shadow inset on a `<tr>` does not paint. */
-.matched-row.undecided td:first-child {
-  box-shadow: inset 3px 0 0 var(--warn);
+/* Nobody has said yes or no to this paper yet.
+
+   On the track itself, not as a stripe down the row. A stripe was
+   the same yellow as the clash triangle sitting a few pixels from
+   it, saying something unrelated -- and it was at the far end of the
+   row from the control that answers it. The app already says "this
+   field wants something" by outlining and tinting the field: see
+   `td input.invalid`, whose comment makes the same promise this
+   does, that nothing is saved until it is dealt with. */
+.matched-row.undecided .review-picks {
+  border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
 }
 
 .review-head {
