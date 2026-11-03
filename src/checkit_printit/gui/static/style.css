@@ -1854,29 +1854,66 @@ body.hasbar.tall main { padding-bottom: 68px; }
    not read. There is something on these, but no code I could find..."
    -- eleven lines of explanation above the table that shows the same
    pages. The explanations moved to the `?`; the counts stayed. */
-.scan-job + .scan-job { margin-top: var(--s3); }
+.scan-job {
+  margin-bottom: var(--s3);
+  padding: var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
 
 .jobhead {
   display: flex;
   align-items: baseline;
   gap: var(--s2);
+  margin-bottom: var(--s3);
 }
 .jobname {
   margin: 0;
-  font-size: var(--t-base);
+  font-size: var(--t-lg);
   font-weight: 600;
 }
 .jobdate {
   color: var(--muted);
-  font-size: var(--t-sm);
+  font-size: var(--t-base);
   font-variant-numeric: tabular-nums;
 }
-.jobfacts {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--t-sm);
+
+/* Settled on the left, work on the right, one line. */
+.jobline {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
   font-variant-numeric: tabular-nums;
 }
+.jobstat { font-size: var(--t-lg); }
+.jobsoft { color: var(--muted); }
+
+/* A count that is a piece of work: filled rather than outlined,
+   because the outlined `.chip` is how the app says "a small fact"
+   and this is the opposite of one. The glyph is the mark he would
+   put on the paper himself. */
+.jobchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s3);
+  border-radius: var(--r-pill);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: var(--t-base);
+  white-space: nowrap;
+}
+.jobchip .glyph {
+  flex: 0 0 auto;
+  /* `.glyph` works its stroke width out from this, so a width without
+     it draws thinner than everything beside it. */
+  --glyph-size: 18;
+  width: 18px;
+  height: 18px;
+}
+.jobchip + .jobchip { margin-left: calc(var(--s1) * -1); }
 
 #scan-missing h3, #scan-dupes h3, #scan-sheets-head {
   margin: var(--s4) 0 var(--s1);

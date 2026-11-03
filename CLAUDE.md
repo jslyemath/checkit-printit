@@ -1526,6 +1526,21 @@ When a figure dies at a line that has not changed, suspect a package
 that has. Bisect by loading them one at a time with an assignment in
 between; reading thirty package sources is slower.
 
+## An agreed design is written down before it is built
+
+`PRINT_TOOL_DESIGN.md` section 16 holds what the Scans tab shows: the
+job card, the chips and their glyphs, the wording, and both tables
+still to build. It is there because the Scans header was once agreed
+from a mockup, built a day later from a one-line summary of that
+mockup, and came out wrong in four ways -- no glyphs, chips in the
+page header rather than on the job, no card, and wordier than the
+thing it replaced.
+
+A long conversation is not a place to keep a decision. When a mockup
+is agreed, write it into the plan document first. And when all that is
+to hand is a one-line description of a picture, say so instead of
+building from it.
+
 ## One gutter, and no tag-name rules
 
 `--gutter` is the distance from the rail to everything in a view -- the
