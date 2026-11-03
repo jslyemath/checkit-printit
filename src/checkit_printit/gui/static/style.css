@@ -1879,16 +1879,25 @@ body.hasbar.tall main { padding-bottom: 68px; }
   font-variant-numeric: tabular-nums;
 }
 
-/* Settled on the left, work on the right, one line. */
+/* Settled on the left, work on the right, one line -- and one line
+   is the whole point, so nothing wraps and nothing shrinks. When the
+   words stop fitting, `fitChips()` puts `.tight` on the container and
+   every chip on the tab drops to glyph and number together. */
 .jobline {
   display: flex;
   align-items: center;
   gap: var(--s3);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
   font-variant-numeric: tabular-nums;
 }
+.jobline > * { flex: 0 0 auto; }
+.jobline .spacer { flex: 1 1 auto; }
 .jobstat { font-size: var(--t-lg); }
 .jobsoft { color: var(--muted); }
+
+#scan-jobs.tight .jobword { display: none; }
+#scan-jobs.tight .jobchip { padding-inline: var(--s2); }
 
 /* A count that is a piece of work: filled rather than outlined,
    because the outlined `.chip` is how the app says "a small fact"
@@ -1898,6 +1907,10 @@ body.hasbar.tall main { padding-bottom: 68px; }
   display: inline-flex;
   align-items: center;
   gap: var(--s2);
+  /* The text's own box, not a line box with half a line of air above
+     and below it: centring a glyph against that air puts the glyph
+     visibly below the words. */
+  line-height: 1;
   padding: var(--s1) var(--s3);
   border-radius: var(--r-pill);
   background: var(--warn-soft);
@@ -1905,6 +1918,8 @@ body.hasbar.tall main { padding-bottom: 68px; }
   font-size: var(--t-base);
   white-space: nowrap;
 }
+/* The number rides with the glyph; only the word is spaced off. */
+.jobchip .jobnum { margin-right: calc(var(--s2) * -1 + 6px); }
 .jobchip .glyph {
   flex: 0 0 auto;
   /* `.glyph` works its stroke width out from this, so a width without

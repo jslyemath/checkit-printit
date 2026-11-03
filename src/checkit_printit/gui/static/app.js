@@ -352,8 +352,13 @@ const GLYPH = {
      everywhere else, with the obvious thing done to it. */
   pass: "M5 12.6l4.6 4.6L19 6.8",
   fail: "M6.5 6.5l11 11M17.5 6.5l-11 11",
-  query: [{ d: "M8.8 9a3.2 3.2 0 1 1 3.2 3.2V14.4" },
-          { o: [12, 18.2, 1.05] }],
+  /* Shifted up half a unit so its ink centres on 12, which is where
+     `pass`, `fail` and `absent` all centre. It used to centre on
+     12.53 -- the only one of the four that did not -- and a light
+     glyph sitting low is far more obvious than a heavy one, so it
+     read as dropped wherever it stood beside text. */
+  query: [{ d: "M8.8 8.5a3.2 3.2 0 1 1 3.2 3.2V13.9" },
+          { o: [12, 17.7, 1.05] }],
   absent: [{ r: [7.5, 3.5, 9, 6.4, 1.9] },
            { r: [4.2, 11.2, 15.6, 2.9, 1.5] },
            { d: "M7 19.8v-5.7M17 19.8v-5.7" },
@@ -2283,6 +2288,7 @@ function scanSetup() {
   const input = document.getElementById("scan-files");
   const drop = document.getElementById("scan-drop");
 
+  watchChipFit();
   input.addEventListener("change", () => scanChose(input.files));
   document.getElementById("scan-clear").addEventListener("click", scanClear);
 
@@ -2952,13 +2958,55 @@ function renderReview(data) {
  * back, the question mark for one that could not be placed. Same two
  * glyphs the review uses for `absent` and `queried`, so the chip and
  * the row he ends up on are visibly the same claim. */
+/* The chips shed their words when there is no room -- all of them at
+ * once, across every card, so two cards side by side never disagree
+ * about how a count is written.
+ *
+ * They do not wrap. A chip pushed onto a second line leaves the card
+ * two rows tall with one word on the end of it, which is the thing
+ * this layout exists to avoid.
+ *
+ * Always measured in the roomy state: `.tight` comes off, the lines
+ * are asked whether they overflow, and it goes back on only if one
+ * does. Measuring in whichever state happens to be current is how a
+ * fitter ends up flapping between two answers -- collapse makes room,
+ * room un-collapses, repeat. Reading the same question every time
+ * gives the same answer every time.
+ */
+function fitChips() {
+  const jobs = document.getElementById("scan-jobs");
+  if (!jobs) return;
+  jobs.classList.remove("tight");
+  const over = [...jobs.querySelectorAll(".jobline")]
+    .some(line => line.scrollWidth > line.clientWidth + 1);
+  jobs.classList.toggle("tight", over);
+}
+
+/* One observer for the life of the page. The class it toggles changes
+ * the chips' width and not the container's, so it cannot wake itself. */
+let chipFitter = null;
+
+function watchChipFit() {
+  if (chipFitter) return;
+  const jobs = document.getElementById("scan-jobs");
+  if (!jobs || typeof ResizeObserver === "undefined") return;
+  chipFitter = new ResizeObserver(fitChips);
+  chipFitter.observe(jobs);
+}
+
 function scanChip(n, what, glyph) {
   const chip = document.createElement("span");
   chip.className = "jobchip";
   chip.appendChild(icon(glyph));
-  const text = document.createElement("span");
-  text.textContent = `${n} ${what}`;
-  chip.appendChild(text);
+  // Two spans, because the word goes and the number stays. A glyph
+  // alone says which problem; it does not say how much of it.
+  const count = document.createElement("span");
+  count.className = "jobnum";
+  count.textContent = String(n);
+  const word = document.createElement("span");
+  word.className = "jobword";
+  word.textContent = what;
+  chip.append(count, word);
   return chip;
 }
 
@@ -3044,6 +3092,8 @@ function renderScan(data) {
                              pile.unmatched
                                ? [scanChip(pile.unmatched, "unmatched",
                                            "query")] : []));
+
+  fitChips();
 
   const dupes = document.getElementById("scan-dupes");
   dupes.hidden = !data.duplicates.length;
