@@ -18,3 +18,7 @@ out/
 # one behind. One was committed into src/ and shadowed a module for
 # several days.
 *.mut
+
+# A local preview config: it names an absolute venv path and a course
+# that only exists on one machine.
+.claude/
