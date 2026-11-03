@@ -901,6 +901,27 @@ def _dark_fraction(image):
     return float((grey < 128).mean())
 
 
+#: How wide a page thumbnail is kept, in pixels.
+#:
+#: A page that could not be placed is a page somebody has to look at,
+#: and a row in a table is no use without a picture of what it is
+#: talking about. 150px is enough to tell a blank from a torn corner
+#: from a cover sheet, which is the whole question being asked of it.
+#:
+#: Only the pages that *failed* get one. `Sheet.cuts` exists because
+#: the full render is thrown away immediately -- a few hundred of them
+#: will not fit in memory -- and a thumbnail of every page would walk
+#: back into that. There are usually a handful of these.
+THUMB_WIDE = 150
+
+
+def _thumb(image):
+    """A small copy of a whole page, for a row that has to show one."""
+    small = image.copy()
+    small.thumbnail((THUMB_WIDE, THUMB_WIDE * 4))
+    return small
+
+
 def read_page(image, resolve, anchors_for=None, want=()):
     """Place one rendered page. `resolve(run_no)` gives its Index.
 
@@ -917,17 +938,19 @@ def read_page(image, resolve, anchors_for=None, want=()):
                  if pageindex.read_payload(t)), None)
 
     if ours is None:
+        look = {"cuts": {"page": _thumb(image)}} if "page" in want else {}
         if found:
-            return {"status": "foreign", "code": found[0]}
+            return {"status": "foreign", "code": found[0], **look}
         if _dark_fraction(image) < INK_FLOOR:
-            return {"status": "blank"}
-        return {"status": "unreadable"}
+            return {"status": "blank", **look}
+        return {"status": "unreadable", **look}
 
     run_no, page = ours
+    look = {"cuts": {"page": _thumb(image)}} if "page" in want else {}
     index = resolve(run_no)
     if index is None:
         return {"status": "unknown-run", "run_no": run_no, "page": page,
-                "code": f"C1-{run_no}-{page}"}
+                "code": f"C1-{run_no}-{page}", **look}
     entry = index.get(page)
     if entry is None:
         # The run exists and says nothing about this page. Either the
@@ -935,7 +958,7 @@ def read_page(image, resolve, anchors_for=None, want=()):
         # pagination, or the index was written by a different compile
         # than the one that printed this sheet.
         return {"status": "unknown-page", "run_no": run_no, "page": page,
-                "code": f"C1-{run_no}-{page}"}
+                "code": f"C1-{run_no}-{page}", **look}
     out = {"status": "placed", "run_no": run_no, "page": page,
            "entry": entry, "code": f"C1-{run_no}-{page}"}
     if want and anchors_for:

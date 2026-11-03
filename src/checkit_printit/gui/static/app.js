@@ -3288,6 +3288,270 @@ function applyRematch(id, who) {
   refreshScansDirty();
 }
 
+/* ---- the pages with no home -------------------------------------------
+ *
+ * Preview, File, Page, Description, Match. Everything the reader could
+ * not place: a blank sheet, a page whose code would not read, a code
+ * from somewhere else, a code naming a job this course has not got.
+ *
+ * The preview is the point of the table. A row saying "copier-1.pdf,
+ * page 23, no code found" is a row about a page you cannot see, and
+ * the only question being asked -- is this a real paper or a cover
+ * sheet or the back of something -- is a question about what it looks
+ * like.
+ */
+let unplacedRows = [];
+
+const UNPLACED_COLUMNS = [
+  { key: "_look", label: "Preview", sortable: false, cell: unplacedLook },
+  { key: "file", label: "File" },
+  { key: "at", label: "Page", cls: "mid",
+    // Padded so 9 sorts before 10 rather than after it.
+    value: r => String(r.at).padStart(4, "0") },
+  { key: "status", label: "Description", value: r => scanSaid(r.status),
+    cell: r => document.createTextNode(scanSaid(r.status)) },
+  { key: "_match", label: "Match", sortable: false, cell: unplacedMatch },
+];
+
+const UNPLACED_SORT = [
+  { key: "file", desc: false },
+  { key: "at", desc: false },
+];
+
+const unplacedSort = makeSorter({
+  columns: UNPLACED_COLUMNS,
+  defaults: UNPLACED_SORT,
+  redraw: () => renderUnplaced(),
+  resetTitle: "Back to file, then page.",
+});
+
+/* What a failed page is called, in a table cell.
+ *
+ * Shorter than `SCAN_OUTCOME.short`, which is a column label for the
+ * old stack listing: "No code found" says what happened, where
+ * "Could not read" says what I did about it. */
+const SCAN_SAID = {
+  blank: "Blank",
+  unreadable: "No code found",
+  foreign: "A code from something else",
+  "unknown-run": "Names a job this course has not got",
+  "unknown-page": "Names a page that job does not have",
+};
+
+function scanSaid(status) {
+  return SCAN_SAID[status] || scanOutcome(status).short;
+}
+
+function unplacedLook(row) {
+  if (!row.look) return noPaper();
+  const img = document.createElement("img");
+  img.className = "unplaced-look";
+  img.src = row.look;
+  img.alt = `page ${row.at} of ${row.file}`;
+  img.loading = "lazy";
+  peekable(img, row.look, "click for the whole page");
+  img.classList.add("openable");
+  // `openSheet` wants something to put in its title. An unplaced page
+  // has no student and no skill, so it is named by where it is --
+  // which is all anybody knows about it.
+  img.onclick = () => openSheet(
+    { name: row.file, skill: `page ${row.at}` },
+    { file: row.file, page: row.at });
+  return img;
+}
+
+function unplacedMatch(row) {
+  // A blank sheet is not a paper anybody mislaid. There is nobody to
+  // match it to, and offering the control would be offering to do
+  // something that makes no sense.
+  if (row.status === "blank") return noPaper();
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "btn small";
+  b.textContent = "Match to…";
+  b.onclick = () => openMatchTo(row);
+  return b;
+}
+
+function renderUnplaced() {
+  const box = document.getElementById("scan-unplaced");
+  if (!box) return;
+  box.hidden = !unplacedRows.length;
+  if (!unplacedRows.length) return;
+  const table = document.getElementById("scan-unplaced-table");
+  unplacedSort.header(table.querySelector("thead tr"));
+  const body = table.querySelector("tbody");
+  body.textContent = "";
+  for (const row of unplacedSort.apply(unplacedRows)) {
+    const tr = document.createElement("tr");
+    for (const column of UNPLACED_COLUMNS) {
+      const td = document.createElement("td");
+      if (column.cls) td.className = column.cls;
+      const made = column.cell
+        ? column.cell(row)
+        : document.createTextNode(String(row[column.key] ?? ""));
+      if (made) td.appendChild(made);
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+  const n = unplacedRows.length;
+  document.getElementById("unplaced-count").textContent =
+    `${n} page${n === 1 ? "" : "s"}`;
+}
+
+/* Matching one of these by hand: the skill first, then the student.
+ *
+ * That order, and not the other way round, because the skill narrows
+ * the list of people who could own the paper -- on a redo each
+ * student picks one or two skills out of fourteen, so "who took N3"
+ * is a much shorter question than "which of this student's skills is
+ * this". The people come from the papers the job actually printed,
+ * which is what `rematchPool` holds.
+ */
+let matchTo = null;
+
+function openMatchTo(row) {
+  matchTo = { row, skill: "" };
+  const box = document.getElementById("rematch-box");
+  box.hidden = false;
+  drawMatchTo();
+}
+
+function drawMatchTo() {
+  const { row, skill } = matchTo;
+  document.getElementById("rematch-for").textContent =
+    `${row.file} · page ${row.at}`;
+  const field = document.getElementById("rematch-find");
+  const shut = document.getElementById("rematch-shut");
+  shut.textContent = "";
+  shut.appendChild(icon("fail"));
+  shut.onclick = closeMatchTo;
+
+  if (!skill) {
+    document.getElementById("rematch-ask").textContent = "Which skill is it?";
+    field.hidden = true;
+    const list = document.getElementById("rematch-list");
+    list.textContent = "";
+    const skills = Object.keys(rematchPool).sort();
+    if (!skills.length) {
+      const none = document.createElement("div");
+      none.className = "rematch-band";
+      none.textContent = "No job in this stack to match it to";
+      list.appendChild(none);
+      return;
+    }
+    for (const name of skills) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "rematch-pick";
+      const label = document.createElement("span");
+      label.textContent = name;
+      const many = document.createElement("span");
+      many.className = "muted";
+      many.textContent = `${rematchPool[name].length} took it`;
+      b.append(label, many);
+      b.onclick = () => { matchTo.skill = name; drawMatchTo(); };
+      list.appendChild(b);
+    }
+    return;
+  }
+
+  document.getElementById("rematch-ask").textContent = `Whose ${skill} is it?`;
+  field.hidden = false;
+  field.value = "";
+  field.oninput = () => fillMatchTo(field.value);
+  field.onkeydown = (e) => { if (e.key === "Escape") closeMatchTo(); };
+  fillMatchTo("");
+  field.focus();
+}
+
+function fillMatchTo(typed) {
+  const { row, skill } = matchTo;
+  // The same ranking the re-match picker uses, over the same pool.
+  const fake = { skill, sid: "" };
+  const { likely, rest } = rematchChoices(fake, typed);
+  const list = document.getElementById("rematch-list");
+  list.textContent = "";
+  const band = (words) => {
+    const h = document.createElement("div");
+    h.className = "rematch-band";
+    h.textContent = words;
+    list.appendChild(h);
+  };
+  const add = (who) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "rematch-pick";
+    const nm = document.createElement("span");
+    nm.textContent = filedNames() && who.sort_last && who.sort_first
+      ? `${who.sort_last}, ${who.sort_first}` : who.name;
+    const sec = document.createElement("span");
+    sec.className = "muted";
+    sec.textContent = who.section || "";
+    b.append(nm, sec);
+    b.onclick = () => applyMatchTo(row, skill, who);
+    list.appendChild(b);
+  };
+  // A way back, because picking the wrong skill is the likely mistake
+  // and reopening the panel to fix it would be a silly price.
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "rematch-back";
+  back.textContent = `← not ${skill}`;
+  back.onclick = () => { matchTo.skill = ""; drawMatchTo(); };
+  list.appendChild(back);
+  if (likely.length) { band("Likely"); likely.forEach(add); }
+  if (rest.length) {
+    band(likely.length ? "Everyone else" : "Everyone who took this");
+    rest.forEach(add);
+  }
+}
+
+function closeMatchTo() {
+  matchTo = null;
+  document.getElementById("rematch-box").hidden = true;
+  document.getElementById("rematch-find").hidden = false;
+  document.getElementById("rematch-ask").textContent = "Whose paper is this?";
+}
+
+/* The page becomes a row in the matched table.
+ *
+ * With no box crop: the reader never found an anchor on this page --
+ * that is why it is here -- so there was nothing to cut a square out
+ * of. The Box column shows a dash and the mark gets made from the
+ * preview, which is what the Preview column is for. `sure` is null
+ * for the same reason: nothing was read, so there is nothing to be
+ * sure about, and the dial says `n/a` rather than claiming a figure.
+ */
+function applyMatchTo(row, skill, who) {
+  reviewRows.push({
+    id: `hand-${row.file}-${row.at}`,
+    run: row.run || (data_runs()[0] || 0),
+    page: row.page || 0,
+    sid: who.sid, name: who.name,
+    sort_last: who.sort_last, sort_first: who.sort_first,
+    section: who.section, skill,
+    scanned: true, sure: null,
+    crops: [], shots: [], nameCrop: "",
+    at: [{ file: row.file, page: row.at }],
+    read: "", reads: [], ink: 0, beside: 0,
+    outcome: "", recorded: "",
+    byHand: true, touched: true,
+  });
+  unplacedRows = unplacedRows.filter(
+    u => !(u.file === row.file && u.at === row.at));
+  closeMatchTo();
+  renderMatched();
+  renderUnplaced();
+  refreshScansDirty();
+}
+
+//: The run numbers in the stack, for a hand-matched page that has no
+//: code of its own to say which job it belongs to.
+let scanRunNumbers = [];
+function data_runs() { return scanRunNumbers; }
+
 function renderMatched() {
   const table = document.getElementById("scan-matched");
   if (!table) return;
@@ -3503,6 +3767,10 @@ function renderScan(data) {
   // they came from, and the page total is already on the drop strip.
   document.getElementById("scan-count").textContent = "";
 
+  unplacedRows = data.unplaced || [];
+  scanRunNumbers = (data.runs || []).map(r => r.no);
+  renderUnplaced();
+
   const jobs = document.getElementById("scan-jobs");
   jobs.textContent = "";
   const pile = pileCounts(data);
@@ -3540,38 +3808,15 @@ function renderScan(data) {
 
   fitChips();
 
-  const dupes = document.getElementById("scan-dupes");
-  dupes.hidden = !data.duplicates.length;
-  if (data.duplicates.length)
-    rows(document.getElementById("scan-dupes-table"),
-         ["The same paper", "Turned up in"],
-         data.duplicates.map(d => [
-           data.sheets.find(s => s.run === d.run && s.page === d.page)
-             ?.name || `page ${d.page}`,
-           d.where.join(" and "),
-         ]));
+  // The duplicates table is gone. A sheet that went through twice
+  // shows as two crops in its own row of the matched table, which
+  // is the same fact in the place you are already looking.
 
-  // The print job only earns a column when the stack spans more than
-  // one of them, which is rare. Otherwise it is the same number on
-  // every row, which is noise.
-  const manyRuns = data.runs.length > 1;
-  const head = ["File", "Page in it", "What it is", "Student",
-                "Skill"];
-  if (manyRuns) head.push("Print job");
-  rows(document.getElementById("scan-sheets"), head,
-       data.sheets.map(s => {
-         // An answer key is not a matched anything -- it is an
-         // answer key, and saying so is the whole answer. Same for
-         // a spare, which belongs to nobody until it is written on.
-         const what = s.kind === "key" ? "Answer key"
-                    : s.kind === "spare" ? "Spare copy"
-                    : scanOutcome(s.status).short;
-         const line = [
-           s.file, s.at, what, s.name || s.sid || "", s.skill,
-         ];
-         if (manyRuns) line.push(s.run ?? "");
-         return line;
-       }));
+  // The listing of every page in the stack is gone, along with the
+  // `<details>` it hid inside. It was 94 rows to find 4 in, and the
+  // 90 it spent them on had each gone exactly where they should. What
+  // is left of it is the Other pages table, which is only the ones
+  // that did not.
 
   renderReview(data);
 }

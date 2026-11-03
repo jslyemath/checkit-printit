@@ -2085,6 +2085,34 @@ table.matched tr.nopaper .namebtn { color: var(--muted); }
 }
 .clashflag .glyph { --glyph-size: 18; width: 18px; height: 18px; }
 
+/* The page thumbnail. Taller than the row's other pictures, because
+   a whole page at a crop's height is a grey smudge -- and this table
+   has a handful of rows, so the height costs nothing worth keeping. */
+.unplaced-look {
+  display: block;
+  height: 64px;
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  cursor: zoom-in;
+}
+table.unplaced tbody td { height: 64px; line-height: 1.4; }
+table.unplaced td { white-space: normal; }
+
+/* A way back out of the second step of Match to..., because picking
+   the wrong skill is the likely mistake and reopening the panel to
+   undo it would be a silly price. */
+.rematch-back {
+  font: inherit;
+  font-size: var(--t-sm);
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  padding: var(--s1) var(--s2);
+  cursor: pointer;
+}
+.rematch-back:hover { color: var(--accent); }
+
 /* ---- the Mark column, as a track -------------------------------------
    One pill with the verdict filled in place, rather than three
    separate buttons.

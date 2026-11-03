@@ -1712,7 +1712,7 @@ class Scanning:
             try:
                 batch = scans_mod.read_pdfs(paths, record_path,
                                             on_page=progress,
-                                            want=("box", "name"))
+                                            want=("box", "name", "page"))
                 self.sheets = _joined(self.sheets, batch.sheets, paths)
                 self.files = _file_order(self.files, paths)
                 self.result = _batch_json(
@@ -1812,6 +1812,22 @@ def _batch_json(batch, record_path, sections=None):
                 "name": names.get(entry.sid, "") if entry.sid else "",
             })
 
+    # Every page that found no home, with a picture of itself. These
+    # are the rows of the second table, and a row about a page nobody
+    # could read is no use without the page.
+    unplaced = [{
+        "file": os.path.basename(sheet.source),
+        "at": sheet.at,
+        "status": sheet.status,
+        "code": sheet.code,
+        # The run and page its code claimed, when it had a readable
+        # one -- `unknown-run` and `unknown-page` both do, and that is
+        # the only clue to what the sheet was meant to be.
+        "run": sheet.run_no,
+        "page": sheet.page,
+        "look": _as_jpeg(sheet.cuts["page"]) if "page" in sheet.cuts else "",
+    } for sheet in batch.unplaced]
+
     duplicates = [{"run": run, "page": page,
                    "where": [f"{os.path.basename(s.source)} p{s.at}"
                              for s in group]}
@@ -1822,6 +1838,7 @@ def _batch_json(batch, record_path, sections=None):
     # two places to change it.
     return {"counts": counts, "runs": runs, "sheets": sheets,
             "missing": missing, "duplicates": duplicates,
+            "unplaced": unplaced,
             "outcomes": OUTCOMES,
             "review": _review_rows(batch, record_path, names,
                                    sections or {}),
