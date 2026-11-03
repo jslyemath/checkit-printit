@@ -1947,25 +1947,28 @@ table.matched {
    the cards and the heading are above it, and wastes the lower half
    of a tall one.
 
-   `100vh - 170px` is a screenful less the save bar and some air, so
-   on any window the table plus one short scroll puts its bottom edge
-   -- and the scrollbar along it -- on screen. 52vh was tried first
-   and was not enough: 374px of table starting 379px down a 720px
-   window still ends 34px past the bottom.
+   `100vh - 320px` is a screenful less the save bar, the cards above
+   the table, and enough page left over to put a pointer on.
+
+   That last part is the reason it is not larger. A scroll area takes
+   the wheel while it still has somewhere to go, so a table filling
+   the window leaves nowhere to stand to scroll the *page* -- which
+   is how the first attempt at this felt. It was `100vh - 170px`,
+   which on a 760px window came to 590px of table and about none of
+   anything else.
 
    A floor of 240px so it never becomes a letterbox, and a ceiling of
-   760px so a tall monitor does not get one enormous table.
+   540px: about ten rows, which is where he put it, and past which a
+   tall monitor is just a longer reach to the bottom.
 
-   This leaves the bar one flick away rather than at the window edge
-   exactly. Getting it exact means measuring the space above in
-   script and resizing the table as the page scrolls, which trades a
-   reachable scrollbar for a table that changes height while you read
-   it. Not worth it.
+   `overscroll-behavior` is left alone deliberately. The default
+   chains, so once the table is scrolled to its end the wheel carries
+   on down the page, and only the middle of a long table holds on.
 
    The heading row sticks, because a table you scroll inside loses
    its headings on the first row otherwise. */
 .scroller:has(table.matched) {
-  max-height: clamp(240px, calc(100vh - 170px), 760px);
+  max-height: clamp(240px, calc(100vh - 320px), 540px);
   overflow: auto;
   scrollbar-gutter: stable;
 }
