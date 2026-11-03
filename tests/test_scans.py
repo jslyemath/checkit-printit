@@ -925,3 +925,89 @@ class TestTheIdGridOnARealPage:
             checked += 1
         pdf.close()
         assert checked, "no page carried an id grid"
+
+
+class TestWhenTheGridIsRead:
+    """`_cuts` reads a handwritten id only where one can exist.
+
+    Three conditions, and each of them saves real work or avoids a
+    real mistake: a pool to match against, an `id` mark on the page,
+    and no student already named by the footer code.
+    """
+
+    @staticmethod
+    def call(monkeypatch, sid="", candidates=("001",), marks=None,
+             reads="001"):
+        """Run `_cuts` with the cutting and the recogniser stubbed.
+
+        Stubbed because what is under test is *whether* the grid is
+        read, and a real reading would need a rendered page, a scanner
+        and a trained recogniser to answer a question about an `if`.
+        """
+        import types
+        from checkit_printit import digits as digits_mod
+        from checkit_printit import pageindex
+
+        asked = []
+        monkeypatch.setattr(scans, "cut_out",
+                            lambda *a, **k: "crop")
+        monkeypatch.setattr(scans, "_corners", lambda s: None)
+        monkeypatch.setattr(scans, "placement",
+                            lambda anchor, corners: (lambda x, y: (x, y)))
+        monkeypatch.setattr(scans, "_pinned", lambda *a, **k: None)
+        monkeypatch.setattr(scans, "id_cells",
+                            lambda *a, **k: ["cell"] * 9)
+
+        def read_id(cells, pool):
+            asked.append(list(pool))
+            return (reads, -0.4) if reads else None
+
+        monkeypatch.setattr(digits_mod, "read_id", read_id)
+
+        if marks is None:
+            marks = {"box": pageindex.Mark(1, 2, 3, 4, 5),
+                     "id": pageindex.Mark(6, 7, 8, 9, 10)}
+        entry = pageindex.Page(page=1, kind="student", sid=sid, slug="W1",
+                               vseed="401", sheet=1, marks=marks)
+        found = scans._cuts(
+            image=None, entry=entry, page=1,
+            symbols=[types.SimpleNamespace(text="C1-1-1")],
+            anchors={1: object()}, want=("box", "id"),
+            candidates=list(candidates))
+        return found, asked
+
+    def test_a_paper_with_no_name_on_it_has_its_grid_read(self,
+                                                          monkeypatch):
+        found, asked = self.call(monkeypatch)
+        assert asked == [["001"]], "the grid was not read"
+        assert found["read_sid"] == "001"
+        assert found["read_score"] == -0.4
+
+    def test_a_named_paper_is_not_read(self, monkeypatch):
+        """The footer code already said whose it is, and the mark is
+        the number in print. Reading it would be work done on every
+        page of every stack to learn nothing."""
+        found, asked = self.call(monkeypatch, sid="007")
+        assert asked == [], "the grid was read on a named paper"
+        assert "read_sid" not in found
+
+    def test_a_page_with_no_grid_is_not_read(self, monkeypatch):
+        from checkit_printit import pageindex
+        found, asked = self.call(
+            monkeypatch, marks={"box": pageindex.Mark(1, 2, 3, 4, 5)})
+        assert asked == []
+        assert "read_sid" not in found
+
+    def test_no_pool_means_no_reading(self, monkeypatch):
+        """Reading a stack does not need a roster, and `read_pdfs` is
+        called without one by anything that only wants to know what
+        came back."""
+        found, asked = self.call(monkeypatch, candidates=())
+        assert asked == []
+        assert "read_sid" not in found
+
+    def test_a_grid_that_could_not_be_read_says_nothing(self, monkeypatch):
+        found, asked = self.call(monkeypatch, reads=None)
+        assert asked == [["001"]]
+        assert "read_sid" not in found, (
+            "an unreadable grid must leave the row blank, not guess")

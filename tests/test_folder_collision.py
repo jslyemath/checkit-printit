@@ -472,11 +472,15 @@ class TestTheNameCropIsItsOwnShape:
         entry = pageindex.Page(page=1, kind="student", sid="001",
                                slug="W1", vseed="401", sheet=1,
                                marks=marks)
-        cuts = scans._cuts(
+        # `_cuts` hands back everything the page gave up, not only the
+        # crops: a handwritten id is read with the same transform the
+        # crops were taken with, and working that out in two places is
+        # how two copies of it come to disagree.
+        found = scans._cuts(
             image=None, entry=entry, page=1,
             symbols=[types.SimpleNamespace(text="C1-1-1")],
             anchors={1: object()}, want=("box", "name"))
 
-        assert set(cuts) == {"box", "name"}
+        assert set(found["cuts"]) == {"box", "name"}
         assert asked[marks["box"]] is scans.BOX_CUT
         assert asked[marks["name"]] is scans.NAME_CUT
