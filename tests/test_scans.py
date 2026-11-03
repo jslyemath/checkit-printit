@@ -561,3 +561,367 @@ class TestCuttingItOutOfARealPage:
                                                   anchor.page_height)
         assert scans.PAD[2] > 1.0, "no room beside the box for a mark"
         assert scans.PAD[2] > scans.PAD[0], "more room left than right"
+
+
+# --------------------------------------------------------- the id grid --
+
+def id_crop(dx=0, dy=0, wide=None, digits=(), underline=False,
+            above=0, fat=0, paper=252, rule=214, pen=40):
+    """A picture shaped like the id crop, with the grid drawn where asked.
+
+    Drawn rather than scanned, so that a test about finding a rule is
+    not also a test about pdfium.
+
+    The three greys are the ones measured off the first real stack of
+    handwritten grids: paper came back around 252, the rules -- which
+    print in 30% black -- around 214, and pen below 150. The whole
+    method rests on those three being separable, so a fixture that
+    drew the rules in black would prove nothing about the scan it has
+    to work on.
+
+    `dx` and `dy` move the drawn grid away from where `ID_LOOK`
+    predicts it, which is the situation this code exists for: on that
+    stack the prediction landed about a millimetre out, a quarter of
+    a cell, because the transform is fitted nine inches away at the
+    footer.
+    """
+    from PIL import Image, ImageDraw
+
+    across = scans.ID_SIDE * 2 + scans.ID_WIDE / scans.ID_HIGH
+    down = scans.ID_MARGIN * 2 + 1
+    per = scans.ID_LOOK.per_unit
+    image = Image.new("RGB", (round(per * across), round(per * down)),
+                      (paper, paper, paper))
+    left, top, want_wide = scans.id_predicted(image)
+    left, top = left + dx, top + dy
+    wide = want_wide if wide is None else wide
+    high = wide * scans.ID_HIGH / scans.ID_WIDE
+    draw = ImageDraw.Draw(image)
+
+    thick = max(1, round(scans.ID_RULE / scans.ID_HIGH * high))
+    grey = (rule, rule, rule)
+    # The outline, then the eight rules between the cells.
+    draw.rectangle((left, top, left + wide, top + high),
+                   outline=grey, width=thick)
+    # `fat` thickens the top rule downwards, as a scanner run dark
+    # does. It is the only way to tell a top edge from a middle: at
+    # the nominal three pixels they are a pixel and a half apart,
+    # which is the fixture's own rounding.
+    if fat:
+        draw.rectangle((left, top, left + wide, top + thick + fat - 1),
+                       fill=grey)
+    for k in range(1, scans.ID_COUNT):
+        x = left + (k * (scans.ID_CELL + scans.ID_RULE)) / scans.ID_WIDE * wide
+        draw.rectangle((x, top, x + thick - 1, top + high), fill=grey)
+
+    # The blank name's underline: the one other long rule on this
+    # line, and by design the grid's bottom rule is lowered to meet
+    # it. Drawn across the whole width so it cannot be told from the
+    # grid's own rules by length.
+    if underline:
+        y = top + high
+        draw.rectangle((0, y, image.width, y + thick - 1), fill=grey)
+
+    # A long rule *above* the grid, which is the only arrangement
+    # where picking the topmost band and picking the nearest one give
+    # different answers. Nothing in the header puts one there today;
+    # a crease, a line of the student's own or the foot of the line
+    # above on a crooked sheet would.
+    if above:
+        draw.rectangle((0, top - above, image.width,
+                        top - above + thick - 1), fill=grey)
+
+    # Something written in the cells asked for, as wide as the cell
+    # allows. Wide on purpose: a blob that filled only the middle
+    # would still sit inside its own cell with the crop a quarter of
+    # a cell out, and would therefore pass whether the grid was found
+    # or merely predicted.
+    cell_w = scans.ID_CELL / scans.ID_WIDE * wide
+    for k in digits:
+        x = left + (scans.ID_RULE + k * (scans.ID_CELL + scans.ID_RULE)) \
+            / scans.ID_WIDE * wide
+        draw.rectangle((x + 0.08 * cell_w, top + 0.2 * high,
+                        x + 0.92 * cell_w, top + 0.8 * high),
+                       fill=(pen, pen, pen))
+    return image
+
+
+def ink_per_cell(cells, level=150, inset=0.0):
+    """How many pixels darker than `level` each cell holds.
+
+    `inset` trims that fraction off every side before counting. The
+    fixture draws a rule three pixels wide and the cut lands on its
+    far edge, so rounding can leave one pixel of it in the picture --
+    which is a fact about drawing rectangles at integer coordinates,
+    not about the arithmetic being tested. A small inset steps past
+    it and still leaves the test able to see a rule that is a quarter
+    of a cell out of place, which is the error it is there to catch.
+    """
+    import numpy
+
+    out = []
+    for cell in cells:
+        dx, dy = round(cell.width * inset), round(cell.height * inset)
+        middle = cell.crop((dx, dy, cell.width - dx, cell.height - dy))
+        out.append(int((numpy.asarray(middle.convert("L")) < level).sum()))
+    return out
+
+
+class TestFindingTheIdGrid:
+    """The grid is found by its top rule, and by nothing else.
+
+    Not by the nine vertical rules: at 0.4pt in 30% black they are
+    paler than anybody's pen, so a comb fitted to them locked onto a
+    digit's downstroke on two of the first four real pages -- half a
+    cell out, and confident about it. Not by the bottom rule either,
+    which is drawn to meet the blank name's underline and so has no
+    left end of its own.
+    """
+
+    def test_a_grid_drawn_where_it_was_predicted_is_found_there(self):
+        image = id_crop()
+        want = scans.id_predicted(image)
+        left, top, wide = scans.id_grid(image, want)
+        assert abs(left - want[0]) <= 2, (left, want[0])
+        assert abs(top - want[1]) <= 2, (top, want[1])
+        assert abs(wide - want[2]) <= 3, (wide, want[2])
+
+    def test_a_grid_that_drifted_is_found_where_it_really_is(self):
+        """+30 and -16 pixels are the drift measured on the real
+        stack: about a millimetre each way, a quarter of a cell."""
+        image = id_crop(dx=30, dy=-16)
+        want = scans.id_predicted(image)
+        left, top, _ = scans.id_grid(image, want)
+        assert abs(left - (want[0] + 30)) <= 2, left
+        assert abs(top - (want[1] - 16)) <= 2, top
+
+    def test_digits_written_in_the_cells_do_not_move_the_answer(self):
+        """The failure that killed the first attempt. Pen is darker
+        than the rules, so anything that scores a landmark by darkness
+        alone prefers the handwriting."""
+        bare = scans.id_grid(id_crop(dx=24), scans.id_predicted(id_crop()))
+        full = scans.id_grid(id_crop(dx=24, digits=range(9)),
+                             scans.id_predicted(id_crop()))
+        assert abs(bare[0] - full[0]) <= 2, (bare, full)
+        assert abs(bare[1] - full[1]) <= 2, (bare, full)
+
+    def test_the_name_s_underline_is_not_taken_for_the_grid(self):
+        """It is the same kind of line, the same length and the same
+        grey, and it is collinear with the grid's bottom rule."""
+        image = id_crop(dx=24, underline=True)
+        want = scans.id_predicted(image)
+        left, top, _ = scans.id_grid(image, want)
+        assert abs(top - want[1]) <= 3, top
+        assert abs(left - (want[0] + 24)) <= 2, left
+
+    def test_a_rule_above_the_grid_does_not_win(self):
+        """The band nearest the prediction, not the topmost one.
+
+        This is the arrangement that tells the two apart, and the
+        first version of this test did not have it: it drew the
+        underline where the real one is, below the grid, where the
+        topmost band is the right answer anyway. Replacing "nearest"
+        with "the first one" then broke nothing, and ten passing
+        tests said the code was fine.
+        """
+        image = id_crop(dx=24, above=20)
+        want = scans.id_predicted(image)
+        left, top, _ = scans.id_grid(image, want)
+        assert abs(top - want[1]) <= 3, top
+        assert abs(left - (want[0] + 24)) <= 2, left
+
+    def test_a_thick_rule_is_measured_at_its_top_edge(self):
+        """Not at its middle. All three numbers have to mean the same
+        thing: `left` and the width come from where a run starts and
+        stops, so they are the grid's outer edges, and `top` has to be
+        one too or the cells are cut from a rectangle that is partly
+        outer and partly middle.
+
+        Drawn eight pixels thick, because at the three a 0.4pt rule
+        actually comes out the difference is a pixel and a half -- and
+        a test that tight would have been measuring how PIL rounds
+        rather than what this function returns.
+        """
+        image = id_crop(fat=8)
+        want = scans.id_predicted(image)
+        _, top, _ = scans.id_grid(image, want)
+        assert abs(top - want[1]) <= 2, (top, want[1])
+
+    def test_blank_paper_is_refused(self):
+        from PIL import Image
+        image = Image.new("RGB", (994, 204), (252, 252, 252))
+        assert scans.id_grid(image, scans.id_predicted(image)) is None
+
+    def test_a_rule_of_the_wrong_width_is_refused(self):
+        """A long dark line that is not this grid. Better to say the
+        grid could not be placed than to cut nine cells from it:
+        cells cut from the wrong landmark are still read, and read
+        wrongly."""
+        image = id_crop()
+        want = scans.id_predicted(image)
+        narrow = id_crop(wide=want[2] * 0.8)
+        assert scans.id_grid(narrow, want) is None
+
+
+class TestCuttingTheCells:
+    def test_there_are_nine_of_them_and_they_are_the_same_size(self):
+        cells = scans.cells_in(id_crop())
+        assert len(cells) == scans.ID_COUNT
+        assert len({c.height for c in cells}) == 1
+        assert max(c.width for c in cells) - min(c.width for c in cells) <= 1
+
+    def test_what_was_written_in_a_cell_is_in_that_cell_only(self):
+        """With the grid a quarter of a cell from where it was
+        predicted -- which is where it was on every page of the real
+        stack. Cut from the prediction, a cell holds most of its own
+        digit and a slice of its neighbour's, and a digit read off the
+        wrong cell is a wrong student with nothing to show for it."""
+        cells = scans.cells_in(id_crop(dx=30, dy=-16, digits=(4,)))
+        ink = ink_per_cell(cells)
+        assert ink[4] > 1000, ink
+        assert all(v < 50 for i, v in enumerate(ink) if i != 4), ink
+
+    def test_an_empty_grid_holds_no_ink_at_all(self):
+        """The cells are cut *inside* the rules, so a grid nobody has
+        written in comes back as nine pieces of blank paper. If the
+        cut were a few pixels out, a rule would be sitting in the
+        picture -- which is the cheapest check there is that the
+        arithmetic inside the grid is right."""
+        ink = ink_per_cell(scans.cells_in(id_crop(dx=24, dy=-14)),
+                           level=240, inset=0.08)
+        assert all(v == 0 for v in ink), ink
+
+    def test_a_grid_that_cannot_be_placed_gives_nothing(self):
+        from PIL import Image
+        assert scans.cells_in(
+            Image.new("RGB", (994, 204), (252, 252, 252))) is None
+
+
+class TestWhereTheCellsSitInsideTheGrid:
+    r"""The contract with `\cipidgrid`, stated as numbers.
+
+    Nine cells of 4.4mm, a 0.4pt rule between each pair and one
+    around the outside. Every one of those is a few pixels, which is
+    too small to see in a picture of a cell -- so dropping the rule
+    when stepping into the first cell broke nothing that any ink
+    count could notice. Asserted here instead.
+    """
+
+    def test_there_are_nine(self):
+        assert len(scans.id_boxes(0, 0, 900)) == 9
+
+    def test_the_first_cell_starts_one_rule_in(self):
+        wide = 900
+        boxes = scans.id_boxes(100, 50, wide)
+        want = scans.ID_RULE / scans.ID_WIDE * wide
+        assert abs((boxes[0][0] - 100) - want) <= 1, boxes[0]
+
+    def test_the_last_cell_stops_one_rule_short_of_the_end(self):
+        wide = 900
+        boxes = scans.id_boxes(100, 50, wide)
+        want = scans.ID_RULE / scans.ID_WIDE * wide
+        assert abs((100 + wide - boxes[-1][2]) - want) <= 1, boxes[-1]
+
+    def test_consecutive_cells_are_one_rule_apart(self):
+        wide = 900
+        boxes = scans.id_boxes(0, 0, wide)
+        want = scans.ID_RULE / scans.ID_WIDE * wide
+        gaps = [b[0] - a[2] for a, b in zip(boxes, boxes[1:])]
+        assert all(abs(g - want) <= 1 for g in gaps), gaps
+
+    def test_a_cell_is_as_wide_as_the_macro_says(self):
+        wide = 900
+        boxes = scans.id_boxes(0, 0, wide)
+        want = scans.ID_CELL / scans.ID_WIDE * wide
+        assert all(abs((b[2] - b[0]) - want) <= 1 for b in boxes), boxes
+
+    def test_a_cell_is_taller_than_it_is_wide(self):
+        """5.2mm against 4.4mm. Worth stating because it is the one
+        proportion a reader of the code might assume the other way
+        round, digits being written in square boxes everywhere else."""
+        left, top, right, bottom = scans.id_boxes(0, 0, 900)[0]
+        assert bottom - top > right - left
+
+
+@pytest.fixture(scope="module")
+def printed_blank(bank_dir, tmp_path_factory):
+    """A compiled run with no names on it, so the id grid is drawn.
+
+    Its own fixture rather than a parameter on `printed`, because
+    every other test in this file wants the named run and a
+    parametrised fixture would compile both for all of them.
+    """
+    tmp_path = tmp_path_factory.mktemp("blank")
+    chart = tmp_path / "seating.toml"
+    chart.write_text('[[group]]\nseats = ["Ada", "Bo"]\n', encoding="utf-8")
+    publication = pub_mod.Publication(
+        course="TEST 101", semester="Fall", professor="Nobody",
+        title="Checkpoint", date="2026-01-01", bank_path=bank_dir,
+        keys=False, names=False)
+    out = str(tmp_path / "out")
+    source, _ = theme.load(bank_dir)
+    assemble_mod.assemble(publication, students(),
+                          seating.load(str(chart)), out, source,
+                          rng=random.Random(1), run_seed=1, run_id=RUN_NO)
+    for _ in range(2):
+        subprocess.run([pdflatex, "-interaction=nonstopmode",
+                        "-halt-on-error", "main.tex"],
+                       cwd=out, capture_output=True, timeout=300)
+    assert os.path.isfile(os.path.join(out, "main.pdf"))
+    return out
+
+
+@pytest.mark.skipif(not pdflatex, reason="no pdflatex")
+class TestTheIdGridOnARealPage:
+    def test_every_page_printed_blank_carries_a_grid(self, printed_blank):
+        index = pageindex.load(printed_blank)
+        gridded = [n for n, e in index.pages.items() if e.marks.get("id")]
+        assert gridded, "no page recorded an id mark"
+        for n in gridded:
+            assert not index.pages[n].sid, (
+                f"page {n} has both a student and a grid")
+
+    def test_the_cells_land_inside_the_printed_rules(self, printed_blank):
+        """Against the run's own PDF used as its own scan, so the
+        transform is the identity and the cut has to land exactly.
+
+        Nobody wrote on these, and a cell is cut *inside* the rules,
+        so a correct cut gives nine pieces of blank paper. A rule in
+        the picture means the arithmetic and pdflatex disagree.
+        """
+        pdfium = pytest.importorskip("pypdfium2")
+        zxingcpp = pytest.importorskip("zxingcpp")
+        numpy = pytest.importorskip("numpy")
+        index = pageindex.load(printed_blank)
+        found_any = scans.anchors(printed_blank)
+        assert found_any, "no code on any page to anchor against"
+
+        pdf = pdfium.PdfDocument(os.path.join(printed_blank, "main.pdf"))
+        checked = 0
+        for n, entry in sorted(index.pages.items()):
+            mark = entry.marks.get("id")
+            if mark is None:
+                continue
+            image = pdf[n - 1].render(scale=scans.DPI / 72).to_pil()
+            codes = [c for c in zxingcpp.read_barcodes(image)
+                     if pageindex.read_payload(c.text)]
+            anchor = found_any[n % 2]
+            carry = scans.placement(anchor, scans._corners(codes[0]))
+            cells = scans.id_cells(image, mark, anchor, carry)
+            assert cells is not None, f"page {n}: the grid was not found"
+            assert len(cells) == scans.ID_COUNT
+            # Trimmed, for the same reason the drawn version is: the
+            # crop is resampled up from 200dpi, which smears a rule
+            # that is barely a pixel wide across four or five of the
+            # output's -- so a pixel or two of grey at a cell's own
+            # edge is the resampler, not a misplaced cut. Eight per
+            # cent steps past that and still leaves the test able to
+            # see a rule a quarter of a cell inside, which is the size
+            # of error that reads a digit off the wrong cell.
+            for k, ink in enumerate(ink_per_cell(cells, level=240,
+                                                 inset=0.08)):
+                assert ink == 0, (
+                    f"page {n} cell {k}: a printed rule is in the picture")
+            checked += 1
+        pdf.close()
+        assert checked, "no page carried an id grid"
