@@ -393,6 +393,25 @@ def set_flags(path, run_id, delisted=None, graded=None):
         db.close()
 
 
+def printed_pairs(path):
+    """`{(run_id, sid, slug)}` -- every paper this course ever printed.
+
+    `save_attempts` builds the same set to decide what to *report* as
+    strange. This one exists so a caller can decide what to *refuse*:
+    a correction arriving from the browser says whose paper something
+    is, and the only safe answer is "only if that student was handed
+    that skill in that run".
+    """
+    if not os.path.isfile(path):
+        return set()
+    db = connect(path)
+    try:
+        return {(r["run_id"], str(r["sid"]), r["slug"]) for r in db.execute(
+            "SELECT run_id, sid, slug FROM printed")}
+    finally:
+        db.close()
+
+
 def save_attempts(path, rows):
     """Record what was decided about a batch of papers.
 

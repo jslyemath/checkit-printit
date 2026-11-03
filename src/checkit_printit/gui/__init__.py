@@ -2207,16 +2207,56 @@ def api_scan_save(course, body):
             raise GuiError(
                 f"{outcome!r} is not an outcome. It is one of "
                 f"{', '.join(record_mod.OUTCOMES)}.")
-        want[str(item.get("id"))] = outcome
+        want[str(item.get("id"))] = {
+            "outcome": outcome,
+            "sid": str(item.get("sid") or ""),
+            "skill": str(item.get("skill") or ""),
+            "run": item.get("run"),
+            "file": str(item.get("file") or ""),
+            "page": item.get("page") or 0,
+            "byHand": bool(item.get("byHand")),
+        }
     if not want:
         raise GuiError("nothing was decided, so there is nothing to save.")
 
     path = course.file("record")
+
+    # What the course actually handed out. A decision may say whose
+    # paper something is -- that is what a re-match is -- but only
+    # where this says the student was given that skill in that run.
+    # The browser offers the same list; this is the half that cannot
+    # be got round by a stale page.
+    printed = record_mod.printed_pairs(path)
+
+    def owner(said, row):
+        """The student to record against, or a refusal.
+
+        `row` is the server's own idea of the paper. When the page
+        agrees, nothing is being claimed and the server's own answer
+        stands. When it differs, the pair has to be one that was
+        printed.
+        """
+        sid, slug = said["sid"], said["skill"]
+        if not sid or (sid == row.get("sid") and slug == row.get("skill")):
+            return row.get("sid"), row.get("skill")
+        run = record_mod.run_by_no(path, said["run"] or row.get("run"))
+        if run is None or (run["run_id"], sid, slug) not in printed:
+            raise GuiError(
+                f"this course did not print {slug or 'that skill'} for "
+                f"that student in that job, so a paper cannot be "
+                f"matched to them. Nothing was saved.")
+        return sid, slug
+
     rows, no_run = [], set()
+    seen_ids = set()
     for row in result.get("review", []):
-        outcome = want.get(row["id"])
-        if not outcome:
+        said = want.get(row["id"])
+        if not said:
             continue
+        seen_ids.add(row["id"])
+        outcome = said["outcome"]
+        row = dict(row)
+        row["sid"], row["skill"] = owner(said, row)
         run = record_mod.run_by_no(path, row["run"])
         if run is None:
             # The code named a run this course does not have. The
@@ -2234,6 +2274,43 @@ def api_scan_save(course, body):
             "reading": row["read"] if row["scanned"] else "",
             "ink": row["ink"] if row["scanned"] else None,
             "beside": row["beside"] if row["scanned"] else None,
+        })
+
+    # A page matched by hand is not in the read's review list -- the
+    # reader never placed it, which is why it was in the other table --
+    # so nothing above found it and it used to be dropped in silence.
+    # It is found by where it is instead: the file it came out of and
+    # the page it was in, which the server knows from its own sheets.
+    for key, said in want.items():
+        if key in seen_ids or not said["byHand"]:
+            continue
+        sheet = next((s for s in SCANNING.sheets
+                      if os.path.basename(s.source) == said["file"]
+                      and s.at == said["page"]), None)
+        if sheet is None:
+            raise GuiError(
+                f"{said['file']} page {said['page']} is not in the stack "
+                "that was read. Nothing was saved.")
+        if sheet.placed:
+            # It found a home by itself, so it has a row above and
+            # should have been matched by id. Something is out of step.
+            raise GuiError(
+                f"{said['file']} page {said['page']} was placed by its "
+                "own code, so it cannot also be matched by hand. "
+                "Nothing was saved.")
+        run = record_mod.run_by_no(path, said["run"])
+        if run is None or (run["run_id"], said["sid"],
+                           said["skill"]) not in printed:
+            raise GuiError(
+                f"this course did not print {said['skill'] or 'that skill'} "
+                "for that student in that job, so a page cannot be matched "
+                "to them. Nothing was saved.")
+        rows.append({
+            "run_id": run["run_id"], "sid": said["sid"],
+            "slug": said["skill"], "outcome": said["outcome"],
+            # No page in the job and no reading: the reader never
+            # placed this sheet, so there is no box it measured.
+            "page": None, "reading": "", "ink": None, "beside": None,
         })
 
     try:
