@@ -2580,50 +2580,34 @@ function shortDay(iso) {
   return (y && m && d) ? `${m}/${d}` : iso;
 }
 
-/* One job's line: how much of it came back, and how much of that is
-   the key.
+/* What one job's card says: how many papers came back, and how many
+   were printed and did not.
 
    Papers, not sheets. A double feed puts one paper through twice, and
-   counting sheets then says "12 of 12 back" on a job that is also
+   counting sheets said "12 of 12 back" on a job that was also
    reporting one missing -- two numbers that cannot both be true. The
    demo stack is exactly that: 12 placed sheets, 1 duplicate, 11
-   papers, 1 missing.
-
-   The job's own share of what is missing is only worth printing when
-   there is more than one job to tell apart. With one job it is the
-   chip in the page header said twice. */
-function jobFacts(data, run, many) {
-  const mine = data.sheets.filter(s => s.run === run.no);
-  const placed = mine.filter(s => s.status === "placed");
-  const back = new Set(placed.map(s => s.page)).size;
-  const keys = new Set(placed.filter(s => s.kind === "key")
-                             .map(s => s.page)).size;
-  const gone = data.missing.filter(m => m.run === run.no).length;
-  return [
-    run.pages ? `${back} of ${run.pages} back` : `${back} matched`,
-    keys ? `${keys} key${keys === 1 ? "" : "s"}` : "",
-    many && gone ? `${gone} not back` : "",
-  ].filter(Boolean);
+   papers, 1 missing. */
+function jobCounts(data, run) {
+  const placed = data.sheets.filter(
+    s => s.run === run.no && s.status === "placed");
+  return {
+    matched: new Set(placed.map(s => s.page)).size,
+    missing: data.missing.filter(m => m.run === run.no).length,
+  };
 }
 
-/* Everything that is not a placed page. None of it can sit in a job's
-   section, because none of it carries a code naming a job -- a blank
-   sheet least of all.
+/* The two counts that belong to the pile rather than to any job,
+   because the pages carrying them name no job: a blank sheet has no
+   code at all, and an unmatched one has nothing usable.
 
-   Blank belongs here rather than on a job's line, where it was until
-   the demo stack showed the bug: a blank has no run, so filtering a
-   job's sheets by run dropped it, and the one blank page in that
-   stack was reported nowhere at all.
-
-   `tag` rather than `short`: four of these sit on one line, and the
-   column labels the table uses run to eleven words for four numbers. */
-function looseFacts(counts) {
-  return Object.entries(counts)
-    .filter(([status]) => status !== "placed")
-    .map(([status, n]) => {
-      const out = scanOutcome(status);
-      return `${n} ${out.tag || out.short.toLowerCase()}`;
-    });
+   This is why blank is not computed per job. It was, once, and a
+   job's sheets are selected by run number -- which a blank does not
+   have -- so the one blank page in the demo stack was reported
+   nowhere on the screen at all. */
+function pileCounts(data) {
+  const blank = data.counts.blank || 0;
+  return { blank, unmatched: unmatchedCount(data.counts) };
 }
 
 /* --- end pure --- */
@@ -2963,19 +2947,29 @@ function renderReview(data) {
   countReview();
 }
 
-function scanChip(n, what) {
+/* A count that is a piece of work, wearing the mark he would make on
+ * the paper himself: the struck-through sheet for one that never came
+ * back, the question mark for one that could not be placed. Same two
+ * glyphs the review uses for `absent` and `queried`, so the chip and
+ * the row he ends up on are visibly the same claim. */
+function scanChip(n, what, glyph) {
   const chip = document.createElement("span");
-  chip.className = "chip warn";
-  chip.textContent = `${n} ${what}`;
+  chip.className = "jobchip";
+  chip.appendChild(icon(glyph));
+  const text = document.createElement("span");
+  text.textContent = `${n} ${what}`;
+  chip.appendChild(text);
   return chip;
 }
 
-/* One section per job: a name, its date, and a line of settled facts.
+/* One card per print job: what it was called, when it was printed,
+ * what came back, and what still wants a person.
  *
- * The per-job share of what is missing is only worth printing when
- * there is more than one job to tell apart -- with one job it is the
- * chip in the page header said twice. */
-function scanJob(title, date, facts) {
+ * `facts` are settled and read as plain text. `chips` are work, and
+ * they sit at the right-hand end of the same line -- absent at zero
+ * rather than reading "0 missing", which is a thing to notice and
+ * then dismiss. */
+function scanJob(title, date, facts, chips) {
   const box = document.createElement("section");
   box.className = "scan-job";
 
@@ -2992,9 +2986,18 @@ function scanJob(title, date, facts) {
     head.appendChild(when);
   }
 
-  const line = document.createElement("p");
-  line.className = "jobfacts";
-  line.textContent = facts.filter(Boolean).join(" \u00b7 ");
+  const line = document.createElement("div");
+  line.className = "jobline";
+  for (const [text, muted] of facts) {
+    const span = document.createElement("span");
+    span.className = muted ? "jobsoft" : "jobstat";
+    span.textContent = text;
+    line.appendChild(span);
+  }
+  const gap = document.createElement("span");
+  gap.className = "spacer";
+  line.appendChild(gap);
+  for (const chip of chips) line.appendChild(chip);
 
   box.append(head, line);
   return box;
@@ -3003,28 +3006,44 @@ function scanJob(title, date, facts) {
 function renderScan(data) {
   document.getElementById("scan-result").hidden = false;
 
-  // The two counts that are work, and nothing else. The page total
-  // is already on the drop strip; repeating it here would be the
-  // strip said twice.
-  const chips = document.getElementById("scan-count");
-  chips.textContent = "";
-  const unmatched = unmatchedCount(data.counts);
-  if (data.missing.length)
-    chips.appendChild(scanChip(data.missing.length, "missing"));
-  if (unmatched) chips.appendChild(scanChip(unmatched, "unmatched"));
+  // The page header carries nothing: the counts belong to the job
+  // they came from, and the page total is already on the drop strip.
+  document.getElementById("scan-count").textContent = "";
 
   const jobs = document.getElementById("scan-jobs");
   jobs.textContent = "";
-  const many = data.runs.length > 1;
-  for (const run of data.runs)
-    jobs.appendChild(scanJob(run.title || `Job ${run.no}`,
-                             shortDay(run.date),
-                             jobFacts(data, run, many)));
+  const pile = pileCounts(data);
+  // Blank and unmatched belong to the pile, not to a job. With one
+  // job -- the ordinary case -- there is nowhere else they could have
+  // come from, so they go on its card. With several, they would be a
+  // guess, and they get a card of their own instead.
+  const alone = data.runs.length === 1;
 
-  const loose = looseFacts(data.counts);
-  if (loose.length) jobs.appendChild(scanJob("Other pages", "", loose));
-  if (!data.runs.length && !loose.length)
-    jobs.appendChild(scanJob("No job", "", ["nothing recognised"]));
+  for (const run of data.runs) {
+    const count = jobCounts(data, run);
+    const facts = [[`${count.matched} matched`, false]];
+    if (alone && pile.blank) facts.push([`${pile.blank} blank`, true]);
+    const chips = [];
+    if (count.missing)
+      chips.push(scanChip(count.missing, "missing", "absent"));
+    if (alone && pile.unmatched)
+      chips.push(scanChip(pile.unmatched, "unmatched", "query"));
+    jobs.appendChild(scanJob(run.title || `Job ${run.no}`,
+                             shortDay(run.date), facts, chips));
+  }
+
+  if (!alone && (pile.blank || pile.unmatched))
+    jobs.appendChild(scanJob(
+      "Other pages", "",
+      pile.blank ? [[`${pile.blank} blank`, true]] : [],
+      pile.unmatched
+        ? [scanChip(pile.unmatched, "unmatched", "query")] : []));
+
+  if (!data.runs.length)
+    jobs.appendChild(scanJob("No job", "", [["nothing recognised", true]],
+                             pile.unmatched
+                               ? [scanChip(pile.unmatched, "unmatched",
+                                           "query")] : []));
 
   const dupes = document.getElementById("scan-dupes");
   dupes.hidden = !data.duplicates.length;
