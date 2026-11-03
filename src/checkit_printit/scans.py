@@ -608,6 +608,254 @@ def cut_out(image, mark, anchor, carry, cut=BOX_CUT):
                                           fillcolor=(255, 255, 255))
 
 
+# ---------------------------------------------------------------------
+# The id grid
+#
+# `\cipidgrid` draws nine cells for a student to write their id into,
+# on any paper printed without a name. `\cipmark{id}` wraps exactly
+# that grid, so where each cell sits inside the recorded rectangle is
+# arithmetic off the macro's own lengths -- no searching for rules.
+#
+# What is **not** arithmetic is where the rectangle lands on a scan.
+# On the original PDF it sits on the ink to within a pixel at 200dpi.
+# On the first real stack of handwritten grids it landed about a
+# millimetre right and a millimetre up on all four pages: the
+# transform is fitted from the footer code and pinned by the footer's
+# grading box, and the header is nine inches away from both, so a
+# fraction of a degree down there is a millimetre up here.
+#
+# A millimetre is nothing to a name crop, which is padded on all
+# sides and only has to be legible. It is a quarter of a 4.4mm cell.
+# With a digit that leans, a quarter-cell of drift puts the
+# neighbour's ink in the picture -- and a digit read off the wrong
+# cell is a wrong student, silently.
+#
+# So the grid is found rather than predicted, using the one landmark
+# that is right beside it: its own top rule, 40mm of straight line in
+# a header that contains no other.
+
+#: pt per mm, TeX's own. Here rather than imported because the grid's
+#: lengths are written in millimetres in the macro and in points
+#: everywhere else, and converting at the point of use would put the
+#: same constant in six expressions.
+MM = 2.8452756
+
+#: `\cipidgrid`, in points: nine 4.4mm cells, with a 0.4pt rule
+#: between each pair and around the outside, 5.2mm tall inside.
+ID_CELL = 4.4 * MM
+ID_RULE = 0.4
+ID_TALL = 5.2 * MM
+ID_COUNT = 9
+ID_WIDE = ID_COUNT * ID_CELL + (ID_COUNT + 1) * ID_RULE
+ID_HIGH = ID_TALL + 2 * ID_RULE
+
+#: Half a cell either side and a third of the grid's height above and
+#: below: room for several times the drift that was measured, without
+#: reaching the name on the left or the course and date on the right.
+#:
+#: 120 pixels to the grid's height makes a cell about 96 by 111 and a
+#: 0.4pt rule three pixels wide, which is what lets the rule be found
+#: at all. At the 60 the first attempt used, the rules were under two
+#: pixels and the scan had smeared them into the paper.
+ID_SIDE = (ID_CELL / 2) / ID_HIGH
+ID_MARGIN = 0.35
+ID_LOOK = Cut((ID_SIDE, ID_MARGIN, ID_SIDE, ID_MARGIN), "height", 120)
+
+#: Grey at or below this is print rather than paper, out of 255.
+#:
+#: Three levels, measured off the first real stack: paper came back
+#: at 250 to 255, the rules -- printed in 30% black -- at 205 to 235,
+#: and pen below 150. 240 separates paper from the other two, which
+#: is all this has to do: the rule is being found by its *shape*, and
+#: pen counting as print costs nothing because no pen stroke is 40mm
+#: long and straight.
+ID_INK = 240
+
+#: How much of the grid's predicted width a dark run has to span
+#: before it is taken for the top rule. Three quarters, not all of
+#: it: a 0.4pt rule at 200dpi is under a pixel wide, so a scanner
+#: resolves it as a line of middling grey that drops out here and
+#: there. On the stack it tested against, the top rule came back as
+#: 897 to 902 pixels of a predicted 898, and the *bottom* rule lost
+#: its left half on two pages out of four.
+ID_LONG = 0.75
+
+#: How far the width found may differ from the width predicted before
+#: the find is thrown away. The scale comes from the footer code and
+#: is pinned by the grading box, and it was good to half a percent on
+#: every page of that stack -- so 3% is many times the error seen and
+#: still tight enough that a long dark line which is *not* the grid
+#: fails it.
+ID_SCALE_LIMIT = 0.03
+
+
+def _runs(dark, least, gap=3):
+    """Spans of True in `dark` at least `least` long, closing small gaps.
+
+    The gaps are the point. A rule that drops below the ink level for
+    two or three pixels is still a rule, and a run-length scan that
+    does not forgive that returns forty fragments instead of one line.
+    """
+    import numpy
+
+    out, start, last = [], None, None
+    for x in numpy.flatnonzero(dark):
+        if start is None:
+            start = x
+        elif x - last > gap:
+            if last - start >= least:
+                out.append((int(start), int(last)))
+            start = x
+        last = x
+    if start is not None and last - start >= least:
+        out.append((int(start), int(last)))
+    return out
+
+
+def id_grid(crop, want):
+    """Where the grid really is in `crop`: `(left, top, width)` or None.
+
+    `want` is `(left, top, width)` as predicted, in the same pixels.
+
+    Found by its top rule, and by nothing else. The nine *vertical*
+    rules are the obvious landmark and the wrong one: at 0.4pt and 30%
+    black they are paler than anybody's pen, so a comb fitted to them
+    locks onto a digit with a long downstroke -- which it did, on two
+    of the first four real pages, giving an answer half a cell out
+    while reporting a confident fit. The bottom rule is no good for
+    the left edge either: it is drawn to meet the blank name's
+    underline, so the two are collinear and a run can start anywhere
+    along the name.
+
+    None when no long rule is there, or when the one found is the
+    wrong width. Saying "this grid could not be placed" is the whole
+    point of the check -- nine cells cut from a landmark that is
+    something else would be read, and read wrongly.
+    """
+    import numpy
+
+    want_left, want_top, want_wide = want
+    grey = numpy.asarray(crop.convert("L"), dtype=float)
+    rows = []
+    for y in range(grey.shape[0]):
+        found = _runs(grey[y] <= ID_INK, ID_LONG * want_wide)
+        if found:
+            rows.append((y, *max(found, key=lambda r: r[1] - r[0])))
+    if not rows:
+        return None
+
+    # A rule is three pixels tall at this scale, so the rows it
+    # darkens come in a band. Group them, and take the band nearest
+    # where the top rule was predicted.
+    #
+    # Nearest rather than topmost. In everything seen so far the
+    # topmost long rule *is* the grid's top rule -- the only other one
+    # in the header is the blank name's underline, which is drawn to
+    # meet the grid's bottom. But the prediction is good to a fifth of
+    # the grid's height even when it is at its worst, so "nearest"
+    # costs nothing and is right about anything that does turn up
+    # above: a line of the student's own, a crease, the foot of
+    # whatever is on the line above on a sheet fed in crooked.
+    bands, run = [], []
+    for row in rows:
+        if run and row[0] - run[-1][0] > 2:
+            bands.append(run)
+            run = []
+        run.append(row)
+    bands.append(run)
+    band = min(bands,
+               key=lambda b: abs(numpy.mean([r[0] for r in b]) - want_top))
+
+    left = float(numpy.median([r[1] for r in band]))
+    wide = float(numpy.median([r[2] for r in band])) - left
+    if abs(wide / want_wide - 1) > ID_SCALE_LIMIT:
+        return None
+    # The band's first row, not its middle. All three numbers have to
+    # mean the same thing, because `want` is the grid's *outer*
+    # rectangle and the cells are measured in from it -- and `left`
+    # and `wide` come from where a run starts and stops, so they are
+    # outer edges already. The first row is the top rule's outer edge
+    # by the same rule, and needs no arithmetic to say so.
+    #
+    # Taking the middle instead is wrong by half a rule, which is a
+    # pixel and a half of a 114-pixel cell. Small, but it was also
+    # untestable at that size: the fixture draws rules at whole
+    # pixels, so a test tight enough to see it would have been testing
+    # how PIL rounds. This version can be checked with a rule drawn
+    # thick, which is what a scan run dark produces anyway.
+    top = float(min(r[0] for r in band))
+    return left, top, wide
+
+
+def id_predicted(crop):
+    """Where `ID_LOOK` puts the grid in a crop of that size.
+
+    `(left, top, width)`. Derived from the pads rather than written
+    out again: `_frame` has already turned them into the crop's size,
+    and a second copy of that arithmetic is a second thing to get
+    wrong when a margin changes.
+    """
+    wide, high = crop.size
+    across = ID_SIDE * 2 + ID_WIDE / ID_HIGH
+    down = ID_MARGIN * 2 + 1
+    return (ID_SIDE / across * wide,
+            ID_MARGIN / down * high,
+            (ID_WIDE / ID_HIGH) / across * wide)
+
+
+def id_boxes(left, top, wide):
+    r"""The nine cells of a grid at `(left, top)` of width `wide`.
+
+    `(left, top, right, bottom)` each, as whole pixels, inside
+    whatever picture the grid was found in. The grid's outer
+    rectangle in, the cells out: everything between is the macro's own
+    lengths, and that correspondence is the contract with
+    `\cipidgrid`. A cell starts one rule in from the grid's edge and
+    one rule after the cell before it, which is the sort of thing that
+    is a three-pixel error when it is wrong -- too small to see in a
+    picture of a cell, which is why it is asserted rather than
+    eyeballed.
+
+    Separate from `cells_in` for that reason and no other.
+    """
+    # The height follows the width rather than being measured between
+    # the two rules. Both are there to measure between, but the grid
+    # is seven times wider than it is tall, so the width is the same
+    # measurement with seven times the leverage -- and the shape
+    # between them is fixed by the macro.
+    high = wide * ID_HIGH / ID_WIDE
+    out = []
+    for k in range(ID_COUNT):
+        x = left + (ID_RULE + k * (ID_CELL + ID_RULE)) / ID_WIDE * wide
+        y = top + ID_RULE / ID_HIGH * high
+        out.append((round(x), round(y),
+                    round(x + ID_CELL / ID_WIDE * wide),
+                    round(y + ID_TALL / ID_HIGH * high)))
+    return out
+
+
+def cells_in(crop):
+    """The nine cells of the grid in this crop, one image each, or None.
+
+    The crop must have been cut with `ID_LOOK`, because that is what
+    says where the grid was expected and therefore how far the search
+    may wander.
+
+    Nothing here reads a digit. This is the segmentation, and once the
+    grid's own position is known it is exact: the macro's lengths say
+    where every cell is inside it.
+    """
+    found = id_grid(crop, id_predicted(crop))
+    if found is None:
+        return None
+    return [crop.crop(box) for box in id_boxes(*found)]
+
+
+def id_cells(image, mark, anchor, carry):
+    """The nine cells of the id grid on a scanned page, or None."""
+    return cells_in(cut_out(image, mark, anchor, carry, cut=ID_LOOK))
+
+
 #: A pixel is the instructor's pen when it is **coloured** and not
 #: paper-white. Saturation, out of 255.
 #:
