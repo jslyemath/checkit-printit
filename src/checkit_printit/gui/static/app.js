@@ -2862,9 +2862,18 @@ function undecidedReview() {
   return reviewRows.filter(r => !r.outcome);
 }
 
+//: Papers printed without a name that nobody has claimed yet. Like
+//: an unanswered mark, these stop the save: there is no student to
+//: record them against, and a row with no student is a mark
+//: belonging to the whole class.
+function unnamedReview() {
+  return reviewRows.filter(r => r.unowned && !r.sid);
+}
+
 function refreshScansDirty() {
   const n = unsavedReview().length;
   const left = undecidedReview().length;
+  const nameless = unnamedReview().length;
 
   /* Three states, and the bar says which.
    *
@@ -2878,12 +2887,18 @@ function refreshScansDirty() {
    * here too and a stack read by mistake is exactly the case where
    * nothing has been decided.
    */
-  const says = left
+  // Whichever is in the way, said shortest. A paper with no student
+  // comes first: an unanswered mark is a decision he has not made,
+  // and this is a paper nobody can file at all.
+  const says = nameless
+    ? (nameless === 1 ? "1 unnamed" : `${nameless} unnamed`)
+    : left
     ? (left === 1 ? "1 unmarked" : `${left} unmarked`)
     : (n === 1 ? "1 result not saved" : `${n} results not saved`);
-  saveBar("scans", n > 0 || left > 0, says,
-          n > 0 || left > 0 || reviewRows.length > 0);
-  document.getElementById("scans-save").hidden = !n || left > 0;
+  const stuck = left > 0 || nameless > 0;
+  saveBar("scans", n > 0 || stuck, says,
+          n > 0 || stuck || reviewRows.length > 0);
+  document.getElementById("scans-save").hidden = !n || stuck;
 }
 
 async function saveScans() {
@@ -2896,6 +2911,13 @@ async function saveScans() {
   if (left) {
     toast(left === 1 ? "one paper is still unmarked"
                      : `${left} papers are still unmarked`, true);
+    return;
+  }
+  const nameless = unnamedReview().length;
+  if (nameless) {
+    toast(nameless === 1
+      ? "one paper has no student yet"
+      : `${nameless} papers have no student yet`, true);
     return;
   }
   let out;
@@ -3035,21 +3057,27 @@ function noPaper() {
  * differently was a difference with no reason behind it -- and this
  * is the crop you most want the page for, because when the printed
  * name and the indexed one disagree, the page is what settles it. */
-function matchedNameCrop(row) {
-  if (!row.nameCrop) return noPaper();
+/* A crop off the paper: hover to see it larger, click for the whole
+ * page. One builder, because the name and the id are the same kind of
+ * control and a second copy is a second thing to keep in step. */
+function cropOf(src, alt, row) {
   const img = document.createElement("img");
   img.className = "matched-crop";
-  img.src = row.nameCrop;
-  img.alt = "the name printed on this paper";
+  img.src = src;
+  img.alt = alt;
   img.loading = "lazy";
   const where = (row.at || [])[0];
-  peekable(img, row.nameCrop,
-           where ? "click for the whole page" : "the name on this paper");
+  peekable(img, src, where ? "click for the whole page" : alt);
   if (where) {
     img.classList.add("openable");
     img.onclick = () => openSheet(row, where);
   }
   return img;
+}
+
+function matchedNameCrop(row) {
+  if (!row.nameCrop) return noPaper();
+  return cropOf(row.nameCrop, "the name printed on this paper", row);
 }
 
 /* The name the index gives, and a way to say it is the wrong one.
@@ -3080,6 +3108,34 @@ function matchedNameCell(row) {
     flag.setAttribute("role", "img");
     flag.setAttribute("aria-label", flag.title);
     wrap.appendChild(flag);
+  }
+
+  /* A paper printed with nobody's name on it -- a spare, or any
+     sheet from a run printed blank. The student wrote their own id
+     into the grid in the header, so the first column shows that grid
+     instead of a name, and the button is there from the start rather
+     than after a click: there is no name to click on, and matching
+     it is not an optional correction but the only way this row can
+     be saved.
+
+     The handwritten name is in the next column along, as it is for
+     every other row, so both pieces of evidence sit side by side --
+     which is the point of those two columns being neighbours. */
+  if (row.unowned && !row.sid) {
+    wrap.classList.add("unowned");
+    wrap.appendChild(row.idCrop
+      ? cropOf(row.idCrop, "the id written on this paper", row)
+      : Object.assign(document.createElement("span"),
+                      { className: "dim", textContent: "no id" }));
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "iconbtn rematch needed";
+    go.appendChild(icon("rematch"));
+    go.title = "Say whose paper this is";
+    go.setAttribute("aria-label", go.title);
+    go.onclick = () => openRematch(row);
+    wrap.appendChild(go);
+    return wrap;
   }
 
   const name = document.createElement("button");
