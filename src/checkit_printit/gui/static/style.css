@@ -1844,6 +1844,100 @@ body.hasbar.tall main { padding-bottom: 68px; }
   overflow-wrap: anywhere;
 }
 
+/* ---- the matched table -----------------------------------------------
+   One row per paper, one row height. Everything in a row is one line
+   tall so the eye can run down a column: the crops are sized to the
+   row rather than the row to the crops.
+
+   It replaced three stacked lists -- the papers wanting a look, a
+   fold-away for the rest -- which meant working out which list a
+   paper was in before you could look at it. */
+table.matched {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+table.matched th,
+table.matched td {
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+table.matched td.mid { text-align: center; }
+
+/* The four marks stay on one line. `.review-picks` wraps by default,
+   which was right in the card it was written for -- that had the
+   whole width of the panel -- and in a table cell it turned one row
+   into four. The cell is `white-space: nowrap`, so the table gives
+   the column the width it asks for instead. */
+table.matched .review-picks {
+  flex-wrap: nowrap;
+  justify-content: center;
+}
+table.matched .review-pick { padding: 3px 8px; }
+/* A heading that is not a button still has to look like a heading. */
+.nosort { color: var(--muted); font-size: var(--t-sm); font-weight: 500; }
+table.matched th.mid .sort { margin: 0 auto; }
+table.matched tbody tr:hover { background: var(--surface-1); }
+
+/* A paper that never came back. Dimmed rather than hidden: it is
+   still a row he may want to mark by hand. */
+table.matched tr.nopaper .namebtn { color: var(--muted); }
+
+/* The crops, sized to the row. */
+.matched-crop {
+  display: block;
+  height: 26px;
+  max-width: 190px;
+  object-fit: contain;
+  object-position: left center;
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+}
+.matched-box { display: inline-flex; gap: var(--s1); }
+.matched-box img {
+  display: block;
+  height: 26px;
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+}
+.matched-box img.openable { cursor: zoom-in; }
+/* Two pictures of one square, when the sheet went through twice.
+   Smaller, because two of them in a row's height is the budget. */
+.matched-box.twice img { height: 22px; }
+
+/* The name, and the way to say it is the wrong one.
+
+   A button rather than text, because it does something -- and it
+   wears no border until the pointer is on it, which is how
+   `.pagetitle` already says "this is not just words". */
+.matched-name { display: inline-flex; align-items: center; gap: var(--s2); }
+.namebtn {
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+  margin: -2px -6px;
+  cursor: pointer;
+}
+.namebtn:hover { border-color: var(--line-strong); }
+.namebtn:focus-visible { outline: none; border-color: var(--accent); }
+
+/* 21px, not the 18 every other `.iconbtn` carries. Two figures and
+   an arrow is more ink than the rest of the set, and at 18 the arrow
+   -- the half that means anything -- closes into the shoulder beside
+   it. See `GLYPH.rematch`. */
+.iconbtn.rematch { width: 30px; height: 30px; }
+.iconbtn.rematch svg { --glyph-size: 21; width: 21px; height: 21px; }
+
+.dim { color: var(--dim); }
+
 /* ---- the job header --------------------------------------------------
    What the stack turned out to be, one section per print job it came
    from. Every line here is settled; nothing in it is a control and
@@ -1951,15 +2045,6 @@ body.hasbar.tall main { padding-bottom: 68px; }
 /* Three columns and not a table: the middle one holds a picture
    whose height sets the row, and the right one is a group of
    buttons. A table would make both of those fight the cell. */
-.review-row {
-  display: grid;
-  grid-template-columns: minmax(9rem, 14rem) auto 1fr;
-  align-items: center;
-  gap: var(--s3);
-  padding: var(--s2) var(--s3);
-  background: var(--panel);
-}
-.review-name { font-size: var(--t-base); }
 
 /* The crop sits on white whatever the app's theme is. It is a
    photograph of paper, and paper is white -- on a dark background a
@@ -2009,7 +2094,12 @@ body.hasbar.tall main { padding-bottom: 68px; }
 /* A row nobody has decided yet is marked on its edge rather than
    coloured all over: the thing being looked at is the crop, and a
    tinted row would fight it. */
-.review-row.undecided { box-shadow: inset 3px 0 0 var(--warn); }
+/* Nobody has said yes or no to this paper yet. A bar down the left
+   edge, which on a table row means the first cell, because a box
+   shadow inset on a `<tr>` does not paint. */
+.matched-row.undecided td:first-child {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
 
 .review-head {
   display: flex;
@@ -2388,4 +2478,3 @@ button.act.chip:hover { border-color: var(--line-strong); }
 }
 
 /* Four columns now: who, how sure, the picture, the four marks. */
-.review-row { grid-template-columns: minmax(9rem, 14rem) auto auto 1fr; }

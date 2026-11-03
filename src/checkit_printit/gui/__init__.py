@@ -86,6 +86,22 @@ def _sort_names(student):
     return last, first
 
 
+def _split_for_sort(full):
+    """`sort_last` / `sort_first` for a name the record printed.
+
+    The review knows a student by the name on the paper rather than by
+    a roster row, so `_sort_names`, which takes a student, cannot be
+    used. Same splitter underneath, and the same caveat: on a roster
+    with one full-name column this is a guess and it is wrong on a
+    compound surname. It decides a row's position in a sort and
+    nothing else.
+    """
+    if not full:
+        return {"sort_last": "", "sort_first": ""}
+    last, first, _ = classlist_mod.split_full_name(full)
+    return {"sort_last": last or "", "sort_first": first or ""}
+
+
 def _student_json(student, index):
     """One row of the roster table.
 
@@ -2017,6 +2033,11 @@ def _review_rows(batch, record_path, names, sections=None):
             "id": f"{run_no}-{page}",
             "run": run_no, "page": page,
             "sid": entry.sid, "name": names.get(entry.sid, ""),
+            # Sorting by surname wants the surname, and the browser
+            # has no splitter on purpose -- see `_sort_names`. The
+            # same guess the roster sorts on, so the two tabs put one
+            # student in the same place.
+            **_split_for_sort(names.get(entry.sid, "")),
             "section": (sections or {}).get(entry.sid, ""),
             "skill": entry.slug, "scanned": True,
             # Every square taken of this paper. One, nearly always;
@@ -2063,6 +2084,11 @@ def _review_rows(batch, record_path, names, sections=None):
                 "id": f"{run_no}-{page}",
                 "run": run_no, "page": page,
                 "sid": entry.sid, "name": names.get(entry.sid, ""),
+            # Sorting by surname wants the surname, and the browser
+            # has no splitter on purpose -- see `_sort_names`. The
+            # same guess the roster sorts on, so the two tabs put one
+            # student in the same place.
+            **_split_for_sort(names.get(entry.sid, "")),
                 "section": (sections or {}).get(entry.sid, ""),
                 "skill": entry.slug, "scanned": False, "crops": [],
                 "shots": [], "nameCrop": "", "at": [],
