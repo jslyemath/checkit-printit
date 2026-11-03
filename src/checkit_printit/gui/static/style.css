@@ -2120,6 +2120,17 @@ table.matched tr.nopaper .namebtn { color: var(--muted); }
 
 .dim { color: var(--dim); }
 
+/* The handwritten name on a paper whose owner was worked out from the
+   id grid. Ringed because it is the only check on that reading --
+   there is no printed name to agree with. Same yellow as an
+   unanswered mark, which is the app's one way of saying "look at
+   this", and on the picture rather than the row so it points at the
+   thing to look at. */
+.matched-crop.wantslook {
+  border-color: var(--warn);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 35%, transparent);
+}
+
 /* A paper printed with nobody's name on it. The button is not an
    optional correction here -- it is the only way the row can be
    saved -- so it wears the accent rather than sitting grey until

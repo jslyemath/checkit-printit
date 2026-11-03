@@ -3077,7 +3077,17 @@ function cropOf(src, alt, row) {
 
 function matchedNameCrop(row) {
   if (!row.nameCrop) return noPaper();
-  return cropOf(row.nameCrop, "the name printed on this paper", row);
+  const img = cropOf(row.nameCrop, "the name printed on this paper", row);
+  /* Outlined when the student in the first column was worked out
+     from the id grid rather than read off a printed code.
+
+     Those are the rows where the handwriting is the only check there
+     is: the code says nothing about who owns a blank paper, so if the
+     grid was misread the name beside it is the only thing that would
+     show it. Every other row has a printed name to agree with and
+     needs no ringing. */
+  if (row.byId) img.classList.add("wantslook");
+  return img;
 }
 
 /* The name the index gives, and a way to say it is the wrong one.
@@ -3111,22 +3121,24 @@ function matchedNameCell(row) {
   }
 
   /* A paper printed with nobody's name on it -- a spare, or any
-     sheet from a run printed blank. The student wrote their own id
-     into the grid in the header, so the first column shows that grid
-     instead of a name, and the button is there from the start rather
-     than after a click: there is no name to click on, and matching
-     it is not an optional correction but the only way this row can
-     be saved.
+     sheet from a run printed blank -- that nothing has yet worked
+     out the owner of.
 
-     The handwritten name is in the next column along, as it is for
-     every other row, so both pieces of evidence sit side by side --
-     which is the point of those two columns being neighbours. */
+     The id grid is **not** shown here. This column holds a name, the
+     way it does for a paper whose code named one; whose paper it is
+     is the program's job to work out, from the grid, and the check
+     is the handwritten name in the column alongside. A picture of
+     nine digits in the name column asked him to read the id himself,
+     which is the job the grid exists to avoid.
+
+     Until the grid can be read, this is where it stops: a dash and
+     a button. The button is there from the start rather than after a
+     click, because there is no name to click on and matching it is
+     not an optional correction -- it is the only way the row can be
+     saved. */
   if (row.unowned && !row.sid) {
     wrap.classList.add("unowned");
-    wrap.appendChild(row.idCrop
-      ? cropOf(row.idCrop, "the id written on this paper", row)
-      : Object.assign(document.createElement("span"),
-                      { className: "dim", textContent: "no id" }));
+    wrap.appendChild(noPaper());
     const go = document.createElement("button");
     go.type = "button";
     go.className = "iconbtn rematch needed";
@@ -3381,6 +3393,9 @@ function applyRematch(id, who) {
   row.name = who.name;
   row.sort_last = who.sort_last;
   row.sort_first = who.sort_first;
+  // The section comes with the student, so Sec fills itself in. It
+  // was blank on an unowned paper for the same reason the name was:
+  // nothing on the sheet said whose it was.
   row.section = who.section;
   row.rematched = true;
   row.touched = true;
