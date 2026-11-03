@@ -12,6 +12,7 @@ binds, and the control is simply inert. These tests are cheap and catch
 exactly that.
 """
 
+import json
 import os
 import re
 import shutil
@@ -632,3 +633,128 @@ def test_every_page_heading_is_a_pagename(html):
     """
     bare = [m for m in re.findall(r"<h2(?![^>]*\bclass=)[^>]*>", html)]
     assert not bare, "a page heading is not a .pagename: " + "; ".join(bare)
+
+
+# -------------------------------------------- the scan arithmetic ----
+
+def pure_block():
+    """The marked region of app.js, which uses no DOM.
+
+    Lifted rather than imported because app.js is a browser script,
+    not a module: loading it reaches for `document` on the first line
+    that runs.
+    """
+    js = read("app.js")
+    # From the outcome table, because the counting asks each status
+    # whether it is one to chase, to the whole of the closing marker --
+    # cutting inside it leaves an unterminated comment.
+    start = js.index("const SCAN_OUTCOME = {")
+    end = js.index("/* --- end pure --- */")
+    assert start < end, "the pure block is not where it says it is"
+    return js[start:end]
+
+
+def run_js(body):
+    """`node -e` over the pure block plus an assertion, as JSON."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+    done = subprocess.run([node, "-e", pure_block() + "\n" + body],
+                          capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr.strip()
+    return json.loads(done.stdout)
+
+
+#: A stack shaped like the demo one: twelve pages printed, one never
+#: handed in, four of them the key -- and two double feeds, one of a
+#: student's paper and one of a key.
+#:
+#: The key is fed twice on purpose. With four distinct key pages and
+#: no repeat, counting key *sheets* and counting key *papers* give the
+#: same answer, and a fixture that cannot tell them apart is a test
+#: that passes either way -- which is what this one did until a
+#: mutation put `placed.filter(...).length` back and nothing failed.
+DEMO = """
+const data = {
+  counts: { placed: 13, blank: 1 },
+  runs: [{ no: 1, title: "Checkpoint", date: "2026-10-25", pages: 12 }],
+  sheets: [
+    {status:"placed",run:1,page:1,kind:"student"},
+    {status:"placed",run:1,page:1,kind:"student"},
+    {status:"placed",run:1,page:2,kind:"student"},
+    {status:"placed",run:1,page:3,kind:"student"},
+    {status:"placed",run:1,page:5,kind:"student"},
+    {status:"placed",run:1,page:6,kind:"student"},
+    {status:"placed",run:1,page:7,kind:"student"},
+    {status:"placed",run:1,page:9,kind:"student"},
+    {status:"placed",run:1,page:11,kind:"key"},
+    {status:"placed",run:1,page:11,kind:"key"},
+    {status:"placed",run:1,page:12,kind:"key"},
+    {status:"placed",run:1,page:13,kind:"key"},
+    {status:"placed",run:1,page:14,kind:"key"},
+    {status:"blank",run:null,page:null,kind:""}
+  ],
+  missing: [{ run: 1, page: 10 }]
+};
+"""
+
+
+def test_a_paper_fed_twice_is_counted_once():
+    """Eleven papers came back, not twelve.
+
+    Counting sheets gave "12 of 12 back" beside a chip reading
+    "1 missing" -- two numbers that cannot both be true. Found by
+    reading the real demo stack, which has exactly one double feed;
+    nothing smaller would have shown it.
+    """
+    facts = run_js(DEMO + 'console.log(JSON.stringify('
+                          'jobFacts(data, data.runs[0], false)));')
+    # 13 placed sheets, two of them repeats: 11 papers. And 11 back
+    # plus the 1 missing is the 12 that were printed.
+    assert facts[0] == "11 of 12 back", facts
+    # 5 key sheets, 4 key papers.
+    assert facts[1] == "4 keys", facts
+
+
+def test_a_blank_page_is_reported_somewhere():
+    """A blank carries no code, so it has no run and no job section.
+
+    It was on a job's facts line, where filtering that job's sheets by
+    run dropped it -- the one blank in the demo stack appeared nowhere
+    on the page at all.
+    """
+    job = run_js(DEMO + 'console.log(JSON.stringify('
+                        'jobFacts(data, data.runs[0], false)));')
+    assert not any("blank" in f for f in job), (
+        "a blank is back on a job's line, where its run is null: "
+        + str(job))
+    loose = run_js(DEMO + 'console.log(JSON.stringify('
+                          'looseFacts(data.counts)));')
+    assert loose == ["1 blank"], loose
+
+
+def test_only_the_pages_worth_chasing_are_unmatched():
+    """A barcode from somewhere else is a cover sheet, not work.
+
+    Chasing `foreign` would be chasing the copier.
+    """
+    counts = ('const c = { placed: 6, blank: 2, unreadable: 3, '
+              '"unknown-run": 1, foreign: 1 };')
+    n = run_js(counts + 'console.log(JSON.stringify(unmatchedCount(c)));')
+    assert n == 4, n
+
+
+def test_the_job_date_is_month_and_day():
+    out = run_js('console.log(JSON.stringify('
+                 '[shortDay("2026-11-02"), shortDay(""), shortDay("odd")]));')
+    assert out == ["11/2", "", "odd"], out
+
+
+def test_one_job_does_not_repeat_the_missing_chip():
+    """With a single job the per-job share is the chip said twice."""
+    one = run_js(DEMO + 'console.log(JSON.stringify('
+                        'jobFacts(data, data.runs[0], false)));')
+    many = run_js(DEMO + 'console.log(JSON.stringify('
+                         'jobFacts(data, data.runs[0], true)));')
+    assert not any("not back" in f for f in one), one
+    assert "1 not back" in many, many

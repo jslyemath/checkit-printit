@@ -1134,6 +1134,15 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 }
 .chip + .chip { margin-left: var(--s1); }
 
+/* The warning pair, for a chip that is a piece of work rather than a
+   fact. Same yellow the save bar and the rail's dot use, so "something
+   wants you" looks the same everywhere in the app. */
+.chip.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
 .annot-body { min-width: 0; }
 .annot-body > :last-child { margin-bottom: 0; }
 
@@ -1835,19 +1844,39 @@ body.hasbar.tall main { padding-bottom: 68px; }
   overflow-wrap: anywhere;
 }
 
-.scan-counts {
-  list-style: none;
-  margin: var(--s3) 0;
-  padding: 0;
+/* ---- the job header --------------------------------------------------
+   What the stack turned out to be, one section per print job it came
+   from. Every line here is settled; nothing in it is a control and
+   nothing in it is coloured. The work is two chips in the page header,
+   and they are the only yellow on the tab until the review starts.
+
+   A list of outcome sentences used to stand here -- "3 pages I could
+   not read. There is something on these, but no code I could find..."
+   -- eleven lines of explanation above the table that shows the same
+   pages. The explanations moved to the `?`; the counts stayed. */
+.scan-job + .scan-job { margin-top: var(--s3); }
+
+.jobhead {
   display: flex;
-  flex-direction: column;
-  gap: var(--s1);
+  align-items: baseline;
+  gap: var(--s2);
 }
-.scan-counts li { font-size: var(--t-sm); }
-/* Only the two that need chasing are coloured. "Placed" and "blank"
-   are the ordinary outcome and a page of green ticks would make the
-   two that matter harder to find, not easier. */
-.scan-counts li.chase strong { color: var(--warn); }
+.jobname {
+  margin: 0;
+  font-size: var(--t-base);
+  font-weight: 600;
+}
+.jobdate {
+  color: var(--muted);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+}
+.jobfacts {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+}
 
 #scan-missing h3, #scan-dupes h3, #scan-sheets-head {
   margin: var(--s4) 0 var(--s1);
