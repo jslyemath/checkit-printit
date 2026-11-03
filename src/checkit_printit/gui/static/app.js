@@ -564,24 +564,29 @@ const GLYPH = {
            { r: [4.2, 11.2, 15.6, 2.9, 1.5] },
            { d: "M7 19.8v-5.7M17 19.8v-5.7" },
            { d: "M3.4 20.6L20.6 3.4" }],
-  /* Re-matching a paper to a different student: one person, and a
-     caret for the list that opens.
+  /* Re-matching a paper to a different student: this person, then
+     that one. His picture, and the right one -- it says the whole
+     action without a word.
 
      Deliberately not `swapby`. The Last name heading already wears
      that for the name-order switch, so the same glyph in a cell of
-     that column would read as the same action -- he spotted that
-     before it was built.
+     that column would read as the same action.
 
-     Picked the way `drop` and `restore` were: four drawn and looked
-     at side by side at 48px and 18px. A person with a circular arrow
-     and two people with an arrow between them both turned to mush at
-     18px -- too many strokes in too little room. A tag stayed legible
-     but says "re-label", and the thing being chosen is a person. The
-     caret doubles as a promise about what the click does, which is
-     open a list. */
-  pickwho: [{ o: [10, 8.2, 3.3] },
-            { d: "M3.6 20c0-3.5 2.9-5.6 6.4-5.6 1.3 0 2.5.3 3.5.8" },
-            { d: "M15.4 16.4l2.9 3 2.9-3" }],
+     **Draw this one at 21px, not 18.** Two figures and an arrow is
+     more ink than the rest of this set carries, and at 18px the
+     arrow -- which is the half that means anything -- closes up into
+     the shoulder beside it. 21px is the rail's size, so it is not a
+     new one. Four layouts were drawn and looked at from 64px down to
+     16px: side by side turned to mush, two bare heads lost the
+     people, and a fat diagonal pair crowded its own arrow. This one
+     shrinks the figures and spends what it saves on the arrowhead,
+     because the arrow is what carries the meaning. */
+  rematch: [{ o: [5.8, 5.2, 2.6] },
+            { d: "M1.8 11.8a4.0 4.0 0 0 1 8.0 0" },
+            { o: [18.2, 18.4, 2.6] },
+            { d: "M14.2 24.0a4.0 4.0 0 0 1 8.0 0" },
+            { d: "M13.6 4.6h5.2a2 2 0 0 1 2 2v5.0" },
+            { d: "M17.6 10.2l3.2 3.4 3.2-3.4" }],
   collapse: "M14.5 7.5 9.5 12l5 4.5",
   // Points up while a group is open; CSS turns it when it closes.
   chev: "M6 14.5l6-6 6 6",
