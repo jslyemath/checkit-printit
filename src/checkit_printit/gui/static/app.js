@@ -70,6 +70,8 @@ const VIEWS = [
  *   sortKeys       `[[key, note], ...]` for a column with more than one
  *                  order -- Name cycles surname and given name
  *   value(row)     the text to sort on, when it is not `row[key]`
+ *   absent(row)    truthy for a row with no value for this key; those
+ *                  sort last whichever way the column points
  *   pin            "left" or "right", added to the `th` as a class
  *   cls            any other class for the `th`
  *   resetHere      put the "back to the default order" button in this `th`
@@ -158,6 +160,17 @@ function makeSorter({ columns, defaults, redraw, resetTitle }) {
     if (!keys.length) return rows;
     return [...rows].sort((a, b) => {
       for (const { key, desc, column } of keys) {
+        // A row with nothing to compare goes last, whichever way the
+        // column is pointing. Sorting Scans by confidence puts the
+        // least certain readings at the top, and a paper that never
+        // arrived has no reading at all -- it is not the most
+        // doubtful one, it is not one of them. Flipping to ascending
+        // must not drag the whole absent block to the front either,
+        // so this is decided before `desc` is applied.
+        if (column.absent) {
+          const gone = column.absent(a) - column.absent(b);
+          if (gone) return gone;
+        }
         const cmp = valueOf(key, column, a).localeCompare(
           valueOf(key, column, b), undefined, { numeric: true });
         if (cmp) return desc ? -cmp : cmp;
@@ -194,6 +207,16 @@ function makeSorter({ columns, defaults, redraw, resetTitle }) {
       if (column.headExtra) column.headExtra(th);
 
       if (column.sortable === false) {
+        // Still a heading. The Roster's one unsortable column is the
+        // actions strip, whose label is empty, so nothing noticed
+        // until Scans gave two unsortable columns real names and got
+        // two blank headings.
+        if (column.label) {
+          const plain = document.createElement("span");
+          plain.className = "nosort";
+          plain.textContent = column.label;
+          th.appendChild(plain);
+        }
         row.appendChild(th);
         continue;
       }
@@ -585,8 +608,13 @@ const GLYPH = {
             { d: "M1.8 11.8a4.0 4.0 0 0 1 8.0 0" },
             { o: [18.2, 18.4, 2.6] },
             { d: "M14.2 24.0a4.0 4.0 0 0 1 8.0 0" },
-            { d: "M13.6 4.6h5.2a2 2 0 0 1 2 2v5.0" },
-            { d: "M17.6 10.2l3.2 3.4 3.2-3.4" }],
+            // The drop lands on 18.2, which is the second head's own
+            // centre, so the arrow points at the person rather than
+            // past their ear. The horizontal sits at 3.4 and the turn
+            // has a 2-unit radius under it: at 4.6 the corner was
+            // folded into the descent and read as a kink.
+            { d: "M12.6 3.4h3.6a2 2 0 0 1 2 2v6.0" },
+            { d: "M15.4 10.6l2.8 2.8 2.8-2.8" }],
   collapse: "M14.5 7.5 9.5 12l5 4.5",
   // Points up while a group is open; CSS turns it when it closes.
   chev: "M6 14.5l6-6 6 6",
@@ -2712,107 +2740,7 @@ function pileCounts(data) {
 let reviewRows = [];
 let reviewOutcomes = [];
 
-function reviewRow(row) {
-  const el = document.createElement("div");
-  el.className = "review-row";
-  el.dataset.id = row.id;
 
-  const who = document.createElement("div");
-  who.className = "review-who";
-  const name = document.createElement("div");
-  name.className = "review-name";
-  name.textContent = row.name || row.sid || "(no name)";
-  const skill = document.createElement("div");
-  skill.className = "muted";
-  skill.textContent = row.skill;
-  who.append(name, skill);
-  // The name as it is printed on the sheet, under the name the
-  // index says it is. A wrong index then shows as a column that
-  // stops agreeing with itself, which is the only warning there
-  // would otherwise be -- see the run overwritten on 2026-10-27.
-  if (row.nameCrop) {
-    const shot = document.createElement("img");
-    shot.className = "review-nameshot";
-    shot.src = row.nameCrop;
-    shot.alt = `the name printed on this paper`;
-    shot.loading = "lazy";
-    // The same look-closer as the box crop. This is the thing being
-    // checked against the index, and it is cut small.
-    peekable(shot, row.nameCrop,
-             "the name printed on this paper \u2014 it should be the "
-             + "one above");
-    who.appendChild(shot);
-  }
-  // Said here rather than over the pictures: it is a fact about the
-  // paper, and `.review-shot` is white because a crop of a sheet
-  // belongs on something sheet-coloured.
-  if ((row.crops || []).length > 1 && !row.read) {
-    const note = document.createElement("div");
-    note.className = "warnline review-disagree";
-    note.textContent = "scanned twice, and the two do not match";
-    who.appendChild(note);
-  }
-
-  const shot = document.createElement("div");
-  shot.className = "review-shot";
-  const crops = row.crops || [];
-  if (crops.length) {
-    // Usually one. Two when the sheet went through the copier
-    // twice, and then both are here on purpose: if they disagree
-    // the suggestion was withheld, and the two pictures are the
-    // reason why.
-    shot.classList.toggle("twice", crops.length > 1);
-    crops.forEach((crop, i) => {
-      const img = document.createElement("img");
-      // Two pictures of the same square: the row shows the close
-      // one, cut round the box the reader actually found, and the
-      // popover shows the wide one it was cut from. The row's job
-      // is "is there a tick in it", which wants no paper around it
-      // at all; the context is one hover away.
-      img.src = (row.shots || [])[i] || crop;
-      img.alt = `the grading box on ${row.name || row.sid}'s ${row.skill}`;
-      img.loading = "lazy";
-      const where = (row.at || [])[i];
-      peekable(img, crop, where
-        ? "click for the whole page" : "the grading box, close up");
-      if (where) {
-        img.classList.add("openable");
-        img.onclick = () => openSheet(row, where);
-      }
-      shot.appendChild(img);
-    });
-  }
-  // Nothing here when no paper came back. The dial already says
-  // `n/a` and the chair glyph is lit: three ways of saying one
-  // thing is two too many, and the words were the ones taking the
-  // room.
-
-  const picks = document.createElement("div");
-  picks.className = "review-picks";
-  picks.setAttribute("role", "radiogroup");
-  for (const outcome of reviewOutcomes) {
-    // "Did not sit it" is only an answer for a paper that is not
-    // here. A sheet that came back was sat, whatever is on it.
-    if (outcome.id === "absent" && row.scanned) continue;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "review-pick";
-    button.dataset.outcome = outcome.id;
-    // The glyph alone. The word is the tooltip and the accessible
-    // name -- it was beside the glyph and that spent the width the
-    // glyph was there to save.
-    button.appendChild(icon(OUTCOME_GLYPH[outcome.id] || "query"));
-    button.setAttribute("aria-label", outcome.label);
-    button.title = `${outcome.label} \u2014 ${outcome.mark}`;
-    button.setAttribute("role", "radio");
-    button.onclick = () => setOutcome(row.id, outcome.id);
-    picks.appendChild(button);
-  }
-
-  el.append(who, sureDial(row), shot, picks);
-  paintRow(el, row);
-  return el;
-}
 
 /* How sure the reading is, as a ring and a number out of ten.
 
@@ -2883,7 +2811,7 @@ function setOutcome(id, outcome) {
   row.outcome = row.outcome === outcome ? "" : outcome;
   row.touched = true;
   for (const el of document.querySelectorAll(
-      `.review-row[data-id="${CSS.escape(id)}"]`)) {
+      `.matched-row[data-id="${CSS.escape(id)}"]`)) {
     paintRow(el, row);
   }
   countReview();
@@ -2945,6 +2873,236 @@ async function saveScans() {
   reviewNote(out);
   countReview();
   toast(out.saved === 1 ? "1 result saved" : `${out.saved} results saved`);
+}
+
+/* ---- the matched table -------------------------------------------------
+ *
+ * One row per paper, every column sortable, on the same `makeSorter`
+ * the Roster uses.
+ *
+ * It opens on confidence descending, then section, then surname --
+ * which puts the readings that want a person at the top without
+ * splitting the table into "sure" and "unsure" lists. A paper that
+ * never came back has no reading, so it is not the most doubtful one;
+ * `absent` sinks those to the bottom of a confidence sort whichever
+ * way it points.
+ *
+ * The two name columns sit next to each other on purpose: the crop is
+ * what the paper says and the first column is what the index says, so
+ * a wrong index shows as a row that stops agreeing with itself. That
+ * is the only warning there is -- nothing here reads the name, so no
+ * machine can notice. See the run overwritten on 2026-10-27.
+ */
+const MATCHED_COLUMNS = [
+  // "Name", not "Last name": the heading is built as "<note> <label>"
+  // and the note is the order it is sorted in, so this reads "last
+  // name" or "first name" and follows the switch beside it. Labelling
+  // it "Last name" produced "last last name", and would have lied
+  // after a swap anyway.
+  { key: "name", label: "Name", min: 180, grow: true,
+    value: r => displayName(r),
+    sortKeys: [["sort_last", "last"], ["sort_first", "first"]],
+    headExtra: nameFormatSwitch,
+    cell: matchedNameCell },
+  { key: "nameCrop", label: "Paper name", sortable: false, min: 150,
+    cell: r => cropImage(r.nameCrop,
+                         "the name printed on this paper",
+                         "the name printed on this paper — it should "
+                         + "be the one beside it") },
+  { key: "section", label: "Section", min: 74 },
+  { key: "skill", label: "Skill", min: 64 },
+  { key: "sure", label: "Confidence", min: 96, cls: "mid",
+    // Padded, because the compare is textual: "9" beats "10" unsorted.
+    value: r => r.scanned ? String(Math.round((r.sure || 0) * 10)).padStart(2, "0") : "",
+    absent: r => (r.scanned ? 0 : 1),
+    cell: r => sureDial(r) },
+  { key: "_box", label: "Paper mark", sortable: false, min: 120,
+    cell: matchedBoxCell },
+  { key: "_mark", label: "Mark", min: 150, cls: "mid",
+    // By the order he would read them in, not alphabetically: passed,
+    // query, not passed, did not sit it. Undecided rows group together
+    // at one end rather than scattering among the decided ones.
+    value: r => String(OUTCOME_LIST.findIndex(o => o.id === r.outcome) + 1),
+    cell: matchedMarkCell },
+];
+
+const MATCHED_SORT = [
+  { key: "sure", desc: true },
+  { key: "section", desc: false },
+  { key: "sort_last", desc: false },
+];
+
+const matchedSort = makeSorter({
+  columns: MATCHED_COLUMNS,
+  defaults: MATCHED_SORT,
+  redraw: () => renderMatched(),
+  resetTitle: "Back to least sure first, then section and surname.",
+});
+
+/* The Roster's name-order switch, in the heading that owns it.
+ *
+ * Lifted rather than copied, because it is the same preference: the
+ * two tabs read one `filedNames()` and flipping it on either flips it
+ * on both. Nothing else anywhere may wear `swapby` -- in a name
+ * column it means the name order and only that, which is why
+ * re-matching got a glyph of its own. */
+function nameFormatSwitch(th) {
+  const swap = document.createElement("button");
+  swap.className = "iconbtn tiny namefmt";
+  swap.type = "button";
+  swap.appendChild(icon("swapby"));
+  swap.title = filedNames()
+    ? "Showing surname first. Switch to First Last."
+    : "Showing given name first. Switch to Last, First.";
+  swap.setAttribute("aria-label", swap.title);
+  swap.onclick = (e) => { e.stopPropagation(); setFiledNames(!filedNames()); };
+  th.appendChild(swap);
+}
+
+/* A crop off the paper, or a dash where there is no paper. */
+function cropImage(src, alt, peek) {
+  if (!src) {
+    const dash = document.createElement("span");
+    dash.className = "dim";
+    dash.textContent = "—";
+    return dash;
+  }
+  const img = document.createElement("img");
+  img.className = "matched-crop";
+  img.src = src;
+  img.alt = alt;
+  img.loading = "lazy";
+  peekable(img, src, peek);
+  return img;
+}
+
+/* The name the index gives, and a way to say it is the wrong one.
+ *
+ * Two clicks, not one. The first shows the button and costs nothing;
+ * the second opens the list. On a table of ninety rows a single click
+ * that re-matched a paper would go off by accident, and the accident
+ * is silent -- the row would simply be somebody else's.
+ */
+function matchedNameCell(row) {
+  const wrap = document.createElement("span");
+  wrap.className = "matched-name";
+
+  const name = document.createElement("button");
+  name.type = "button";
+  name.className = "namebtn";
+  name.textContent = displayName(row) || row.sid || "(no name)";
+  if (!row.scanned) name.classList.add("dim");
+  name.title = "Click if this is not whose paper this is.";
+  name.onclick = () => armRematch(row.id);
+  wrap.appendChild(name);
+
+  if (rematchArmed === row.id) {
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "iconbtn rematch";
+    go.appendChild(icon("rematch"));
+    go.title = "Match this paper to a different student";
+    go.setAttribute("aria-label", go.title);
+    go.onclick = () => openRematch(row);
+    wrap.appendChild(go);
+  }
+  return wrap;
+}
+
+//: Which row has shown its re-match button. One at a time: two armed
+//: rows would be two half-started actions with nothing saying which.
+let rematchArmed = "";
+
+function armRematch(id) {
+  rematchArmed = rematchArmed === id ? "" : id;
+  renderMatched();
+}
+
+function matchedBoxCell(row) {
+  const crops = row.crops || [];
+  if (!crops.length) {
+    const dash = document.createElement("span");
+    dash.className = "dim";
+    dash.textContent = "—";
+    return dash;
+  }
+  const box = document.createElement("span");
+  box.className = "matched-box";
+  // Usually one. Two when the sheet went through the copier twice,
+  // and then both are here on purpose: if they disagree the
+  // suggestion was withheld, and the two pictures are the reason why.
+  box.classList.toggle("twice", crops.length > 1);
+  crops.forEach((crop, i) => {
+    const img = document.createElement("img");
+    // The row shows the tight cut, round the box the reader found;
+    // the popover shows the wide one it came from. The row's job is
+    // "is there a tick in it", which wants no paper around it at all.
+    img.src = (row.shots || [])[i] || crop;
+    img.alt = `the grading box on ${row.name || row.sid}'s ${row.skill}`;
+    img.loading = "lazy";
+    const where = (row.at || [])[i];
+    peekable(img, crop,
+             where ? "click for the whole page" : "the grading box, close up");
+    if (where) {
+      img.classList.add("openable");
+      img.onclick = () => openSheet(row, where);
+    }
+    box.appendChild(img);
+  });
+  return box;
+}
+
+function matchedMarkCell(row) {
+  const picks = document.createElement("span");
+  picks.className = "review-picks";
+  picks.setAttribute("role", "radiogroup");
+  for (const outcome of reviewOutcomes) {
+    // "Did not sit it" is only an answer for a paper that is not
+    // here. A sheet that came back was sat, whatever is on it.
+    if (outcome.id === "absent" && row.scanned) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "review-pick";
+    button.dataset.outcome = outcome.id;
+    // The glyph alone. The word is the tooltip and the accessible
+    // name -- beside the glyph it spent the width the glyph saves.
+    button.appendChild(icon(OUTCOME_GLYPH[outcome.id] || "query"));
+    button.setAttribute("aria-label", outcome.label);
+    button.title = `${outcome.label} — ${outcome.mark}`;
+    button.setAttribute("role", "radio");
+    button.onclick = () => setOutcome(row.id, outcome.id);
+    picks.appendChild(button);
+  }
+  return picks;
+}
+
+function renderMatched() {
+  const table = document.getElementById("scan-matched");
+  if (!table) return;
+  matchedSort.header(table.querySelector("thead tr"));
+  const body = table.querySelector("tbody");
+  body.textContent = "";
+  for (const row of matchedSort.apply(reviewRows)) {
+    const tr = document.createElement("tr");
+    // Not `review-row`: that class is `display: grid`, written for
+    // the card this table replaced, and on a `<tr>` it collapses
+    // every cell to a few pixels. `setOutcome` looks rows up by this
+    // one now.
+    tr.className = "matched-row";
+    tr.dataset.id = row.id;
+    if (!row.scanned) tr.classList.add("nopaper");
+    for (const column of MATCHED_COLUMNS) {
+      const td = document.createElement("td");
+      if (column.cls) td.className = column.cls;
+      const made = column.cell
+        ? column.cell(row)
+        : document.createTextNode(String(row[column.key] ?? ""));
+      if (made) td.appendChild(made);
+      tr.appendChild(td);
+    }
+    paintRow(tr, row);
+    body.appendChild(tr);
+  }
 }
 
 /* What the save had to say, kept on the page rather than in a toast.
@@ -3015,20 +3173,14 @@ function renderReview(data) {
       countReview();
       accept.disabled = true;
     };
-    const rows = document.getElementById("review-asks-rows");
-    rows.innerHTML = "";
-    for (const row of asks) rows.appendChild(reviewRow(row));
   }
 
-  const restHead = document.getElementById("review-rest-head");
-  restHead.textContent = rest.length === 1
-    ? "The one I am sure about"
-    : `The ${rest.length} I am sure about`;
-  const restRows = document.getElementById("review-rest-rows");
-  restRows.innerHTML = "";
-  for (const row of rest) restRows.appendChild(reviewRow(row));
-  document.getElementById("review-rest").open = !asks.length;
-
+  // One table, sorted least-sure first. The three lists this
+  // replaces -- the ones needing a look, a fold-away for the rest --
+  // made you work out which list a paper was in before you could
+  // look at it, and a sort does that job without cutting the table
+  // into pieces.
+  renderMatched();
   countReview();
 }
 

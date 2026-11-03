@@ -819,13 +819,19 @@
             <span class="spacer"></span>
             <button id="review-accept" class="btn" type="button"></button>
           </div>
-          <div id="review-asks-rows" class="review-rows"></div>
         </div>
 
-        <details id="review-rest">
-          <summary id="review-rest-head"></summary>
-          <div id="review-rest-rows" class="review-rows"></div>
-        </details>
+        <!-- One table of every matched paper, sortable on every
+             column. Not sure / unsure / the rest: three lists meant
+             deciding which one a paper was in before you could look
+             at it, and the confidence sort puts the doubtful ones on
+             top without splitting anything up. -->
+        <div class="scroller">
+          <table id="scan-matched" class="matched">
+            <thead><tr></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
 
       <details id="scan-sheets-wrap">
