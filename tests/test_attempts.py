@@ -793,3 +793,172 @@ class TestASecondStackJoinsTheFirst:
         job.files = ["tray1.pdf"]
         said = job.status()
         assert said["pages"] == 2 and said["files"] == ["tray1.pdf"]
+
+
+class TestSavingAPaperMatchedByItsGrid:
+    """A run printed without names: the footer code says which page it
+    is, and nothing on the sheet says whose. The student comes from the
+    nine digits they wrote in the header, which the server works out and
+    puts in the row -- so by the time the browser sends a decision back,
+    the student is the server's own answer and not a claim.
+
+    Which matters, because `owner` treats a decision that names a
+    *different* student as a re-match and refuses it unless the record
+    says that pair was printed. A by-id row would be refused by that
+    rule if the sid the page echoes were read as a correction, and the
+    whole feature would fail at its last step while every part of it
+    worked.
+    """
+
+    @pytest.fixture
+    def course(self, tmp_path, monkeypatch, db):
+        from checkit_printit import course as course_mod
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(tmp_path))
+        course_mod.init("Test", bank="", adopt=None)
+        import shutil
+        shutil.copy(db, course_mod.file_in("Test", "record"))
+        return gui_mod.Course("Test")
+
+    def read(self, monkeypatch, sid, skill):
+        """A finished read holding one paper printed without a name.
+
+        `unowned` stays true -- the *paper* carries nobody's name,
+        which is a fact about the print job -- while `sid` is filled
+        in, because the grid said who wrote on it.
+        """
+        result = {"review": [
+            {"id": "1-9", "run": 1, "page": 9, "sid": sid, "name": "Ada",
+             "skill": skill, "scanned": True, "crops": ["x"],
+             "unowned": True, "byId": True, "sureOfId": -0.4,
+             "read": "ticked", "ink": 0.03, "beside": 0.0,
+             "outcome": "passed"}]}
+        monkeypatch.setattr(gui_mod.SCANNING, "result", result)
+        return result
+
+    def test_the_student_the_grid_named_is_saved(self, course, monkeypatch):
+        self.read(monkeypatch, "001", "W2")
+        out = gui_mod.api_scan_save(course, {"decisions": [
+            {"id": "1-9", "outcome": "passed",
+             "sid": "001", "skill": "W2"}]})
+        assert out["saved"] == 1
+        assert out["unprinted"] == []
+        rows = record.attempts_for(course.file("record"), "001")
+        assert ("W2", "passed") in [(r["slug"], r["outcome"]) for r in rows]
+
+    def test_a_spare_is_saved_and_reported_rather_than_refused(
+            self, course, monkeypatch):
+        """Somebody picked up a spare. A spare is printed with nobody
+        assigned to it, so the record does not say that student was
+        handed that skill in that job -- and that is the normal case
+        for a spare, not a reason to throw the decision away.
+
+        So it saves, and comes back under `unprinted` for him to see.
+        """
+        self.read(monkeypatch, "002", "W2")       # 002 was given W1 only
+        out = gui_mod.api_scan_save(course, {"decisions": [
+            {"id": "1-9", "outcome": "passed",
+             "sid": "002", "skill": "W2"}]})
+        assert out["saved"] == 1
+        assert out["unprinted"] == [{"sid": "002", "skill": "W2"}]
+
+    def test_naming_somebody_else_is_still_a_re_match(
+            self, course, monkeypatch):
+        """The grid can be misread, and then he corrects it -- which is
+        a re-match like any other and goes through the printed check.
+        Reading the id does not open a way round it."""
+        self.read(monkeypatch, "001", "W2")
+        with pytest.raises(gui_mod.GuiError):
+            gui_mod.api_scan_save(course, {"decisions": [
+                {"id": "1-9", "outcome": "passed",
+                 "sid": "002", "skill": "W2", "run": 1}]})
+
+    def test_a_grid_that_could_not_be_read_still_refuses(
+            self, course, monkeypatch):
+        """No sid in the row and none from the page: there is nobody to
+        record it against, and a row with no student is a mark
+        belonging to the whole class."""
+        self.read(monkeypatch, "", "W2")
+        with pytest.raises(gui_mod.GuiError):
+            gui_mod.api_scan_save(course, {"decisions": [
+                {"id": "1-9", "outcome": "passed"}]})
+
+
+class TestARowWhoseStudentCameFromTheGrid:
+    """What `_review_rows` makes of a paper printed without a name.
+
+    The sheet carries `read_sid`, worked out from the nine digits in
+    the header. The row has to carry a *name*, a section and the flag
+    that rings the handwriting -- the same fields a paper with a
+    printed code gets, so that the table does not need two ways of
+    drawing a row.
+    """
+
+    @pytest.fixture
+    def measured(self, monkeypatch):
+        monkeypatch.setattr(
+            gui_mod.scans_mod, "measure",
+            lambda cut: {"call": cut, "inside": 0.03, "beside": 0.0})
+        monkeypatch.setattr(gui_mod, "_as_jpeg", lambda img: f"jpeg:{img}")
+
+    def sheet(self, sid="", read_sid="", read_score=None):
+        """A placed sheet off a run printed without names.
+
+        `entry.sid` is empty on such a page and always has been --
+        `assemble` writes no student into the index for a blank-name
+        handout, which is exactly why the grid has to be read at all.
+        """
+        from checkit_printit import pageindex
+        entry = pageindex.Page(page=1, kind="student", sid=sid, slug="W1",
+                               vseed="401", sheet=1, marks={})
+        return scans_mod.Sheet(
+            source="copier-1.pdf", at=1, status="placed", run_no=1, page=1,
+            entry=entry, code="C1-1-1", cuts={"box": "ticked"},
+            read_sid=read_sid, read_score=read_score)
+
+    def rows(self, sheets, names=None, sections=None):
+        return gui_mod._review_rows(
+            scans_mod.Batch(sheets=sheets), "/no/such/record.db",
+            names if names is not None else {}, sections)
+
+    def test_the_read_id_becomes_the_row_s_student(self, measured):
+        rows = self.rows([self.sheet(read_sid="001", read_score=-0.4)],
+                         names={"001": "Ada Byron"},
+                         sections={"001": "820"})
+        assert rows[0]["sid"] == "001"
+        assert rows[0]["name"] == "Ada Byron"
+        assert rows[0]["section"] == "820", (
+            "the section comes with the student, so it fills itself in")
+        assert rows[0]["sureOfId"] == -0.4
+
+    def test_it_sorts_under_the_surname_like_any_other_row(self, measured):
+        """Not a separate kind of row. Once the student is known the
+        paper is an ordinary paper, and the Scans table and the Roster
+        have to put them in the same place."""
+        rows = self.rows([self.sheet(read_sid="001")],
+                         names={"001": "Ada Byron"})
+        assert rows[0]["sort_last"].lower().startswith("byron")
+
+    def test_the_handwriting_is_flagged_for_a_look(self, measured):
+        """`byId` rings the handwritten name in warning yellow. Only
+        on these rows: they are the only ones where the handwriting is
+        the only check there is, every other row having a printed name
+        to agree with -- and a highlight that is always on is not a
+        highlight."""
+        rows = self.rows([self.sheet(read_sid="001")], names={"001": "Ada"})
+        assert rows[0]["byId"] is True
+
+    def test_a_printed_code_is_not_flagged(self, measured):
+        rows = self.rows([self.sheet(sid="001")], names={"001": "Ada"})
+        assert rows[0]["byId"] is False
+        assert rows[0]["sid"] == "001"
+
+    def test_a_grid_nobody_could_read_leaves_the_row_blank(self, measured):
+        """And blank is the point. The row shows a dash and a match
+        button, and the save refuses it until he says whose it is;
+        inventing somebody for him to catch would be worse, because
+        the blank row is the one he looks at."""
+        rows = self.rows([self.sheet()], names={"001": "Ada"})
+        assert rows[0]["sid"] == ""
+        assert rows[0]["name"] == ""
+        assert rows[0]["byId"] is False
+        assert rows[0]["unowned"] is True

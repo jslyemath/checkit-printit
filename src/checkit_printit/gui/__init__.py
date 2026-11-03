@@ -1712,6 +1712,14 @@ class Scanning:
             try:
                 batch = scans_mod.read_pdfs(paths, record_path,
                                             on_page=progress,
+                                            # Who could have written an
+                                    # id into a grid: the roster, not
+                                    # the students handed this skill.
+                                    # A spare is printed with nobody
+                                    # assigned to it, so the person who
+                                    # picked one up need not appear in
+                                    # the run at all.
+                                    candidates=list(sections),
                                             # `id` as well: on a paper printed
                                     # without a name the grid is the
                                     # only thing on the sheet that says
@@ -2047,6 +2055,21 @@ def _review_rows(batch, record_path, names, sections=None):
     rows = []
     for (run_no, page), copies in papers.items():
         entry = copies[0].entry
+        # Whose paper it is. The footer code says, on a named run. On
+        # a paper printed blank it says nothing, and then the student
+        # is whoever wrote their id into the grid -- which `read_sid`
+        # carries when the writing was clear enough to be sure of.
+        #
+        # The name goes in the name column, the way it does for a
+        # printed code, and the section comes with the student. What
+        # the instructor checks it against is the handwriting beside
+        # it, which `byId` has the view ring in warning yellow: those
+        # are the only rows where the handwriting is the only check
+        # there is.
+        by_id = next((s.read_sid for s in copies if s.read_sid), "")
+        sid = entry.sid or by_id
+        sure_of_id = next((s.read_score for s in copies
+                           if s.read_sid == sid), None)
         # Kept with the crop each was taken from: the box comes back
         # in that crop's own pixels, and turning it into the fraction
         # the view needs takes the crop's size.
@@ -2063,13 +2086,15 @@ def _review_rows(batch, record_path, names, sections=None):
         rows.append({
             "id": f"{run_no}-{page}",
             "run": run_no, "page": page,
-            "sid": entry.sid, "name": names.get(entry.sid, ""),
+            "sid": sid, "name": names.get(sid, ""),
             # Sorting by surname wants the surname, and the browser
             # has no splitter on purpose -- see `_sort_names`. The
             # same guess the roster sorts on, so the two tabs put one
             # student in the same place.
-            **_split_for_sort(names.get(entry.sid, "")),
-            "section": (sections or {}).get(entry.sid, ""),
+            **_split_for_sort(names.get(sid, "")),
+            "section": (sections or {}).get(sid, ""),
+            "byId": bool(by_id and not entry.sid),
+            "sureOfId": sure_of_id,
             "skill": entry.slug, "scanned": True,
             # Every square taken of this paper. One, nearly always;
             # two when it went through twice, and then both are
@@ -2115,7 +2140,7 @@ def _review_rows(batch, record_path, names, sections=None):
             # it until a student is chosen.
             "unowned": not entry.owned,
             "outcome": SUGGESTS.get(agreed, ""),
-            "recorded": recorded(run_no, entry.sid, entry.slug),
+            "recorded": recorded(run_no, sid, entry.slug),
         })
 
     for run_no, pages in batch.missing(resolve).items():

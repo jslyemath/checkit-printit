@@ -83,6 +83,16 @@ class Sheet:
     #: renders will not fit in memory and these will.
     cuts: dict = dataclasses.field(default_factory=dict)
 
+    #: The student whose id was written into the grid, when this is a
+    #: paper printed without a name and the writing was clear enough
+    #: to be sure. Empty otherwise -- including when a grid was there
+    #: and could not be read, which is a row for the instructor to
+    #: match by hand and not a place for a guess.
+    read_sid: str = ""
+    #: How likely that id is, given what is in the cells. Negative,
+    #: a log; see `digits.ACCEPT`. None when nothing was read.
+    read_score: float = None
+
     @property
     def placed(self):
         return self.status == "placed"
@@ -1190,13 +1200,18 @@ def _thumb(image):
     return small
 
 
-def read_page(image, resolve, anchors_for=None, want=()):
+def read_page(image, resolve, anchors_for=None, want=(), candidates=()):
     """Place one rendered page. `resolve(run_no)` gives its Index.
 
     `anchors_for(run_no)` gives that run's `{parity: Anchor}`, and
     `want` names the marks to cut out. Both optional: placing a page
     needs neither, and the instructor may only want to know what came
     back.
+
+    `candidates` are the student ids this page could belong to -- the
+    roster, in practice. Given, and with "id" among `want`, a paper
+    printed without a name has the grid in its header read and matched
+    against them. Left out, the grid is cut and not read.
     """
     import zxingcpp
 
@@ -1230,13 +1245,18 @@ def read_page(image, resolve, anchors_for=None, want=()):
     out = {"status": "placed", "run_no": run_no, "page": page,
            "entry": entry, "code": f"C1-{run_no}-{page}"}
     if want and anchors_for:
-        out["cuts"] = _cuts(image, entry, page, symbols,
-                            anchors_for(run_no), want)
+        out.update(_cuts(image, entry, page, symbols,
+                         anchors_for(run_no), want, candidates))
     return out
 
 
-def _cuts(image, entry, page, symbols, anchors, want):
-    """Straightened crops of the marks asked for, or nothing.
+def _cuts(image, entry, page, symbols, anchors, want, candidates=()):
+    """What this page gave up, once it is lined up with the original.
+
+    `{"cuts": {label: image}}`, and `read_sid`/`read_score` when a
+    handwritten id was read. One function rather than two because
+    both need the same transform, and working it out twice is how
+    the two copies drift apart.
 
     Nothing, quietly, in three cases that are all ordinary: the run's
     folder has gone, so there is no page to compare against; the
@@ -1281,7 +1301,20 @@ def _cuts(image, entry, page, symbols, anchors, want):
         if mark is not None:
             cuts[label] = cut_out(image, mark, anchor, carry,
                                   cut=PADS.get(label, BOX_CUT))
-    return cuts
+
+    found = {"cuts": cuts}
+    # The grid, but only on a paper that was printed without a name.
+    # On a named run the same mark is the id in print, which says
+    # nothing nobody knew: the sheet already carries the student in
+    # its footer code.
+    id_mark = entry.marks.get("id")
+    if candidates and id_mark is not None and not entry.sid:
+        from . import digits as digits_mod
+        cells = id_cells(image, id_mark, anchor, carry)
+        read = digits_mod.read_id(cells, candidates) if cells else None
+        if read:
+            found["read_sid"], found["read_score"] = read
+    return found
 
 
 #: How far the box may disagree with the footer code before the
@@ -1483,7 +1516,8 @@ def anchor_reader(record_path, dpi=DPI):
     return resolve
 
 
-def read_pdfs(paths, record_path, dpi=DPI, on_page=None, want=()):
+def read_pdfs(paths, record_path, dpi=DPI, on_page=None, want=(),
+              candidates=()):
     """Read a stack. `on_page(done, total)` is called as it goes.
 
     The PDFs are read in the order given and pages in the order they
@@ -1517,7 +1551,8 @@ def read_pdfs(paths, record_path, dpi=DPI, on_page=None, want=()):
                 image = doc[n - 1].render(scale=dpi / 72).to_pil()
                 sheets.append(Sheet(
                     source=path, at=n,
-                    **read_page(image, resolve, anchors_for, want)))
+                    **read_page(image, resolve, anchors_for, want,
+                                candidates)))
                 done += 1
                 if on_page:
                     on_page(done, total)

@@ -33,6 +33,18 @@ dependencies = [
     # detector is weaker on small printed symbols, which is exactly this case
     # -- an 11mm code in a 200dpi scan.
     "zxing-cpp>=2",
+    # Both of these were load-bearing and undeclared. `scans` has imported
+    # numpy and PIL inside its functions since it was written -- every reading
+    # of a grading box goes through them -- and they were only ever present
+    # because matplotlib, a long way down the chain from checkit-dashboard,
+    # happens to pull numpy in, and because this machine had Pillow already.
+    # An install without matplotlib would have got as far as the first scan.
+    #
+    # Now more than load-bearing: the handwritten-id recogniser in `digits`
+    # is numpy arithmetic and nothing else, which is the whole reason it
+    # needs no model runner installed.
+    "numpy>=1.24",
+    "pillow>=10",
     # This tool imports checkit -- `from checkit.bank import Bank` -- so it is
     # a real dependency, and leaving it undeclared meant `pip install` could
     # succeed and then fail at the first command with an import error.
@@ -58,4 +70,16 @@ where = ["src"]
 # gui/static ships with the package. Left out, `pip install` succeeds and
 # `checkit-printit gui` then serves 404s for its own page -- the same shape as
 # the 0.2.8.5 release whose install had never worked for anyone.
-checkit_printit = ["theme/*.sty", "gui/static/*"]
+#
+# `**`, not `*`. A single star matches files in `static` and stops there, so
+# the built wheel carried app.js, index.html and style.css and left behind
+# both web fonts and the whole of `static/seating` -- an installed copy served
+# the seating view with no stylesheet and no script at all. Found by building
+# a wheel and listing what was in it, which is the only way this is ever
+# found: the repository has every file, so every check run against a working
+# tree passes.
+#
+# data/digits.npz is the handwritten-digit recogniser. Without it `digits`
+# raises on first use and says to run tools/train_digits.py, rather than
+# reading every id as somebody arbitrary.
+checkit_printit = ["theme/*.sty", "gui/static/**", "data/*.npz"]
