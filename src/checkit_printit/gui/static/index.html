@@ -791,18 +791,33 @@
            down rather than navigate. -->
       <div id="scan-review" hidden>
         <header class="pagehead">
-          <h3>Check the marking</h3>
+          <h3>Papers</h3>
+          <button class="hint" type="button" aria-expanded="false"
+                  aria-label="What this does">?</button>
           <span class="spacer"></span>
-          <span id="review-count" class="sec-count"></span>
+          <!-- How much of the marking is settled, as a line rather
+               than as a sentence. It said "86 of 86 decided", which
+               is a number you have to read to learn something a bar
+               tells you at a glance, and it goes entirely once
+               everything is decided. -->
+          <span id="review-done" class="donebar" hidden>
+            <span class="donebar-fill"></span>
+          </span>
         </header>
-        <p class="muted">Each paper with the actual square off the
-          page beside it, so you are agreeing with the paper and not
-          with my guess. Change anything that is wrong.</p>
+        <p class="hint-text" hidden>Every paper that was matched to a
+          student, with the actual square off the page beside it &mdash;
+          so you are agreeing with the paper rather than with my guess.
+          Change anything that is wrong. The least certain readings are
+          at the top; a bar down the left of a row means nobody has
+          said yes or no to it yet.</p>
         <p class="warnline" id="review-unsaved" hidden></p>
 
         <div id="review-asks" hidden>
+          <!-- The count that stood here -- "9 papers need you" -- is
+               the line above said again, and the line above is now a
+               bar. What is left is the one thing this block was for:
+               agreeing with everything you have not argued with. -->
           <div class="review-head">
-            <strong id="review-asks-count"></strong>
             <span class="spacer"></span>
             <button id="review-accept" class="btn" type="button"></button>
           </div>
