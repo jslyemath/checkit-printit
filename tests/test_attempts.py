@@ -447,13 +447,19 @@ class TestTheWholePageView:
 # ----------------------------------------------------------- endpoint ----
 
 class TestTheSaveEndpoint:
-    """The browser sends judgment and nothing else.
+    """The page may correct the student. It may not invent one.
 
-    Which student, which skill, which page and what was measured all
-    come from the server's own copy of the read. A page that has been
-    reloaded, edited or simply gone stale then cannot attach a
-    decision to a different student -- which is the one mistake here
-    that nobody would ever notice.
+    Which page, and what was measured on it, still come only from the
+    server's own copy of the read. The student does not: re-matching
+    a paper is the one case where the page knows something the server
+    does not, and while the server ignored it every re-match was
+    thrown away on save and every hand-matched page written nowhere
+    at all, both reporting success.
+
+    So a decision may name a student -- and is taken only where the
+    print record says that student was handed that skill in that run.
+    A stale page still cannot attach a decision to somebody who was
+    never given the paper, which is the mistake nobody would notice.
     """
 
     @pytest.fixture
@@ -492,18 +498,53 @@ class TestTheSaveEndpoint:
         assert out["saved"] == 2
         assert out["runs"] == ["first"]
 
-    def test_the_browser_cannot_name_the_student(self, course, read):
-        """The decision carries an id and an outcome. Everything else
-        is looked up. A page sending a different sid changes
-        nothing, because it is never asked for one."""
+    def test_the_browser_cannot_invent_a_student(self, course, read):
+        """A sid nobody was printed anything for is refused outright.
+
+        It used to be ignored, and that silence is what made the bug
+        above possible: a correction and an invention looked the same
+        from here, so both were dropped. Refusing says which.
+        """
+        with pytest.raises(gui_mod.GuiError, match="did not print"):
+            gui_mod.api_scan_save(course, {"decisions": [
+                {"id": "1-1", "outcome": "passed",
+                 "sid": "999", "skill": "W9", "run": 1}]})
+        path = course.file("record")
+        assert record.attempts_for(path, "999") == [], (
+            "the browser's sid reached the database")
+        assert record.attempts_for(path, "001") == [], (
+            "the rest of the save went in anyway")
+
+    def test_the_page_may_still_say_nothing(self, course, read):
+        """An ordinary decision names no student, and the server's
+        own answer stands. This is every row he has not re-matched."""
         gui_mod.api_scan_save(course, {"decisions": [
-            {"id": "1-1", "outcome": "passed",
-             "sid": "999", "slug": "W9", "page": 77, "ink": 1.0}]})
-        rows = record.attempts_for(course.file("record"), "999")
-        assert rows == [], "the browser's sid reached the database"
+            {"id": "1-1", "outcome": "passed"}]})
         mine = record.attempts_for(course.file("record"), "001")
         assert [(r["slug"], r["page"], r["ink"]) for r in mine] == [
             ("W1", 1, 0.03)]
+
+    def test_a_rematch_reaches_the_record(self, course, read):
+        """The whole point. Ada's W1 is really Bo's, and Bo was handed
+        a W1 in that run, so the mark goes to Bo."""
+        gui_mod.api_scan_save(course, {"decisions": [
+            {"id": "1-1", "outcome": "passed",
+             "sid": "002", "skill": "W1", "run": 1}]})
+        path = course.file("record")
+        assert [r["slug"] for r in record.attempts_for(path, "002")] == ["W1"]
+        assert record.attempts_for(path, "001") == [], (
+            "the mark stayed on the student the code named")
+
+    def test_a_rematch_to_a_paper_they_never_had_is_refused(self, course,
+                                                            read):
+        """Bo was printed W1 in that run and not W2. A paper cannot be
+        moved to somebody who was never given that skill, however much
+        the handwriting looks like theirs."""
+        with pytest.raises(gui_mod.GuiError, match="did not print"):
+            gui_mod.api_scan_save(course, {"decisions": [
+                {"id": "1-2", "outcome": "passed",
+                 "sid": "002", "skill": "W2", "run": 1}]})
+        assert record.attempts_for(course.file("record"), "002") == []
 
     def test_a_paper_with_no_decision_is_skipped(self, course, read):
         """Not the same as `absent`, which is a decision: "no paper
@@ -518,6 +559,46 @@ class TestTheSaveEndpoint:
             {"id": "1-3", "outcome": "absent"}]})
         row = record.attempts_for(course.file("record"), "002")[0]
         assert (row["page"], row["reading"], row["ink"]) == (None, "", None)
+
+    @pytest.fixture
+    def loose(self, monkeypatch):
+        """One page in the stack that the reader could not place."""
+        class Sheet:
+            source = "/anywhere/copier-2.pdf"
+            at = 7
+            placed = False
+        monkeypatch.setattr(gui_mod.SCANNING, "sheets", [Sheet()])
+
+    def test_a_page_matched_by_hand_is_written(self, course, read, loose):
+        """It has no row in the read -- the reader never placed it --
+        so nothing finds it by id. It is found by the file and page it
+        came from, which the server knows from its own sheets."""
+        out = gui_mod.api_scan_save(course, {"decisions": [
+            {"id": "hand-copier-2.pdf-7", "outcome": "passed",
+             "sid": "002", "skill": "W1", "run": 1,
+             "file": "copier-2.pdf", "page": 7, "byHand": True}]})
+        assert out["saved"] == 1
+        row = record.attempts_for(course.file("record"), "002")[0]
+        # No page in the job and no reading: there was no box to read.
+        assert (row["slug"], row["page"], row["reading"]) == ("W1", None, "")
+
+    def test_a_hand_match_not_in_the_stack_is_refused(self, course, read,
+                                                      loose):
+        """A page the server never saw is a page it cannot vouch for."""
+        with pytest.raises(gui_mod.GuiError, match="not in the stack"):
+            gui_mod.api_scan_save(course, {"decisions": [
+                {"id": "hand-copier-9.pdf-3", "outcome": "passed",
+                 "sid": "002", "skill": "W1", "run": 1,
+                 "file": "copier-9.pdf", "page": 3, "byHand": True}]})
+
+    def test_a_hand_match_to_a_paper_they_never_had_is_refused(
+            self, course, read, loose):
+        with pytest.raises(gui_mod.GuiError, match="did not print"):
+            gui_mod.api_scan_save(course, {"decisions": [
+                {"id": "hand-copier-2.pdf-7", "outcome": "passed",
+                 "sid": "002", "skill": "W2", "run": 1,
+                 "file": "copier-2.pdf", "page": 7, "byHand": True}]})
+        assert record.attempts_for(course.file("record"), "002") == []
 
     def test_an_outcome_nothing_can_read_is_refused(self, course, read):
         with pytest.raises(gui_mod.GuiError, match="is not an outcome"):

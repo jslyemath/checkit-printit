@@ -2901,7 +2901,28 @@ async function saveScans() {
   let out;
   try {
     out = await api("/api/scan/save", {
-      decisions: rows.map(r => ({ id: r.id, outcome: r.outcome })) });
+      /* Who, as well as what.
+       *
+       * The server builds its rows from its own copy of the read and
+       * takes the student from there, which is right -- a page must
+       * not be able to put a mark on anybody it likes. But a
+       * re-match is the one case where the page knows something the
+       * server does not, and sending only `{id, outcome}` meant every
+       * re-match was silently dropped and every hand-matched page
+       * written nowhere at all.
+       *
+       * So the student travels too, and the server accepts it only
+       * where the print record says that student was handed that
+       * skill in that run. `file` and `page` come along for a page
+       * matched by hand, which has no row in the server's read to be
+       * found by id. */
+      decisions: rows.map(r => ({
+        id: r.id, outcome: r.outcome,
+        sid: r.sid, skill: r.skill, run: r.run,
+        file: (r.at && r.at[0] && r.at[0].file) || "",
+        page: (r.at && r.at[0] && r.at[0].page) || 0,
+        byHand: Boolean(r.byHand),
+      })) });
   } catch (err) {
     // The one failure worth spelling out: the server was restarted
     // between reading the stack and saving it, so its copy of the
@@ -3550,6 +3571,9 @@ function closeMatchTo() {
 function applyMatchTo(row, skill, who) {
   reviewRows.push({
     id: `hand-${row.file}-${row.at}`,
+    // The page's own code said nothing usable, so the run is the
+    // stack's. With one job that is the only answer; with several the
+    // skill picked narrows it, and the server checks it either way.
     run: row.run || (data_runs()[0] || 0),
     page: row.page || 0,
     sid: who.sid, name: who.name,
