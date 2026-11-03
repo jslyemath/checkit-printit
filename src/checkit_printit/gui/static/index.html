@@ -770,8 +770,18 @@
     <p id="scan-error" class="warnline" hidden></p>
 
     <div id="scan-result" hidden>
-      <p id="scan-runs"></p>
-      <ul id="scan-counts" class="scan-counts"></ul>
+      <!-- One section per print job the stack came from. A stack
+           routinely spans two of them, and a count only means
+           something against the job it belongs to: "137 of 141 back"
+           is an answer, "137 pages" is not.
+
+           Everything here is a settled fact, so it is plain text.
+           The two things that still want a person -- a paper that
+           never came back, and a page that could not be placed --
+           are chips in the page header instead, and they are absent
+           at zero rather than reading "0 missing", which is a thing
+           to notice and then dismiss. -->
+      <div id="scan-jobs"></div>
 
       <!-- Both of these are empty when nothing went wrong, and both
            are the reason to open this tab at all. Missing comes

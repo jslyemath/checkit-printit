@@ -2506,12 +2506,14 @@ const SCAN_OUTCOME = {
   },
   blank: {
     short: "Blank",
+    tag: "blank",
     sentence: n => `${n} blank ${n === 1 ? "page" : "pages"}`,
     why: "Nothing printed and nothing written. A spacer sheet, or the "
        + "back of a single-sided page. Ignored.",
   },
   unreadable: {
     short: "Could not read",
+    tag: "no code",
     sentence: n => `${n} ${n === 1 ? "page" : "pages"} I could not read`,
     why: "There is something on these, but no code I could find. A "
        + "torn corner, a very dark scan, or a page printed before the "
@@ -2520,12 +2522,14 @@ const SCAN_OUTCOME = {
   },
   foreign: {
     short: "Not from here",
+    tag: "other code",
     sentence: n => `${n} ${n === 1 ? "page carries" : "pages carry"} `
                  + "a barcode from something else",
     why: "A code, but not one of ours. Probably a cover sheet.",
   },
   "unknown-run": {
     short: "Unknown print job",
+    tag: "unknown job",
     sentence: n => `${n} ${n === 1 ? "page names" : "pages name"} `
                  + "a print job I have no record of",
     why: "The code is one of ours and names a job this course has not "
@@ -2534,6 +2538,7 @@ const SCAN_OUTCOME = {
   },
   "unknown-page": {
     short: "Page not in that job",
+    tag: "bad page",
     sentence: n => `${n} ${n === 1 ? "page is" : "pages are"} `
                  + "numbered past the end of the job they name",
     why: "The job is here and does not have that page -- the folder "
@@ -2543,8 +2548,85 @@ const SCAN_OUTCOME = {
 };
 
 function scanOutcome(status) {
-  return SCAN_OUTCOME[status] || { short: status, sentence: n => `${n} ${status}` };
+  return SCAN_OUTCOME[status] || { short: status, tag: status, sentence: n => `${n} ${status}` };
 }
+
+/* ---- scan arithmetic ---------------------------------------------------
+   Everything the job header counts, and no DOM in any of it.
+
+   `tests/test_gui_markup.py` lifts this block out between the markers
+   and runs it under node. Both bugs this header has had were counting
+   bugs that only a real stack showed, and nothing else in the suite
+   runs a line of this file.
+   --- begin pure --- */
+
+/* A page that came in and could not be put anywhere: no code, a code
+   from a job this course has not got, a page numbered past the end of
+   the job it names. `foreign` is not one of these -- a barcode from
+   somewhere else is almost always a cover sheet, and chasing it would
+   be chasing the copier. */
+function unmatchedCount(counts) {
+  return Object.entries(counts)
+    .filter(([status]) => scanOutcome(status).chase)
+    .reduce((total, [, n]) => total + n, 0);
+}
+
+/* `11/2`. The long form belongs on the Update form, where it matches
+   the wording a student ticked; here the date is one fact among
+   several on a line and the month and day are the whole of it. */
+function shortDay(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  return (y && m && d) ? `${m}/${d}` : iso;
+}
+
+/* One job's line: how much of it came back, and how much of that is
+   the key.
+
+   Papers, not sheets. A double feed puts one paper through twice, and
+   counting sheets then says "12 of 12 back" on a job that is also
+   reporting one missing -- two numbers that cannot both be true. The
+   demo stack is exactly that: 12 placed sheets, 1 duplicate, 11
+   papers, 1 missing.
+
+   The job's own share of what is missing is only worth printing when
+   there is more than one job to tell apart. With one job it is the
+   chip in the page header said twice. */
+function jobFacts(data, run, many) {
+  const mine = data.sheets.filter(s => s.run === run.no);
+  const placed = mine.filter(s => s.status === "placed");
+  const back = new Set(placed.map(s => s.page)).size;
+  const keys = new Set(placed.filter(s => s.kind === "key")
+                             .map(s => s.page)).size;
+  const gone = data.missing.filter(m => m.run === run.no).length;
+  return [
+    run.pages ? `${back} of ${run.pages} back` : `${back} matched`,
+    keys ? `${keys} key${keys === 1 ? "" : "s"}` : "",
+    many && gone ? `${gone} not back` : "",
+  ].filter(Boolean);
+}
+
+/* Everything that is not a placed page. None of it can sit in a job's
+   section, because none of it carries a code naming a job -- a blank
+   sheet least of all.
+
+   Blank belongs here rather than on a job's line, where it was until
+   the demo stack showed the bug: a blank has no run, so filtering a
+   job's sheets by run dropped it, and the one blank page in that
+   stack was reported nowhere at all.
+
+   `tag` rather than `short`: four of these sit on one line, and the
+   column labels the table uses run to eleven words for four numbers. */
+function looseFacts(counts) {
+  return Object.entries(counts)
+    .filter(([status]) => status !== "placed")
+    .map(([status, n]) => {
+      const out = scanOutcome(status);
+      return `${n} ${out.tag || out.short.toLowerCase()}`;
+    });
+}
+
+/* --- end pure --- */
 
 /* The review grid.
  *
@@ -2881,62 +2963,68 @@ function renderReview(data) {
   countReview();
 }
 
+function scanChip(n, what) {
+  const chip = document.createElement("span");
+  chip.className = "chip warn";
+  chip.textContent = `${n} ${what}`;
+  return chip;
+}
+
+/* One section per job: a name, its date, and a line of settled facts.
+ *
+ * The per-job share of what is missing is only worth printing when
+ * there is more than one job to tell apart -- with one job it is the
+ * chip in the page header said twice. */
+function scanJob(title, date, facts) {
+  const box = document.createElement("section");
+  box.className = "scan-job";
+
+  const head = document.createElement("header");
+  head.className = "jobhead";
+  const name = document.createElement("h3");
+  name.className = "jobname";
+  name.textContent = title;
+  head.appendChild(name);
+  if (date) {
+    const when = document.createElement("span");
+    when.className = "jobdate";
+    when.textContent = date;
+    head.appendChild(when);
+  }
+
+  const line = document.createElement("p");
+  line.className = "jobfacts";
+  line.textContent = facts.filter(Boolean).join(" \u00b7 ");
+
+  box.append(head, line);
+  return box;
+}
+
 function renderScan(data) {
   document.getElementById("scan-result").hidden = false;
-  const n = data.sheets.length;
-  document.getElementById("scan-count").textContent =
-    `${n} page${n === 1 ? "" : "s"} scanned`;
 
-  // One run is the ordinary case and reads as a sentence. More than
-  // one is unusual enough to be worth listing.
-  const runs = document.getElementById("scan-runs");
-  if (!data.runs.length) {
-    runs.textContent = "None of these pages came from a print job this "
-                     + "course knows about.";
-  } else if (data.runs.length === 1) {
-    const r = data.runs[0];
-    runs.textContent = `These are from ${r.title}, printed `
-      + `${spokenDay(r.date) || r.date}. That job was ${r.pages} pages.`;
-  } else {
-    runs.textContent = "These come from more than one print job: "
-      + data.runs.map(r => `${r.title} (${spokenDay(r.date) || r.date})`)
-          .join(", ") + ".";
-  }
+  // The two counts that are work, and nothing else. The page total
+  // is already on the drop strip; repeating it here would be the
+  // strip said twice.
+  const chips = document.getElementById("scan-count");
+  chips.textContent = "";
+  const unmatched = unmatchedCount(data.counts);
+  if (data.missing.length)
+    chips.appendChild(scanChip(data.missing.length, "missing"));
+  if (unmatched) chips.appendChild(scanChip(unmatched, "unmatched"));
 
-  const counts = document.getElementById("scan-counts");
-  counts.innerHTML = "";
-  // Said here rather than listed in a section of its own: the papers
-  // themselves are rows in the review below, and a table up here
-  // would be the same fact written twice.
-  if (data.missing.length) {
-    const li = document.createElement("li");
-    li.className = "chase";
-    const strong = document.createElement("strong");
-    strong.textContent = data.missing.length === 1
-      ? "1 paper was printed and never came back."
-      : `${data.missing.length} papers were printed and never came back.`;
-    const span = document.createElement("span");
-    span.className = "muted";
-    span.textContent = " They are at the top of the review below, "
-      + "where you can mark one by hand or say the student was away.";
-    li.append(strong, span);
-    counts.appendChild(li);
-  }
-  for (const [status, count] of Object.entries(data.counts)) {
-    const outcome = scanOutcome(status);
-    const li = document.createElement("li");
-    if (outcome.chase) li.className = "chase";
-    const strong = document.createElement("strong");
-    strong.textContent = outcome.sentence(count) + ".";
-    li.appendChild(strong);
-    if (outcome.why) {
-      const span = document.createElement("span");
-      span.className = "muted";
-      span.textContent = " " + outcome.why;
-      li.appendChild(span);
-    }
-    counts.appendChild(li);
-  }
+  const jobs = document.getElementById("scan-jobs");
+  jobs.textContent = "";
+  const many = data.runs.length > 1;
+  for (const run of data.runs)
+    jobs.appendChild(scanJob(run.title || `Job ${run.no}`,
+                             shortDay(run.date),
+                             jobFacts(data, run, many)));
+
+  const loose = looseFacts(data.counts);
+  if (loose.length) jobs.appendChild(scanJob("Other pages", "", loose));
+  if (!data.runs.length && !loose.length)
+    jobs.appendChild(scanJob("No job", "", ["nothing recognised"]));
 
   const dupes = document.getElementById("scan-dupes");
   dupes.hidden = !data.duplicates.length;
