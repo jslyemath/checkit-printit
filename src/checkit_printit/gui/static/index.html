@@ -821,6 +821,24 @@
           </div>
         </div>
 
+        <!-- Pointing a paper at a different student. A panel
+             rather than a menu hung off the row: the list is the
+             whole class that took one skill, which is longer than a
+             menu should be, and it has a field at the top because
+             the fastest way to find a name is to type it. -->
+        <div id="rematch-box" class="rematch" hidden>
+          <header class="rematch-head">
+            <strong>Whose paper is this?</strong>
+            <span id="rematch-for" class="muted"></span>
+            <span class="spacer"></span>
+            <button id="rematch-shut" class="iconbtn tiny" type="button"
+                    aria-label="Leave it as it is"></button>
+          </header>
+          <input id="rematch-find" type="text" autocomplete="off"
+                 placeholder="Type the name on the paper">
+          <div id="rematch-list" class="rematch-list"></div>
+        </div>
+
         <!-- One table of every matched paper, sortable on every
              column. Not sure / unsure / the rest: three lists meant
              deciding which one a paper was in before you could look

@@ -1844,6 +1844,82 @@ body.hasbar.tall main { padding-bottom: 68px; }
   overflow-wrap: anywhere;
 }
 
+/* The caption under a zoom preview, for a screen reader only. The
+   words were on screen, where they said what the picture already
+   showed; taking them out of the document entirely would take them
+   from anyone who cannot see the picture. */
+#peek-say {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- re-matching a paper ---------------------------------------------
+   A panel above the table rather than a menu hanging off the row: the
+   list is every student who took one skill, which is longer than a
+   menu should be, and a menu that long would be scrolling over the
+   row it came from. */
+.rematch {
+  margin-bottom: var(--s3);
+  padding: var(--s3) var(--s4) var(--s4);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+.rematch-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+}
+#rematch-find {
+  width: 100%;
+  font: inherit;
+  padding: var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  color: var(--ink);
+}
+#rematch-find:focus { outline: none; border-color: var(--accent); }
+
+.rematch-list {
+  margin-top: var(--s2);
+  max-height: 260px;
+  overflow-y: auto;
+}
+.rematch-band {
+  color: var(--muted);
+  font-size: var(--t-xs);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: var(--s2) var(--s1) var(--s1);
+}
+.rematch-pick {
+  display: flex;
+  width: 100%;
+  gap: var(--s3);
+  justify-content: space-between;
+  font: inherit;
+  text-align: left;
+  padding: var(--s1) var(--s2);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+.rematch-pick:hover { background: var(--surface-2); }
+/* The one it is already pointed at, so choosing it again is visibly
+   a no-op rather than a mystery. */
+.rematch-pick.current { color: var(--accent); }
+
 /* ---- the matched table -----------------------------------------------
    One row per paper, one row height. Everything in a row is one line
    tall so the eye can run down a column: the crops are sized to the
@@ -1864,6 +1940,35 @@ table.matched td {
   vertical-align: middle;
   white-space: nowrap;
 }
+
+/* One height for everything in a row.
+ *
+ * There were three or four: the dial at 34px, the name crop at 26,
+ * the box at 26 or 22, and a bare text cell at whatever the line box
+ * came to. Each sat in its own amount of leftover padding, so the
+ * box in particular had a band of nothing under it and read as
+ * floating. Now every cell's content is `--rowart` tall and the
+ * padding above and below it is whatever is left of the row, which
+ * is the same for all of them.
+ *
+ * 34px, matching the dial, because the dial is the one thing here
+ * that cannot shrink -- a ring with a two-digit number in it. The
+ * crops grew to meet it, which is also the answer to "the paper mark
+ * is too hard to see without squinting". */
+table.matched tbody td {
+  height: var(--rowart);
+  /* The line box is the row's height too, not just the picture.
+     `height` on a cell is a floor for its content, so the row with
+     only dashes in it came out 6px shorter than every row holding a
+     crop -- an image sits on a text baseline and drags the descender
+     space along with it. Fixing the line box fixes both ends: the
+     pictures stop adding to it and the dashes stop falling short. */
+  line-height: var(--rowart);
+}
+/* ...except the marks, which are buttons with their own padding and
+   would be 36px tall inside a 36px line. */
+table.matched tbody td .review-picks { line-height: 1; }
+:root { --rowart: 36px; }
 table.matched td.mid { text-align: center; }
 
 /* The four marks stay on one line. `.review-picks` wraps by default,
@@ -1888,7 +1993,9 @@ table.matched tr.nopaper .namebtn { color: var(--muted); }
 /* The crops, sized to the row. */
 .matched-crop {
   display: block;
-  height: 26px;
+  cursor: zoom-in;
+  vertical-align: middle;
+  height: var(--rowart);
   max-width: 190px;
   object-fit: contain;
   object-position: left center;
@@ -1896,25 +2003,46 @@ table.matched tr.nopaper .namebtn { color: var(--muted); }
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
 }
-.matched-box { display: inline-flex; gap: var(--s1); }
+.matched-box {
+  display: inline-flex;
+  gap: var(--s1);
+  vertical-align: middle;
+}
 .matched-box img {
   display: block;
-  height: 26px;
+  height: var(--rowart);
   background: #fff;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
 }
 .matched-box img.openable { cursor: zoom-in; }
 /* Two pictures of one square, when the sheet went through twice.
-   Smaller, because two of them in a row's height is the budget. */
-.matched-box.twice img { height: 22px; }
+   Still the row's height -- they sit side by side, so it is width
+   they cost, not height, and shrinking them was solving a problem
+   the layout does not have. */
 
 /* The name, and the way to say it is the wrong one.
 
    A button rather than text, because it does something -- and it
    wears no border until the pointer is on it, which is how
    `.pagetitle` already says "this is not just words". */
-.matched-name { display: inline-flex; align-items: center; gap: var(--s2); }
+/* The name, and the re-match button at the far right of the column.
+ *
+ * `flex`, not `inline-flex`, so the cell's full width is in play and
+ * the button can be pushed to its right edge. Pinned there rather
+ * than following the end of the name: at the end of the name it lands
+ * in a different place on every row, which reads as random. When a
+ * name is long enough to reach the button, the column widens to take
+ * it -- that is the one case where the button moves, and spending
+ * width on every row to spare that one case is a worse trade. */
+.matched-name {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+}
+.matched-name .namebtn { flex: 0 1 auto; min-width: 0; }
+.matched-name .iconbtn.rematch { margin-left: auto; }
 .namebtn {
   font: inherit;
   font-weight: 600;

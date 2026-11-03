@@ -606,15 +606,24 @@ const GLYPH = {
      because the arrow is what carries the meaning. */
   rematch: [{ o: [5.8, 5.2, 2.6] },
             { d: "M1.8 11.8a4.0 4.0 0 0 1 8.0 0" },
-            { o: [18.2, 18.4, 2.6] },
+            // 17.4, not 18.4: the head has to clear its own
+            // shoulders by the same margin the first one does. The
+            // shoulder baseline is centre + 6.6 on both of them now,
+            // and at 18.4 this head sat a unit inside the arc, which
+            // is the squashing he saw.
+            { o: [18.2, 17.4, 2.6] },
             { d: "M14.2 24.0a4.0 4.0 0 0 1 8.0 0" },
             // The drop lands on 18.2, which is the second head's own
             // centre, so the arrow points at the person rather than
             // past their ear. The horizontal sits at 3.4 and the turn
             // has a 2-unit radius under it: at 4.6 the corner was
             // folded into the descent and read as a kink.
-            { d: "M12.6 3.4h3.6a2 2 0 0 1 2 2v6.0" },
-            { d: "M15.4 10.6l2.8 2.8 2.8-2.8" }],
+            //
+            // It stops at 9.6 rather than 11.4. Raising the head cost
+            // the arrow the room it had, and an arrowhead landing on
+            // a scalp is worse than a short arrow.
+            { d: "M12.6 3.4h3.6a2 2 0 0 1 2 2v4.2" },
+            { d: "M15.4 8.8l2.8 2.8 2.8-2.8" }],
   collapse: "M14.5 7.5 9.5 12l5 4.5",
   // Points up while a group is open; CSS turns it when it closes.
   chev: "M6 14.5l6-6 6 6",
@@ -2905,18 +2914,15 @@ const MATCHED_COLUMNS = [
     headExtra: nameFormatSwitch,
     cell: matchedNameCell },
   { key: "nameCrop", label: "Paper name", sortable: false, min: 150,
-    cell: r => cropImage(r.nameCrop,
-                         "the name printed on this paper",
-                         "the name printed on this paper — it should "
-                         + "be the one beside it") },
+    cell: matchedNameCrop },
   { key: "section", label: "Section", min: 74 },
   { key: "skill", label: "Skill", min: 64 },
-  { key: "sure", label: "Confidence", min: 96, cls: "mid",
+  { key: "sure", label: "Conf", min: 80, cls: "mid",
     // Padded, because the compare is textual: "9" beats "10" unsorted.
     value: r => r.scanned ? String(Math.round((r.sure || 0) * 10)).padStart(2, "0") : "",
     absent: r => (r.scanned ? 0 : 1),
     cell: r => sureDial(r) },
-  { key: "_box", label: "Paper mark", sortable: false, min: 120,
+  { key: "_box", label: "Box", sortable: false, min: 120,
     cell: matchedBoxCell },
   { key: "_mark", label: "Mark", min: 150, cls: "mid",
     // By the order he would read them in, not alphabetically: passed,
@@ -2959,20 +2965,34 @@ function nameFormatSwitch(th) {
   th.appendChild(swap);
 }
 
-/* A crop off the paper, or a dash where there is no paper. */
-function cropImage(src, alt, peek) {
-  if (!src) {
-    const dash = document.createElement("span");
-    dash.className = "dim";
-    dash.textContent = "—";
-    return dash;
-  }
+function noPaper() {
+  const dash = document.createElement("span");
+  dash.className = "dim";
+  dash.textContent = "\u2014";
+  return dash;
+}
+
+/* The name as it is printed on the paper.
+ *
+ * The same control as the box beside it: hover to see it larger,
+ * click for the whole page. Two crops off one sheet behaving
+ * differently was a difference with no reason behind it -- and this
+ * is the crop you most want the page for, because when the printed
+ * name and the indexed one disagree, the page is what settles it. */
+function matchedNameCrop(row) {
+  if (!row.nameCrop) return noPaper();
   const img = document.createElement("img");
   img.className = "matched-crop";
-  img.src = src;
-  img.alt = alt;
+  img.src = row.nameCrop;
+  img.alt = "the name printed on this paper";
   img.loading = "lazy";
-  peekable(img, src, peek);
+  const where = (row.at || [])[0];
+  peekable(img, row.nameCrop,
+           where ? "click for the whole page" : "the name on this paper");
+  if (where) {
+    img.classList.add("openable");
+    img.onclick = () => openSheet(row, where);
+  }
   return img;
 }
 
@@ -3020,12 +3040,7 @@ function armRematch(id) {
 
 function matchedBoxCell(row) {
   const crops = row.crops || [];
-  if (!crops.length) {
-    const dash = document.createElement("span");
-    dash.className = "dim";
-    dash.textContent = "—";
-    return dash;
-  }
+  if (!crops.length) return noPaper();
   const box = document.createElement("span");
   box.className = "matched-box";
   // Usually one. Two when the sheet went through the copier twice,
@@ -3076,9 +3091,161 @@ function matchedMarkCell(row) {
   return picks;
 }
 
+/* Point this paper at a different student.
+ *
+ * This was called and never written -- the button armed, and clicking
+ * it threw. The arming half was reported as though it were the
+ * feature, which it was not.
+ *
+ * Guesses first. There are two, and they disagree often enough to be
+ * worth separating: the code in the footer says whose paper the index
+ * thinks this is, and the crop says whose name is written on it. When
+ * re-matching is happening at all, the index is the one under
+ * suspicion -- so the suggestions are the students whose names look
+ * like what is written, and the rest of the class follows in roster
+ * order so the list is still a list you can find anybody in.
+ *
+ * Only students who sat this skill in this job: the `printed` table
+ * knows who was given what, and on a redo not everybody takes the
+ * same skills. A paper for N3 cannot belong to somebody who was
+ * never handed an N3.
+ */
+function openRematch(row) {
+  const box = document.getElementById("rematch-box");
+  box.dataset.id = row.id;
+  document.getElementById("rematch-for").textContent =
+    `${row.skill} · page ${row.page}`;
+  const field = document.getElementById("rematch-find");
+  field.value = "";
+  // Rebound each time rather than once at startup, because the row
+  // is the thing being filtered for and it changes on every open.
+  field.oninput = () => fillRematch(row, field.value);
+  // Escape leaves it alone, which is the answer a panel over a table
+  // of ninety rows needs to have.
+  field.onkeydown = (e) => { if (e.key === "Escape") closeRematch(); };
+  const shut = document.getElementById("rematch-shut");
+  shut.textContent = "";
+  shut.appendChild(icon("fail"));
+  shut.onclick = closeRematch;
+  fillRematch(row, "");
+  box.hidden = false;
+  field.focus();
+}
+
+function closeRematch() {
+  const box = document.getElementById("rematch-box");
+  box.hidden = true;
+  box.dataset.id = "";
+  rematchArmed = "";
+  renderMatched();
+}
+
+/* Who could have written this paper, most likely first.
+ *
+ * `sameSkill` is everybody the job handed this skill to. The order
+ * within it is the only judgement here: a name that starts with what
+ * the crop appears to say, then a name containing it, then the rest
+ * by surname. There is no OCR, so "what the crop appears to say" is
+ * whatever he types -- the field is the reader, and he is looking at
+ * the picture while he types into it.
+ */
+function rematchChoices(row, typed) {
+  const sameSkill = (rematchPool[row.skill] || []);
+  const q = typed.trim().toLowerCase();
+  if (!q) return { likely: [], rest: sameSkill };
+  const starts = [], holds = [], rest = [];
+  for (const who of sameSkill) {
+    const hay = `${who.name} ${who.sid}`.toLowerCase();
+    if (hay.startsWith(q) || (who.sort_last || "").toLowerCase().startsWith(q))
+      starts.push(who);
+    else if (hay.includes(q)) holds.push(who);
+    else rest.push(who);
+  }
+  return { likely: starts.concat(holds), rest };
+}
+
+//: skill -> everybody the job gave that skill to, in roster order.
+//: Built from the review rows themselves, because those are exactly
+//: the papers the job printed.
+let rematchPool = {};
+
+function buildRematchPool(rows) {
+  const pool = {};
+  for (const row of rows) {
+    if (!row.sid) continue;
+    (pool[row.skill] = pool[row.skill] || []).push({
+      sid: row.sid, name: row.name,
+      sort_last: row.sort_last, sort_first: row.sort_first,
+      section: row.section,
+    });
+  }
+  for (const skill of Object.keys(pool)) {
+    // By surname inside section, which is the order he reads a class
+    // list in -- and the same order the Roster opens on.
+    pool[skill].sort((a, b) =>
+      (a.section || "").localeCompare(b.section || "", undefined, { numeric: true })
+      || (a.sort_last || a.name).localeCompare(b.sort_last || b.name));
+  }
+  rematchPool = pool;
+}
+
+function fillRematch(row, typed) {
+  const list = document.getElementById("rematch-list");
+  list.textContent = "";
+  const { likely, rest } = rematchChoices(row, typed);
+  const add = (who) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "rematch-pick";
+    if (who.sid === row.sid) b.classList.add("current");
+    const nm = document.createElement("span");
+    nm.textContent = filedNames() && who.sort_last && who.sort_first
+      ? `${who.sort_last}, ${who.sort_first}` : who.name;
+    const sec = document.createElement("span");
+    sec.className = "muted";
+    sec.textContent = who.section || "";
+    b.append(nm, sec);
+    b.onclick = () => applyRematch(row.id, who);
+    list.appendChild(b);
+  };
+  const band = (words) => {
+    const h = document.createElement("div");
+    h.className = "rematch-band";
+    h.textContent = words;
+    list.appendChild(h);
+  };
+  if (likely.length) { band("Likely"); likely.forEach(add); }
+  if (rest.length) {
+    band(likely.length ? "Everyone else" : "Everyone who took this");
+    rest.forEach(add);
+  }
+  if (!likely.length && !rest.length) band("Nobody here took this skill");
+}
+
+/* The re-match itself, which is a pending change like any other.
+ *
+ * It does not write anything. The save bar owns that, and a paper
+ * pointed at the wrong person is exactly the kind of mistake that
+ * wants an undo. `touched` is what the bar counts.
+ */
+function applyRematch(id, who) {
+  const row = reviewRows.find(r => r.id === id);
+  if (!row) return;
+  row.sid = who.sid;
+  row.name = who.name;
+  row.sort_last = who.sort_last;
+  row.sort_first = who.sort_first;
+  row.section = who.section;
+  row.rematched = true;
+  row.touched = true;
+  closeRematch();
+  refreshScansDirty();
+}
+
 function renderMatched() {
   const table = document.getElementById("scan-matched");
   if (!table) return;
+  buildRematchPool(reviewRows);
   matchedSort.header(table.querySelector("thead tr"));
   const body = table.querySelector("tbody");
   body.textContent = "";
