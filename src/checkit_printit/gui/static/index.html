@@ -783,19 +783,6 @@
            to notice and then dismiss. -->
       <div id="scan-jobs"></div>
 
-      <!-- Both of these are empty when nothing went wrong, and both
-           are the reason to open this tab at all. Missing comes
-           first: a paper nobody can find is the one nobody chases,
-           because the student it belonged to does not complain. -->
-      <div id="scan-dupes" hidden>
-        <h3>Pages that went through twice</h3>
-        <p class="muted">The same sheet of paper turned up more than
-          once &mdash; usually a double feed, sometimes a stack scanned
-          twice. Nothing has been thrown away; this is just so you
-          know.</p>
-        <div class="scroller"><table id="scan-dupes-table"></table></div>
-      </div>
-
       <!-- The review. One row per paper, not a student-by-skill
            grid: on a redo each student picks one or two skills out of
            fourteen, so the grid would be 85% empty and the crops
@@ -828,7 +815,7 @@
              the fastest way to find a name is to type it. -->
         <div id="rematch-box" class="rematch" hidden>
           <header class="rematch-head">
-            <strong>Whose paper is this?</strong>
+            <strong id="rematch-ask">Whose paper is this?</strong>
             <span id="rematch-for" class="muted"></span>
             <span class="spacer"></span>
             <button id="rematch-shut" class="iconbtn tiny" type="button"
@@ -852,13 +839,23 @@
         </div>
       </div>
 
-      <details id="scan-sheets-wrap">
-        <summary id="scan-sheets-head">Everything in the stack</summary>
-        <p class="muted">One line per page, in the order the copier
-          sent them &mdash; including the blanks and anything I could
-          not place.</p>
-        <div class="scroller"><table id="scan-sheets"></table></div>
-      </details>
+      <!-- Everything the reader could not place. It replaces the
+           fold-away listing of the whole stack, which was every page
+           including the 90 that went exactly where they should --
+           a list you had to read to find the four that mattered. -->
+      <div id="scan-unplaced" hidden>
+        <header class="pagehead">
+          <h3>Other pages</h3>
+          <span class="spacer"></span>
+          <span id="unplaced-count" class="sec-count"></span>
+        </header>
+        <div class="scroller">
+          <table id="scan-unplaced-table" class="matched unplaced">
+            <thead><tr></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <!-- Start over is this tab's Discard, and it is honest about what
