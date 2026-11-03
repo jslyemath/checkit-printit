@@ -398,9 +398,26 @@ class TestTheNameCropIsItsOwnShape:
         assert scans.PADS["box"].pad == scans.PAD
 
     def test_anything_without_its_own_framing_gets_the_box_s(self):
-        """So adding a mark cannot silently get a name-shaped crop."""
+        """So adding a mark cannot silently get a name-shaped crop.
+
+        `id` used to be the example here, being the one mark in
+        `MARKS` with no framing of its own. It has one now -- the
+        grid is read on a paper printed without a name -- so the
+        example is a label that does not exist, which is what the
+        fallback is actually for.
+        """
         from checkit_printit import scans
-        assert scans.PADS.get("id", scans.BOX_CUT) is scans.BOX_CUT
+        assert "nosuchmark" not in scans.PADS
+        assert scans.PADS.get("nosuchmark", scans.BOX_CUT) is scans.BOX_CUT
+
+    def test_the_id_is_framed_like_the_name(self):
+        """Both are a run of content on the header line whose height
+        is the part that matters. Framed by width, a nine-cell grid
+        would come out at a different size from a short name on the
+        same line."""
+        from checkit_printit import scans
+        assert scans.PADS["id"].unit == "height"
+        assert scans.PADS["id"] is scans.NAME_CUT
 
     def test_a_long_name_is_set_no_smaller_than_a_short_one(self):
         """The fault underneath the clipping, as a test.

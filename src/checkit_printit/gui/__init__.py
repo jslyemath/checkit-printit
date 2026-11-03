@@ -1712,7 +1712,11 @@ class Scanning:
             try:
                 batch = scans_mod.read_pdfs(paths, record_path,
                                             on_page=progress,
-                                            want=("box", "name", "page"))
+                                            # `id` as well: on a paper printed
+                                    # without a name the grid is the
+                                    # only thing on the sheet that says
+                                    # whose it is.
+                                    want=("box", "name", "id", "page"))
                 self.sheets = _joined(self.sheets, batch.sheets, paths)
                 self.files = _file_order(self.files, paths)
                 self.result = _batch_json(
@@ -2026,7 +2030,17 @@ def _review_rows(batch, record_path, names, sections=None):
     # copier saw it.
     papers = {}
     for sheet in batch.placed:
-        if sheet.entry.kind != "student":
+        # `gradable`, not `kind == "student"`. A key is nobody's
+        # attempt and stays out. A **spare** is a real paper somebody
+        # wrote on -- it is printed with an empty name and an empty id
+        # grid for exactly that -- and it used to be dropped here, so
+        # a hand-written spare appeared nowhere on the tab at all and
+        # could not be recorded. Same for every paper in a run printed
+        # without names.
+        #
+        # `Page.owned` has said which is which since the index format
+        # was written, and nothing read it until now.
+        if not sheet.entry.gradable:
             continue
         papers.setdefault((sheet.run_no, sheet.page), []).append(sheet)
 
@@ -2076,6 +2090,12 @@ def _review_rows(batch, record_path, names, sections=None):
             # thing being checked is the index, not the scanner.
             "nameCrop": next((_as_jpeg(s.cuts["name"]) for s in copies
                               if "name" in s.cuts), ""),
+            # The id as printed. On a named run this is the number
+            # itself and says nothing new; on a paper printed blank
+            # it is a grid somebody wrote in, and the only thing on
+            # the sheet that says whose paper it is.
+            "idCrop": next((_as_jpeg(s.cuts["id"]) for s in copies
+                            if "id" in s.cuts), ""),
             # Where the sheet came from, so the whole page can be
             # fetched when he asks for it. Not the page itself:
             # sixty full renders is a response nobody wants.
@@ -2089,6 +2109,11 @@ def _review_rows(batch, record_path, names, sections=None):
             # disagree are the least certain thing in the stack,
             # whatever either one measured on its own.
             "sure": min((r.get("sure", 0.0) for r in reads), default=0.0),
+            # Nobody's name was printed on this one, so nobody knows
+            # whose it is until he says. The row carries the id crop
+            # and the name crop for him to read, and `save` refuses
+            # it until a student is chosen.
+            "unowned": not entry.owned,
             "outcome": SUGGESTS.get(agreed, ""),
             "recorded": recorded(run_no, entry.sid, entry.slug),
         })
@@ -2257,6 +2282,13 @@ def api_scan_save(course, body):
         outcome = said["outcome"]
         row = dict(row)
         row["sid"], row["skill"] = owner(said, row)
+        if not row["sid"]:
+            # A paper printed without a name, still unmatched. There
+            # is nobody to record it against, and a row with no
+            # student would be a mark belonging to the whole class.
+            raise GuiError(
+                f"a {row['skill']} paper has no student yet. Match it "
+                "to somebody, or set it aside. Nothing was saved.")
         run = record_mod.run_by_no(path, row["run"])
         if run is None:
             # The code named a run this course does not have. The

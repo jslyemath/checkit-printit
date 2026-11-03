@@ -2120,6 +2120,18 @@ table.matched tr.nopaper .namebtn { color: var(--muted); }
 
 .dim { color: var(--dim); }
 
+/* A paper printed with nobody's name on it. The button is not an
+   optional correction here -- it is the only way the row can be
+   saved -- so it wears the accent rather than sitting grey until
+   hovered, and it is there from the start. */
+.matched-name.unowned .iconbtn.rematch.needed {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.matched-name.unowned .iconbtn.rematch.needed:hover {
+  background: var(--accent-soft);
+}
+
 /* The clash flag, at the left of the row. Not a button: there is
    nothing to press, it is a note about two rows at once, and what to
    do about it is to re-match one of them. */

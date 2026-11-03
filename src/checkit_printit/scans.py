@@ -456,7 +456,20 @@ PAD = (0.70, 0.80, 1.60, 0.80)
 #: The other way round, a crop tight enough to drop the colon is
 #: tight enough to drop a letter, and the letter is the whole reason
 #: the picture is there.
-NAME_PAD = (0.60, 0.50, 0.90, 0.60)
+#: The bottom was 0.60 and the top 0.50, and the picture came out
+#: with about five pixels more paper under the name than over it --
+#: which he spotted by looking at it. The pads are in units of the
+#: mark's *height*, which is the part above the baseline, while the
+#: rect they pad spans height and depth both. So the bottom pad is
+#: added underneath the descender space rather than including it, and
+#: equal numbers do not come out as equal margins.
+#:
+#: Measured rather than reasoned: ink sat 19px from the top and 24 to
+#: 25px from the bottom of an 84px crop, on four names. At 40px to the
+#: unit, 0.125 is those five pixels; 0.47 leaves a descender its 1px
+#: and still reads level. "Bo Peep" is the test case -- its `p` is the
+#: only descender in the demo stack.
+NAME_PAD = (0.60, 0.50, 0.90, 0.47)
 
 #: How many pixels one mark-unit comes out as, per mark.
 #:
@@ -494,7 +507,14 @@ NAME_CUT = Cut(NAME_PAD, "height", PX_PER_NAME)
 
 #: Per mark, falling back to the box's. Here rather than at the call
 #: site so that adding a third mark is one line in one place.
-PADS = {"box": BOX_CUT, "name": NAME_CUT}
+#: The id sits on the same header line as the name and is the same
+#: kind of thing -- a short run of content whose height is what
+#: matters -- so it is framed the same way. The grid is 5.2mm tall
+#: against the name line's 4mm or so, which `Cut`'s own unit handles:
+#: the pad is in units of the mark, not of millimetres.
+ID_CUT = NAME_CUT
+
+PADS = {"box": BOX_CUT, "name": NAME_CUT, "id": ID_CUT}
 
 
 def _frame(mark, anchor, carry, cut=BOX_CUT):
