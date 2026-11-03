@@ -2837,10 +2837,6 @@ function setOutcome(id, outcome) {
 }
 
 function countReview() {
-  const undecided = reviewRows.filter(r => !r.outcome).length;
-  const done = reviewRows.length - undecided;
-  const accept = document.getElementById("review-accept");
-  if (accept) accept.disabled = !undecided;
   refreshScansDirty();
 }
 
@@ -3656,26 +3652,16 @@ function renderReview(data) {
   box.hidden = !reviewRows.length;
   if (!reviewRows.length) return;
 
-  const asks = reviewRows.filter(r => !r.outcome);
-  const rest = reviewRows.filter(r => r.outcome);
+  /* Every paper arrives with a decision already in it: the reader's
+     call for one that came back, and `absent` for one that did not.
+     His job is to read down the column and change what is wrong, not
+     to enter 86 answers -- which is why there is no "agree with the
+     rest" button. There was one. It set a flag nothing read, and
+     then disabled itself.
 
-  const asksBox = document.getElementById("scan-review")
-    .querySelector("#review-asks");
-  asksBox.hidden = !asks.length;
-  if (asks.length) {
-    const accept = document.getElementById("review-accept");
-    accept.textContent = rest.length === 1
-      ? "Agree with the other one"
-      : `Agree with the other ${rest.length}`;
-    // Agreeing is not saving. It marks the readings the instructor
-    // has not argued with as decided; the saving is one action at
-    // the end, and it is not built yet.
-    accept.onclick = () => {
-      for (const row of reviewRows) if (row.outcome) row.agreed = true;
-      countReview();
-      accept.disabled = true;
-    };
-  }
+     What makes that safe rather than lazy is the confidence sort:
+     the readings least worth trusting are at the top of the table,
+     so the ones to argue with are the ones he reaches first. */
 
   // One table, sorted least-sure first. The three lists this
   // replaces -- the ones needing a look, a fold-away for the rest --
