@@ -2061,10 +2061,74 @@ table.matched tr.nopaper .namebtn { color: var(--muted); }
    an arrow is more ink than the rest of the set, and at 18 the arrow
    -- the half that means anything -- closes into the shoulder beside
    it. See `GLYPH.rematch`. */
-.iconbtn.rematch { width: 30px; height: 30px; }
+.iconbtn.rematch {
+  width: 30px;
+  height: 30px;
+  /* `button.iconbtn` carries `margin-bottom: 12px`, which is right in
+     the roster's action column and wrong here: a flex line centres
+     the *margin* box, so a 30px button with 12px under it sat 6px
+     above the middle of its row. */
+  margin: 0;
+}
 .iconbtn.rematch svg { --glyph-size: 21; width: 21px; height: 21px; }
 
 .dim { color: var(--dim); }
+
+/* The clash flag, at the left of the row. Not a button: there is
+   nothing to press, it is a note about two rows at once, and what to
+   do about it is to re-match one of them. */
+.clashflag {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--warn);
+}
+.clashflag .glyph { --glyph-size: 18; width: 18px; height: 18px; }
+
+/* ---- the Mark column, as a track -------------------------------------
+   One pill with the verdict filled in place, rather than three
+   separate buttons.
+
+   Chosen over three squares and over a segmented box because this is
+   a column you read down ninety times: with a track, the filled spot
+   is in a different position in each row, so the shape of the column
+   tells you the shape of the marking before you read any of it. The
+   three marks are an order he reads in -- passed, query, not passed
+   -- which is why a track is honest here and would not be for an
+   unordered set. */
+table.matched .review-picks {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  line-height: 1;
+}
+table.matched .review-pick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--muted);
+}
+table.matched .review-pick .glyph {
+  --glyph-size: 17;
+  width: 17px;
+  height: 17px;
+}
+table.matched .review-pick:hover { background: var(--surface-3); color: var(--ink); }
+table.matched .review-pick.on {
+  background: var(--accent);
+  color: var(--on-accent, #0b1f14);
+}
+table.matched .review-pick.on:hover { background: var(--accent); }
 
 /* ---- the job header --------------------------------------------------
    What the stack turned out to be, one section per print job it came
