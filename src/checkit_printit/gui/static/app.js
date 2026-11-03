@@ -2839,8 +2839,16 @@ function setOutcome(id, outcome) {
 function countReview() {
   const undecided = reviewRows.filter(r => !r.outcome).length;
   const done = reviewRows.length - undecided;
-  document.getElementById("review-count").textContent =
-    `${done} of ${reviewRows.length} decided`;
+  /* How far through the marking, as a line. It was "86 of 86 decided"
+     -- a sentence you have to read to learn what a bar says at a
+     glance -- and at 86 of 86 it was saying nothing at all, which is
+     why the bar is absent once everything is settled. */
+  const bar = document.getElementById("review-done");
+  const settled = reviewRows.filter(r => r.outcome).length;
+  const part = reviewRows.length ? settled / reviewRows.length : 0;
+  bar.hidden = !reviewRows.length || settled === reviewRows.length;
+  bar.style.setProperty("--done", String(part));
+  bar.title = `${settled} of ${reviewRows.length} decided`;
   const accept = document.getElementById("review-accept");
   if (accept) accept.disabled = !undecided;
   refreshScansDirty();
@@ -3636,9 +3644,6 @@ function renderReview(data) {
     .querySelector("#review-asks");
   asksBox.hidden = !asks.length;
   if (asks.length) {
-    document.getElementById("review-asks-count").textContent =
-      asks.length === 1 ? "1 paper needs you"
-                        : `${asks.length} papers need you`;
     const accept = document.getElementById("review-accept");
     accept.textContent = rest.length === 1
       ? "Agree with the other one"
@@ -5546,7 +5551,13 @@ async function boot() {
     // An annotated section scopes its own explanation; a page header's
     // belongs to the whole view, which has only one. `.annot` is listed
     // first so the Print tab's three do not all find each other.
-    const text = btn.closest(".annot, .view")?.querySelector(".hint-text");
+    // A `?` sitting in a section's own header takes that section's
+    // explanation; `.view` holds one for the tab as a whole, and
+    // Scans now has both. Nearest first, or the tab's would answer
+    // for every `?` on it.
+    const near = btn.closest("header")?.parentElement;
+    const text = near?.querySelector(":scope > .hint-text")
+      || btn.closest(".annot, .view")?.querySelector(".hint-text");
     if (!text) return;
     const open = btn.getAttribute("aria-expanded") === "true";
     btn.setAttribute("aria-expanded", String(!open));

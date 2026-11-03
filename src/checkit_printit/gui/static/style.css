@@ -1920,6 +1920,36 @@ body.hasbar.tall main { padding-bottom: 68px; }
    a no-op rather than a mystery. */
 .rematch-pick.current { color: var(--accent); }
 
+/* How far through the marking. No words: the only question it
+   answers is "how much is left", which is a length.
+
+   `--done` is registered so the fill can be transitioned -- an
+   unregistered custom property is a text substitution, and a width
+   reading one through `calc()` does not reliably follow it. Same
+   reason the drop area's progress bar registers `--read`. */
+@property --done {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+.donebar {
+  display: inline-block;
+  width: 110px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  overflow: hidden;
+  align-self: center;
+}
+.donebar-fill {
+  display: block;
+  height: 100%;
+  width: calc(var(--done, 0) * 100%);
+  background: var(--accent);
+  transition: --done 220ms ease;
+}
+
 /* ---- the matched table -----------------------------------------------
    One row per paper, one row height. Everything in a row is one line
    tall so the eye can run down a column: the crops are sized to the
@@ -1932,6 +1962,49 @@ table.matched {
   width: 100%;
   border-collapse: collapse;
   table-layout: auto;
+}
+
+/* **The scroller stops before the window does.**
+
+   Seven columns do not fit a narrow window, so the table scrolls
+   sideways -- and a horizontal scrollbar lives at the bottom of the
+   thing it scrolls. With ninety rows that was two screens down, so
+   the one control that reaches the columns you cannot see was the
+   one control you had to leave the table to find.
+
+   Capped against the window rather than at a row count. A count
+   cannot work: ten rows is 530px, which overflows a 700px window once
+   the cards and the heading are above it, and wastes the lower half
+   of a tall one.
+
+   `100vh - 170px` is a screenful less the save bar and some air, so
+   on any window the table plus one short scroll puts its bottom edge
+   -- and the scrollbar along it -- on screen. 52vh was tried first
+   and was not enough: 374px of table starting 379px down a 720px
+   window still ends 34px past the bottom.
+
+   A floor of 240px so it never becomes a letterbox, and a ceiling of
+   760px so a tall monitor does not get one enormous table.
+
+   This leaves the bar one flick away rather than at the window edge
+   exactly. Getting it exact means measuring the space above in
+   script and resizing the table as the page scrolls, which trades a
+   reachable scrollbar for a table that changes height while you read
+   it. Not worth it.
+
+   The heading row sticks, because a table you scroll inside loses
+   its headings on the first row otherwise. */
+.scroller:has(table.matched) {
+  max-height: clamp(240px, calc(100vh - 170px), 760px);
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.scroller:has(table.matched) thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  /* Opaque, or the rows show through it as they pass under. */
+  background: var(--surface-2);
 }
 table.matched th,
 table.matched td {
