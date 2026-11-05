@@ -470,9 +470,12 @@ roster file it writes is headed "Written by checkit-printit roster drop". If a
 rule needs to be reachable from the GUI, move it out of the `@click.command`
 body rather than copying it. See the footgun above about one of two copies.
 
-Built: **8a** the shell, **8b** Roster, **8c** Update form, **8d** Print job.
-The other four views are listed in the nav and say what they will do and
-which CLI command does it today. Order and rationale:
+**All eight views are built**: Roster, Update form, Print job, Runs, Scans,
+Progress, Seating, Settings. `VIEWS` in `app.js` is the list, in rail order.
+
+The "not built yet" page (`#view-soon`, driven by a `soon:` key on a view) is
+still there and nothing uses it. It is kept for the next tab, not because
+anything is unfinished. Order and rationale:
 `../checkit/PRINT_TOOL_DESIGN.md` 12.6, and "Where things stand" below.
 
 ### How it looks, and where the rules are
@@ -1660,7 +1663,9 @@ built rather than alphabetically, because several are part-done:
 | 8c | **Update form** | done -- open skills, the assessment, a form-shaped preview, the push |
 | 8d | **Print job** | done -- modes, variants, extras, per-student override and version, preview, build |
 | 8e | the response pull | done -- it is Print job's first card, not a tab |
-| 8e | **Record** | **not started.** The only view still entirely untouched |
+| 8e | **Runs** | done 2026-10-24 -- this is what "Record" became. List, detail, delist, graded, reprint exactly, start-from-these-settings |
+| 8e | **Scans** | done 2026-10-27, rebuilt 2026-11-02/03. Drop a stack of PDFs, place every page by its footer code, read the grading box, two sortable tables, re-match, save into the record. On a run printed without names the id grid is read and the student found |
+| 8e | **Progress** | done 2026-10-27. The grid, thresholds, the recent highlight, a drill-in that edits. No section filter |
 | 8f | **Seating** | its own module under `gui/static/seating/` — ~5,900 lines of JS and ~1,600 of CSS, by far the largest thing in the app. Four modes in the rail (**People, Groups, Seats, Printing**) and two overlays that cross them (**Up Next**, **projector**). A room can be built from nothing. See the table below, and `../checkit/PRINT_TOOL_DESIGN.md` 12.11–12.17 |
 | 8g | ~~Cold call~~ | **folded into Seating as the Up Next mode**, and renamed: the students see it. No tab of its own. See `../checkit/PRINT_TOOL_DESIGN.md` 12.12 |
 | 8h | **Setup** | half done -- a form can be created or attached from the app. The boilerplate editor is still to come |
