@@ -2444,9 +2444,14 @@ button.act.chip:hover { border-color: var(--line-strong); }
 .gridscroll { overflow: auto; max-height: calc(100vh - 230px); }
 
 #progress-grid { border-collapse: separate; border-spacing: 0; }
+/* 190px, fixed. See the note on `--whocol` below. */
+#progress-grid { --whocol: 190px; }
 #progress-grid th.who {
   position: sticky;
   left: 0;
+  width: var(--whocol);
+  min-width: var(--whocol);
+  max-width: var(--whocol);
   z-index: 2;
   background: var(--surface-1);
   text-align: left;
@@ -2470,7 +2475,6 @@ button.act.chip:hover { border-color: var(--line-strong); }
   font-weight: 400;
   color: var(--ink);
   padding: var(--s1) var(--s3) var(--s1) var(--s2);
-  max-width: 190px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2483,6 +2487,32 @@ button.act.chip:hover { border-color: var(--line-strong); }
   text-align: center;
   padding: var(--s2) var(--s1);
 }
+
+/* Section: narrow, and stuck to the name column rather than scrolling
+   out from under it. It is here to be *clicked* as much as read --
+   sorting by it is what produces the bands below, and without a
+   heading there would be no control to sort by section at all. */
+#progress-grid th.seccol,
+#progress-grid td.seccol {
+  position: sticky;
+  left: var(--whocol);
+  width: 54px;
+  min-width: 54px;
+  text-align: center;
+  padding: 0 var(--s1);
+  font-size: var(--t-xs);
+  color: var(--muted);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  z-index: 2;
+}
+#progress-grid thead th.seccol { z-index: 5; }
+
+/* A band spans the whole row, so it must not be pushed out by the two
+   sticky columns ahead of it -- and it is the one row here that scrolls
+   with the table rather than standing still. */
+#progress-grid tr.secband td { position: static; }
 
 /* A cell is a square, and square means square: the grid is read by
    scanning across, and columns of different widths make a row look
