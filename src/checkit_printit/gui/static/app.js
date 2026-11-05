@@ -737,7 +737,12 @@ function filedNames() {
 function setFiledNames(on) {
   try { localStorage.setItem("filedNames", on ? "1" : "0"); }
   catch (err) { /* a private window still gets a working roster */ }
+  // Both tables that show a name, not just the Roster. The switch is
+  // one preference about how a name reads, so a tab that was left
+  // showing the other form is a tab that disagrees with itself the
+  // next time it is looked at.
   renderRoster();
+  if (progressData) renderProgress();
 }
 
 /* "Lynott, Kilah", from the server's split and never from one done here.
@@ -938,6 +943,14 @@ async function loadProgress() {
   renderProgress();
 }
 
+/* --- pure: progress ---
+
+   Everything from here to the end marker is arithmetic over a record
+   row: no DOM, no fetch, no globals beyond what is declared inside.
+   `tests/test_gui_markup.py` lifts it and runs it under node, which is
+   the only way a line of it is ever executed by the suite -- `node
+   --check` parses this file and runs none of it. */
+
 /* What one cell is, from what the record says about it.
 
    Returned rather than drawn, so the rules are in one readable place
@@ -984,6 +997,92 @@ function cellState(cell, threshold) {
   return state;
 }
 
+/* How a cell sorts, worst first.
+
+   A grid is read for trouble, so one click on a skill should bring the
+   people who need that skill to the top. The order is the order of
+   concern -- stuck, then part way, then open, then never sat, then
+   passed, then never printed -- and not alphabetical by state name,
+   which would put "none" between "open" and "part" for no reason.
+
+   Sorted as a string because that is what `makeSorter` compares, so
+   the rank is written with a leading digit. */
+const CELL_RANK = { stuck: "0", part: "1", open: "2", none: "5",
+                    passed: "4" };
+
+function cellSortKey(cell, threshold) {
+  const state = cellState(cell, threshold);
+  // Never sat sits between open and passed: it is not progress, but it
+  // is not somebody struggling either -- there was no paper.
+  let rank = CELL_RANK[state.kind];
+  if (state.unsat) rank = "3";
+  // Within a rank, more attempts first: two failures want attention
+  // before one.
+  //
+  // Counting *down* from 1000 is what makes that work as a string
+  // comparison, and it is also what keeps the width fixed: every real
+  // count lands between 900 and 999, so ten attempts give "990" and
+  // two give "998" and the three digits line up. A `padStart` here as
+  // well was dead -- removing it broke no test, because the
+  // subtraction had already done the job.
+  const attempts = String(1000 - (state.attempts || 0));
+  return rank + attempts;
+}
+
+/* --- end pure: progress --- */
+
+/* Rebuilt on each load; see this file's note above `progressSort`. */
+const progressColumns = [];
+
+function fillProgressColumns(data) {
+  progressColumns.length = 0;
+  progressColumns.push({
+    key: "name", label: "Name", pin: "left", cls: "who",
+    value: s => displayName(s),
+    sortKeys: [["sort_last", "last"], ["sort_first", "first"]],
+    resetHere: true,
+    /* The same control the Roster's Name heading carries, and for the
+       same reason: how a name reads is a property of the name column.
+       `swapby` means the name order here and nowhere else -- see the
+       note on the Roster's copy. */
+    headExtra: (th) => {
+      const swap = document.createElement("button");
+      swap.className = "iconbtn tiny namefmt";
+      swap.type = "button";
+      swap.appendChild(icon("swapby"));
+      swap.title = filedNames()
+        ? "Showing surname first. Switch to First Last."
+        : "Showing given name first. Switch to Last, First.";
+      swap.setAttribute("aria-label", swap.title);
+      swap.onclick = (e) => { e.stopPropagation(); setFiledNames(!filedNames()); };
+      th.appendChild(swap);
+    },
+  });
+  progressColumns.push({
+    key: "section", label: "Sec", cls: "seccol",
+    value: s => s.section || "",
+  });
+  for (const skill of data.skills) {
+    progressColumns.push({
+      key: "skill:" + skill.slug,
+      label: skill.slug,
+      cls: "skillcol",
+      skill,
+      value: (s) => cellSortKey(
+        (progressData.cells[s.sid] || {})[skill.slug], skill.threshold),
+    });
+  }
+}
+
+const progressSort = makeSorter({
+  columns: progressColumns,
+  // Surname, then section: the same default the Roster opens on, so
+  // one student is in the same place on both tabs.
+  defaults: [{ key: "sort_last", desc: false }],
+  redraw: () => renderProgress(),
+  resetTitle: "Back to the roster's own order.",
+});
+
 function renderProgress() {
   const data = progressData;
   const grid = document.getElementById("progress-grid");
@@ -1003,36 +1102,50 @@ function renderProgress() {
     : "nothing graded yet";
   document.getElementById("progress-recent").checked = lightRecent;
 
+  fillProgressColumns(data);
   grid.innerHTML = "";
   const thead = document.createElement("thead");
   const head = document.createElement("tr");
-  const corner = document.createElement("th");
-  corner.className = "who";
-  corner.textContent = "Name";
-  head.appendChild(corner);
-  for (const skill of data.skills) {
-    const th = document.createElement("th");
-    th.className = "skillcol";
-    th.textContent = skill.slug;
-    // The slug is what is printed on the paper and what he says out
-    // loud; the title is the sentence, and 29 sentences across the
-    // top is a wall. So the slug shows and the title is the tooltip.
+  progressSort.header(head);
+  // The slug is what is printed on the paper and what he says out
+  // loud; the title is the sentence, and 29 sentences across the top
+  // is a wall. So the slug shows and the title is the tooltip. Put on
+  // after `header` draws, because the sorter owns the button inside.
+  head.querySelectorAll("th.skillcol").forEach((th, i) => {
+    const skill = data.skills[i];
+    if (!skill) return;
     th.title = skill.threshold > 1
       ? `${skill.title} \u2014 needs ${skill.threshold} passes`
       : skill.title;
-    head.appendChild(th);
-  }
+  });
   thead.appendChild(head);
   grid.appendChild(thead);
 
+  const rows = progressSort.apply(data.students);
+  const runs = sectionRuns(rows, "progress:") || [];
+  const span = progressColumns.length;
+
   const body = document.createElement("tbody");
-  for (const student of data.students) {
+  let runAt = 0;
+  let shutNow = false;
+  for (let i = 0; i < rows.length; i += 1) {
+    if (runAt < runs.length && runs[runAt].start === i) {
+      body.appendChild(sectionBand(runs[runAt], span, renderProgress));
+      shutNow = bandShut(runs[runAt].key);
+      runAt += 1;
+    }
+    if (shutNow) continue;
+    const student = rows[i];
     const tr = document.createElement("tr");
     const name = document.createElement("th");
     name.className = "who";
     name.scope = "row";
-    name.textContent = student.name || student.sid;
+    name.textContent = displayName(student) || student.sid;
     tr.appendChild(name);
+    const sec = document.createElement("td");
+    sec.className = "seccol";
+    sec.textContent = student.section || "";
+    tr.appendChild(sec);
     const mine = data.cells[student.sid] || {};
     for (const skill of data.skills) {
       tr.appendChild(progressCell(student, skill, mine[skill.slug], recent));
@@ -1655,20 +1768,24 @@ let shutBands = new Set([DROPPED_BAND]);
 
 function bandShut(key) { return shutBands.has(key); }
 
-function toggleBand(key) {
+function toggleBand(key, redraw) {
   if (shutBands.has(key)) shutBands.delete(key);
   else shutBands.add(key);
-  renderRoster();
+  redraw();
 }
 
-function sectionRuns(rows) {
+/* `prefix` keeps one table's shut bands out of another's. Progress and
+   the Roster both group by section and both have an 820; without it,
+   folding 820 away on one tab folds it on the other, which is a
+   surprise rather than a shared preference. */
+function sectionRuns(rows, prefix = "") {
   if (!rows.length) return null;
   const runs = [];
   for (const student of rows) {
     const name = student.section || "";
     const last = runs[runs.length - 1];
     if (last && last.section === name) last.count += 1;
-    else runs.push({ section: name, key: "section:" + name, count: 1,
+    else runs.push({ section: name, key: prefix + "section:" + name, count: 1,
                      start: runs.reduce((a, r) => a + r.count, 0) });
   }
   // One run is the whole table, so the band would say what the header
@@ -1684,13 +1801,16 @@ function sectionRuns(rows) {
  * The count used to be a floated span, which put it above the name's
  * baseline. The row is a flex line now, so the two sit on one.
  */
-function sectionBand(run) {
+function sectionBand(run, span, redraw) {
   const tr = document.createElement("tr");
   // `secband`, not `band`: seating.css owns `.band` for its selection
   // rectangle, and `position: absolute` on a <tr> drops it out of the table.
   tr.className = "secband";
   const td = document.createElement("td");
-  td.colSpan = COLUMNS.length;
+  // Given, not `COLUMNS.length`: the Roster is not the only table with
+  // sections in it any more, and a band that spans the wrong number of
+  // columns leaves a hole at the end of the row.
+  td.colSpan = span;
 
   const shut = bandShut(run.key);
   const button = document.createElement("button");
@@ -1710,7 +1830,7 @@ function sectionBand(run) {
   count.textContent = `${run.count} student${run.count === 1 ? "" : "s"}`;
 
   button.append(name, count);
-  button.onclick = () => toggleBand(run.key);
+  button.onclick = () => toggleBand(run.key, redraw);
   if (shut) tr.classList.add("shut");
   td.appendChild(button);
   tr.appendChild(td);
@@ -1754,7 +1874,10 @@ function renderRoster() {
 
   const shown = rows.filter(r => r.student).map(r => r.student);
   for (const row of rows) {
-    if (row.band) { body.appendChild(sectionBand(row.band)); continue; }
+    if (row.band) {
+      body.appendChild(sectionBand(row.band, COLUMNS.length, renderRoster));
+      continue;
+    }
     const student = row.student;
     const tr = document.createElement("tr");
     if (isDropped(student)) tr.className = "dropped";

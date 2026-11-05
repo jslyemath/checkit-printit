@@ -2432,8 +2432,13 @@ def api_progress(course, _body):
     # Live students only, in roster order: a grid is read down a
     # class list, and somebody who has left is not on it.
     people = course.roster()
+    # `_split_for_sort` as well, the same call `_review_rows` makes --
+    # not a second splitter. Sorting by surname needs the surname, and
+    # the browser has no splitter on purpose; without this the grid
+    # could not offer the Roster's name order at all, and the two tabs
+    # could show one student two ways at once.
     students = [{"sid": roster_mod.key_of(s), "name": s.display,
-                 "section": s.section}
+                 "section": s.section, **_split_for_sort(s.display)}
                 for s in people.live()]
 
     return {

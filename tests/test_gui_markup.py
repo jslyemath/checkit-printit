@@ -747,3 +747,136 @@ def test_the_job_date_is_month_and_day():
     out = run_js('console.log(JSON.stringify('
                  '[shortDay("2026-11-02"), shortDay(""), shortDay("odd")]));')
     assert out == ["11/2", "", "odd"], out
+
+
+# ------------------------------------------------- the Progress grid --
+
+def progress_block():
+    """The marked Progress arithmetic from app.js, which uses no DOM.
+
+    Its own region rather than part of the scan block: the two are
+    nowhere near each other in the file, and a single marker pair
+    spanning both would drag `renderProgress` in with them.
+    """
+    js = read("app.js")
+    start = js.index("/* --- pure: progress ---")
+    end = js.index("/* --- end pure: progress --- */")
+    assert start < end, "the Progress block is not where it says it is"
+    return js[start:end]
+
+
+def run_progress_js(body):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+    done = subprocess.run([node, "-e", progress_block() + "\n" + body],
+                          capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr.strip()
+    return json.loads(done.stdout)
+
+
+def cell(attempts=0, passes=0, queries=0, absents=0):
+    return (f"{{attempts:{attempts}, passes:{passes}, "
+            f"queries:{queries}, absents:{absents}}}")
+
+
+class TestWhatACellSaysAboutItself:
+    """`cellState` turns a record row into what the grid draws.
+
+    Never run by the suite before this: it lives outside the block the
+    markup tests lift, and `node --check` parses app.js without
+    executing a line of it.
+    """
+
+    def test_nothing_recorded_is_not_a_state(self):
+        out = run_progress_js(
+            "console.log(JSON.stringify(["
+            "cellState(null, 1).kind,"
+            f"cellState({cell()}, 1).kind]))")
+        assert out == ["none", "none"]
+
+    def test_one_pass_where_one_is_needed_is_passed(self):
+        out = run_progress_js(
+            f"console.log(JSON.stringify(cellState({cell(1, 1)}, 1)))")
+        assert out["kind"] == "passed"
+        # "1 of 1" is the word "passed" written twice.
+        assert "count" not in out
+
+    def test_passing_at_the_second_go_says_how_many(self):
+        out = run_progress_js(
+            f"console.log(JSON.stringify(cellState({cell(2, 1)}, 1)))")
+        assert out["kind"] == "passed" and out["count"] == "2"
+
+    def test_part_way_counts_against_the_threshold(self):
+        out = run_progress_js(
+            f"console.log(JSON.stringify(cellState({cell(1, 1)}, 2)))")
+        assert out["kind"] == "part" and out["count"] == "1/2"
+
+    def test_one_failure_is_ordinary_and_several_is_not(self):
+        out = run_progress_js(
+            "console.log(JSON.stringify(["
+            f"cellState({cell(1, 0)}, 1),"
+            f"cellState({cell(3, 0)}, 1)]))")
+        assert out[0]["kind"] == "open" and "count" not in out[0]
+        assert out[1]["kind"] == "stuck" and out[1]["count"] == "3"
+
+    def test_a_query_is_carried_without_being_a_pass(self):
+        """It is a paper he wants to look at again. Calling it either
+        way would decide something he deliberately did not."""
+        out = run_progress_js(
+            f"console.log(JSON.stringify(cellState({cell(1, 0, 1)}, 1)))")
+        assert out["kind"] == "open" and out["queried"] is True
+
+    def test_nothing_handed_in_at_all_is_marked(self):
+        out = run_progress_js(
+            f"console.log(JSON.stringify(cellState({cell(2, 0, 0, 2)}, 1)))")
+        assert out["unsat"] is True
+
+    def test_one_absence_among_several_sittings_is_not(self):
+        """`unsat` is "there was never a paper", not "one of them was
+        missed" -- the box drawn is a box on a sheet, and for this
+        student there was a sheet."""
+        out = run_progress_js(
+            f"console.log(JSON.stringify(cellState({cell(2, 0, 0, 1)}, 1)))")
+        assert out["unsat"] is False
+
+
+class TestTheOrderASkillColumnSortsIn:
+    """One click on a skill brings the people who need it to the top.
+
+    The order is the order of concern, not alphabetical by state name
+    -- which would put "none" between "open" and "part".
+    """
+
+    @staticmethod
+    def ranked():
+        return run_progress_js(
+            "const rows = ["
+            f"['stuck', {cell(3, 0)}, 1],"
+            f"['part', {cell(1, 1)}, 2],"
+            f"['open', {cell(1, 0)}, 1],"
+            f"['unsat', {cell(1, 0, 0, 1)}, 1],"
+            f"['passed', {cell(1, 1)}, 1],"
+            "['none', null, 1]];"
+            "const keyed = rows.map(([n, c, t]) => [n, cellSortKey(c, t)]);"
+            "keyed.sort((a, b) => a[1].localeCompare(b[1]));"
+            "console.log(JSON.stringify(keyed.map(k => k[0])))")
+
+    def test_trouble_comes_first_and_nothing_printed_comes_last(self):
+        assert self.ranked() == ["stuck", "part", "open", "unsat",
+                                 "passed", "none"]
+
+    def test_more_attempts_outrank_fewer_in_the_same_state(self):
+        """Two failures want looking at before one."""
+        out = run_progress_js(
+            f"console.log(JSON.stringify([cellSortKey({cell(5, 0)}, 1),"
+            f"cellSortKey({cell(2, 0)}, 1)]))")
+        assert out[0] < out[1]
+
+    def test_ten_attempts_do_not_sort_before_two(self):
+        """The count is compared as text, so it is padded. Unpadded,
+        "10" sorts before "2" and the worst row hides in the middle."""
+        out = run_progress_js(
+            f"console.log(JSON.stringify([cellSortKey({cell(10, 0)}, 1),"
+            f"cellSortKey({cell(2, 0)}, 1)]))")
+        assert out[0] < out[1]
