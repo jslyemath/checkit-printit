@@ -242,7 +242,7 @@ class TestTheDrillIn:
             "sid": "001", "slug": "AD", "runId": "first",
             "outcome": "passed"})
         row = record.attempts_for(course.file("record"), "001")[0]
-        assert (row["outcome"], row["page"], row["reading"]) == (
+        assert (row["outcome"], row["run_page"], row["reading"]) == (
             "passed", 4, "empty")
 
     def test_a_paper_never_printed_for_them_is_refused(self, course):

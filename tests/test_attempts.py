@@ -85,7 +85,7 @@ class TestSaving:
         would be a number somebody later averages."""
         record.save_attempts(db, [decide("first", "002", "W1", "absent")])
         row = record.attempts_for(db, "002")[0]
-        assert row["page"] is None
+        assert row["run_page"] is None
         assert row["reading"] == ""
         assert row["ink"] is None
 
@@ -258,7 +258,7 @@ class TestOneRowPerPaper:
             page=page, kind=kind, sid="001" if kind == "student" else "",
             slug="W1", vseed="401", sheet=1, marks={})
         return scans_mod.Sheet(
-            source=source, at=at, status="placed", run_no=1, page=page,
+            source=source, scan_page=at, status="placed", run_no=1, run_page=page,
             entry=entry, code=f"C1-1-{page}", cuts={"box": call})
 
     @pytest.fixture
@@ -342,8 +342,8 @@ class TestARereadKnowsWhatIsSaved:
         entry = pageindex.Page(page=page, kind="student", sid=sid,
                                slug=slug, vseed="401", sheet=1, marks={})
         return scans_mod.Sheet(
-            source="copier-1.pdf", at=1, status="placed", run_no=1,
-            page=page, entry=entry, code=f"C1-1-{page}",
+            source="copier-1.pdf", scan_page=1, status="placed", run_no=1,
+            run_page=page, entry=entry, code=f"C1-1-{page}",
             cuts={"box": call})
 
     @pytest.fixture
@@ -376,8 +376,10 @@ class TestARereadKnowsWhatIsSaved:
         against -- and that must read as "not saved", not crash."""
         sheet = self.sheet(1, "ticked")
         sheet = scans_mod.Sheet(
-            source=sheet.source, at=sheet.at, status="placed", run_no=77,
-            page=1, entry=sheet.entry, code="C1-77-1", cuts=sheet.cuts)
+            source=sheet.source, scan_page=sheet.scan_page,
+            status="placed", run_no=77,
+            run_page=1, entry=sheet.entry, code="C1-77-1",
+            cuts=sheet.cuts)
         rows = self.rows(saved, [sheet])
         assert rows[0]["recorded"] == ""
 
@@ -521,7 +523,7 @@ class TestTheSaveEndpoint:
         gui_mod.api_scan_save(course, {"decisions": [
             {"id": "1-1", "outcome": "passed"}]})
         mine = record.attempts_for(course.file("record"), "001")
-        assert [(r["slug"], r["page"], r["ink"]) for r in mine] == [
+        assert [(r["slug"], r["run_page"], r["ink"]) for r in mine] == [
             ("W1", 1, 0.03)]
 
     def test_a_rematch_reaches_the_record(self, course, read):
@@ -558,14 +560,15 @@ class TestTheSaveEndpoint:
         gui_mod.api_scan_save(course, {"decisions": [
             {"id": "1-3", "outcome": "absent"}]})
         row = record.attempts_for(course.file("record"), "002")[0]
-        assert (row["page"], row["reading"], row["ink"]) == (None, "", None)
+        assert (row["run_page"], row["reading"], row["ink"]) \
+            == (None, "", None)
 
     @pytest.fixture
     def loose(self, monkeypatch):
         """One page in the stack that the reader could not place."""
         class Sheet:
             source = "/anywhere/copier-2.pdf"
-            at = 7
+            scan_page = 7
             placed = False
         monkeypatch.setattr(gui_mod.SCANNING, "sheets", [Sheet()])
 
@@ -580,7 +583,8 @@ class TestTheSaveEndpoint:
         assert out["saved"] == 1
         row = record.attempts_for(course.file("record"), "002")[0]
         # No page in the job and no reading: there was no box to read.
-        assert (row["slug"], row["page"], row["reading"]) == ("W1", None, "")
+        assert (row["slug"], row["run_page"], row["reading"]) \
+            == ("W1", None, "")
 
     def test_a_hand_match_not_in_the_stack_is_refused(self, course, read,
                                                       loose):
@@ -911,8 +915,9 @@ class TestARowWhoseStudentCameFromTheGrid:
         entry = pageindex.Page(page=1, kind="student", sid=sid, slug="W1",
                                vseed="401", sheet=1, marks={})
         return scans_mod.Sheet(
-            source="copier-1.pdf", at=1, status="placed", run_no=1, page=1,
-            entry=entry, code="C1-1-1", cuts={"box": "ticked"},
+            source="copier-1.pdf", scan_page=1, status="placed", run_no=1,
+            run_page=1, entry=entry, code="C1-1-1",
+            cuts={"box": "ticked"},
             read_sid=read_sid, read_score=read_score)
 
     def rows(self, sheets, names=None, sections=None):
