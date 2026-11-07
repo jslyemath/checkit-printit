@@ -56,10 +56,17 @@ class Sheet:
     """One side of one sheet in the stack, and what was made of it."""
 
     #: The PDF it came out of, and its page number *in that file*.
-    #: Kept so the instructor can be told where to look, and for no
-    #: other reason -- position in the stack means nothing here.
+    #: Kept so the instructor can be told where to look -- and, once
+    #: a scan is stored, so the page can be found again.
+    #:
+    #: `scan_page` and `run_page` below are two different numbers and
+    #: both used to be called something that did not say which: `at`
+    #: and `page`. A scanned stack comes back shuffled, split across
+    #: files and padded with blanks, so page four of a copier's PDF
+    #: has nothing to do with page four of the job that was printed.
+    #: Telling them apart is the whole purpose of the footer code.
     source: str
-    at: int
+    scan_page: int
 
     #: One of:
     #:   placed      the code resolved to a run and a page in it
@@ -71,7 +78,8 @@ class Sheet:
     status: str
 
     run_no: int = None
-    page: int = None
+    #: Which page of the *printed run* this is. See `scan_page`.
+    run_page: int = None
     #: The `main.pages` entry, when there is one.
     entry: object = None
     #: What was decoded, whatever it was. Kept for the foreign case,
@@ -148,7 +156,7 @@ class Batch:
         """
         seen = {}
         for sheet in self.placed:
-            seen.setdefault((sheet.run_no, sheet.page), []).append(sheet)
+            seen.setdefault((sheet.run_no, sheet.run_page), []).append(sheet)
         return {key: group for key, group in seen.items() if len(group) > 1}
 
     def missing(self, index_for):
@@ -174,7 +182,7 @@ class Batch:
         stuck to another in the feeder, and those want different
         responses, but both start here.
         """
-        arrived = {(s.run_no, s.page) for s in self.placed}
+        arrived = {(s.run_no, s.run_page) for s in self.placed}
         out = {}
         for run_no in self.runs:
             index = index_for(run_no)
@@ -1232,7 +1240,8 @@ def read_page(image, resolve, anchors_for=None, want=(), candidates=()):
     look = {"cuts": {"page": _thumb(image)}} if "page" in want else {}
     index = resolve(run_no)
     if index is None:
-        return {"status": "unknown-run", "run_no": run_no, "page": page,
+        return {"status": "unknown-run", "run_no": run_no,
+                "run_page": page,
                 "code": f"C1-{run_no}-{page}", **look}
     entry = index.get(page)
     if entry is None:
@@ -1240,9 +1249,10 @@ def read_page(image, resolve, anchors_for=None, want=(), candidates=()):
         # paper is from a rebuild of that folder with different
         # pagination, or the index was written by a different compile
         # than the one that printed this sheet.
-        return {"status": "unknown-page", "run_no": run_no, "page": page,
+        return {"status": "unknown-page", "run_no": run_no,
+                "run_page": page,
                 "code": f"C1-{run_no}-{page}", **look}
-    out = {"status": "placed", "run_no": run_no, "page": page,
+    out = {"status": "placed", "run_no": run_no, "run_page": page,
            "entry": entry, "code": f"C1-{run_no}-{page}"}
     if want and anchors_for:
         out.update(_cuts(image, entry, page, symbols,
@@ -1550,7 +1560,7 @@ def read_pdfs(paths, record_path, dpi=DPI, on_page=None, want=(),
             for n in range(1, len(doc) + 1):
                 image = doc[n - 1].render(scale=dpi / 72).to_pil()
                 sheets.append(Sheet(
-                    source=path, at=n,
+                    source=path, scan_page=n,
                     **read_page(image, resolve, anchors_for, want,
                                 candidates)))
                 done += 1

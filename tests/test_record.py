@@ -311,3 +311,123 @@ class TestWhatTheBuildHandsOver:
             handouts=report["handouts"])
         assert rows == 2 and unnamed == 0
         assert record.times_printed(path, "806000001") == {"AD": 1}
+
+
+class TestRenamingAColumnOnADatabaseThatExists:
+    r"""`attempt.page` became `attempt.run_page` on open.
+
+    New machinery: `ADDED` only ever added columns, because
+    `CREATE TABLE IF NOT EXISTS` does nothing to a table that is
+    already there. A rename has to find the old name, change it, and
+    then never do anything again -- and it runs against a file with
+    the term's decisions in it, so "never do anything again" is the
+    part worth proving.
+    """
+
+    @staticmethod
+    def old_shape(path):
+        """A database as it was before the rename existed."""
+        import sqlite3
+        db = sqlite3.connect(path)
+        db.executescript("""
+            CREATE TABLE run (run_id TEXT PRIMARY KEY, run_no INTEGER,
+                title TEXT NOT NULL, date TEXT NOT NULL,
+                built TEXT NOT NULL, seed INTEGER NOT NULL,
+                output TEXT NOT NULL, extras INTEGER NOT NULL DEFAULT 0,
+                unnamed INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE attempt (attempt_id INTEGER PRIMARY KEY,
+                run_id TEXT NOT NULL, sid TEXT NOT NULL, slug TEXT NOT NULL,
+                outcome TEXT NOT NULL, decided TEXT NOT NULL, page INTEGER,
+                reading TEXT NOT NULL DEFAULT '', ink REAL, beside REAL,
+                UNIQUE(run_id, sid, slug));
+            INSERT INTO run VALUES
+                ('first', 1, 'T', '2026-10-01', '2026-10-01T09:00', 1, '/o',
+                 0, 0);
+            INSERT INTO attempt
+                (run_id, sid, slug, outcome, decided, page, reading)
+                VALUES ('first', '001', 'W1', 'passed', '2026-10-02', 7,
+                        'ticked');
+        """)
+        db.commit()
+        db.close()
+
+    def test_the_value_comes_through_under_the_new_name(self, tmp_path):
+        path = str(tmp_path / "old.db")
+        self.old_shape(path)
+        db = record.connect(path)
+        try:
+            row = db.execute("SELECT * FROM attempt").fetchone()
+            assert row["run_page"] == 7
+            assert row["outcome"] == "passed" and row["reading"] == "ticked"
+        finally:
+            db.close()
+
+    def test_the_old_name_is_gone_rather_than_kept_beside_it(self, tmp_path):
+        """A copy would leave two columns answering one question, and
+        the stale one is the one something later reads."""
+        path = str(tmp_path / "old.db")
+        self.old_shape(path)
+        db = record.connect(path)
+        try:
+            names = {r["name"] for r in db.execute(
+                "PRAGMA table_info(attempt)")}
+            assert "run_page" in names and "page" not in names
+        finally:
+            db.close()
+
+    def test_opening_it_again_changes_nothing(self, tmp_path):
+        path = str(tmp_path / "old.db")
+        self.old_shape(path)
+        shape = []
+        for _ in range(3):
+            db = record.connect(path)
+            shape.append([r["name"] for r in db.execute(
+                "PRAGMA table_info(attempt)")])
+            db.close()
+        assert shape[0] == shape[1] == shape[2]
+
+    def test_a_fresh_database_has_the_same_shape_as_a_migrated_one(
+            self, tmp_path):
+        """Or the two diverge and only one of them is tested."""
+        old = str(tmp_path / "old.db")
+        self.old_shape(old)
+        db = record.connect(old)
+        migrated = [r["name"] for r in db.execute("PRAGMA table_info(attempt)")]
+        db.close()
+        db = record.connect(str(tmp_path / "new.db"))
+        fresh = [r["name"] for r in db.execute("PRAGMA table_info(attempt)")]
+        db.close()
+        assert migrated == fresh
+
+    def test_a_file_holding_both_names_is_left_alone(self, tmp_path):
+        """Only reachable from a half-finished migration or somebody
+        editing the file by hand, and both of those happen to a record
+        that has a term of work in it. Without the second half of the
+        guard SQLite refuses the rename and the course will not open
+        at all -- so the cost of being wrong here is the whole app.
+        """
+        import sqlite3
+        path = str(tmp_path / 'both.db')
+        self.old_shape(path)
+        raw = sqlite3.connect(path)
+        raw.execute('ALTER TABLE attempt ADD COLUMN run_page INTEGER')
+        raw.commit()
+        raw.close()
+        db = record.connect(path)          # must not raise
+        try:
+            names = {r['name'] for r in db.execute(
+                'PRAGMA table_info(attempt)')}
+            assert {'page', 'run_page'} <= names
+        finally:
+            db.close()
+
+    def test_saving_into_a_migrated_database_works(self, tmp_path):
+        """The rename is on the read path and the write path both."""
+        path = str(tmp_path / "old.db")
+        self.old_shape(path)
+        written, unknown = record.save_attempts(path, [
+            {"run_id": "first", "sid": "001", "slug": "W1",
+             "outcome": "failed", "page": 9}])
+        assert written == 1
+        row = record.attempts_for(path, "001")[0]
+        assert row["run_page"] == 9 and row["outcome"] == "failed"

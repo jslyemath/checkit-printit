@@ -1800,10 +1800,10 @@ def _batch_json(batch, record_path, sections=None):
         entry = sheet.entry
         sheets.append({
             "file": os.path.basename(sheet.source),
-            "at": sheet.at,
+            "at": sheet.scan_page,
             "status": sheet.status,
             "run": sheet.run_no,
-            "page": sheet.page,
+            "page": sheet.run_page,
             "skill": entry.slug if entry else "",
             "kind": entry.kind if entry else "",
             "sid": entry.sid if entry else "",
@@ -1829,19 +1829,19 @@ def _batch_json(batch, record_path, sections=None):
     # could read is no use without the page.
     unplaced = [{
         "file": os.path.basename(sheet.source),
-        "at": sheet.at,
+        "at": sheet.scan_page,
         "status": sheet.status,
         "code": sheet.code,
         # The run and page its code claimed, when it had a readable
         # one -- `unknown-run` and `unknown-page` both do, and that is
         # the only clue to what the sheet was meant to be.
         "run": sheet.run_no,
-        "page": sheet.page,
+        "page": sheet.run_page,
         "look": _as_jpeg(sheet.cuts["page"]) if "page" in sheet.cuts else "",
     } for sheet in batch.unplaced]
 
     duplicates = [{"run": run, "page": page,
-                   "where": [f"{os.path.basename(s.source)} p{s.at}"
+                   "where": [f"{os.path.basename(s.source)} p{s.scan_page}"
                              for s in group]}
                   for (run, page), group in sorted(batch.duplicates.items())]
 
@@ -2050,7 +2050,7 @@ def _review_rows(batch, record_path, names, sections=None):
         # was written, and nothing read it until now.
         if not sheet.entry.gradable:
             continue
-        papers.setdefault((sheet.run_no, sheet.page), []).append(sheet)
+        papers.setdefault((sheet.run_no, sheet.run_page), []).append(sheet)
 
     rows = []
     for (run_no, page), copies in papers.items():
@@ -2124,7 +2124,11 @@ def _review_rows(batch, record_path, names, sections=None):
             # Where the sheet came from, so the whole page can be
             # fetched when he asks for it. Not the page itself:
             # sixty full renders is a response nobody wants.
-            "at": [{"file": s.source, "page": s.at} for s in copies],
+            # `page` here is the page in the *scanned file*, which is
+            # what `/api/scan/sheet` wants. The browser-side keys have
+            # not been renamed yet; see the note in `scans.Sheet`.
+            "at": [{"file": s.source, "page": s.scan_page}
+                   for s in copies],
             "read": agreed,
             "reads": sorted(calls) or ([agreed] if agreed else []),
             "ink": first.get("inside", 0),
@@ -2343,7 +2347,7 @@ def api_scan_save(course, body):
             continue
         sheet = next((s for s in SCANNING.sheets
                       if os.path.basename(s.source) == said["file"]
-                      and s.at == said["page"]), None)
+                      and s.scan_page == said["page"]), None)
         if sheet is None:
             raise GuiError(
                 f"{said['file']} page {said['page']} is not in the stack "
@@ -2474,7 +2478,9 @@ def api_progress_cell(course, body):
          "rebuilt": bool(r["rebuilt"]),
          "seed": r["seed"], "version": r["version"],
          "outcome": r["outcome"] or "", "decided": r["decided"] or "",
-         "page": r["page"], "reading": r["reading"] or ""}
+         # Which page of the printed job. Not the page of the
+         # scanned PDF -- see `scans.Sheet`.
+         "runPage": r["run_page"], "reading": r["reading"] or ""}
         for r in rows]}
 
 
@@ -2515,7 +2521,7 @@ def api_progress_set(course, body):
     try:
         record_mod.save_attempts(path, [{
             "run_id": run_id, "sid": sid, "slug": slug,
-            "outcome": outcome, "page": was["page"],
+            "outcome": outcome, "page": was["run_page"],
             "reading": was["reading"] or "", "ink": None,
             "beside": None}])
     except record_mod.RecordError as exc:

@@ -92,10 +92,15 @@ CREATE TABLE IF NOT EXISTS meta (
 --
 -- Keyed by (run, student, skill) and not by page, because a page is
 -- how a sheet is *found* and this is about the occasion: one run,
--- one skill, one student, one decision. `page` is kept so the scan
--- can be linked back to, and is NULL for a paper that never reached
--- the scanner -- the instructor asked to be able to mark one of
--- those by hand, holding the sheet.
+-- one skill, one student, one decision.
+--
+-- `run_page` is which page of the *printed job* this paper was, and
+-- is NULL for one that never reached the scanner -- the instructor
+-- asked to be able to mark one of those by hand, holding the sheet.
+-- It is **not** the page of the copier's PDF the image is on; a
+-- scanned stack comes back shuffled and split across files, so the
+-- two numbers are unrelated. It was called `page`, which read as
+-- whichever of those the reader had in mind.
 CREATE TABLE IF NOT EXISTS attempt (
     attempt_id INTEGER PRIMARY KEY,
     run_id  TEXT NOT NULL REFERENCES run(run_id) ON DELETE CASCADE,
@@ -103,7 +108,7 @@ CREATE TABLE IF NOT EXISTS attempt (
     slug    TEXT NOT NULL,
     outcome TEXT NOT NULL,
     decided TEXT NOT NULL,
-    page    INTEGER,
+    run_page INTEGER,
     -- What the reader called it, beside what the instructor
     -- decided. Kept so a disagreement can be looked at instead of
     -- argued about, and so a threshold that turns out to be wrong
@@ -132,6 +137,20 @@ CREATE INDEX IF NOT EXISTS attempt_by_student ON attempt(sid, slug);
 OUTCOMES = ("passed", "queried", "failed", "absent")
 
 
+#: Columns renamed after the first databases were written, as
+#: `(table, was, now)`. Applied on open, once, and a no-op every time
+#: after -- the check is on the column names actually present, so a
+#: database that has already been through it is left alone and one
+#: restored from an old backup is brought forward.
+#:
+#: Renaming rather than adding-and-copying because the values do not
+#: change: `attempt.page` always held the printed run's page, and only
+#: the name was wrong. A copy would leave the old column behind as a
+#: second answer to the same question.
+RENAMED = [
+    ("attempt", "page", "run_page"),
+]
+
 #: Columns added to `run` after the first databases were written.
 #: `CREATE TABLE IF NOT EXISTS` does nothing to a table that exists,
 #: so a column added to SCHEMA alone reaches new courses only -- and
@@ -159,6 +178,10 @@ def connect(path):
     for column, decl in ADDED.items():
         if column not in have:
             db.execute(f"ALTER TABLE run ADD COLUMN {column} {decl}")
+    for table, was, now in RENAMED:
+        names = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
+        if was in names and now not in names:
+            db.execute(f"ALTER TABLE {table} RENAME COLUMN {was} TO {now}")
     db.commit()
     return db
 
@@ -416,7 +439,8 @@ def save_attempts(path, rows):
     """Record what was decided about a batch of papers.
 
     `rows` carry `run_id`, `sid`, `slug`, `outcome`, and optionally
-    `page`, `reading`, `ink`, `beside`. Every run named is marked
+    `page` -- which page of the printed run -- plus `reading`,
+    `ink` and `beside`. Every run named is marked
     graded, because having a decision in it is exactly what graded
     means.
 
@@ -456,13 +480,13 @@ def save_attempts(path, rows):
                 unknown.append(key)
             db.execute(
                 "INSERT INTO attempt"
-                " (run_id, sid, slug, outcome, decided, page,"
+                " (run_id, sid, slug, outcome, decided, run_page,"
                 "  reading, ink, beside)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(run_id, sid, slug) DO UPDATE SET"
                 "   outcome = excluded.outcome,"
                 "   decided = excluded.decided,"
-                "   page    = excluded.page,"
+                "   run_page = excluded.run_page,"
                 "   reading = excluded.reading,"
                 "   ink     = excluded.ink,"
                 "   beside  = excluded.beside",
@@ -582,7 +606,7 @@ def history(path, sid, slug):
             "SELECT p.run_id, r.title, r.date, r.run_no, r.delisted,"
             "       r.rebuilt,"
             "       p.seed, p.version,"
-            "       a.outcome, a.decided, a.page, a.reading"
+            "       a.outcome, a.decided, a.run_page, a.reading"
             "  FROM printed p"
             "  JOIN run r ON r.run_id = p.run_id"
             "  LEFT JOIN attempt a"

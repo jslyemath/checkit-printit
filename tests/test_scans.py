@@ -184,7 +184,7 @@ class TestPlacing:
         two files, so a placing that went by position would be wrong
         for all but a couple of them by luck."""
         _, _, order = stack
-        got = [s.page for s in batch.sheets]
+        got = [s.run_page for s in batch.sheets]
         assert got == order
 
     def test_a_placed_student_page_names_the_right_student(self, batch):
@@ -215,7 +215,7 @@ class TestWhatDidNotPlace:
         """Every page that carried a code was read. If this starts
         failing, the symbol or the scan has got worse -- it is the
         canary for the 9mm decision."""
-        bad = [(s.source, s.at) for s in batch.sheets
+        bad = [(s.source, s.scan_page) for s in batch.sheets
                if s.status == "unreadable"]
         assert not bad, bad
 
@@ -251,7 +251,7 @@ class TestTheThreeQuestions:
         automatically."""
         _, index, _ = stack
         twice = scans.Batch(sheets=batch.sheets + [batch.placed[0]])
-        key = (batch.placed[0].run_no, batch.placed[0].page)
+        key = (batch.placed[0].run_no, batch.placed[0].run_page)
         assert list(twice.duplicates) == [key]
         assert len(twice.duplicates[key]) == 2
 
@@ -267,7 +267,7 @@ class TestTheThreeQuestions:
         short = scans.Batch(sheets=[s for s in batch.sheets
                                     if s is not dropped])
         assert short.missing(lambda n: index) == {dropped.run_no:
-                                                  [dropped.page]}
+                                                  [dropped.run_page]}
 
     def test_padding_pages_are_not_expected_back(self, batch, stack):
         """`main.pages` lists no line for a blank, so a blank cannot
@@ -285,8 +285,8 @@ class TestTheThreeQuestions:
         keys = [n for n, e in index.pages.items() if e.kind == "key"]
         assert keys, "the run printed no keys, so this proves nothing"
         nothing = scans.Batch(sheets=[
-            scans.Sheet(source="x", at=1, status="placed", run_no=RUN_NO,
-                        page=n, entry=index.get(n))
+            scans.Sheet(source="x", scan_page=1, status="placed", run_no=RUN_NO,
+                        run_page=n, entry=index.get(n))
             for n in index.pages if index.get(n).kind == "student"])
         assert nothing.missing(lambda n: index) == {}
 
@@ -297,8 +297,8 @@ class TestTheThreeQuestions:
         students = [n for n, e in index.pages.items()
                     if e.kind == "student"]
         short = scans.Batch(sheets=[
-            scans.Sheet(source="x", at=1, status="placed", run_no=RUN_NO,
-                        page=n, entry=index.get(n))
+            scans.Sheet(source="x", scan_page=1, status="placed", run_no=RUN_NO,
+                        run_page=n, entry=index.get(n))
             for n in students[1:]])
         assert short.missing(lambda n: index) == {RUN_NO: [students[0]]}
 
