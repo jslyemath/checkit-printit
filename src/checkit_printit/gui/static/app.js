@@ -1218,9 +1218,14 @@ function legendEntry(parts) {
   return span;
 }
 
-function legendMark(name, tone) {
+/* A swatch wearing the same class the grid's own cell wears, so the
+   two cannot drift: the colour is stated once, in the stylesheet,
+   against the name of the thing rather than against its position in
+   the strip. */
+function legendMark(kind, name, tone) {
   const span = document.createElement("span");
-  span.className = "legend-mark" + (tone ? " tone-" + tone : "");
+  span.className = "legend-mark"
+    + (kind ? " " + kind : "") + (tone ? " tone-" + tone : "");
   if (name) span.appendChild(icon(name));
   return span;
 }
@@ -1232,27 +1237,29 @@ function words(s) {
 function drawProgressLegend(lit, graded) {
   const bar = document.getElementById("progress-legend");
   bar.textContent = "";
+  const fraction = legendMark("part", null);
+  // Drawn as itself rather than as a glyph, because that is what the
+  // cell shows: the fraction *is* the mark there.
+  fraction.textContent = "1/2";
   bar.append(
-    legendEntry([legendMark("pass"), words("passed")]),
-    legendEntry([legendMark(null), words("part way")]),
-    legendEntry([legendMark("fail"), words("none yet")]),
-    legendEntry([legendMark("query"), words("in question")]),
+    legendEntry([legendMark("passed", "pass"), words("passed")]),
+    legendEntry([fraction, words("part way")]),
+    legendEntry([legendMark("none-passed", "fail"), words("none yet")]),
+    legendEntry([legendMark("query", "query"), words("in question")]),
   );
-  // The fraction is drawn as itself rather than as a glyph, because
-  // that is what the cell shows.
-  bar.querySelectorAll(".legend-mark")[1].textContent = "1/2";
 
   const red = legendEntry([
-    legendMark(null, "stuck"), words("red after "),
+    legendMark(null, "fail", "stuck"), words("red after "),
     litNumber("stuckAt", lit.stuckAt,
               "How many sittings without a pass before a cell goes red. "
               + "0 turns it off."),
     words(" goes"),
   ]);
-  const amber = legendEntry([legendMark(null, "open"),
+  const amber = legendEntry([legendMark(null, "query", "open"),
                              words("amber: open question")]);
   const green = legendEntry([
-    legendMark(null, "justin"), words("green: passed in the last "),
+    legendMark(null, "pass", "justin"),
+    words("green: passed in the last "),
     litNumber("recentSets", lit.recent.size,
               `How many of the ${graded} graded run(s) count as just `
               + "come back. 0 turns the green off."),

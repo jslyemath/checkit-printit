@@ -775,6 +775,70 @@ def run_progress_js(body):
     return json.loads(done.stdout)
 
 
+class TestTheColourOfWhatIsInACell:
+    r"""One rule: whatever is in a cell is the cell's own colour.
+
+    Stated as `color` on the `td`, which a glyph picks up through
+    `currentColor` and the fraction through `inherit`. Asserted here
+    because a measurement in a browser is not something the suite can
+    make, and six rules kept in step by hand is how two of them end up
+    disagreeing.
+    """
+
+    @staticmethod
+    def block(selector):
+        """The body of the one rule with exactly this selector."""
+        import re
+        found = re.findall(
+            r"(?:^|\})\s*" + re.escape(selector) + r"\s*\{([^{}]*)\}",
+            rules_only())
+        assert len(found) == 1, f"{selector}: {len(found)} rules, wanted 1"
+        return found[0]
+
+    def test_a_mark_carries_its_own_colour(self):
+        r"""A tick is green and a cross is red wherever they appear,
+        the same way round. The cross was muted grey, which made
+        "nobody has passed this" look like "nothing here"."""
+        assert "var(--accent)" in self.block("#progress-grid td.passed")
+        assert "var(--bad)" in self.block("#progress-grid td.none-passed")
+        assert "var(--warn)" in self.block("#progress-grid td.query")
+
+    def test_every_highlight_colours_what_is_inside_it(self):
+        """Not only the background. A 1/2 in an amber cell is amber."""
+        for tone, token in (("justin", "--accent"), ("open", "--warn"),
+                            ("stuck", "--bad")):
+            body = self.block(f"#progress-grid td.tone-{tone}")
+            assert f"background: var({token}-soft)" in body, tone
+            assert f"color: var({token})" in body, tone
+
+    def test_a_highlight_wins_over_the_mark_s_own_colour(self):
+        """Same specificity, so source order decides, so the tones
+        have to come after. A cross in an amber cell reads amber --
+        the one pairing where the two actually disagree."""
+        css = rules_only()
+        assert css.index("#progress-grid td.none-passed") \
+            < css.index("#progress-grid td.tone-open")
+        assert css.index("#progress-grid td.part") \
+            < css.index("#progress-grid td.tone-open")
+
+    def test_the_fraction_takes_the_cell_s_colour(self):
+        """`inherit`, not a colour of its own, or an amber cell would
+        light its background and leave the number the wrong colour."""
+        assert "color: inherit" in self.block("#progress-grid .cellcount")
+
+    def test_the_legend_names_its_marks_rather_than_counting_them(self):
+        """`:nth-child` on the legend is a claim about the order of
+        the strip, not about what each mark is: reorder it and the
+        colours follow the wrong items."""
+        import re
+        strip = [line for line in rules_only().splitlines()
+                 if ".legend-item" in line and "nth-child" in line]
+        assert not strip, strip
+        for kind in ("passed", "none-passed", "query", "part"):
+            assert re.search(r"\.legend-mark\." + re.escape(kind) + r"\b",
+                             rules_only()), kind
+
+
 def cell(attempts=0, passes=0, queries=0, absents=0, last=None, pin="old"):
     last = "null" if last is None else f'"{last}"'
     return (f"{{attempts:{attempts}, passes:{passes}, queries:{queries}, "
