@@ -119,6 +119,44 @@ CREATE TABLE IF NOT EXISTS attempt (
     UNIQUE(run_id, sid, slug)
 );
 
+-- A stack of scanned pages, as it was imported. The id is the
+-- filename it is stored under in the course's `scans/` folder, which
+-- is derived from the file's own contents -- so importing the same
+-- stack twice is the same row, not a second one quietly overwriting
+-- the first.
+CREATE TABLE IF NOT EXISTS scan (
+    scan_id  TEXT PRIMARY KEY,   -- the stored filename
+    -- **The identity.** The filename carries a date and the copier's
+    -- own name so the folder is readable by hand, and neither of
+    -- those is stable: the same stack imported a day later, or after
+    -- the download was renamed, would otherwise become a second copy
+    -- with a second row. Re-importing yesterday's stack because
+    -- something went wrong is an ordinary thing to do.
+    sha      TEXT NOT NULL UNIQUE,
+    added    TEXT NOT NULL,      -- when it was first imported
+    original TEXT NOT NULL,      -- what the copier called it
+    pages    INTEGER NOT NULL,
+    bytes    INTEGER NOT NULL
+);
+
+-- What one page of one stack turned out to be, **after he corrected
+-- it**. Written when a read is saved, not when it is imported: until
+-- he has looked at it, what the reader guessed is not an answer.
+--
+-- `run_id` and `sid` are NULL for a page that was never placed and
+-- never matched -- a blank, a separator, somebody else's paper. That
+-- row still earns its place: it is how a re-read knows the page was
+-- seen and dismissed rather than missed.
+CREATE TABLE IF NOT EXISTS scan_page (
+    scan_id   TEXT NOT NULL REFERENCES scan(scan_id) ON DELETE CASCADE,
+    scan_page INTEGER NOT NULL,
+    run_id    TEXT,
+    sid       TEXT,
+    slug      TEXT,
+    PRIMARY KEY (scan_id, scan_page)
+);
+
+CREATE INDEX IF NOT EXISTS scan_page_by_run ON scan_page(run_id);
 CREATE INDEX IF NOT EXISTS printed_by_student ON printed(sid, slug);
 CREATE INDEX IF NOT EXISTS printed_by_run ON printed(run_id);
 CREATE INDEX IF NOT EXISTS attempt_by_student ON attempt(sid, slug);
@@ -511,6 +549,139 @@ def discard_run(path, run_id):
         db.execute("DELETE FROM run WHERE run_id = ?", (run_id,))
         db.commit()
         return papers
+    finally:
+        db.close()
+
+
+def scan_by_sha(path, sha):
+    """The stored filename this content already has, or None."""
+    if not os.path.isfile(path):
+        return None
+    db = connect(path)
+    try:
+        row = db.execute("SELECT scan_id FROM scan WHERE sha = ?",
+                         (sha,)).fetchone()
+        return row["scan_id"] if row else None
+    finally:
+        db.close()
+
+
+def add_scan(path, scan_id, sha, original, pages, size):
+    """Record a stack that has just been imported, once.
+
+    Importing the same bytes again is the same row, whatever the file
+    was called this time: `sha` is the identity. `added` keeps the
+    *first* time it was seen, because that is the day the papers were
+    collected and the day he will look for.
+    """
+    db = connect(path)
+    try:
+        db.execute(
+            "INSERT INTO scan (scan_id, sha, added, original, pages, bytes)"
+            " VALUES (?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(sha) DO NOTHING",
+            (scan_id, sha,
+             datetime.datetime.now().isoformat(timespec="seconds"),
+             original, int(pages), int(size)))
+        db.commit()
+    finally:
+        db.close()
+
+
+def note_scan_pages(path, scan_id, rows):
+    """What each page of this stack was decided to be.
+
+    `rows` are `(scan_page, run_id, sid, slug)`, and replace whatever
+    was there for this stack before -- a second pass over the same
+    pages is a correction of the first, not an addition to it.
+    """
+    db = connect(path)
+    try:
+        # A stack nothing imported -- a read from before scans were
+        # recorded, or a path from somewhere else entirely. There is
+        # no file to bring back, so there is nothing to remember
+        # about its pages. Skipped rather than refused: the decisions
+        # are already saved and this is the working, not the result.
+        known = db.execute("SELECT 1 FROM scan WHERE scan_id = ?",
+                           (scan_id,)).fetchone()
+        if known is None:
+            return 0
+        with db:
+            db.execute("DELETE FROM scan_page WHERE scan_id = ?", (scan_id,))
+            db.executemany(
+                "INSERT INTO scan_page (scan_id, scan_page, run_id, sid, slug)"
+                " VALUES (?, ?, ?, ?, ?)",
+                [(scan_id, int(page), run_id or None, sid or None, slug or None)
+                 for page, run_id, sid, slug in rows])
+        return len(rows)
+    finally:
+        db.close()
+
+
+def scans(path):
+    """Every stack imported, newest first, with what is in it.
+
+    `runs` is the runs its pages were attributed to and how many
+    pages of each -- which is how a stack links back to the jobs it
+    holds, and how "part of a run" shows as part of one.
+    """
+    if not os.path.isfile(path):
+        return []
+    db = connect(path)
+    try:
+        out = []
+        for row in db.execute(
+                "SELECT * FROM scan ORDER BY added DESC, scan_id"):
+            item = dict(row)
+            item["runs"] = [dict(r) for r in db.execute(
+                "SELECT p.run_id, r.run_no, r.title, r.date,"
+                "       COUNT(*) AS pages,"
+                "       (SELECT COUNT(*) FROM printed q"
+                "         WHERE q.run_id = p.run_id) AS printed"
+                "  FROM scan_page p"
+                "  LEFT JOIN run r ON r.run_id = p.run_id"
+                " WHERE p.scan_id = ? AND p.run_id IS NOT NULL"
+                " GROUP BY p.run_id ORDER BY r.date, r.built",
+                (item["scan_id"],))]
+            item["placed"] = sum(r["pages"] for r in item["runs"])
+            out.append(item)
+        return out
+    finally:
+        db.close()
+
+
+def scan_corrections(path, scan_id):
+    """`{scan_page: (run_id, sid, slug)}` for a stack he has saved.
+
+    What a re-read is told, so it comes back as he left it rather
+    than as the reader first guessed. Only pages that were attributed
+    to somebody: a page with no student is not a correction, it is
+    the absence of one.
+    """
+    if not os.path.isfile(path):
+        return {}
+    db = connect(path)
+    try:
+        return {r["scan_page"]: (r["run_id"], r["sid"], r["slug"])
+                for r in db.execute(
+                    "SELECT scan_page, run_id, sid, slug FROM scan_page"
+                    " WHERE scan_id = ? AND sid IS NOT NULL", (scan_id,))}
+    finally:
+        db.close()
+
+
+def forget_scan(path, scan_id):
+    """Drop a stack from the record. The file is not this function's.
+
+    The page rows go with it, which loses the corrections -- so a
+    re-import after this is a fresh read. The decisions themselves
+    are in `attempt` and are untouched; this is the picture and the
+    working, not the result.
+    """
+    db = connect(path)
+    try:
+        db.execute("DELETE FROM scan WHERE scan_id = ?", (scan_id,))
+        db.commit()
     finally:
         db.close()
 

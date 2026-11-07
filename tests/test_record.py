@@ -639,3 +639,133 @@ class TestDiscardingARunThatWasNeverHandedOut:
         left = record.printed_pairs(db)
         assert {r for r, _, _ in left} == {"out-1"}
         assert len(left) == 3
+
+
+class TestRememberingAScan:
+    """A stack is known by its contents, not by what it was called."""
+
+    def test_the_same_bytes_are_one_stack_however_it_is_named(self, db):
+        record.add_scan(db, "2026-11-07 copier a3f9c2.pdf", "a3f9c2",
+                        "DOC1.pdf", 12, 900)
+        record.add_scan(db, "2026-11-08 renamed a3f9c2.pdf", "a3f9c2",
+                        "DOC1 (1).pdf", 12, 900)
+        rows = record.scans(db)
+        assert len(rows) == 1
+        assert rows[0]["scan_id"] == "2026-11-07 copier a3f9c2.pdf", (
+            "the first name it was given is the one it keeps")
+
+    def test_a_known_stack_is_found_by_its_hash(self, db):
+        record.add_scan(db, "stack.pdf", "a3f9c2", "DOC1.pdf", 12, 900)
+        assert record.scan_by_sha(db, "a3f9c2") == "stack.pdf"
+        assert record.scan_by_sha(db, "nothing") is None
+
+    def test_different_bytes_are_different_stacks(self, db):
+        record.add_scan(db, "one.pdf", "aaa", "DOC1.pdf", 1, 10)
+        record.add_scan(db, "two.pdf", "bbb", "DOC1.pdf", 1, 10)
+        assert len(record.scans(db)) == 2
+
+
+class TestWhatAScanHoldsAndWhereItCameFrom:
+    @staticmethod
+    def stack(db):
+        write(db, run_id="out-1", date="2026-09-18")
+        record.add_scan(db, "stack.pdf", "aaa", "DOC1.pdf", 4, 900)
+        return db
+
+    def test_it_says_which_runs_are_in_it(self, db):
+        """How a stack links back to the jobs it holds."""
+        self.stack(db)
+        record.note_scan_pages(db, "stack.pdf", [
+            (1, "out-1", "806000001", "W1"),
+            (2, "out-1", "806000001", "D1"),
+            (3, "", "", ""),
+        ])
+        [scan] = record.scans(db)
+        assert [r["run_id"] for r in scan["runs"]] == ["out-1"]
+        assert scan["runs"][0]["pages"] == 2
+        assert scan["placed"] == 2
+
+    def test_it_says_how_much_of_a_run_is_in_it(self, db):
+        """Part of a run reads as part of one: two of its three
+        papers, so the other one is somewhere else or still in the
+        pile on his desk."""
+        self.stack(db)
+        record.note_scan_pages(db, "stack.pdf", [
+            (1, "out-1", "806000001", "W1"),
+            (2, "out-1", "806000001", "D1"),
+        ])
+        [scan] = record.scans(db)
+        assert scan["runs"][0]["pages"] == 2
+        assert scan["runs"][0]["printed"] == 3
+
+    def test_a_page_nobody_claimed_is_still_written_down(self, db):
+        """It says the page was seen and dismissed. Without the row a
+        re-read would offer it as new every time."""
+        self.stack(db)
+        record.note_scan_pages(db, "stack.pdf", [(1, "", "", "")])
+        [scan] = record.scans(db)
+        assert scan["runs"] == [] and scan["placed"] == 0
+
+    def test_saving_again_replaces_rather_than_adds(self, db):
+        """A second pass over one stack is a correction of the first."""
+        self.stack(db)
+        record.note_scan_pages(db, "stack.pdf", [
+            (1, "out-1", "806000001", "W1")])
+        record.note_scan_pages(db, "stack.pdf", [
+            (1, "out-1", "806000002", "W1")])
+        assert record.scan_corrections(db, "stack.pdf") == {
+            1: ("out-1", "806000002", "W1")}
+
+    def test_a_stack_nothing_imported_is_skipped(self, db):
+        """A read from before scans were recorded. There is no file
+        to bring back, so there is nothing to remember about it --
+        and the decisions were already saved either way."""
+        write(db, run_id="out-1", date="2026-09-18")
+        assert record.note_scan_pages(db, "never-seen.pdf", [
+            (1, "out-1", "806000001", "W1")]) == 0
+
+    def test_forgetting_a_stack_takes_its_pages_with_it(self, db):
+        self.stack(db)
+        record.note_scan_pages(db, "stack.pdf", [
+            (1, "out-1", "806000001", "W1")])
+        record.forget_scan(db, "stack.pdf")
+        assert record.scans(db) == []
+        assert record.scan_corrections(db, "stack.pdf") == {}
+
+    def test_forgetting_a_stack_keeps_the_decisions(self, db):
+        """The pages are the working. The marks are the result, and
+        they are in `attempt`, which this does not touch."""
+        self.stack(db)
+        record.save_attempts(db, [{
+            "run_id": "out-1", "sid": "806000001", "slug": "W1",
+            "outcome": "passed"}])
+        record.forget_scan(db, "stack.pdf")
+        assert len(record.attempts_for(db, "806000001")) == 1
+
+
+class TestBringingAStackBackAsHeLeftIt:
+    """`scan_corrections` is what a re-read is told.
+
+    An outcome already survives a re-read -- `recorded_in` finds it
+    by (run, student, skill). What does not survive is a **re-match**,
+    because the record holds the student he chose and a fresh read
+    recomputes the one the index names, so the lookup misses. That
+    correction lives here.
+    """
+
+    def test_it_gives_back_the_student_he_chose(self, db):
+        write(db, run_id="out-1", date="2026-09-18")
+        record.add_scan(db, "stack.pdf", "aaa", "DOC1.pdf", 2, 900)
+        # The index said 806000001; he said it was 806000002.
+        record.note_scan_pages(db, "stack.pdf", [
+            (1, "out-1", "806000002", "W1")])
+        assert record.scan_corrections(db, "stack.pdf")[1] == (
+            "out-1", "806000002", "W1")
+
+    def test_a_page_with_nobody_on_it_is_not_a_correction(self, db):
+        """The absence of an answer is not an answer to restore."""
+        write(db, run_id="out-1", date="2026-09-18")
+        record.add_scan(db, "stack.pdf", "aaa", "DOC1.pdf", 2, 900)
+        record.note_scan_pages(db, "stack.pdf", [
+            (1, "out-1", "806000001", "W1"), (2, "", "", "")])
+        assert list(record.scan_corrections(db, "stack.pdf")) == [1]

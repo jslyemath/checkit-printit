@@ -566,10 +566,16 @@ class TestTheSaveEndpoint:
     @pytest.fixture
     def loose(self, monkeypatch):
         """One page in the stack that the reader could not place."""
+        # The real dataclass's own defaults for a sheet that did not
+        # place, spelled out. A stand-in missing fields the real one
+        # always has cannot fail the way the boundary fails -- which
+        # is how this one sailed past `_note_pages` reading run_no.
         class Sheet:
             source = "/anywhere/copier-2.pdf"
             scan_page = 7
             placed = False
+            run_no = None
+            run_page = None
         monkeypatch.setattr(gui_mod.SCANNING, "sheets", [Sheet()])
 
     def test_a_page_matched_by_hand_is_written(self, course, read, loose):
