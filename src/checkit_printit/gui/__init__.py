@@ -21,6 +21,7 @@ required on every API call as a header a cross-origin form cannot set.
 import base64
 import dataclasses
 import io
+import datetime
 import http.server
 import json
 import mimetypes
@@ -1880,6 +1881,37 @@ def _batch_json(batch, record_path, sections=None):
             "gradable": sum(1 for s in batch.sheets if s.gradable)}
 
 
+#: How much of the copier's own filename to keep in the stored one.
+#: Long enough to recognise a stack by, short enough that the whole
+#: name stays readable in a folder listing.
+SCAN_STEM = 40
+
+
+def scan_filename(original, blob, when=None):
+    """What a stack is stored as: a date, a readable stem, a hash.
+
+        2026-11-07 DOC110326-11032026150756 a3f9c2.pdf
+
+    The hash is six hex of the file's own sha256 and is the part that
+    matters: the same bytes always give the same name, so importing
+    one stack twice writes one file instead of two, and a name can
+    never come to mean a different document. The date and the stem
+    are for him -- this folder gets opened by hand.
+
+    Everything outside the safe set becomes a space, because a
+    copier's name can carry anything and this becomes a filename.
+    """
+    import hashlib
+
+    stamp = (when or datetime.date.today()).isoformat()
+    stem = os.path.splitext(os.path.basename(original or ""))[0]
+    keep = "".join(c if (c.isalnum() or c in " -_.") else " " for c in stem)
+    keep = " ".join(keep.split())[:SCAN_STEM].strip()
+    short = hashlib.sha256(blob).hexdigest()[:6]
+    middle = f" {keep}" if keep else ""
+    return f"{stamp}{middle} {short}.pdf"
+
+
 def api_scan_start(course, body):
     """Take the uploaded PDFs and start reading them.
 
@@ -1906,13 +1938,46 @@ def api_scan_start(course, body):
             raise GuiError(f"{name} did not arrive intact.") from None
         if not blob.startswith(b"%PDF"):
             raise GuiError(f"{name} does not look like a PDF.")
-        path = os.path.join(folder, name)
-        with open(path, "wb") as f:
-            f.write(blob)
+        # The sha is the identity and the filename is decoration --
+        # see `scan_filename`. A stack already known comes back under
+        # the name it was first given, so importing it again is the
+        # same file and the same row rather than a second copy with
+        # a different date on it.
+        import hashlib
+        sha = hashlib.sha256(blob).hexdigest()
+        stored = (record_mod.scan_by_sha(course.file("record"), sha)
+                  or scan_filename(name, blob))
+        path = os.path.join(folder, stored)
+        if not os.path.isfile(path):
+            with open(path, "wb") as f:
+                f.write(blob)
+        record_mod.add_scan(course.file("record"), stored, sha, name,
+                            _page_count(path), len(blob))
         paths.append(path)
 
     SCANNING.start(course, paths)
     return {"started": True, "files": [os.path.basename(p) for p in paths]}
+
+
+def _page_count(path):
+    """How many pages a PDF has, or 0 if it cannot be opened.
+
+    Zero rather than raising: the listing wants a number and a stack
+    that will not open is a thing the read itself reports, loudly and
+    with a reason. Failing here would refuse the import instead.
+    """
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:                                 # pragma: no cover
+        return 0
+    try:
+        doc = pdfium.PdfDocument(path)
+    except Exception:
+        return 0
+    try:
+        return len(doc)
+    finally:
+        doc.close()
 
 
 def api_scan_status(_course, _body):
@@ -2402,6 +2467,8 @@ def api_scan_save(course, body):
     except record_mod.RecordError as exc:
         raise GuiError(str(exc)) from None
 
+    _note_pages(course, result, rows)
+
     return {
         "saved": written,
         "skipped": len(result.get("review", [])) - written,
@@ -2413,6 +2480,45 @@ def api_scan_save(course, body):
         "noRun": sorted(no_run),
         "runs": sorted({r["run_id"] for r in rows}),
     }
+
+
+def _note_pages(course, result, rows):
+    """Write down what each page of each stack turned out to be.
+
+    One row per scanned page, so a stack can be brought back as he
+    left it. The attribution comes from the decisions just saved,
+    matched to the page by (run, page) -- which is how a re-matched
+    paper gets recorded against the student he chose rather than the
+    one the index named.
+
+    A page that was never placed and never matched still gets a row,
+    with no student on it. That is not nothing: it says the page was
+    seen and dismissed, so a re-read does not present it as new.
+    """
+    by_paper = {}
+    for row in rows:
+        if row.get("page") is not None:
+            by_paper[(row["run_id"], row["page"])] = (row["sid"], row["slug"])
+
+    # Which run each run number belongs to, so a sheet's `run_no` can
+    # be turned into the id the decisions are keyed by.
+    path = course.file("record")
+    run_ids = {}
+    for sheet in SCANNING.sheets:
+        if sheet.run_no is not None and sheet.run_no not in run_ids:
+            found = record_mod.run_by_no(path, sheet.run_no)
+            run_ids[sheet.run_no] = (found or {}).get("run_id", "")
+
+    per_scan = {}
+    for sheet in SCANNING.sheets:
+        scan_id = os.path.basename(sheet.source)
+        run_id = run_ids.get(sheet.run_no, "")
+        sid, slug = by_paper.get((run_id, sheet.run_page), ("", ""))
+        per_scan.setdefault(scan_id, []).append(
+            (sheet.scan_page, run_id if sid else "", sid, slug))
+
+    for scan_id, pages in per_scan.items():
+        record_mod.note_scan_pages(path, scan_id, pages)
 
 
 def api_progress(course, _body):
