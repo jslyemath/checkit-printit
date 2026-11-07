@@ -931,10 +931,34 @@ function show(id) {
 // ------------------------------------------------------------- progress --
 
 let progressData = null;
-/* Kept in the browser, not the course: whether the highlight is on is
-   a preference of the person looking, not a fact about the class, and
-   two people reading the same course should not fight over it. */
-let lightRecent = false;
+
+/* Kept in the browser, not the course: how the grid is lit is a
+   preference of the person looking, not a fact about the class, and
+   two people reading the same course should not fight over it.
+
+   `stuckAt` is how many sittings without a single pass before a cell
+   goes red. `recentSets` is how many of the most recent graded runs
+   count as "just came back" for the green; 0 is off, which is what
+   the tick box it replaces did by default. */
+const LIT_DEFAULTS = { stuckAt: 2, recentSets: 0 };
+
+function litSetting(name) {
+  try {
+    const raw = localStorage.getItem("progress." + name);
+    if (raw === null) return LIT_DEFAULTS[name];
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 && n <= 99 ? n : LIT_DEFAULTS[name];
+  } catch (err) {
+    // A private window still gets a working grid, on the defaults.
+    return LIT_DEFAULTS[name];
+  }
+}
+
+function setLitSetting(name, value) {
+  try { localStorage.setItem("progress." + name, String(value)); }
+  catch (err) { /* see above */ }
+  renderProgress();
+}
 
 async function loadProgress() {
   const out = await api("/api/progress", {});
@@ -955,78 +979,80 @@ async function loadProgress() {
 
    Returned rather than drawn, so the rules are in one readable place
    and the drawing below is only ever "put this mark in that box".
-   `kind` drives the styling; `mark` and `count` are what is shown. */
-function cellState(cell, threshold) {
-  if (!cell || !cell.attempts) return { kind: "none" };
-  const passed = cell.passes >= threshold;
-  const state = {
-    kind: passed ? "passed" : "open",
-    // A query is still a "?" he has to come back to. It reads as not
-    // passed -- which it is -- and carries a corner mark so the fact
-    // that he flagged it does not vanish into the same box as an
-    // ordinary blank.
-    queried: Boolean(cell.queries),
-    // Nothing was ever handed in. Not a seventh state -- it is still
-    // not passed and still ends in "offer it again" -- but the box
-    // drawn is a box on a paper, and there was no paper.
-    unsat: cell.attempts > 0 && cell.absents === cell.attempts,
-    attempts: cell.attempts,
-    passes: cell.passes,
-  };
-  if (passed) {
-    // Only where more than one check is needed. Where one passes a
-    // skill, "1 of 1" is the word "passed" written twice.
-    if (threshold > 1) state.count = `${cell.passes}/${threshold}`;
-    // Passed first time needs no number.
-    else if (cell.attempts > 1) state.count = String(cell.attempts);
+
+   `mark` is the glyph's name or "" for a number or nothing; `count`
+   is the fraction, and only ever a fraction. `tone` is the
+   background. See PRINT_TOOL_DESIGN.md 17 for why each is what it is.
+
+   **A sitting is an attempt that was not an absence.** Did-not-sit is
+   recorded, and shown in the drill-in and the tooltip, and reaches
+   nothing here: not the glyph, not the background, not the sort. A
+   cell whose attempts were all absences is a blank cell, exactly as
+   if the paper had never been printed. */
+function cellState(cell, threshold, lit) {
+  const sat = cell ? (cell.attempts || 0) - (cell.absents || 0) : 0;
+  if (sat <= 0) return { kind: "none", mark: "", sat: 0 };
+
+  const passes = cell.passes || 0;
+  const state = { sat, passes, mark: "", count: "", tone: "" };
+  const recent = lit && lit.recent;
+  const stuckAt = (lit && lit.stuckAt) || 0;
+
+  if (passes >= threshold) {
+    // A tick, and never a number beside it. "Passed at the second
+    // go" and "two of the two passes needed" used to be the same
+    // shape in the same place; the count went to the drill-in and
+    // the fraction is now the only number on the grid.
+    state.kind = "passed";
+    state.mark = "pass";
+    if (recent && recent.has(cell.passedIn)) state.tone = "justin";
     return state;
   }
-  if (cell.passes) {
-    // Part way: two needed, one so far. Its own state, because it is
-    // neither "nothing yet" nor "failing".
+
+  if (passes > 0) {
+    // Part way. The fraction instead of a glyph, not as well as one.
     state.kind = "part";
-    state.count = `${cell.passes}/${threshold}`;
-    return state;
+    state.count = `${passes}/${threshold}`;
+  } else if (cell.lastSat === "queried") {
+    // Nothing passed and the last paper is in question. The `?`
+    // stands in for the `✗` and for nothing else -- see the note in
+    // the design on why it never replaces a fraction or a tick.
+    state.kind = "query";
+    state.mark = "query";
+  } else {
+    state.kind = "none-passed";
+    state.mark = "fail";
   }
-  // Not passed. One attempt is ordinary; several is the loudest
-  // thing on the page, and the count is why.
-  if (cell.attempts > 1) {
-    state.kind = "stuck";
-    state.count = String(cell.attempts);
-  }
+
+  // Amber before red where both fit. A query means the cell is not
+  // decided, and "this one is stuck" is a judgement the query may
+  // overturn.
+  if (cell.queries) state.tone = "open";
+  else if (!passes && sat >= stuckAt && stuckAt > 0) state.tone = "stuck";
   return state;
 }
 
 /* How a cell sorts, worst first.
 
-   A grid is read for trouble, so one click on a skill should bring the
-   people who need that skill to the top. The order is the order of
-   concern -- stuck, then part way, then open, then never sat, then
-   passed, then never printed -- and not alphabetical by state name,
-   which would put "none" between "open" and "part" for no reason.
+   A grid is read for trouble, so one click on a skill should bring
+   the people who need that skill to the top. The order is the order
+   of concern and not alphabetical by state name, which would put
+   "none" in the middle of it.
 
-   Sorted as a string because that is what `makeSorter` compares, so
-   the rank is written with a leading digit. */
-const CELL_RANK = { stuck: "0", part: "1", open: "2", none: "5",
-                    passed: "4" };
+   Sorted as a string because that is what `makeSorter` compares. */
+const CELL_RANK = { "none-passed": "0", query: "1", part: "2",
+                    passed: "3", none: "4" };
 
 function cellSortKey(cell, threshold) {
   const state = cellState(cell, threshold);
-  // Never sat sits between open and passed: it is not progress, but it
-  // is not somebody struggling either -- there was no paper.
-  let rank = CELL_RANK[state.kind];
-  if (state.unsat) rank = "3";
-  // Within a rank, more attempts first: two failures want attention
-  // before one.
+  // Within a rank, more sittings first: four goes without a pass
+  // wants looking at before two.
   //
   // Counting *down* from 1000 is what makes that work as a string
   // comparison, and it is also what keeps the width fixed: every real
-  // count lands between 900 and 999, so ten attempts give "990" and
-  // two give "998" and the three digits line up. A `padStart` here as
-  // well was dead -- removing it broke no test, because the
-  // subtraction had already done the job.
-  const attempts = String(1000 - (state.attempts || 0));
-  return rank + attempts;
+  // count lands between 900 and 999, so ten sittings give "990" and
+  // two give "998" and the three digits line up.
+  return CELL_RANK[state.kind] + String(1000 - (state.sat || 0));
 }
 
 /* --- end pure: progress --- */
@@ -1094,13 +1120,16 @@ function renderProgress() {
     : "";
   if (!any) return;
 
-  const recent = new Set(data.recent || []);
-  const note = document.getElementById("progress-recent-note");
-  note.textContent = recent.size
-    ? (recent.size === 1 ? "the last grading set"
-                         : `the last ${recent.size} grading sets`)
-    : "nothing graded yet";
-  document.getElementById("progress-recent").checked = lightRecent;
+  // What lights the grid: the reader's two numbers, and the runs
+  // that the second of them picks out. The server sends every graded
+  // run newest first and the browser takes as many as were asked for.
+  const graded = data.recent || [];
+  const wanted = litSetting("recentSets");
+  const lit = {
+    stuckAt: litSetting("stuckAt"),
+    recent: new Set(graded.slice(0, wanted)),
+  };
+  drawProgressLegend(lit, graded.length);
 
   fillProgressColumns(data);
   grid.innerHTML = "";
@@ -1148,38 +1177,114 @@ function renderProgress() {
     tr.appendChild(sec);
     const mine = data.cells[student.sid] || {};
     for (const skill of data.skills) {
-      tr.appendChild(progressCell(student, skill, mine[skill.slug], recent));
+      tr.appendChild(progressCell(student, skill, mine[skill.slug], lit));
     }
     body.appendChild(tr);
   }
   grid.appendChild(body);
 }
 
-function progressCell(student, skill, cell, recent) {
+/* The legend, which is also the two controls.
+
+   What it replaces: a tick box, a sentence explaining the tick box, a
+   muted note saying "the last 2 grading sets", and `#progress-key` --
+   an empty span nothing ever filled. Four things for one idea.
+
+   Each mark sits beside its own short label, and the two numbers are
+   edited where they are read rather than in a box somewhere above.
+   An `input` styled down to look like the number it holds: it is a
+   number, so it is a number field, and a stepper or a nine-item menu
+   would be more furniture than the thing it sets. */
+function litNumber(name, value, title) {
+  const box = document.createElement("input");
+  box.type = "number";
+  box.className = "litnum";
+  box.min = "0";
+  box.max = "99";
+  box.value = String(value);
+  box.title = title;
+  box.setAttribute("aria-label", title);
+  box.onchange = () => {
+    const n = parseInt(box.value, 10);
+    setLitSetting(name, Number.isFinite(n) && n >= 0 ? Math.min(n, 99) : 0);
+  };
+  return box;
+}
+
+function legendEntry(parts) {
+  const span = document.createElement("span");
+  span.className = "legend-item";
+  for (const part of parts) span.append(part);
+  return span;
+}
+
+function legendMark(name, tone) {
+  const span = document.createElement("span");
+  span.className = "legend-mark" + (tone ? " tone-" + tone : "");
+  if (name) span.appendChild(icon(name));
+  return span;
+}
+
+function words(s) {
+  return document.createTextNode(s);
+}
+
+function drawProgressLegend(lit, graded) {
+  const bar = document.getElementById("progress-legend");
+  bar.textContent = "";
+  bar.append(
+    legendEntry([legendMark("pass"), words("passed")]),
+    legendEntry([legendMark(null), words("part way")]),
+    legendEntry([legendMark("fail"), words("none yet")]),
+    legendEntry([legendMark("query"), words("in question")]),
+  );
+  // The fraction is drawn as itself rather than as a glyph, because
+  // that is what the cell shows.
+  bar.querySelectorAll(".legend-mark")[1].textContent = "1/2";
+
+  const red = legendEntry([
+    legendMark(null, "stuck"), words("red after "),
+    litNumber("stuckAt", lit.stuckAt,
+              "How many sittings without a pass before a cell goes red. "
+              + "0 turns it off."),
+    words(" goes"),
+  ]);
+  const amber = legendEntry([legendMark(null, "open"),
+                             words("amber: open question")]);
+  const green = legendEntry([
+    legendMark(null, "justin"), words("green: passed in the last "),
+    litNumber("recentSets", lit.recent.size,
+              `How many of the ${graded} graded run(s) count as just `
+              + "come back. 0 turns the green off."),
+    words(" of " + graded),
+  ]);
+  bar.append(red, amber, green);
+}
+
+function progressCell(student, skill, cell, lit) {
   const td = document.createElement("td");
-  const state = cellState(cell, skill.threshold);
+  const state = cellState(cell, skill.threshold, lit);
   td.className = "cell " + state.kind;
-  if (state.queried) td.classList.add("queried");
-  if (state.unsat) td.classList.add("unsat");
-  if (lightRecent && cell && cell.passedIn && recent.has(cell.passedIn)) {
-    td.classList.add("justin");
+  if (state.tone) td.classList.add("tone-" + state.tone);
+
+  if (state.mark) {
+    // The glyph, from the app's own set -- `pass`, `fail` and `query`
+    // are the same three the drill-in's mark track draws, so a cell
+    // and the control that sets it are the same shape.
+    const wrap = document.createElement("span");
+    wrap.className = "cellmark";
+    wrap.appendChild(icon(state.mark));
+    td.appendChild(wrap);
+  } else if (state.count) {
+    const n = document.createElement("span");
+    n.className = "cellcount";
+    n.textContent = state.count;
+    td.appendChild(n);
   }
   if (state.kind !== "none") {
-    const mark = document.createElement("span");
-    mark.className = "cellmark";
-    // A tick for passed, an outlined box for not. Drawn as text
-    // rather than SVG: 1,300 inline SVGs is a slow page, and the
-    // shape is carried by CSS on `.cell` anyway.
-    mark.textContent = state.kind === "passed" ? "\u2713" : "";
-    td.appendChild(mark);
-    if (state.count) {
-      const n = document.createElement("span");
-      n.className = "cellcount";
-      n.textContent = state.count;
-      td.appendChild(n);
-    }
     td.title = describeCell(student, skill, cell, state);
   }
+
   // Every cell opens, taken or not: a skill he never offered this
   // student still has runs it could be recorded against, and an
   // empty cell is the most likely one to need filling in by hand.
@@ -1429,23 +1534,21 @@ const OUTCOME_LIST = [
    one place to recover what a mark means is here. */
 function describeCell(student, skill, cell, state) {
   const who = student.name || student.sid;
-  const tries = cell.attempts === 1 ? "1 attempt"
-                                    : `${cell.attempts} attempts`;
-  // "Not passed, 1 attempt" about somebody who never saw the paper
-  // is a false sentence, and the tooltip is the one place a cell
-  // explains itself.
-  if (state.unsat) {
-    return cell.attempts === 1
-      ? `${who}, ${skill.slug}: did not sit it`
-      : `${who}, ${skill.slug}: did not sit it, ${cell.attempts} times`;
-  }
+  const sat = state.sat;
+  const tries = sat === 1 ? "1 sitting" : `${sat} sittings`;
   let said;
   if (state.kind === "passed") said = "passed";
   else if (state.kind === "part") {
     said = `${cell.passes} of ${skill.threshold} passes so far`;
-  } else said = "not passed";
-  const q = cell.queries ? ", one marked with a query" : "";
+  } else if (state.kind === "query") said = "last one is in question";
+  else said = "no passes yet";
+  // Absences are invisible to the grid and said here, which is the
+  // one place a cell explains itself. A paper that never came back
+  // is still something he may be holding.
   const a = cell.absents ? `, ${cell.absents} not sat` : "";
+  const q = cell.queries && state.kind !== "query"
+    ? `, ${cell.queries === 1 ? "one query" : cell.queries + " queries"}`
+    : "";
   return `${who}, ${skill.slug}: ${said} \u2014 ${tries}${q}${a}`;
 }
 
@@ -5681,10 +5784,6 @@ async function boot() {
   document.getElementById("cell").addEventListener("close", () => {
     cellOpen = null;
   });
-  document.getElementById("progress-recent").onchange = (e) => {
-    lightRecent = e.target.checked;
-    renderProgress();
-  };
   document.getElementById("print-save").onclick = savePrint;
   document.getElementById("print-revert").onclick = revertPrint;
   const preset = document.getElementById("print-reset");

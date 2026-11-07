@@ -775,108 +775,166 @@ def run_progress_js(body):
     return json.loads(done.stdout)
 
 
-def cell(attempts=0, passes=0, queries=0, absents=0):
-    return (f"{{attempts:{attempts}, passes:{passes}, "
-            f"queries:{queries}, absents:{absents}}}")
+def cell(attempts=0, passes=0, queries=0, absents=0, last=None, pin="old"):
+    last = "null" if last is None else f'"{last}"'
+    return (f"{{attempts:{attempts}, passes:{passes}, queries:{queries}, "
+            f"absents:{absents}, lastSat:{last}, passedIn:\"{pin}\"}}")
 
 
-class TestWhatACellSaysAboutItself:
-    """`cellState` turns a record row into what the grid draws.
+LIT = '{stuckAt:2, recent:new Set(["NEW"])}'
 
-    Never run by the suite before this: it lives outside the block the
-    markup tests lift, and `node --check` parses app.js without
-    executing a line of it.
+
+def state(cell_js, threshold=1, lit=LIT):
+    return run_progress_js(
+        f"console.log(JSON.stringify(cellState({cell_js}, {threshold}, {lit})))")
+
+
+class TestWhatACellShows:
+    r"""One mark per cell, from `PRINT_TOOL_DESIGN.md` 17.
+
+    Never run by the suite before these existed: `cellState` lives
+    outside the block the markup tests lift, and `node --check` parses
+    app.js without executing a line of it.
     """
 
-    def test_nothing_recorded_is_not_a_state(self):
-        out = run_progress_js(
-            "console.log(JSON.stringify(["
-            "cellState(null, 1).kind,"
-            f"cellState({cell()}, 1).kind]))")
-        assert out == ["none", "none"]
+    def test_nothing_recorded_shows_nothing(self):
+        assert state("null")["kind"] == "none"
+        assert state(cell())["kind"] == "none"
 
-    def test_one_pass_where_one_is_needed_is_passed(self):
-        out = run_progress_js(
-            f"console.log(JSON.stringify(cellState({cell(1, 1)}, 1)))")
-        assert out["kind"] == "passed"
-        # "1 of 1" is the word "passed" written twice.
-        assert "count" not in out
+    def test_a_skill_only_ever_missed_is_a_blank_cell(self):
+        """Did-not-sit is recorded and reaches the grid nowhere. A
+        student who missed it twice looks exactly like one who was
+        never handed it, which is what was asked for."""
+        assert state(cell(1, absents=1))["kind"] == "none"
+        assert state(cell(2, absents=2))["kind"] == "none"
 
-    def test_passing_at_the_second_go_says_how_many(self):
-        out = run_progress_js(
-            f"console.log(JSON.stringify(cellState({cell(2, 1)}, 1)))")
-        assert out["kind"] == "passed" and out["count"] == "2"
+    def test_an_absence_does_not_count_as_a_go(self):
+        """Three attempts of which one was missed is two sittings,
+        and the red threshold counts sittings."""
+        out = state(cell(3, 0, absents=1, last="failed"))
+        assert out["sat"] == 2 and out["tone"] == "stuck"
 
-    def test_part_way_counts_against_the_threshold(self):
-        out = run_progress_js(
-            f"console.log(JSON.stringify(cellState({cell(1, 1)}, 2)))")
+    def test_passing_is_a_tick_and_never_a_number(self):
+        r"""`\u27132` meaning "passed at the second go" and
+        `\u27132/2` meaning "two of the two needed" were the same
+        shape in the same place."""
+        out = state(cell(3, 1, last="passed"))
+        assert out["kind"] == "passed" and out["mark"] == "pass"
+        assert not out["count"]
+
+    def test_part_way_is_the_fraction_and_no_glyph(self):
+        out = state(cell(1, 1, last="passed"), threshold=2)
         assert out["kind"] == "part" and out["count"] == "1/2"
+        assert not out["mark"]
 
-    def test_one_failure_is_ordinary_and_several_is_not(self):
-        out = run_progress_js(
-            "console.log(JSON.stringify(["
-            f"cellState({cell(1, 0)}, 1),"
-            f"cellState({cell(3, 0)}, 1)]))")
-        assert out[0]["kind"] == "open" and "count" not in out[0]
-        assert out[1]["kind"] == "stuck" and out[1]["count"] == "3"
+    def test_nothing_passed_is_the_cross(self):
+        out = state(cell(1, 0, last="failed"))
+        assert out["kind"] == "none-passed" and out["mark"] == "fail"
 
-    def test_a_query_is_carried_without_being_a_pass(self):
-        """It is a paper he wants to look at again. Calling it either
-        way would decide something he deliberately did not."""
-        out = run_progress_js(
-            f"console.log(JSON.stringify(cellState({cell(1, 0, 1)}, 1)))")
-        assert out["kind"] == "open" and out["queried"] is True
+    def test_a_query_most_recently_replaces_the_cross(self):
+        out = state(cell(2, 0, queries=1, last="queried"))
+        assert out["kind"] == "query" and out["mark"] == "query"
 
-    def test_nothing_handed_in_at_all_is_marked(self):
-        out = run_progress_js(
-            f"console.log(JSON.stringify(cellState({cell(2, 0, 0, 2)}, 1)))")
-        assert out["unsat"] is True
+    def test_a_query_does_not_replace_a_fraction(self):
+        """A cell part way through has a number worth more than the
+        fact that the last paper is in question. The amber carries
+        the question instead."""
+        out = state(cell(2, 1, queries=1, last="queried"), threshold=2)
+        assert out["kind"] == "part" and out["count"] == "1/2"
+        assert out["tone"] == "open"
 
-    def test_one_absence_among_several_sittings_is_not(self):
-        """`unsat` is "there was never a paper", not "one of them was
-        missed" -- the box drawn is a box on a sheet, and for this
-        student there was a sheet."""
-        out = run_progress_js(
-            f"console.log(JSON.stringify(cellState({cell(2, 0, 0, 1)}, 1)))")
-        assert out["unsat"] is False
+    def test_a_query_does_not_replace_a_tick(self):
+        """Passed twice, sat again, and that one queried. The skill
+        is still passed, and a settled skill is not in question."""
+        out = state(cell(3, 2, queries=1, last="queried"), threshold=2)
+        assert out["kind"] == "passed" and out["tone"] == ""
+
+    def test_no_box_glyph_survives_anywhere(self):
+        """The old vocabulary drew six of its seven states as
+        variations on an outlined box. Every mark is now a named icon
+        or nothing."""
+        for js, threshold in ((cell(1, 0, last="failed"), 1),
+                              (cell(2, 0, queries=1, last="queried"), 1),
+                              (cell(1, 1, last="passed"), 2),
+                              (cell(1, 1, last="passed"), 1),
+                              (cell(1, absents=1), 1)):
+            out = state(js, threshold)
+            assert out["mark"] in ("", "pass", "fail", "query"), out
+
+
+class TestWhatLightsACell:
+    def test_red_once_the_sittings_reach_the_reader_s_number(self):
+        assert state(cell(1, 0, last="failed"))["tone"] == ""
+        assert state(cell(2, 0, last="failed"))["tone"] == "stuck"
+
+    def test_zero_turns_the_red_off(self):
+        out = state(cell(9, 0, last="failed"),
+                    lit='{stuckAt:0, recent:new Set()}')
+        assert out["tone"] == ""
+
+    def test_amber_for_an_open_question_even_when_it_is_not_the_latest(self):
+        """The parenthetical in the brief: amber applies whether or
+        not the `?` is the glyph."""
+        out = state(cell(3, 0, queries=1, last="failed"))
+        assert out["kind"] == "none-passed" and out["tone"] == "open"
+
+    def test_amber_beats_red(self):
+        """Both fit here -- three goes, no passes, one queried. A
+        query means the cell is not decided, and "stuck" is a
+        judgement the query may overturn."""
+        out = state(cell(3, 0, queries=1, last="failed"))
+        assert out["tone"] == "open"
+
+    def test_a_passed_skill_is_never_amber(self):
+        out = state(cell(3, 1, queries=1, last="passed"))
+        assert out["tone"] == ""
+
+    def test_green_only_for_a_pass_in_the_reader_s_window(self):
+        assert state(cell(1, 1, last="passed", pin="NEW"))["tone"] == "justin"
+        assert state(cell(1, 1, last="passed", pin="old"))["tone"] == ""
+
+    def test_an_empty_window_lights_nothing_green(self):
+        out = state(cell(1, 1, last="passed", pin="NEW"),
+                    lit="{stuckAt:2, recent:new Set()}")
+        assert out["tone"] == ""
 
 
 class TestTheOrderASkillColumnSortsIn:
-    """One click on a skill brings the people who need it to the top.
+    """One click on a skill brings the people who need it to the top."""
 
-    The order is the order of concern, not alphabetical by state name
-    -- which would put "none" between "open" and "part".
-    """
-
-    @staticmethod
-    def ranked():
-        return run_progress_js(
+    def test_trouble_first_and_nothing_printed_last(self):
+        out = run_progress_js(
             "const rows = ["
-            f"['stuck', {cell(3, 0)}, 1],"
-            f"['part', {cell(1, 1)}, 2],"
-            f"['open', {cell(1, 0)}, 1],"
-            f"['unsat', {cell(1, 0, 0, 1)}, 1],"
-            f"['passed', {cell(1, 1)}, 1],"
+            f"['none-passed', {cell(2, 0, last='failed')}, 1],"
+            f"['query', {cell(1, 0, 1, last='queried')}, 1],"
+            f"['part', {cell(1, 1, last='passed')}, 2],"
+            f"['passed', {cell(1, 1, last='passed')}, 1],"
             "['none', null, 1]];"
             "const keyed = rows.map(([n, c, t]) => [n, cellSortKey(c, t)]);"
             "keyed.sort((a, b) => a[1].localeCompare(b[1]));"
             "console.log(JSON.stringify(keyed.map(k => k[0])))")
+        assert out == ["none-passed", "query", "part", "passed", "none"]
 
-    def test_trouble_comes_first_and_nothing_printed_comes_last(self):
-        assert self.ranked() == ["stuck", "part", "open", "unsat",
-                                 "passed", "none"]
-
-    def test_more_attempts_outrank_fewer_in_the_same_state(self):
-        """Two failures want looking at before one."""
+    def test_more_sittings_outrank_fewer(self):
         out = run_progress_js(
-            f"console.log(JSON.stringify([cellSortKey({cell(5, 0)}, 1),"
-            f"cellSortKey({cell(2, 0)}, 1)]))")
+            "console.log(JSON.stringify(["
+            f"cellSortKey({cell(5, 0, last='failed')}, 1),"
+            f"cellSortKey({cell(2, 0, last='failed')}, 1)]))")
         assert out[0] < out[1]
 
-    def test_ten_attempts_do_not_sort_before_two(self):
-        """The count is compared as text, so it is padded. Unpadded,
-        "10" sorts before "2" and the worst row hides in the middle."""
+    def test_ten_sittings_do_not_sort_below_two(self):
         out = run_progress_js(
-            f"console.log(JSON.stringify([cellSortKey({cell(10, 0)}, 1),"
-            f"cellSortKey({cell(2, 0)}, 1)]))")
+            "console.log(JSON.stringify(["
+            f"cellSortKey({cell(10, 0, last='failed')}, 1),"
+            f"cellSortKey({cell(2, 0, last='failed')}, 1)]))")
         assert out[0] < out[1]
+
+    def test_absences_do_not_move_a_row_up(self):
+        """Sorting by a skill is about who needs it. Somebody who
+        missed four papers is not four times as stuck as somebody who
+        missed one; neither of them has sat it."""
+        out = run_progress_js(
+            "console.log(JSON.stringify(["
+            f"cellSortKey({cell(4, 0, absents=4)}, 1),"
+            f"cellSortKey({cell(1, 0, absents=1)}, 1)]))")
+        assert out[0] == out[1]
