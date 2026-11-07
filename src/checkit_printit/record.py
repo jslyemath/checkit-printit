@@ -168,6 +168,48 @@ ADDED = {
 }
 
 
+def home_root():
+    """The directory every course and every run folder sits under.
+
+    One definition, shared with `course.default_root` -- that one
+    returns the `courses/` subfolder, this one the parent, because a
+    run's output is a sibling of `courses/` and not inside it.
+    """
+    home = os.environ.get("CHECKIT_PRINTIT_HOME")
+    return home or os.path.join(os.path.expanduser("~"), "CheckItPrintIt")
+
+
+def _shorten(folder):
+    """A run folder as it is stored: relative to the home if it is
+    under it, and otherwise exactly as given."""
+    if not folder:
+        return folder
+    root = os.path.abspath(home_root())
+    full = os.path.abspath(folder)
+    if full == root or full.startswith(root + os.sep):
+        return os.path.relpath(full, root)
+    return folder
+
+
+def _resolve(folder):
+    """The same thing on the way back out, always absolute.
+
+    Resolved against the home *as it is now*, which is the whole
+    point: the record survives the home moving.
+    """
+    if not folder or os.path.isabs(folder):
+        return folder
+    return os.path.join(home_root(), folder)
+
+
+def _as_row(row):
+    """A record row as a dict, with its folder resolved."""
+    out = dict(row)
+    if "output" in out.keys():
+        out["output"] = _resolve(out["output"])
+    return out
+
+
 def connect(path):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     db = sqlite3.connect(path)
@@ -182,6 +224,17 @@ def connect(path):
         names = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
         if was in names and now not in names:
             db.execute(f"ALTER TABLE {table} RENAME COLUMN {was} TO {now}")
+    # Run folders were stored absolute until 2026-11-07, which broke
+    # every one of them if the home moved. Shortened here, once: a row
+    # already relative is left alone by `_shorten`, and one pointing
+    # somewhere outside the home stays absolute because there is
+    # nothing for it to be relative to.
+    for row in db.execute(
+            "SELECT run_id, output FROM run WHERE output <> ''").fetchall():
+        short = _shorten(row["output"])
+        if short != row["output"]:
+            db.execute("UPDATE run SET output = ? WHERE run_id = ?",
+                       (short, row["run_id"]))
     db.commit()
     return db
 
@@ -241,7 +294,7 @@ def run_by_no(path, run_no):
     try:
         row = db.execute("SELECT * FROM run WHERE run_no = ?",
                          (int(run_no),)).fetchone()
-        return dict(row) if row else None
+        return _as_row(row) if row else None
     finally:
         db.close()
 
@@ -281,7 +334,7 @@ def write_run(path, run_id, title, date, built, seed, output, handouts,
                 " seed, output, extras, unnamed, rebuilt)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (run_id, run_no and int(run_no), title, date, built,
-                 int(seed), output, int(extras), unnamed,
+                 int(seed), _shorten(output), int(extras), unnamed,
                  int(bool(rebuilt))))
             db.executemany(
                 "INSERT INTO printed (run_id, sid, name, section, slug, seed,"
@@ -304,7 +357,7 @@ def runs(path):
         return []
     db = connect(path)
     try:
-        return [dict(r) for r in db.execute(
+        return [_as_row(r) for r in db.execute(
             "SELECT r.*, COUNT(p.printed_id) AS papers,"
             " COUNT(DISTINCT p.sid) AS students"
             " FROM run r LEFT JOIN printed p ON p.run_id = r.run_id"
@@ -357,7 +410,7 @@ def run_detail(path, run_id):
             " WHERE r.run_id = ? GROUP BY r.run_id", (run_id,)).fetchone()
         if row is None or row["run_id"] is None:
             return None
-        out = dict(row)
+        out = _as_row(row)
         out["skills"] = [dict(r) for r in db.execute(
             "SELECT slug, COUNT(*) AS papers,"
             " COUNT(DISTINCT version) AS versions"
@@ -410,8 +463,8 @@ def set_flags(path, run_id, delisted=None, graded=None):
         db.execute("UPDATE run SET delisted = ?, graded = ? WHERE run_id = ?",
                    (want_delisted, want_graded, run_id))
         db.commit()
-        return dict(db.execute("SELECT * FROM run WHERE run_id = ?",
-                               (run_id,)).fetchone())
+        return _as_row(db.execute("SELECT * FROM run WHERE run_id = ?",
+                                  (run_id,)).fetchone())
     finally:
         db.close()
 
@@ -660,7 +713,7 @@ def recorded_in(path, run_ids):
         db.close()
 
 
-def grading_sets(path, keep=None):
+def graded_runs(path, keep=None):
     """The runs that have been graded, newest first.
 
     `keep` caps the list; None is all of them. The cap used to be the
