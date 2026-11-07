@@ -6,6 +6,7 @@ table of their own, and until then the wording has to stay honest.
 """
 
 import os
+import shutil
 import sys
 
 import pytest
@@ -431,3 +432,116 @@ class TestRenamingAColumnOnADatabaseThatExists:
         assert written == 1
         row = record.attempts_for(path, "001")[0]
         assert row["run_page"] == 9 and row["outcome"] == "failed"
+
+
+class TestARunFolderSurvivesTheHomeMoving:
+    r"""The folder is stored relative to the home and resolved on read.
+
+    It used to be absolute, which meant the nine rows in the live
+    record all broke if `~/CheckItPrintIt` moved -- and moving it is
+    supported, `CHECKIT_PRINTIT_HOME` exists for exactly that. A
+    second machine, a renamed account or a restored backup and the
+    record pointed at nothing.
+
+    Readers are unchanged: `runs`, `run_by_no`, `run_detail` and
+    `set_flags` all hand back an absolute path, resolved against the
+    home *as it is now*. Only the database holds the short form.
+    """
+
+    @staticmethod
+    def make(home, where, run_id="first"):
+        record.write_run(
+            str(home / "record.db"), run_id=run_id, title="T",
+            date="2026-10-01", built="2026-10-01T09:00", seed=1,
+            output=str(where), handouts=[], run_no=1)
+
+    def test_a_folder_under_the_home_is_stored_short(self, tmp_path,
+                                                     monkeypatch):
+        import sqlite3
+        home = tmp_path / "Home"
+        (home / "MAT 106" / "Checkpoint").mkdir(parents=True)
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(home))
+        self.make(home, home / "MAT 106" / "Checkpoint")
+        raw = sqlite3.connect(home / "record.db")
+        stored = raw.execute("SELECT output FROM run").fetchone()[0]
+        raw.close()
+        assert not os.path.isabs(stored), stored
+        assert "MAT 106" in stored
+
+    def test_a_reader_still_gets_an_absolute_path(self, tmp_path,
+                                                  monkeypatch):
+        """Every caller of these was written against an absolute path
+        and none of them changed."""
+        home = tmp_path / "Home"
+        want = home / "MAT 106" / "Checkpoint"
+        want.mkdir(parents=True)
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(home))
+        self.make(home, want)
+        path = str(home / "record.db")
+        for got in (record.runs(path)[0]["output"],
+                    record.run_by_no(path, 1)["output"],
+                    record.run_detail(path, "first")["output"],
+                    record.set_flags(path, "first", graded=True)["output"]):
+            assert os.path.isabs(got)
+            assert os.path.samefile(got, want)
+
+    def test_it_resolves_against_the_home_as_it_is_now(self, tmp_path,
+                                                       monkeypatch):
+        """The whole point. Written under one home, read under
+        another, and it finds the folder in the new place."""
+        first = tmp_path / "First"
+        (first / "MAT 106" / "Checkpoint").mkdir(parents=True)
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(first))
+        self.make(first, first / "MAT 106" / "Checkpoint")
+
+        moved = tmp_path / "Moved"
+        (moved / "MAT 106" / "Checkpoint").mkdir(parents=True)
+        shutil.copy(first / "record.db", moved / "record.db")
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(moved))
+
+        got = record.runs(str(moved / "record.db"))[0]["output"]
+        assert os.path.isdir(got)
+        assert str(moved) in got and str(first) not in got
+
+    def test_a_folder_somewhere_else_entirely_stays_absolute(
+            self, tmp_path, monkeypatch):
+        """The output path can be pointed anywhere, and then there is
+        nothing for it to be relative to. Stored as given rather than
+        mangled into a path out of the home with `..` in it."""
+        import sqlite3
+        home = tmp_path / "Home"
+        home.mkdir()
+        outside = tmp_path / "Outside" / "Job"
+        outside.mkdir(parents=True)
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(home))
+        self.make(home, outside)
+        raw = sqlite3.connect(home / "record.db")
+        stored = raw.execute("SELECT output FROM run").fetchone()[0]
+        raw.close()
+        assert os.path.isabs(stored)
+        assert os.path.samefile(stored, outside)
+
+    def test_rows_already_absolute_are_shortened_on_open(self, tmp_path,
+                                                         monkeypatch):
+        """The migration, which is what the live record needs. Written
+        the old way, then opened once."""
+        import sqlite3
+        home = tmp_path / "Home"
+        inside = home / "MAT 106" / "Checkpoint"
+        inside.mkdir(parents=True)
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(home))
+        self.make(home, inside)
+        # Put it back the old way, behind record's back.
+        raw = sqlite3.connect(home / "record.db")
+        raw.execute("UPDATE run SET output = ?", (str(inside),))
+        raw.commit()
+        raw.close()
+
+        record.connect(str(home / "record.db")).close()
+
+        raw = sqlite3.connect(home / "record.db")
+        stored = raw.execute("SELECT output FROM run").fetchone()[0]
+        raw.close()
+        assert not os.path.isabs(stored), stored
+        assert os.path.samefile(
+            record.runs(str(home / "record.db"))[0]["output"], inside)

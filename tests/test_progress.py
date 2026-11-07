@@ -107,16 +107,16 @@ class TestHistory:
 class TestGradingSets:
     def test_only_graded_runs_count(self, course):
         path = course.file("record")
-        assert record.grading_sets(path) == []
+        assert record.graded_runs(path) == []
         record.save_attempts(path, [decide("first", "001", "AD", "passed")])
-        assert record.grading_sets(path) == ["first"]
+        assert record.graded_runs(path) == ["first"]
 
     def test_newest_first_and_capped(self, course):
         path = course.file("record")
         record.save_attempts(path, [decide("first", "001", "AD", "passed"),
                                     decide("second", "001", "AD", "passed")])
-        assert record.grading_sets(path) == ["second", "first"]
-        assert record.grading_sets(path, keep=1) == ["second"]
+        assert record.graded_runs(path) == ["second", "first"]
+        assert record.graded_runs(path, keep=1) == ["second"]
 
 
 # --------------------------------------------------------- the thresholds -

@@ -2459,9 +2459,14 @@ def api_progress(course, _body):
         "cells": cells,
         # Every graded run, newest first. The view takes as many as
         # the reader asked for -- how many count as "just come back"
-        # is their number, kept in their browser. Worked out from
-        # `graded` rather than from dates: see `record.grading_sets`.
-        "recent": record_mod.grading_sets(path),
+        # is their number, kept in their browser. Worked out from the
+        # `graded` flag rather than from dates: see
+        # `record.graded_runs`.
+        #
+        # Called `recent` until 2026-11-07, which stopped being true
+        # the day the count moved into the browser and the server
+        # began sending all of them.
+        "graded": record_mod.graded_runs(path),
     }
 
 

@@ -1123,7 +1123,7 @@ function renderProgress() {
   // What lights the grid: the reader's two numbers, and the runs
   // that the second of them picks out. The server sends every graded
   // run newest first and the browser takes as many as were asked for.
-  const graded = data.recent || [];
+  const graded = data.graded || [];
   const wanted = litSetting("recentSets");
   const lit = {
     stuckAt: litSetting("stuckAt"),
