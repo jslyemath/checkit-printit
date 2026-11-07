@@ -931,6 +931,10 @@ function show(id) {
     if (id === "runs") loadRuns();
     // Every visit: a stack saved in Scans is the reason to look.
     if (id === "progress") loadProgress();
+    // Every visit too: a stack imported since the last look belongs
+    // in the list, and the list is what this tab shows before
+    // anything has been dropped on it.
+    if (id === "scans") loadStore();
   }
   shownView = id;
   location.hash = id;
@@ -3779,6 +3783,219 @@ function unplacedMatch(row) {
   return b;
 }
 
+/* ------------------------------------------- the imported stacks --
+
+   Every PDF this course has been given, kept so one can be opened
+   again without finding the email. The useful column is `Runs`: a
+   stack holds pages from one job or several, and often only part of
+   one, and that is how he finds the stack he wants.
+
+   Reopening is not a re-import. The file is already here, and the
+   matches and marks he saved come back with it -- see
+   `record.scan_corrections`. */
+let storeRows = [];
+let storeChosen = new Set();
+
+const STORE_COLUMNS = [
+  { key: "_pick", label: "", sortable: false, cls: "pick", cell: storePick },
+  { key: "added", label: "Imported", value: r => r.added || "",
+    cell: storeWhen },
+  { key: "original", label: "From", value: r => r.original || "" },
+  { key: "pages", label: "Pages", cls: "mid",
+    value: r => String(r.pages).padStart(5, "0") },
+  { key: "_runs", label: "Runs", sortable: false, cell: storeRuns },
+  { key: "bytes", label: "Size", cls: "mid",
+    value: r => String(r.bytes).padStart(12, "0"),
+    cell: r => document.createTextNode(saidSize(r.bytes)) },
+  { key: "_bin", label: "", sortable: false, cls: "pinright",
+    cell: storeForget },
+];
+
+const storeSort = makeSorter({
+  columns: STORE_COLUMNS,
+  // Newest first: the stack he wants is nearly always the last one
+  // he gave it.
+  defaults: [{ key: "added", desc: true }],
+  redraw: () => renderStore(),
+  resetTitle: "Back to newest first.",
+});
+
+/* Bytes as something readable. One decimal below 10, none above:
+   "9.4 MB" and "41 MB" are both four characters of information and
+   "41.3 MB" is a third that nobody is going to act on. */
+function saidSize(bytes) {
+  const mb = (bytes || 0) / (1024 * 1024);
+  if (mb < 0.1) return "<0.1 MB";
+  return (mb < 10 ? mb.toFixed(1) : Math.round(mb)) + " MB";
+}
+
+/* When a stack arrived.
+
+   `added` is a full timestamp and `spokenDay` wants a date -- it
+   splits on "-" and chokes on `07T14:49:10` -- so the day is sliced
+   off first. The clock time goes in the tooltip rather than beside
+   the day: two stacks on one afternoon are told apart by what they
+   were called, and a date and a time with a separator between them
+   is the tic this codebase bans. */
+function storeWhen(row) {
+  const span = document.createElement("span");
+  const stamp = row.added || "";
+  span.textContent = spokenDay(stamp.slice(0, 10)) || stamp;
+  if (stamp.length > 10) span.title = stamp.replace("T", " ");
+  return span;
+}
+
+function storePick(row) {
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = storeChosen.has(row.scan_id);
+  // A stack whose file has gone can still be read *about* -- the row
+  // says what was in it -- but there is nothing to open.
+  box.disabled = !row.onDisk;
+  box.title = row.onDisk
+    ? "Choose this stack to open again."
+    : "This file is not in the scans folder any more.";
+  box.setAttribute("aria-label", box.title);
+  box.onchange = () => {
+    if (box.checked) storeChosen.add(row.scan_id);
+    else storeChosen.delete(row.scan_id);
+    renderStore();
+  };
+  return box;
+}
+
+/* Which runs a stack holds, and how much of each.
+
+   `4 of 43` is the whole point of this column: a stack is often part
+   of a job, because the copier split it or because he scanned what
+   was on his desk. The run number is the link back -- clicking it
+   opens that run. */
+function storeRuns(row) {
+  const wrap = document.createElement("span");
+  wrap.className = "storeruns";
+  if (!row.runs || !row.runs.length) {
+    const none = document.createElement("span");
+    none.className = "dim";
+    none.textContent = row.placed === 0 ? "nothing placed" : "\u2014";
+    wrap.appendChild(none);
+    return wrap;
+  }
+  for (const run of row.runs) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "runchip";
+    const whole = run.printed && run.pages >= run.printed;
+    chip.textContent = run.run_no ? `#${run.run_no}` : (run.title || "?");
+    // Only when it is *part* of a run. A bare chip means the whole
+    // job is in this stack, and saying "4" beside "#1" reads as
+    // fourteen before it reads as anything useful.
+    if (!whole) {
+      const count = document.createElement("span");
+      count.className = "runchip-n";
+      count.textContent = `${run.pages}/${run.printed}`;
+      chip.appendChild(count);
+    }
+    chip.title = `${run.title || run.run_id}`
+      + (whole ? ` \u2014 all ${run.pages} papers`
+               : ` \u2014 ${run.pages} of its ${run.printed} papers`)
+      + ". Open this run.";
+    // Straight to that run's own page. The hash moves the tab and
+    // `showRun` opens the detail, which is the pair the Runs tab
+    // itself uses -- not a third way in.
+    chip.onclick = () => { location.hash = "#runs"; showRun(run.run_id); };
+    wrap.appendChild(chip);
+  }
+  return wrap;
+}
+
+function storeForget(row) {
+  const bin = document.createElement("button");
+  bin.type = "button";
+  bin.className = "iconbtn tiny danger";
+  bin.appendChild(icon("trash"));
+  bin.title = "Forget this stack. Your results from it are kept.";
+  bin.setAttribute("aria-label", bin.title);
+  bin.onclick = () => forgetStack(row);
+  return bin;
+}
+
+async function loadStore() {
+  const out = await api("/api/scan/list", {});
+  if (!out) return;
+  storeRows = out.scans || [];
+  storeChosen = new Set([...storeChosen].filter(
+    id => storeRows.some(r => r.scan_id === id && r.onDisk)));
+  renderStore();
+}
+
+function renderStore() {
+  const box = document.getElementById("scan-store");
+  if (!box) return;
+  box.hidden = !storeRows.length;
+  if (!storeRows.length) return;
+  const table = document.getElementById("scan-store-table");
+  storeSort.header(table.querySelector("thead tr"));
+  const body = table.querySelector("tbody");
+  body.textContent = "";
+  for (const row of storeSort.apply(storeRows)) {
+    const tr = document.createElement("tr");
+    tr.dataset.id = row.scan_id;
+    if (!row.onDisk) tr.classList.add("gone");
+    for (const column of STORE_COLUMNS) {
+      const td = document.createElement("td");
+      if (column.cls) td.className = column.cls;
+      const made = column.cell
+        ? column.cell(row)
+        : document.createTextNode(String(row[column.key] ?? ""));
+      if (made) td.appendChild(made);
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+  const here = storeRows.filter(r => r.onDisk).length;
+  const mb = saidSize(storeRows.reduce(
+    (a, r) => a + (r.onDisk ? r.bytes : 0), 0));
+  document.getElementById("store-count").textContent =
+    `${storeRows.length} stack${storeRows.length === 1 ? "" : "s"}`
+    + (here < storeRows.length ? `, ${here} still here` : "")
+    + `, ${mb}`;
+  const bar = document.getElementById("store-bar");
+  bar.hidden = storeChosen.size === 0;
+  document.getElementById("store-chosen").textContent =
+    `${storeChosen.size} chosen`;
+}
+
+async function openStacks() {
+  const ids = [...storeChosen];
+  if (!ids.length) return;
+  const out = await api("/api/scan/reopen", { ids });
+  if (!out) return;
+  storeChosen.clear();
+  renderStore();
+  // The same two lines `scanStart` ends on: the read is running on
+  // the server now and the bar follows it.
+  scanReading = true;
+  scanState("reading", "Reading…", 0);
+  scanPoll();
+}
+
+async function forgetStack(row) {
+  const ok = await ask({
+    title: `Forget ${row.original || row.scan_id}?`,
+    body: "It leaves this list and the matches you made on it are "
+      + "lost, so opening the same PDF later would be a fresh read. "
+      + "Every result you recorded from it is kept.",
+    yes: "Forget it",
+  });
+  if (!ok) return;
+  const out = await api("/api/scan/forget", { id: row.scan_id });
+  if (!out) return;
+  storeRows = out.scans || [];
+  storeChosen.delete(row.scan_id);
+  renderStore();
+  toast("Forgotten.");
+}
+
 function renderUnplaced() {
   const box = document.getElementById("scan-unplaced");
   if (!box) return;
@@ -5840,6 +6057,7 @@ async function boot() {
   };
   document.getElementById("form-push").onclick = pushForm;
   document.getElementById("scans-save").onclick = saveScans;
+  document.getElementById("store-open").onclick = openStacks;
   document.getElementById("sheet-close").onclick = () =>
     document.getElementById("sheet").close();
   document.getElementById("cell-close").onclick = () => {

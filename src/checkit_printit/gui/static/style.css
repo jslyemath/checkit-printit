@@ -2714,6 +2714,56 @@ button.act.chip:hover { border-color: var(--line-strong); }
   color: var(--bad);
 }
 
+/* ---- the stacks this course has imported ------------------------- */
+
+#scan-store { margin-top: var(--s6); }
+
+/* A run a stack holds, and how much of it. `4/43` is the useful
+   case: a stack is often part of a job, because the copier split it
+   or because he scanned what was on his desk at the time. The chip
+   is the link back to that run. */
+.storeruns { display: inline-flex; flex-wrap: wrap; gap: var(--s1); }
+.runchip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s1);
+  padding: 1px var(--s2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill, 99px);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+.runchip:hover { border-color: var(--accent); color: var(--accent); }
+.runchip-n {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.runchip:hover .runchip-n { color: var(--accent); }
+
+/* A stack whose file has been cleared out. The row still says what
+   was in it -- that is a fact about the term -- but there is nothing
+   left to open, so it reads as a record rather than as a thing. */
+#scan-store-table tr.gone td { color: var(--muted); }
+#scan-store-table tr.gone .pick input { cursor: not-allowed; }
+
+#scan-store-table td.pick { width: 34px; text-align: center; }
+#scan-store-table td.mid { text-align: right;
+                           font-variant-numeric: tabular-nums; }
+
+/* The same bar the other tabs put their one action in, and in the
+   same place -- below the thing it acts on, right-aligned. It is not
+   a save bar: nothing here is a draft, and the button reads as what
+   it does rather than as Save. */
+.storebar {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) 0 0;
+}
+
 /* ---- one cell, close up ------------------------------------------ */
 
 /* Wider than `ask`, which holds a sentence; this holds a table of
