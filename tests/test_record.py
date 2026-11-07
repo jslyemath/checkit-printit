@@ -545,3 +545,97 @@ class TestARunFolderSurvivesTheHomeMoving:
         assert not os.path.isabs(stored), stored
         assert os.path.samefile(
             record.runs(str(home / "record.db"))[0]["output"], inside)
+
+
+class TestDiscardingARunThatWasNeverHandedOut:
+    """A day of fixes leaves runs nobody ever sat.
+
+    Each one puts a row in `printed` for every student it would have
+    been for, and `history` is built from `printed` -- so they follow
+    a student into their drill-in as papers that never existed.
+    `delisted` does not help: it moves a run down the Runs list and
+    leaves every printed row where it was.
+    """
+
+    @staticmethod
+    def two_runs(db):
+        write(db, run_id="out-1", date="2026-09-18")
+        write(db, run_id="out-2", date="2026-10-02")
+        return db
+
+    def test_the_run_and_its_papers_go_together(self, db):
+        self.two_runs(db)
+        gone = record.discard_run(db, "out-2")
+        assert gone == 3, "three papers were printed in that run"
+        assert [r["run_id"] for r in record.runs(db)] == ["out-1"]
+
+    def test_the_papers_stop_following_the_student(self, db):
+        """The reason for the whole thing."""
+        self.two_runs(db)
+        assert len(record.history(db, "806000001", "W1")) == 2
+        record.discard_run(db, "out-2")
+        left = record.history(db, "806000001", "W1")
+        assert [r["run_id"] for r in left] == ["out-1"]
+
+    def test_a_graded_run_is_refused(self, db):
+        """The same rule that stops a graded run being delisted, and
+        for the same reason: a decision has to stay findable."""
+        self.two_runs(db)
+        record.save_attempts(db, [{
+            "run_id": "out-2", "sid": "806000001", "slug": "W1",
+            "outcome": "passed"}])
+        with pytest.raises(record.RecordError):
+            record.discard_run(db, "out-2")
+        assert len(record.runs(db)) == 2
+
+    def test_a_run_holding_marks_is_refused_even_unflagged(self, db):
+        """Not the same check twice. `graded` is a flag somebody
+        could clear; the attempt rows are the thing that actually has
+        to stay findable."""
+        self.two_runs(db)
+        record.save_attempts(db, [{
+            "run_id": "out-2", "sid": "806000001", "slug": "W1",
+            "outcome": "passed"}])
+        conn = record.connect(db)
+        conn.execute("UPDATE run SET graded = 0 WHERE run_id = 'out-2'")
+        conn.commit()
+        conn.close()
+        with pytest.raises(record.RecordError):
+            record.discard_run(db, "out-2")
+
+    def test_a_run_flagged_graded_with_no_marks_is_refused(self, db):
+        """Reachable from the Runs tab, which can set the flag on its
+        own. It is him saying "I have read this one back", and
+        discarding it would contradict that -- the fact that nothing
+        was written yet is not a reason to disbelieve him.
+
+        The mirror of the test above: that one has marks and no flag,
+        this one a flag and no marks, and only checking both covers
+        the pair.
+        """
+        self.two_runs(db)
+        record.set_flags(db, 'out-2', graded=True)
+        with pytest.raises(record.RecordError):
+            record.discard_run(db, 'out-2')
+        assert len(record.runs(db)) == 2
+
+    def test_a_run_that_is_not_there_says_so(self, db):
+        self.two_runs(db)
+        with pytest.raises(record.RecordError):
+            record.discard_run(db, "nonesuch")
+
+    def test_the_run_number_is_not_handed_out_again(self, db):
+        """A sheet from a discarded run carries a code. It has to go
+        on failing to resolve, rather than resolving to whatever job
+        was given its number afterwards."""
+        self.two_runs(db)
+        first = record.next_run_no(db, "out-3")
+        record.discard_run(db, "out-2")
+        assert record.next_run_no(db, "out-4") >= first
+
+    def test_only_that_run_s_papers_go(self, db):
+        self.two_runs(db)
+        record.discard_run(db, "out-2")
+        left = record.printed_pairs(db)
+        assert {r for r, _, _ in left} == {"out-1"}
+        assert len(left) == 3
