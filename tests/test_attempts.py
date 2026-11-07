@@ -416,19 +416,49 @@ class TestTheWholePageView:
         assert out["file"] == "copier-1.pdf"
         assert out["image"].startswith("data:image/jpeg;base64,")
 
-    def test_a_file_outside_the_scans_folder_is_refused(self, course,
-                                                        tmp_path):
-        """The browser names the file. Somewhere else on the disk is
-        not this course's scans, whatever the request says."""
+    def test_a_stored_name_on_its_own_is_enough(self, course):
+        """What Progress sends. It has a name out of the record and
+        no business knowing where the folder is -- and the old
+        version, which resolved the request against the working
+        directory before checking it, refused exactly this."""
+        out = gui_mod.api_scan_sheet(course, {"file": "copier-1.pdf",
+                                              "page": 1})
+        assert out["file"] == "copier-1.pdf"
+        assert out["image"].startswith("data:image/jpeg;base64,")
+
+    def test_a_file_outside_the_scans_folder_is_not_opened(self, course,
+                                                           tmp_path):
+        """The browser names the file, and somewhere else on the disk
+        is not this course's scans whatever the request says.
+
+        It is refused for a different reason than it used to be: the
+        request carries a stored *name* now, so the directory is
+        thrown away and what is left is looked for in this course's
+        own folder. The old version built the path and checked it.
+        Both refuse; this one cannot be talked out of it.
+        """
         other = tmp_path / "elsewhere.pdf"
         other.write_bytes(b"%PDF-1.4\n")
-        with pytest.raises(gui_mod.GuiError, match="not a page from this"):
+        with pytest.raises(gui_mod.GuiError):
             gui_mod.api_scan_sheet(course, {"file": str(other), "page": 1})
 
-    def test_climbing_out_with_dots_is_refused(self, course):
+    def test_climbing_out_with_dots_cannot_reach_a_real_file(self, course):
+        """`roster.toml` is really there, one level up, and holds
+        every name and email in the class. A test against a file that
+        does not exist would pass on a refusal that happened for the
+        wrong reason."""
+        # Written here rather than assumed: a test aimed at a file
+        # that is not there passes on a refusal that happened for the
+        # wrong reason.
+        real = os.path.join(course.path, "roster.toml")
+        with open(real, "w", encoding="utf-8") as f:
+            f.write("# names and email addresses live here\n")
         sneaky = os.path.join(course.path, "scans", "..", "roster.toml")
-        with pytest.raises(gui_mod.GuiError, match="not a page from this"):
+        with pytest.raises(gui_mod.GuiError):
             gui_mod.api_scan_sheet(course, {"file": sneaky, "page": 1})
+        # And by the plain name, which is what `basename` leaves.
+        with pytest.raises(gui_mod.GuiError):
+            gui_mod.api_scan_sheet(course, {"file": "roster.toml", "page": 1})
 
     def test_no_file_at_all_is_refused(self, course):
         with pytest.raises(gui_mod.GuiError, match="not a page from this"):

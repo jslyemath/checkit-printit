@@ -769,3 +769,85 @@ class TestBringingAStackBackAsHeLeftIt:
         record.note_scan_pages(db, "stack.pdf", [
             (1, "out-1", "806000001", "W1"), (2, "", "", "")])
         assert list(record.scan_corrections(db, "stack.pdf")) == [1]
+
+
+class TestADecisionFindingItsOwnPage:
+    """`history` carries where the picture is, for the drill-in.
+
+    Through `scan_page` on (run, student, skill) rather than a column
+    on `attempt`: the link was already there once a saved read
+    remembered what each page became.
+    """
+
+    @staticmethod
+    def stacked(db, pages):
+        write(db, run_id="out-1", date="2026-09-18")
+        record.add_scan(db, "stack.pdf", "aaa", "DOC1.pdf", 9, 900)
+        record.note_scan_pages(db, "stack.pdf", pages)
+        return db
+
+    def test_a_paper_carries_its_stack_and_page(self, db):
+        self.stacked(db, [(4, "out-1", "806000001", "W1")])
+        [row] = [r for r in record.history(db, "806000001", "W1")]
+        assert row["scan_id"] == "stack.pdf"
+        assert row["scan_page"] == 4
+
+    def test_a_paper_nothing_scanned_carries_nothing(self, db):
+        """A run handed out and never read back. The row is still
+        there -- that is the point of driving history off `printed` --
+        and simply has no picture."""
+        write(db, run_id="out-1", date="2026-09-18")
+        [row] = record.history(db, "806000001", "W1")
+        assert row["scan_id"] is None and row["scan_page"] is None
+
+    def test_forgetting_the_stack_takes_the_picture_not_the_paper(self, db):
+        self.stacked(db, [(4, "out-1", "806000001", "W1")])
+        record.forget_scan(db, "stack.pdf")
+        [row] = record.history(db, "806000001", "W1")
+        assert row["scan_id"] is None
+        assert row["seed"] == 511, "the paper itself is untouched"
+
+    def test_one_paper_is_one_row_however_often_it_was_fed(self, db):
+        """A double feed puts two pages against one paper. The
+        drill-in lists papers, not pages, so it gets one row with one
+        of the pictures rather than the same paper twice."""
+        self.stacked(db, [(4, "out-1", "806000001", "W1"),
+                          (7, "out-1", "806000001", "W1")])
+        rows = record.history(db, "806000001", "W1")
+        assert len(rows) == 1
+        assert rows[0]["scan_page"] in (4, 7)
+
+    def test_each_student_gets_their_own_page(self, db):
+        """Two papers from one run, in one stack. Looking up by run
+        alone would hand both of them the same picture -- and it is
+        the picture he opens to check whether he marked the right
+        one."""
+        self.stacked(db, [(2, "out-1", "806000001", "W1"),
+                          (6, "out-1", "806000002", "W1")])
+        mine = record.history(db, "806000001", "W1")[0]
+        theirs = record.history(db, "806000002", "W1")[0]
+        assert mine["scan_page"] == 2
+        assert theirs["scan_page"] == 6
+
+    def test_each_skill_gets_its_own_page(self, db):
+        """Same student, two skills in one run, two pages."""
+        self.stacked(db, [(2, "out-1", "806000001", "W1"),
+                          (6, "out-1", "806000001", "D1")])
+        assert record.history(db, "806000001", "W1")[0]["scan_page"] == 2
+        assert record.history(db, "806000001", "D1")[0]["scan_page"] == 6
+
+    def test_the_two_halves_of_the_pointer_agree(self, db):
+        """Two subqueries, so they have to be ordered the same way or
+        they can name the stack of one page and the number of
+        another."""
+        write(db, run_id="out-1", date="2026-09-18")
+        record.add_scan(db, "a.pdf", "aaa", "A.pdf", 9, 900)
+        record.add_scan(db, "b.pdf", "bbb", "B.pdf", 9, 900)
+        # The low page is in the alphabetically *first* stack, so
+        # ordering by page instead of by stack picks a different
+        # answer. With it the other way round the two orderings agree
+        # by accident and the test proves nothing.
+        record.note_scan_pages(db, "a.pdf", [(2, "out-1", "806000001", "W1")])
+        record.note_scan_pages(db, "b.pdf", [(9, "out-1", "806000001", "W1")])
+        [row] = record.history(db, "806000001", "W1")
+        assert (row["scan_id"], row["scan_page"]) == ("a.pdf", 2)
