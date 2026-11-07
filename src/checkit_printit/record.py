@@ -876,7 +876,30 @@ def history(path, sid, slug):
             "SELECT p.run_id, r.title, r.date, r.run_no, r.delisted,"
             "       r.rebuilt,"
             "       p.seed, p.version,"
-            "       a.outcome, a.decided, a.run_page, a.reading"
+            "       a.outcome, a.decided, a.run_page, a.reading,"
+            # Where the picture of this paper is. Two subqueries
+            # rather than a join, because a paper fed through the
+            # copier twice has two rows here and a join would turn
+            # one paper into two. Ordered the same way in both, so
+            # they cannot pick different halves of different pages.
+            #
+            # **One of several, when there are several.** Two pages
+            # can claim one (run, student, skill) -- a double feed,
+            # or two papers matched to the same student, which is the
+            # clash the review grid flags. `attempt` can only hold
+            # one decision for the three, so this offers one picture
+            # for it: the first by stack and page. Resolving the
+            # clash is the instructor's job and the grid asks him to
+            # do it; guessing which page he meant is not this
+            # query's.
+            "       (SELECT s.scan_id FROM scan_page s"
+            "         WHERE s.run_id = p.run_id AND s.sid = p.sid"
+            "           AND s.slug = p.slug"
+            "         ORDER BY s.scan_id, s.scan_page LIMIT 1) AS scan_id,"
+            "       (SELECT s.scan_page FROM scan_page s"
+            "         WHERE s.run_id = p.run_id AND s.sid = p.sid"
+            "           AND s.slug = p.slug"
+            "         ORDER BY s.scan_id, s.scan_page LIMIT 1) AS scan_page"
             "  FROM printed p"
             "  JOIN run r ON r.run_id = p.run_id"
             "  LEFT JOIN attempt a"

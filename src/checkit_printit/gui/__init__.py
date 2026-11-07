@@ -2330,8 +2330,10 @@ def _review_rows(batch, record_path, names, sections=None,
             # `page` here is the page in the *scanned file*, which is
             # what `/api/scan/sheet` wants. The browser-side keys have
             # not been renamed yet; see the note in `scans.Sheet`.
-            "at": [{"file": s.source, "page": s.scan_page}
-                   for s in copies],
+            # The stored name, not the path: `/api/scan/sheet`
+            # resolves it against this course's own folder.
+            "at": [{"file": os.path.basename(s.source),
+                    "page": s.scan_page} for s in copies],
             "read": agreed,
             "reads": sorted(calls) or ([agreed] if agreed else []),
             "ink": first.get("inside", 0),
@@ -2398,11 +2400,17 @@ def api_scan_sheet(course, body):
     import io
     import base64
 
-    want = str(body.get("file") or "")
+    # A stored name, never a path. It used to take an absolute one
+    # and check it was inside the folder, which was safe and still
+    # asked the page to know where files live -- and Progress, which
+    # has a name out of the record and no business knowing a path,
+    # could not ask at all. `basename` is the whole check now.
+    want = os.path.basename(str(body.get("file") or ""))
     page = int(body.get("page") or 0)
     folder = os.path.join(course.path, "scans")
-    full = os.path.abspath(want)
-    if not want or not full.startswith(os.path.abspath(folder) + os.sep):
+    full = os.path.join(folder, want)
+    if not want or not os.path.abspath(full).startswith(
+            os.path.abspath(folder) + os.sep):
         raise GuiError("that is not a page from this course's scans.")
     if not os.path.isfile(full):
         raise GuiError(f"{os.path.basename(full)} is not there any more.")
@@ -2729,7 +2737,12 @@ def api_progress_cell(course, body):
          "outcome": r["outcome"] or "", "decided": r["decided"] or "",
          # Which page of the printed job. Not the page of the
          # scanned PDF -- see `scans.Sheet`.
-         "runPage": r["run_page"], "reading": r["reading"] or ""}
+         "runPage": r["run_page"], "reading": r["reading"] or "",
+         # Where the picture is, when the stack it came out of is
+         # still in the course. Absent for a paper recorded before
+         # scans were kept, and for one whose stack has been
+         # forgotten -- the decision stands either way.
+         "scan": r["scan_id"] or "", "scanPage": r["scan_page"]}
         for r in rows]}
 
 
