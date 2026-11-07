@@ -587,6 +587,17 @@ button.iconbtn.tiny {
   vertical-align: middle;
 }
 button.iconbtn.tiny svg { width: 13px; height: 13px; --glyph-size: 13; }
+
+/* The one button colour that is not the accent. Green means "the
+   thing to do here" and forgetting a run is never that -- it is a
+   thing that is *available*, two steps in, to somebody who went
+   looking. So it is quiet until hovered, and then it is `--bad`,
+   which is the colour the grid already uses for trouble. */
+button.iconbtn.danger:hover {
+  color: var(--bad);
+  border-color: var(--bad);
+  background: var(--bad-soft);
+}
 th .namefmt { float: right; margin-top: -1px; }
 
 /* Restoring is the undo, so it is not the colour of a thing to do. */

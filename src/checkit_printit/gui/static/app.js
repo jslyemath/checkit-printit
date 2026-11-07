@@ -522,6 +522,14 @@ async function okDespitePending(saving, consequence) {
    that name is a SyntaxError that stops the *other* file loading. Same
    collision as `.rail` and `.band`, in JavaScript rather than CSS. */
 const GLYPH = {
+  // A bin: lid, handle, body, two ribs. Drawn rather than borrowed
+  // from `drop`, which is the delist arrow -- one shape for two
+  // meanings is what the grid's old outlined box was.
+  trash: "M3.6 6.4h16.8"
+    + "M9.6 6.4V4.3a1.3 1.3 0 0 1 1.3-1.3h2.2a1.3 1.3 0 0 1 1.3 1.3v2.1"
+    + "M5.9 6.4l.9 13.1a1.9 1.9 0 0 0 1.9 1.8h6.6a1.9 1.9 0 0 0 1.9-1.8"
+    + "l.9-13.1"
+    + "M10.1 10.3v7.2M13.9 10.3v7.2",
   roster: "M9 11.5a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2"
     + "M2.5 20c0-3.4 2.9-5.8 6.5-5.8s6.5 2.4 6.5 5.8"
     + "M16.2 4.7a3.6 3.6 0 0 1 0 6.6M17.4 14.6c2.5.6 4.1 2.5 4.1 5.4",
@@ -2611,9 +2619,59 @@ function runRow(run, tbody) {
     flag.setAttribute("aria-label", flag.title);
     flag.onclick = () => setRunFlag(run.id, { delisted: !run.delisted });
     actions.appendChild(flag);
+
+    /* Discard, and only once it is delisted.
+
+       Delisting is reversible and says "I do not want to see this".
+       Discarding cannot be undone, so it is the second of two steps
+       rather than a button beside the first -- which is how somebody
+       arrives at it on purpose.
+
+       A run that was built and never handed out is not history: it
+       puts a row in `printed` for every student it would have been
+       for, and those follow each of them into their drill-in as
+       papers that were never on a desk. */
+    if (run.delisted) {
+      const bin = document.createElement("button");
+      bin.className = "iconbtn tiny danger";
+      bin.appendChild(icon("trash"));
+      bin.title = "Forget this run and the papers recorded under it.";
+      bin.setAttribute("aria-label", bin.title);
+      bin.onclick = () => discardRun(run);
+      actions.appendChild(bin);
+    }
   }
   tr.appendChild(actions);
   tbody.appendChild(tr);
+}
+
+/* Forget a run, after saying what that costs.
+
+   The count is in the question because the guard cannot cover this.
+   The record refuses a run anything was read back from, which keeps
+   every decision safe -- but nothing knows whether paper actually
+   came out of the printer, so "may be discarded" is not "should be".
+   The number of papers is the one fact that tells him which this is:
+   a rebuild he abandoned has the same shape as the real job, and the
+   date and the count are how he tells them apart. */
+async function discardRun(run) {
+  const papers = run.papers || 0;
+  const ok = await ask({
+    title: `Forget ${run.title}?`,
+    body: papers === 1
+      ? "One paper was recorded under it. That record goes too, and "
+        + "this cannot be undone."
+      : `${papers} papers were recorded under it. Those records go `
+        + "too, and this cannot be undone.",
+    yes: "Forget it",
+  });
+  if (!ok) return;
+  const out = await api("/api/run/discard", { id: run.id });
+  if (!out) return;
+  runsState = out;
+  renderRuns();
+  toast(`Forgotten. ${out.discarded} paper`
+        + `${out.discarded === 1 ? "" : "s"} no longer recorded.`);
 }
 
 function builtAt(stamp) {

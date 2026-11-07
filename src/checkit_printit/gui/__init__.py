@@ -1545,6 +1545,29 @@ def api_run_flag(course, body):
     return api_runs(course, {})
 
 
+def api_run_discard(course, body):
+    """Throw away a run that was never handed out.
+
+    The papers go with it -- that is the point, since a run nobody
+    sat still puts a row in every one of those students' drill-ins.
+    Refused for a graded run by `record.discard_run`, which is the
+    same rule that stops a graded run being delisted.
+
+    The job folder on disk is left alone. It holds the PDF and the
+    page index, it is outside every repository, and deleting a
+    person's files because they tidied a list is not this button's
+    business.
+    """
+    run_id = str(body.get("id") or "").strip()
+    try:
+        papers = record_mod.discard_run(course.file("record"), run_id)
+    except record_mod.RecordError as exc:
+        raise GuiError(str(exc)) from None
+    out = api_runs(course, {})
+    out["discarded"] = papers
+    return out
+
+
 def _job_folder_for_run(row):
     """Where the job folder of a finished run is.
 
@@ -2575,6 +2598,7 @@ ROUTES = {
     "/api/runs": api_runs,
     "/api/run": api_run,
     "/api/run/flag": api_run_flag,
+    "/api/run/discard": api_run_discard,
     "/api/run/replay": api_run_replay,
     "/api/run/reuse": api_run_reuse,
 }

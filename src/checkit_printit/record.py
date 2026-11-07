@@ -469,6 +469,52 @@ def set_flags(path, run_id, delisted=None, graded=None):
         db.close()
 
 
+def discard_run(path, run_id):
+    """Remove a run and every paper recorded under it.
+
+    For a job that was built and never handed out -- a rebuild while
+    fixing something, a test print. Those rows are not history, they
+    are a record of a PDF that existed for ten minutes, and they
+    follow a student around: `history` reads `printed`, so each one
+    shows up in a drill-in as a paper that was never on a desk.
+
+    **Refused once anything has been read back from it**, for the
+    same reason a graded run cannot be delisted: a decision has to
+    stay findable, and the run is where it is found. That makes this
+    safe to offer -- the only runs it can touch are ones no judgement
+    depends on.
+
+    Returns how many printed rows went with it. The run number is
+    not reused: `meta.last_run_no` is the high-water mark and is left
+    alone, so a code on a sheet from a discarded run still fails to
+    resolve rather than resolving to somebody else's job.
+    """
+    if not os.path.isfile(path):
+        raise RecordError(f"{path} does not exist, so there are no runs.")
+    db = connect(path)
+    try:
+        row = db.execute("SELECT graded FROM run WHERE run_id = ?",
+                         (run_id,)).fetchone()
+        if row is None:
+            raise RecordError(f"no run called {run_id!r}.")
+        marks = db.execute(
+            "SELECT COUNT(*) FROM attempt WHERE run_id = ?",
+            (run_id,)).fetchone()[0]
+        if row["graded"] or marks:
+            raise RecordError(
+                f"{run_id} has been graded, so it cannot be discarded. "
+                f"What was read back from it is the record of an "
+                f"attempt, and the run is where it is found.")
+        papers = db.execute(
+            "SELECT COUNT(*) FROM printed WHERE run_id = ?",
+            (run_id,)).fetchone()[0]
+        db.execute("DELETE FROM run WHERE run_id = ?", (run_id,))
+        db.commit()
+        return papers
+    finally:
+        db.close()
+
+
 def printed_pairs(path):
     """`{(run_id, sid, slug)}` -- every paper this course ever printed.
 
