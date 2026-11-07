@@ -892,15 +892,12 @@
     </div>
 
     <div id="progress-body" hidden>
-      <div class="toolbar">
-        <label title="Put the accent behind every skill passed in the
-                      most recent grading sets.">Light up what just came back
-          <span class="tickwrap">
-            <input type="checkbox" id="progress-recent"></span></label>
-        <span id="progress-recent-note" class="muted"></span>
-        <span class="spacer"></span>
-        <span id="progress-key" class="muted"></span>
-      </div>
+      <!-- The legend is the control. Each mark beside its own short
+           label, and the two numbers that decide the red and the green
+           edited where they are read. Filled by `drawProgressLegend`;
+           what was here before was a tick box, a sentence explaining
+           it, a note repeating it, and an empty span. -->
+      <div id="progress-legend" class="legend"></div>
       <div class="scroller gridscroll">
         <table id="progress-grid"></table>
       </div>

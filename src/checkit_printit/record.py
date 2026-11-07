@@ -541,6 +541,18 @@ def progress(path):
                        AND b.outcome = 'passed'
                      ORDER BY br.date DESC, br.built DESC
                      LIMIT 1) AS passed_in,
+                   -- The most recent outcome that was not an absence.
+                   -- `last` answers "what happened last"; this answers
+                   -- "what happened last time they sat it", and the
+                   -- grid wants the second: a student who missed the
+                   -- latest paper has not thereby stopped being in
+                   -- question about the one before.
+                   (SELECT b.outcome FROM attempt b
+                     JOIN run br ON br.run_id = b.run_id
+                     WHERE b.sid = a.sid AND b.slug = a.slug
+                       AND b.outcome <> 'absent'
+                     ORDER BY br.date DESC, br.built DESC
+                     LIMIT 1) AS last_sat,
                    MAX(r.date) AS last_date
               FROM attempt a
               JOIN run r ON r.run_id = a.run_id
@@ -624,8 +636,13 @@ def recorded_in(path, run_ids):
         db.close()
 
 
-def grading_sets(path, keep=2):
-    """The last `keep` runs that have been graded, newest first.
+def grading_sets(path, keep=None):
+    """The runs that have been graded, newest first.
+
+    `keep` caps the list; None is all of them. The cap used to be the
+    whole answer to "what counts as recent", fixed at two. It is the
+    reader's number now and lives in their browser, so the server
+    sends the order and the browser takes as many as it wants.
 
     What "recently passed" means. A grading set is a run something
     has been read back from, which is exactly what `graded` records
@@ -636,9 +653,11 @@ def grading_sets(path, keep=2):
         return []
     db = connect(path)
     try:
-        return [r["run_id"] for r in db.execute(
+        rows = db.execute(
             "SELECT run_id FROM run WHERE graded = 1"
-            " ORDER BY date DESC, built DESC LIMIT ?", (int(keep),))]
+            " ORDER BY date DESC, built DESC")
+        out = [r["run_id"] for r in rows]
+        return out if keep is None else out[:int(keep)]
     finally:
         db.close()
 

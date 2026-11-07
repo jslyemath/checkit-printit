@@ -112,6 +112,14 @@
   --accent-soft: oklch(0.945 0.025 165);
   --warn: oklch(0.500 0.090 55);
   --warn-soft: oklch(0.955 0.030 70);
+  /* The third status colour, added for the Progress grid: a student
+     who has sat a skill several times and passed none of it. There
+     was no red in here at all -- amber was carrying both "look at
+     this" and "this is going wrong", which is one job too many.
+     Same lightness and chroma shape as the other two so it sits in
+     the same family rather than shouting over them. */
+  --bad: oklch(0.505 0.145 25);
+  --bad-soft: oklch(0.955 0.035 25);
   /* The step between `--warn` and `--accent`, for a scale that runs
      from one to the other -- the confidence dial today. Its hue is
      the midpoint of theirs (55 and 165) and its lightness and
@@ -154,6 +162,8 @@
     --accent-soft: oklch(0.330 0.045 165);
     --warn: oklch(0.800 0.110 75);
     --warn-soft: oklch(0.300 0.045 75);
+    --bad: oklch(0.760 0.135 25);
+    --bad-soft: oklch(0.315 0.060 25);
     /* Midway again, between this theme's own two: hues 75 and 165
        give 120, light enough to read on the dark surfaces. */
     --midway: oklch(0.810 0.113 120);
@@ -2437,6 +2447,82 @@ button.act.chip:hover { border-color: var(--line-strong); }
 
 /* ---- the progress grid ------------------------------------------- */
 
+/* The Progress legend, which is also its two controls.
+
+   One strip where there were four things: a tick box, a sentence
+   explaining it, a note repeating it, and an empty span. Each mark
+   sits beside its own label and the two numbers are edited in place.
+
+   Wraps rather than scrolls -- it is prose with controls in it, and
+   prose wraps. */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s4);
+  padding: var(--s2) 0 var(--s3);
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  white-space: nowrap;
+}
+/* A swatch the size of a cell's glyph: the legend shows the mark at
+   the size the grid draws it, or it is a picture of a different
+   thing. An empty one is a colour swatch for a background. */
+.legend-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 18px;
+  border-radius: var(--r-xs, 3px);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.legend-mark svg { width: 15px; height: 15px; --glyph-size: 15; }
+.legend-item:nth-child(1) .legend-mark { color: var(--accent); }
+.legend-item:nth-child(3) .legend-mark { color: var(--muted); }
+.legend-item:nth-child(4) .legend-mark { color: var(--warn); }
+.legend-mark.tone-justin { background: var(--accent-soft); }
+.legend-mark.tone-open   { background: var(--warn-soft); }
+.legend-mark.tone-stuck  { background: var(--bad-soft); }
+
+/* A number edited where it is read. Styled down to the text around
+   it until it is touched: it is one digit in a sentence, and a boxed
+   field with a spinner beside it would be more furniture than the
+   thing it sets. */
+.legend input.litnum {
+  width: 2.4em;
+  padding: 1px 2px;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs, 3px);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.legend input.litnum::-webkit-outer-spin-button,
+.legend input.litnum::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.legend input.litnum:hover {
+  border-color: var(--line);
+  background: var(--surface-2);
+}
+.legend input.litnum:focus {
+  border-color: var(--accent);
+  background: var(--surface-2);
+  outline: none;
+}
+
 /* 45 rows by 29 columns. Both headers stay put, because a cell in
    the middle of it says nothing without the name at its left and
    the slug above it, and scrolling to check which is which is how a
@@ -2539,65 +2625,59 @@ button.act.chip:hover { border-color: var(--line-strong); }
 }
 
 /* Never taken: nothing at all. Most of the grid in September, and
-   the shape of what is still to come. */
+   the shape of what is still to come. A cell whose only attempts
+   were absences is one of these -- see PRINT_TOOL_DESIGN.md 17. */
 #progress-grid td.none { }
 
+/* One glyph per cell, from the app's own set, at the size the row
+   can hold. No box, plain or dashed, anywhere: seven states drawn as
+   variations on an outline were six states nobody could tell apart.
+
+   `currentColor` is how the icons take their colour, so the cell's
+   own rule below is the only place a colour is said. */
+#progress-grid .cellmark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+#progress-grid .cellmark svg {
+  width: 15px;
+  height: 15px;
+  --glyph-size: 15;
+}
+
 /* Passing is quiet. The instructor's call and the right one -- a
-   gradebook is scanned for trouble, and 1,300 green cells would
+   gradebook is scanned for trouble, and 1,300 green ticks would
    drown the four that matter. */
 #progress-grid td.passed .cellmark { color: var(--accent); }
 
-/* Not passed, once. An outlined box: the same shape as the one on
-   the paper, which is what he is remembering when he looks. */
-#progress-grid td.open .cellmark,
-#progress-grid td.part .cellmark,
-#progress-grid td.stuck .cellmark {
-  display: inline-block;
-  width: 13px;
-  height: 13px;
-  border: 1.5px solid var(--line-strong);
-  border-radius: 3px;
-  vertical-align: middle;
-}
+/* Nothing passed yet. Not loud on its own: one go and no pass is
+   ordinary, and whether it has gone on long enough to matter is the
+   reader's number, which the background answers. */
+#progress-grid td.none-passed .cellmark { color: var(--muted); }
 
-/* Never handed in. The same box, dashed: there was no paper, so
-   there is no solid edge to draw. */
-#progress-grid td.unsat .cellmark {
-  border-style: dashed;
-  border-color: var(--line);
-}
+/* The last paper is in question. The glyph the mark track uses for
+   the same thing, so the cell and the control agree. */
+#progress-grid td.query .cellmark { color: var(--warn); }
 
-/* Not passed, more than once. The loudest thing on the page, which
-   is the whole point of the grid. */
-#progress-grid td.stuck { background: var(--warn-soft); }
-#progress-grid td.stuck .cellmark { border-color: var(--warn); }
-#progress-grid td.stuck .cellcount { color: var(--warn); font-weight: 600; }
-
+/* Part way: the fraction, and no glyph beside it. It is the only
+   number on the grid now, so it can only mean one thing. */
 #progress-grid .cellcount {
   font-size: var(--t-xs);
-  margin-left: 2px;
-  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
   vertical-align: middle;
 }
 
-/* A query: a paper he flagged to look at again. It reads as not
-   passed, because it is, and carries a corner so the fact that he
-   marked it does not disappear into the same box as a blank. */
-#progress-grid td.queried::after {
-  content: "";
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--warn);
-}
-
-/* What has just come back, when he asks for it. Off by default:
-   it is the answer to "what happened this week", not to "where is
-   the class", and the grid's usual job is the second one. */
-#progress-grid td.justin { background: var(--accent-soft); }
+/* The three backgrounds. At most one: green needs a pass, and the
+   other two need the skill unpassed. Amber wins over red where both
+   fit -- a query means the cell is not decided, and "stuck" is a
+   judgement the query may overturn. */
+#progress-grid td.tone-justin { background: var(--accent-soft); }
+#progress-grid td.tone-open   { background: var(--warn-soft); }
+#progress-grid td.tone-stuck  { background: var(--bad-soft); }
+#progress-grid td.tone-stuck .cellmark { color: var(--bad); }
 
 /* ---- one cell, close up ------------------------------------------ */
 

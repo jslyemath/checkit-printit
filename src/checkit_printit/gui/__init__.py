@@ -2415,6 +2415,10 @@ def api_progress(course, _body):
             "queries": row["queries"],
             "absents": row["absents"],
             "last": row["last"],
+            # What happened the last time they actually sat it. The
+            # glyph turns on this and not on `last`, because an
+            # absence is invisible to the grid.
+            "lastSat": row["last_sat"],
             "lastDate": row["last_date"],
             "passedIn": row["passed_in"],
         }
@@ -2449,9 +2453,10 @@ def api_progress(course, _body):
                                             course_mod.DEFAULT_THRESHOLD)}
                    for s in slugs],
         "cells": cells,
-        # Which runs count as "just come back", so the view can offer
-        # to light them up. Worked out from `graded` rather than from
-        # dates -- see `record.grading_sets`.
+        # Every graded run, newest first. The view takes as many as
+        # the reader asked for -- how many count as "just come back"
+        # is their number, kept in their browser. Worked out from
+        # `graded` rather than from dates: see `record.grading_sets`.
         "recent": record_mod.grading_sets(path),
     }
 
