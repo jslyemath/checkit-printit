@@ -973,3 +973,93 @@ class TestARowWhoseStudentCameFromTheGrid:
         assert rows[0]["name"] == ""
         assert rows[0]["byId"] is False
         assert rows[0]["unowned"] is True
+
+
+class TestAStackComesBackAsHeLeftIt:
+    """`_review_rows` believes a saved choice over a fresh reading.
+
+    An outcome already survived a re-read: `recorded_in` finds one by
+    (run, student, skill). A **re-match** did not -- the record held
+    the student he chose and a fresh read recomputed the one the
+    index named, so the lookup missed and the match and the mark were
+    lost together.
+    """
+
+    @pytest.fixture
+    def measured(self, monkeypatch):
+        monkeypatch.setattr(
+            gui_mod.scans_mod, "measure",
+            lambda cut: {"call": cut, "inside": 0.03, "beside": 0.0})
+        monkeypatch.setattr(gui_mod, "_as_jpeg", lambda img: f"jpeg:{img}")
+
+    @staticmethod
+    def sheet(sid="001", scan_page=1, run_page=1, read_sid=""):
+        # Sheet is frozen, so read_sid goes in at construction rather
+        # than being set afterwards.
+        from checkit_printit import pageindex
+        entry = pageindex.Page(page=run_page, kind="student", sid=sid,
+                               slug="W1", vseed="401", sheet=1, marks={})
+        return scans_mod.Sheet(
+            source="/scans/stack.pdf", scan_page=scan_page, status="placed",
+            run_no=1, run_page=run_page, entry=entry, code="C1-1-1",
+            cuts={"box": "ticked"}, read_sid=read_sid)
+
+    def rows(self, sheets, corrections=None, names=None):
+        return gui_mod._review_rows(
+            scans_mod.Batch(sheets=sheets), "/no/such/record.db",
+            names or {}, None, corrections=corrections)
+
+    def test_without_a_correction_the_reading_stands(self, measured):
+        [row] = self.rows([self.sheet(sid="001")])
+        assert row["sid"] == "001" and row["restored"] is False
+
+    def test_a_saved_choice_beats_the_index(self, measured):
+        """The whole point. He said it was 002; the code still says
+        001, because the code is printed on the paper and cannot
+        change its mind."""
+        [row] = self.rows(
+            [self.sheet(sid="001")],
+            corrections={("stack.pdf", 1): ("r", "002", "W1")},
+            names={"002": "Bo"})
+        assert row["sid"] == "002"
+        assert row["name"] == "Bo"
+        assert row["restored"] is True
+
+    def test_a_correction_is_keyed_by_the_scanned_page(self, measured):
+        """Not the run page. The two differ on every real stack --
+        the first sheet out of the copier was page five of the job --
+        and a fixture where they happen to match cannot tell the
+        lookup apart from one using the wrong one. This one is page 2
+        of the file and page 5 of the run."""
+        sheet = self.sheet(sid="001", scan_page=2, run_page=5)
+        # Keyed on the scanned page: applied.
+        [row] = self.rows([sheet], corrections={
+            ("stack.pdf", 2): ("r", "002", "W1")})
+        assert row["sid"] == "002", "the scanned page is the key"
+        # Keyed on the run page: not this sheet, so not applied.
+        [row] = self.rows([sheet], corrections={
+            ("stack.pdf", 5): ("r", "002", "W1")})
+        assert row["sid"] == "001", "the run page is not the key"
+
+    def test_agreeing_with_the_read_is_not_a_restoration(self, measured):
+        """`restored` says "he chose this and the read would not
+        have". On a run printed without names every entry.sid is
+        empty, so comparing against the index alone called every
+        single row restored -- including the ones where the id grid
+        had agreed with him perfectly."""
+        [row] = self.rows(
+            [self.sheet(sid="001")],
+            corrections={("stack.pdf", 1): ("r", "001", "W1")})
+        assert row["sid"] == "001" and row["restored"] is False
+
+    def test_it_beats_a_student_read_off_the_id_grid_too(self, measured):
+        """A blank-name paper whose grid resolved to one student and
+        which he then said was another. His answer is a judgement;
+        the grid is a measurement."""
+        sheet = self.sheet(sid="", read_sid="001")
+        [row] = self.rows(
+            [sheet], corrections={("stack.pdf", 1): ("r", "002", "W1")},
+            names={"002": "Bo"})
+        assert row["sid"] == "002" and row["restored"] is True
+        assert row["byId"] is False, (
+            "the name did not come from the grid, so nothing says it did")

@@ -854,6 +854,41 @@
       </div>
     </div>
 
+    <!-- Every stack this course has imported. Its own section below
+         the results rather than a control beside the drop area: that
+         rectangle is the only control up there, and a button next to
+         it is exactly what `test_the_drop_area_has_no_button_beside_it`
+         guards against.
+
+         Shown whether or not a stack is in hand, so the tab has
+         something to say before anything is dropped -- which it did
+         not before. -->
+    <div id="scan-store" hidden>
+      <header class="pagehead">
+        <h3>Imported</h3>
+        <button class="hint" type="button" aria-expanded="false"
+                aria-label="What these are">?</button>
+        <span class="spacer"></span>
+        <span id="store-count" class="sec-count"></span>
+      </header>
+      <p class="hint-text" hidden>Every stack of PDFs you have given
+        this course, kept so you can open one again without finding
+        the email. Reopening brings back the matches and marks you
+        saved, not a fresh read. Forgetting one removes the stack from
+        this list and leaves every result you recorded from it.</p>
+      <div class="scroller">
+        <table id="scan-store-table" class="matched store">
+          <thead><tr></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="storebar" id="store-bar" hidden>
+        <span class="dirty" id="store-chosen"></span>
+        <span class="spacer"></span>
+        <button id="store-open" class="primary">Open again</button>
+      </div>
+    </div>
+
     <!-- Start over is this tab's Discard, and it is honest about what
          it does: there is no saved draft to revert to, so it puts the
          pile down and the way to get it back is to read the stack

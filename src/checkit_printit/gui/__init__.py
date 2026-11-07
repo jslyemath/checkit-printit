@@ -1697,6 +1697,11 @@ class Scanning:
         self.sheets = []
         #: Those files' base names, in the order they were first read.
         self.files = []
+        #: `{(scan file, page): (run_id, sid, slug)}` -- what he
+        #: decided about these pages the last time he saved them.
+        #: Kept across reads for the same reason `sheets` is: adding
+        #: a second stack must not forget the first.
+        self.corrections = {}
 
     def status(self):
         return {"running": self.running, "done": self.done,
@@ -1732,6 +1737,16 @@ class Scanning:
         except (OSError, ValueError):
             sections = {}
 
+        # What he decided about these pages last time, by page. Read
+        # before the thread starts, because it is a few small queries
+        # and doing them here keeps the thread to one job.
+        fixed = {}
+        for one in paths:
+            name = os.path.basename(one)
+            for page, what in record_mod.scan_corrections(
+                    record_path, name).items():
+                fixed[(name, page)] = what
+
         def run():
             try:
                 batch = scans_mod.read_pdfs(paths, record_path,
@@ -1751,9 +1766,10 @@ class Scanning:
                                     want=("box", "name", "id", "page"))
                 self.sheets = _joined(self.sheets, batch.sheets, paths)
                 self.files = _file_order(self.files, paths)
+                self.corrections.update(fixed)
                 self.result = _batch_json(
                     scans_mod.Batch(sheets=self.sheets),
-                    record_path, sections)
+                    record_path, sections, self.corrections)
             except (scans_mod.ScanError, OSError) as exc:
                 self.error = str(exc)
             except Exception as exc:                      # noqa: BLE001
@@ -1793,7 +1809,7 @@ def _file_order(known, paths):
     return names
 
 
-def _batch_json(batch, record_path, sections=None):
+def _batch_json(batch, record_path, sections=None, corrections=None):
     """The batch as the page wants it.
 
     Names are resolved here rather than in `scans`: the reader deals
@@ -1877,7 +1893,8 @@ def _batch_json(batch, record_path, sections=None):
             "unplaced": unplaced,
             "outcomes": OUTCOMES,
             "review": _review_rows(batch, record_path, names,
-                                   sections or {}),
+                                   sections or {},
+                                   corrections=corrections),
             "gradable": sum(1 for s in batch.sheets if s.gradable)}
 
 
@@ -1957,6 +1974,80 @@ def api_scan_start(course, body):
 
     SCANNING.start(course, paths)
     return {"started": True, "files": [os.path.basename(p) for p in paths]}
+
+
+def api_scan_list(course, _body):
+    """Every stack this course has imported, newest first.
+
+    `onDisk` is asked of the filesystem rather than assumed. The
+    folder is the instructor's and outside every repository; he may
+    have cleared it, and a row whose file has gone can still say what
+    was in it even though it can no longer be opened.
+    """
+    folder = os.path.join(course.path, "scans")
+    out = []
+    for row in record_mod.scans(course.file("record")):
+        item = dict(row)
+        item["onDisk"] = os.path.isfile(os.path.join(folder, row["scan_id"]))
+        out.append(item)
+    return {"scans": out,
+            "folder": folder,
+            # What the folder costs, so clearing it is a decision
+            # taken against a number rather than a feeling.
+            "bytes": sum(r["bytes"] for r in out if r["onDisk"])}
+
+
+def api_scan_reopen(course, body):
+    """Read stored stacks again, with his corrections put back.
+
+    Not an import: these are files already in the course, so nothing
+    is uploaded and nothing is renamed. `SCANNING.start` collects
+    what he decided about each page last time and the review comes
+    back with it already applied -- see `_review_rows`.
+    """
+    want = [str(s) for s in (body.get("ids") or []) if s]
+    if not want:
+        raise GuiError("no stacks were chosen.")
+    folder = os.path.join(course.path, "scans")
+    known = {r["scan_id"] for r in record_mod.scans(course.file("record"))}
+    paths = []
+    for scan_id in want:
+        if scan_id not in known:
+            raise GuiError(f"{scan_id} is not a stack this course imported.")
+        full = os.path.join(folder, os.path.basename(scan_id))
+        if not os.path.isfile(full):
+            raise GuiError(
+                f"{scan_id} is not in the scans folder any more, so it "
+                f"cannot be opened. What was decided about it is still "
+                f"in the record.")
+        paths.append(full)
+    SCANNING.start(course, paths)
+    return {"started": True, "files": [os.path.basename(p) for p in paths]}
+
+
+def api_scan_forget(course, body):
+    """Drop a stack from the record, and its file if asked.
+
+    The decisions stay: they are in `attempt`, and this removes the
+    working rather than the result. What goes is the stack's row and
+    its page attributions -- so a later import of the same PDF is a
+    fresh read with nothing remembered.
+    """
+    scan_id = os.path.basename(str(body.get("id") or ""))
+    if not scan_id:
+        raise GuiError("no stack was named.")
+    delete = bool(body.get("delete"))
+    record_mod.forget_scan(course.file("record"), scan_id)
+    if delete:
+        full = os.path.join(course.path, "scans", scan_id)
+        # Resolved and checked before anything is removed. The id
+        # comes from the page, and a name from the page is a name
+        # that can try to be `../something`.
+        folder = os.path.abspath(os.path.join(course.path, "scans"))
+        if os.path.abspath(full).startswith(folder + os.sep) \
+                and os.path.isfile(full):
+            os.remove(full)
+    return api_scan_list(course, {})
 
 
 def _page_count(path):
@@ -2096,7 +2187,8 @@ def _tight(crop, read):
                       min(crop.height, round(y1 + unit * bottom))))
 
 
-def _review_rows(batch, record_path, names, sections=None):
+def _review_rows(batch, record_path, names, sections=None,
+                 corrections=None):
     """One row per paper: what it is, what was read, what to crop.
 
     Papers that never came back are rows too, with no crop. The
@@ -2155,7 +2247,25 @@ def _review_rows(batch, record_path, names, sections=None):
         # are the only rows where the handwriting is the only check
         # there is.
         by_id = next((s.read_sid for s in copies if s.read_sid), "")
-        sid = entry.sid or by_id
+        # What he said about this page last time, if it has been
+        # through here before. His choice beats both readings: it is
+        # the only one of the three that is a judgement rather than a
+        # measurement, and a second read of the same sheet knows
+        # nothing he did not know when he made it.
+        kept = next(
+            ((corrections or {}).get(
+                (os.path.basename(s.source), s.scan_page))
+             for s in copies
+             if (corrections or {}).get(
+                 (os.path.basename(s.source), s.scan_page))), None)
+        sid = (kept[1] if kept else "") or entry.sid or by_id
+        # Restored means "he chose this, and this read would not have"
+        # -- so it is compared against what the read *did* work out,
+        # not against the index alone. On a run printed without names
+        # entry.sid is empty for every paper, so comparing to that
+        # called every single row restored, including the ones where
+        # the id grid agreed with him perfectly.
+        restored = bool(kept and kept[1] and kept[1] != (entry.sid or by_id))
         sure_of_id = next((s.read_score for s in copies
                            if s.read_sid == sid), None)
         # Kept with the crop each was taken from: the box comes back
@@ -2181,7 +2291,12 @@ def _review_rows(batch, record_path, names, sections=None):
             # student in the same place.
             **_split_for_sort(names.get(sid, "")),
             "section": (sections or {}).get(sid, ""),
-            "byId": bool(by_id and not entry.sid),
+            "byId": bool(by_id and not entry.sid and not restored),
+            # He matched this one by hand before and the stack has
+            # been read again. Shown so a restored choice does not
+            # look like something the reader worked out -- and so the
+            # view can say where the row's student came from.
+            "restored": restored,
             "sureOfId": sure_of_id,
             "skill": entry.slug, "scanned": True,
             # Every square taken of this paper. One, nearly always;
@@ -2669,6 +2784,9 @@ ROUTES = {
     "/api/progress/cell": api_progress_cell,
     "/api/progress/set": api_progress_set,
     "/api/scan/start": api_scan_start,
+    "/api/scan/list": api_scan_list,
+    "/api/scan/reopen": api_scan_reopen,
+    "/api/scan/forget": api_scan_forget,
     "/api/scan/status": api_scan_status,
     "/api/scan/clear": api_scan_clear,
     "/api/scan/save": api_scan_save,
