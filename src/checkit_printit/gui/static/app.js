@@ -670,34 +670,56 @@ const GLYPH = {
   // Two ways round, from Seating, where it already means exactly this.
   swapby: "M4 8h13l-3-3M20 16H7l3 3",
 
-  /* A door -- a panel with a knob -- and an arrow going through it to
-     drop, coming back out to restore. Only the arrow turns, so the
-     pair is one idea with a direction.
+  /* A doorway with the door standing open in it, and an arrow going
+     in to drop, back out to restore. **Only the arrow turns.** A
+     mirrored frame would put the doorway on the other side, which
+     says the room moved rather than the person.
 
-     Fourth attempt, and the first chosen by looking rather than by
-     reasoning about coordinates. A person with a minus loses the minus
-     at 18px, and the minus is the whole meaning. Seating's chair with
-     an arrow was too many strokes to read small. A frame plus a
-     separate open panel was two disjoint rectangles. Four candidates
-     were drawn at 56px and 18px side by side and this one was picked
-     off the screen.
+     It was a bare panel with a knob, and the arrowhead was drawn
+     *inside* it: the head ended at x=10.4 and the panel's left edge
+     was at x=9, so the two overlapped by 1.4 before the stroke was
+     counted. That is why it read as a box with a stub rather than as
+     anything going anywhere.
 
      Not a bin, ever: dropping deletes nobody, and it is an unkind
      picture of a person.
 
-     The knob is a zero-length segment, not a circle: `stroke-linecap:
-     round` turns it into a dot exactly one stroke-width across, so it
-     thickens and thins with every other line instead of thinning away
-     at 18px, which a stroked r=0.6 circle did. It sits at the far edge
-     of the panel so it never crowds the arrowhead. The arrow stops
-     1.4 units past the threshold -- through the doorway, not parked
-     in the middle of it. */
-  drop: [{ r: [9, 2.5, 12, 19, 1.6] },
-         { d: "M18.4 12h0.01" },
-         { d: "M2 12h8.2M7.4 8.4l3 3.6-3 3.6" }],
-  restore: [{ r: [9, 2.5, 12, 19, 1.6] },
-            { d: "M18.4 12h0.01" },
-            { d: "M10.2 12H2M5 8.4L2 12l3 3.6" }],
+     **The binding size is 13px, not 18.** The Roster draws these at
+     `.iconbtn` (18) and the Runs tab at `.iconbtn.tiny` (13), where
+     the stroke is 24 * 1.5 / 13 = 2.77 units wide in a 24-unit box.
+     Every gap here was checked at 13 as well as 18, by rasterising
+     and magnifying -- see `tools/mockups/README.md`. Checking only
+     the Roster would have shipped a blob to the other tab, which is
+     the "a fix applied to one path is not applied to the others"
+     failure in picture form.
+
+     The instructor pointed at a stock icon: frame, leaf hinged at the
+     right and swung toward the viewer, arrow through the opening.
+     **The whole of that does not fit.** It stacks five horizontal
+     things up the middle -- leaf top, lintel, arrow, threshold, leaf
+     bottom -- and five strokes at 2.77 is 13.9 units of ink in a box
+     24 tall. So the frame and the leaf share the top and bottom
+     lines, which is what a door only slightly open actually looks
+     like, and that takes it to three.
+
+     What survives of the reference: the opening is on the left and
+     has no stubs across it, so nothing crowds the arrow; the leaf
+     leans 3.2 units over its height, which is the only thing saying
+     "door" rather than "divider"; and the arrow's tip stops at 11.0,
+     3.6 short of where the leaf crosses its lane, so the head stays a
+     head at 13px instead of dissolving into the leaf.
+
+     The knob is gone with the panel. It was a zero-length segment
+     rather than a circle, which is still the right way to draw a dot
+     in a glyph -- `M18.4 12h0.01` under `stroke-linecap: round` is
+     exactly one stroke-width across and scales with everything else.
+     On a leaf one line wide there is nowhere to put one. */
+  drop: [{ d: "M8.4 3.6H21.2V20.4H8.4" },
+         { d: "M16.2 3.9L13 20.1" },
+         { d: "M1.4 12H11M8 9L11 12L8 15" }],
+  restore: [{ d: "M8.4 3.6H21.2V20.4H8.4" },
+            { d: "M16.2 3.9L13 20.1" },
+            { d: "M11 12H1.4M4.4 9L1.4 12L4.4 15" }],
   /* An arrow coming back round to where it started. */
   reset: "M19.4 12a7.4 7.4 0 1 1-2.2-5.3M19.6 4.4v4.2h-4.2",
   back: "M14.5 5.5 8 12l6.5 6.5",

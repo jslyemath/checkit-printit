@@ -45,6 +45,7 @@ the app's own -- which is how the first one failed to draw at all.
 | `drillin.js` | three fly-out panel layouts for the Progress drill-in, all timelines. **C was chosen.** See `PRINT_TOOL_DESIGN.md` 17. |
 | `drillin-c.js` | C refined -- no seed, no attempt number, the Scans track one size down -- with three headers. **H3, the strip, was chosen and built.** |
 | `gear.js` | five toothed gears for the Settings glyph, against the two-circles-and-sticks one in the app, at 13/18/21/32/64 and in the rail. **a8 was chosen and built.** |
+| `door.js` | seven `drop`/`restore` doors, at 13 and 18 and as a pair of real buttons. **The open-frame leaning leaf was chosen and built.** |
 
 `drillin.js` is kept rather than deleted: it is the comparison the
 choice was made from, and a decision whose alternatives have been
@@ -84,3 +85,19 @@ document.body.appendChild(big);
 class in the page's stylesheet and a data-URL SVG is its own
 document, so neither the class nor `currentColor` reaches inside
 it. The formula is the one in `style.css`.
+
+**Do it at every size the glyph is used at, and find that set
+first.** The door was judged at 18px, which is what the Roster
+draws, and a candidate was chosen -- and then the Runs tab turned
+out to draw the same glyph at 13 through `.iconbtn.tiny`, where the
+stroke is 2.77 units instead of 2.0 and the chosen one closed up.
+A different arrangement of the same parts survived both. Grep for
+the glyph's name before deciding anything:
+
+```bash
+grep -rn 'icon("drop")\|icon("restore")' src/checkit_printit/gui/static/
+```
+
+then look up each caller's class in `style.css`. The four sizes in
+use today are 21 (the rail), 18 (`.iconbtn`), 13 (`.iconbtn.tiny`)
+and 13 (the band chevron).

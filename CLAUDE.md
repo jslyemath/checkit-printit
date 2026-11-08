@@ -480,6 +480,10 @@ anything is unfinished. Order and rationale:
 
 ### How it looks, and where the rules are
 
+**`../checkit/PRINT_TOOL_DESIGN.md` section 15 is the to-do list** -- everything open, in one place, with where each item is
+written up and what it is blocked on. Strike an item through there
+when it is done, as well as in the section it came from.
+
 **`../checkit/PRINT_TOOL_DESIGN.md` section 13 is the design document.**
 It says what is settled, what is open, and which open questions are the
 instructor's rather than yours. Read it before changing anything
@@ -1284,8 +1288,15 @@ believed.
 
 A dot inside a glyph is a zero-length segment -- `M18.4 12h0.01` with
 `stroke-linecap: round` -- not a small circle. It is then exactly one
-stroke-width across and scales with everything else. The door knob was
-a stroked `r=0.6` circle and thinned away to nothing at 18px.
+stroke-width across and scales with everything else. The old door's
+knob was a stroked `r=0.6` circle and thinned away to nothing at 18px.
+
+**Nothing in the set uses that technique today** -- the door was
+redrawn on 2026-11-08 and its knob went with the panel, and it was
+the only user. It is kept here because it is still the right way to
+draw a dot, and because the next person to need one should not
+rediscover the thinning circle. `query`'s dot is a real `r=1.05`
+circle, which is large enough not to have the problem.
 
 ### `app.js` and `seating.js` share one global scope
 
@@ -1665,7 +1676,7 @@ built rather than alphabetically, because several are part-done:
 | 8e | the response pull | done -- it is Print job's first card, not a tab |
 | 8e | **Runs** | done 2026-10-24 -- this is what "Record" became. List, detail, delist, graded, reprint exactly, start-from-these-settings |
 | 8e | **Scans** | done 2026-10-27, rebuilt 2026-11-02/03. Drop a stack of PDFs, place every page by its footer code, read the grading box, two sortable tables, re-match, save into the record. On a run printed without names the id grid is read and the student found |
-| 8e | **Progress** | done 2026-10-27. The grid, thresholds, the recent highlight, a drill-in that edits. No section filter |
+| 8e | **Progress** | done 2026-10-27. The grid, thresholds, the recent highlight, stacked sorting with section bands and the name-order swap, and a drill-in panel that edits. **No section filter** -- the one thing still open on the tab |
 | 8f | **Seating** | its own module under `gui/static/seating/` — ~5,900 lines of JS and ~1,600 of CSS, by far the largest thing in the app. Four modes in the rail (**People, Groups, Seats, Printing**) and two overlays that cross them (**Up Next**, **projector**). A room can be built from nothing. See the table below, and `../checkit/PRINT_TOOL_DESIGN.md` 12.11–12.17 |
 | 8g | ~~Cold call~~ | **folded into Seating as the Up Next mode**, and renamed: the students see it. No tab of its own. See `../checkit/PRINT_TOOL_DESIGN.md` 12.12 |
 | 8h | **Setup** | half done -- a form can be created or attached from the app. The boilerplate editor is still to come |
