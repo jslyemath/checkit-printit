@@ -59,7 +59,21 @@
 
    Both notes were right, and neither is a matter of taste: a single
    stroke cannot be a panel, and the lean was on the wrong pair of
-   edges. The candidates from that round are kept below the first
+   edges.
+
+   The round after *that* was rejected too, and for a third thing
+   that is not taste: the leaf had become a **trapezoid**, hinge
+   edge taller than the free edge, so its top and bottom were not
+   parallel. A door turned toward you, drawn without a vanishing
+   point, is a **shear** -- both sides the same length, top and
+   bottom parallel. Measuring the icon he pointed at settles it:
+   its two sides are within two per cent of each other, which is
+   drawing slop on a parallelogram, not a taper. The tempting error
+   is that true perspective really would taper it, bringing the
+   free edge nearer and therefore bigger; no other glyph in this
+   set has perspective in it, so the shear is the one that belongs.
+
+   The candidates from both later rounds are kept below the first
    set, and the paths that shipped are in `app.js`. */
 (function () {
   /* A single-stroke arrow. `h` is the head's half-height, which is
@@ -164,11 +178,11 @@
 
     {
       key: "returns",
-      note: "**built.** The frame is two corner returns at the left, "
-          + "which is the part of a frame you see beside someone "
-          + "walking through. The leaf is a closed quadrilateral: "
-          + "vertical sides, slanted top and bottom, hinge edge the "
-          + "taller of the two as in the icon he pointed at",
+      note: "the right frame, the wrong leaf. Corner returns at the "
+          + "left -- the part of a frame you see beside someone "
+          + "walking through -- but the leaf tapers, hinge edge "
+          + "taller than the free edge, so its top and bottom are "
+          + "**not parallel**. A trapezoid. Rejected",
       door: [
         { d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H12.2" },
         { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H12.2" },
@@ -191,15 +205,29 @@
     },
     {
       key: "parallelogram",
-      note: "a true parallelogram -- both sides the same height, the "
-          + "whole leaf sheared up to the right. It reads as a door "
-          + "tilted rather than turned, and looks like it is floating",
+      note: "**built.** A true parallelogram: both sides 18.0 long, "
+          + "both the top and the bottom sheared 2.2 up to the "
+          + "right, so they are parallel. Measured off the icon he "
+          + "pointed at, whose two sides are within two per cent of "
+          + "each other -- drawing slop on a shear, not a taper",
       door: [
-        { d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H12.2" },
-        { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H12.2" },
-        { d: "M14.8 6.0L21.0 3.2V18.0L14.8 20.8Z" },
+        { d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H11.6" },
+        { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H11.6" },
+        { d: "M14.6 4L21 1.8V19.8L14.6 22Z" },
       ],
-      arrow: [1.6, 11.6, 12, 3],
+      arrow: [1.6, 11.4, 12, 3],
+    },
+    {
+      key: "sheared down",
+      note: "the same parallelogram sheared the other way, 2.6 down "
+          + "to the right. Reads as a door swinging the opposite "
+          + "way; the reference shears up",
+      door: [
+        { d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H11.6" },
+        { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H11.6" },
+        { d: "M14.6 2.2L21 4.8V22.8L14.6 20.2Z" },
+      ],
+      arrow: [1.6, 11.4, 12, 3],
     },
     {
       key: "lintel",

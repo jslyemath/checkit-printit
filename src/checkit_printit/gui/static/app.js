@@ -718,10 +718,26 @@ const GLYPH = {
        It is a closed quadrilateral now: **vertical sides, slanted
        top and bottom.** The slant has to be on the top and bottom,
        not the sides -- a leaning side is a door falling over, where
-       a slanted head and foot is a door turned toward you. Free
-       edge x=14.6 from y=5.2 to 18.8; hinge edge x=21 from 2.4 to
-       21.6, so the hinge is the taller of the two, as in the icon
-       he pointed at.
+       a slanted head and foot is a door turned toward you.
+
+     And it is a **parallelogram**, which was the third correction.
+     The drawing in between had the hinge edge taller than the free
+     edge, so the top and bottom were not parallel -- a trapezoid,
+     and he said so. Both sides are 18.0 long now and the top and
+     bottom are both sheared 2.2 up to the right: free edge x=14.6
+     from y=4.0 to 22.0, hinge edge x=21 from 1.8 to 19.8. That is
+     what the icon he pointed at actually draws, measured off it --
+     its two sides are within two per cent of each other in height,
+     which is a parallelogram with drawing slop, not a taper.
+
+     Worth knowing why the trapezoid was tempting and is still
+     wrong here: a door swinging toward you brings its free edge
+     nearer, and nearer is bigger, so true perspective *would* taper
+     it. A shear is the orthographic reading -- the door turned,
+     with no vanishing point -- and it is what the rest of this
+     glyph set does, none of which has perspective in it. The
+     tapered version is kept in the mockup as `free taller` and
+     `returns`.
 
      **The binding size is 13px, not 18.** The Roster draws these at
      `.iconbtn` (18) and the Runs tab at `.iconbtn.tiny` (13), beside
@@ -749,13 +765,13 @@ const GLYPH = {
      round` is exactly one stroke-width across, where a stroked
      r=0.6 circle thinned away -- and it was the set's last user of
      that trick, which printit's CLAUDE.md now says. */
-  drop: [{ d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H12.2" },
-         { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H12.2" },
-         { d: "M14.6 5.2L21 2.4V21.6L14.6 18.8Z" },
+  drop: [{ d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H11.6" },
+         { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H11.6" },
+         { d: "M14.6 4L21 1.8V19.8L14.6 22Z" },
          { d: "M1.6 12H11.4M8.4 9L11.4 12L8.4 15" }],
-  restore: [{ d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H12.2" },
-            { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H12.2" },
-            { d: "M14.6 5.2L21 2.4V21.6L14.6 18.8Z" },
+  restore: [{ d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H11.6" },
+            { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H11.6" },
+            { d: "M14.6 4L21 1.8V19.8L14.6 22Z" },
             { d: "M11.4 12H1.6M4.6 9L1.6 12L4.6 15" }],
   /* An arrow coming back round to where it started. */
   reset: "M19.4 12a7.4 7.4 0 1 1-2.2-5.3M19.6 4.4v4.2h-4.2",
