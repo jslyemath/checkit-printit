@@ -426,6 +426,30 @@ class TestTheWholePageView:
         assert out["file"] == "copier-1.pdf"
         assert out["image"].startswith("data:image/jpeg;base64,")
 
+    def test_a_thumbnail_is_much_smaller_than_a_look(self, course):
+        """What the drill-in asks for.
+
+        The panel draws one page per attempt, so a student who has
+        sat a skill four times would otherwise cost four full-page
+        renders at once, where a look used to cost one. Measured
+        rather than asserted in the abstract: the point of the flag
+        is the bytes, so the bytes are what is checked.
+        """
+        import base64
+
+        def jpeg_bytes(out):
+            head, _, data = out["image"].partition(",")
+            assert head == "data:image/jpeg;base64"
+            return len(base64.b64decode(data))
+
+        look = gui_mod.api_scan_sheet(
+            course, {"file": "copier-1.pdf", "page": 1})
+        thumb = gui_mod.api_scan_sheet(
+            course, {"file": "copier-1.pdf", "page": 1, "thumb": True})
+        assert thumb["file"] == look["file"]
+        assert thumb["page"] == look["page"]
+        assert jpeg_bytes(thumb) < jpeg_bytes(look) / 2
+
     def test_a_file_outside_the_scans_folder_is_not_opened(self, course,
                                                            tmp_path):
         """The browser names the file, and somewhere else on the disk

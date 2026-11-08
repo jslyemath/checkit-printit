@@ -968,16 +968,34 @@
   </div>
 </dialog>
 
-<dialog id="cell" class="ask cellbox">
-  <h3 id="cell-title"></h3>
-  <p class="muted" id="cell-sub"></p>
-  <div id="cell-papers"></div>
-  <p class="muted" id="cell-none" hidden></p>
-  <div class="toolbar">
+<!-- The drill-in. A panel rather than a dialog: the grid stays
+     visible behind it and the cell it came from stays lit, so working
+     down a column after a scan does not mean closing and reopening
+     one dialog per student. -->
+<aside id="cellpanel" class="flyout" hidden aria-labelledby="cell-who">
+  <div class="flyout-top">
+    <span class="flyout-who" id="cell-who"></span>
+    <span class="flyout-where" id="cell-where"></span>
     <span class="spacer"></span>
-    <button id="cell-close" class="primary">Done</button>
+    <button id="cell-close" class="iconbtn tiny" title="Close"></button>
   </div>
-</dialog>
+  <!-- Which cell this is, as a strip rather than a second heading:
+       the student is the subject and the skill is the context. -->
+  <div class="flyout-strip">
+    <span class="flyout-slug" id="cell-slug"></span>
+    <span class="flyout-skill" id="cell-skill"></span>
+    <span class="spacer"></span>
+    <span class="flyout-verdict" id="cell-verdict"></span>
+  </div>
+  <div class="flyout-line" id="cell-papers"></div>
+  <p class="muted flyout-none" id="cell-none" hidden></p>
+  <div class="flyout-foot">
+    <span class="flyout-footsay" id="cell-footsay"></span>
+    <span class="spacer"></span>
+    <button id="cell-prev" class="iconbtn tiny" title="The student above"></button>
+    <button id="cell-next" class="iconbtn tiny" title="The student below"></button>
+  </div>
+</aside>
 
 <dialog id="ask" class="ask">
   <h3 id="ask-title"></h3>

@@ -2213,8 +2213,14 @@ table.unplaced td { white-space: normal; }
    tells you the shape of the marking before you read any of it. The
    three marks are an order he reads in -- passed, query, not passed
    -- which is why a track is honest here and would not be for an
-   unordered set. */
-table.matched .review-picks {
+   unordered set.
+
+   Keyed on `.track`, not on `table.matched`. It was written for the
+   Scans table and the Progress drill-in now draws the same control,
+   and the same argument -- read the column, not the row -- is what
+   makes it right down a timeline too. A second copy would have been
+   a second thing to keep in step. Whoever draws it adds the class. */
+.review-picks.track {
   display: inline-flex;
   align-items: center;
   gap: 0;
@@ -2224,7 +2230,7 @@ table.matched .review-picks {
   background: var(--surface-2);
   line-height: 1;
 }
-table.matched .review-pick {
+.review-picks.track .review-pick {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2236,17 +2242,28 @@ table.matched .review-pick {
   background: transparent;
   color: var(--muted);
 }
-table.matched .review-pick .glyph {
+.review-picks.track .review-pick .glyph {
   --glyph-size: 17;
   width: 17px;
   height: 17px;
 }
-table.matched .review-pick:hover { background: var(--surface-3); color: var(--ink); }
-table.matched .review-pick.on {
+.review-picks.track .review-pick:hover { background: var(--surface-3); color: var(--ink); }
+.review-picks.track .review-pick.on {
   background: var(--accent);
-  color: var(--on-accent, #0b1f14);
+  color: var(--accent-ink);
 }
-table.matched .review-pick.on:hover { background: var(--accent); }
+.review-picks.track .review-pick.on:hover { background: var(--accent); }
+
+/* One size down, for the drill-in. In the Scans table the track is
+   the widest thing in a row of plain text and carries the column; in
+   the panel it sits under two short lines beside a small page, and
+   at the table's size it was the loudest thing there. */
+.review-picks.track.tight .review-pick { width: 28px; height: 22px; }
+.review-picks.track.tight .review-pick .glyph {
+  --glyph-size: 14;
+  width: 14px;
+  height: 14px;
+}
 
 /* ---- the job header --------------------------------------------------
    What the stack turned out to be, one section per print job it came
@@ -2381,7 +2398,6 @@ table.matched .review-pick.on:hover { background: var(--accent); }
    would only blur it -- for a bigger picture, scan at a higher
    resolution. */
 .review-shot img { display: block; width: 171px; height: auto; }
-.review-nocrop { color: #8a8a8a; padding: 0 var(--s3); font-size: 13px; }
 
 .review-picks { display: flex; gap: var(--s1); flex-wrap: wrap; }
 .review-pick {
@@ -2391,14 +2407,16 @@ table.matched .review-pick.on:hover { background: var(--accent); }
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   background: transparent;
-  color: var(--text);
+  color: var(--ink);
   cursor: pointer;
 }
-.review-pick:hover { border-color: var(--border-strong, var(--line)); }
+/* The only feedback this variant has: it has no hover background, so
+   if the border does not move, nothing does. */
+.review-pick:hover { border-color: var(--line-strong); }
 .review-pick.on {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--on-accent, #0b1f14);
+  color: var(--accent-ink);
 }
 
 /* A row nobody has decided yet is marked on its edge rather than
@@ -2764,28 +2782,200 @@ button.act.chip:hover { border-color: var(--line-strong); }
   padding: var(--s3) 0 0;
 }
 
-/* ---- one cell, close up ------------------------------------------ */
+/* ---- one cell, close up ------------------------------------------
 
-/* Wider than `ask`, which holds a sentence; this holds a table of
-   printings with four buttons on each. */
-.cellbox { max-width: 620px; width: calc(100vw - 2 * var(--s6)); }
+   A panel against the right edge, not a dialog in the middle. A
+   dialog meant closing and reopening for every student in a column,
+   and after a scan that is the whole job; a panel leaves the grid
+   where it is and the cell it came from lit.
 
-.cellpaper {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: var(--s1) var(--s3);
-  align-items: center;
-  padding: var(--s3) 0;
-  border-top: 1px solid var(--line);
+   It costs width -- 400px against the dialog's 620 -- which is why
+   the seed, the version letter, the attempt number and the scanner's
+   own reading are not in here. The seed is how a paper is found
+   again, which is a thing to look up, not to read down a list; the
+   version distinguishes nothing among one student's own papers; the
+   number counts out loud what a timeline has already said; and the
+   reading is how a mark was arrived at, which belongs where a
+   disagreement is looked into.
+
+   It takes width from the window rather than floating over it.
+   `body` is already a flex row -- the nav rail, then `main` at
+   `flex: 1 1 auto; min-width: 0` -- so the panel is a third item
+   beside them and the grid simply becomes 400px narrower. No margin
+   on `main`, and no JavaScript: the layout the app already had does
+   it.
+
+   Floating over was built first and was wrong for this grid. The
+   reason for a panel rather than a dialog is that the cell it came
+   from stays lit, and an overlay hides exactly the right-hand
+   columns -- measured: a cell at x 974-1271 with the panel starting
+   at 1100 sat underneath it, and on a full roster that is about two
+   columns by forty-five rows unreachable without closing the panel.
+   The grid already scrolls sideways, so narrowing it costs columns
+   on screen and costs no access at all. */
+.flyout {
+  flex: 0 0 400px;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+  border-left: 1px solid var(--line);
 }
-.cellpaper:first-child { border-top: 0; }
-.cellwhen { font-size: var(--t-base); }
-.cellwhen .muted { font-size: var(--t-sm); }
-/* Under the date rather than beside it: "scanner read it as empty"
-   is about the same paper as the line above, and a third column
-   would make the four buttons wrap at this width. */
-.cellread { grid-column: 1; font-size: var(--t-sm); }
-.cellpaper .review-picks { grid-column: 2; grid-row: 1 / span 2; }
+.flyout[hidden] { display: none; }
+
+/* Below this there is no width to share: 400px of panel would leave
+   a grid too narrow to be the thing you are working against, so the
+   panel goes back to covering. Material's side sheets and Liferay's
+   sidebar both switch at about here, for the same reason. */
+@media (max-width: 900px) {
+  .flyout {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    max-width: calc(100vw - var(--s6));
+  }
+}
+
+.flyout-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4) var(--s2);
+}
+.flyout-who { font-size: var(--t-lg); color: var(--ink); }
+.flyout-where { font-size: var(--t-xs); color: var(--muted); }
+
+/* The skill as a strip rather than a second heading. Tinted, so it
+   reads as the context the panel was opened in; a line of the same
+   weight under the name read as a subtitle, which made it compete
+   with the name for what the panel is about. */
+.flyout-strip {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s2) var(--s4);
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.flyout-slug {
+  font-size: var(--t-xs);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+}
+.flyout-skill {
+  font-size: var(--t-sm);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flyout-verdict {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s1);
+  font-size: var(--t-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.flyout-verdict .cellcount { color: var(--ink); }
+
+/* The attempts. Scrolls on its own, so the header and the step to
+   the next student stay put however many times a skill was sat. */
+.flyout-line { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s4); }
+.flyout-none { padding: var(--s4); margin: 0; }
+
+.flyout-step {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: var(--s3);
+  position: relative;
+  padding-bottom: var(--s4);
+}
+/* The pages fill their rows and stack, so they are the spine; the
+   rail is the stub between one and the next. */
+.flyout-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 28px;
+  bottom: 0;
+  height: var(--s4);
+  width: 2px;
+  background: var(--line);
+}
+.flyout-when { font-size: var(--t-base); color: var(--ink); }
+.flyout-run { font-size: var(--t-sm); color: var(--muted); }
+.flyout-step .review-picks { margin-top: var(--s2); }
+
+/* The page itself, as the thing you click. No height of its own: a
+   grid item stretches, so it ends exactly where the track ends, and
+   a letter page is about 0.71 as wide as it is tall, which is about
+   what the row comes out at. */
+.flyout-shot { position: relative; width: 58px; height: 100%; }
+.flyout-paper {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  display: block;
+  height: 100%;
+}
+.flyout-thumb {
+  width: 54px;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface-2);
+  display: block;
+}
+.flyout-paper:hover .flyout-thumb { border-color: var(--accent); }
+.flyout-paper:focus-visible { outline: 2px solid var(--accent);
+  outline-offset: 2px; border-radius: 3px; }
+/* Nothing was scanned, so there is nothing to click and no picture
+   to show. The empty frame says it without a sentence. */
+.flyout-thumb.none { border-style: dashed; opacity: .55; }
+
+.flyout-badge {
+  position: absolute;
+  left: 38px;
+  bottom: -8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-1);
+  border: 1.5px solid var(--line);
+}
+.flyout-badge .glyph { --glyph-size: 11; width: 11px; height: 11px; }
+.flyout-badge.passed { border-color: var(--accent); color: var(--accent); }
+.flyout-badge.none-passed { border-color: var(--bad); color: var(--bad); }
+.flyout-badge.query { border-color: var(--warn); color: var(--warn); }
+
+.flyout-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s4);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.flyout-footsay { font-size: var(--t-xs); color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The cell it came from stays lit, which is the whole reason this is
+   a panel. Said with the accent, like the focus ring it replaces. */
+#progress-grid td.cell.open {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
 
 /* The grid's cells are buttons. Said quietly -- a pointer and a
    focus ring, no hover fill -- because 1,300 cells that light up

@@ -42,4 +42,9 @@ the app's own -- which is how the first one failed to draw at all.
 
 | file | what it shows |
 |---|---|
-| `drillin.js` | three fly-out panel layouts for the Progress drill-in, all timelines. See `PRINT_TOOL_DESIGN.md` 17. |
+| `drillin.js` | three fly-out panel layouts for the Progress drill-in, all timelines. **C was chosen.** See `PRINT_TOOL_DESIGN.md` 17. |
+| `drillin-c.js` | C refined -- no seed, no attempt number, the Scans track one size down -- with three headers. **H3, the strip, was chosen and built.** |
+
+`drillin.js` is kept rather than deleted: it is the comparison the
+choice was made from, and a decision whose alternatives have been
+thrown away is a decision that gets reopened.

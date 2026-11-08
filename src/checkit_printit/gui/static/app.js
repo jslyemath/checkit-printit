@@ -1309,11 +1309,11 @@ function progressCell(student, skill, cell, lit) {
   // empty cell is the most likely one to need filling in by hand.
   td.tabIndex = 0;
   td.setAttribute("role", "button");
-  td.onclick = () => openCell(student, skill);
+  td.onclick = () => openCell(student, skill, cell, state, td);
   td.onkeydown = (e) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      openCell(student, skill);
+      openCell(student, skill, cell, state, td);
     }
   };
   return td;
@@ -1422,80 +1422,233 @@ async function openSheet(row, where) {
 
 let cellOpen = null;
 
-async function openCell(student, skill) {
-  cellOpen = { student, skill };
-  const box = document.getElementById("cell");
-  document.getElementById("cell-title").textContent =
-    `${student.name || student.sid} \u2014 ${skill.slug}`;
-  document.getElementById("cell-sub").textContent = skill.threshold > 1
-    ? `${skill.title} \u2014 needs ${skill.threshold} passes`
-    : skill.title;
+/* Which cell the panel is showing. `td` is kept so it can be lit
+   while the panel is open and so stepping to the next student can
+   walk the grid rather than re-sort it -- the grid already knows
+   what order it is in and which rows are collapsed behind a band,
+   and a second copy of that would be a second thing to get wrong. */
+async function openCell(student, skill, cell, state, td) {
+  litCell(null);
+  cellOpen = { student, skill, td };
+  litCell(td);
+
+  const who = displayName(student) || student.sid;
+  document.getElementById("cell-who").textContent = who;
+  document.getElementById("cell-where").textContent = student.section || "";
+  document.getElementById("cell-slug").textContent = skill.slug;
+  // A bank whose skill is titled with its own slug would otherwise
+  // say "W5 W5". The pill is the slug, so the title only earns its
+  // place when it says something the pill did not.
+  const title = document.getElementById("cell-skill");
+  title.textContent = skill.title === skill.slug ? "" : skill.title;
+  document.getElementById("cell-footsay").textContent = who;
+
+  // The verdict the cell itself shows, in the cell's own words, so
+  // the panel confirms you opened the one you meant to.
+  const verdict = document.getElementById("cell-verdict");
+  verdict.textContent = "";
+  if (state && state.kind !== "none") {
+    if (state.count) {
+      const n = document.createElement("span");
+      n.className = "cellcount";
+      n.textContent = state.count;
+      const say = document.createElement("span");
+      say.textContent = "passed";
+      verdict.append(n, say);
+    } else {
+      verdict.textContent = state.kind === "passed" ? "passed"
+        : state.kind === "query" ? "in question" : "no passes yet";
+    }
+  }
+
   document.getElementById("cell-papers").textContent = "";
   document.getElementById("cell-none").hidden = true;
-  if (!box.open) box.showModal();
+  document.getElementById("cellpanel").hidden = false;
+  keepCellInView();
+  stepButtons();
   await drawCell();
+}
+
+/* Opening the panel takes 400px off the grid, so a cell near the
+   right edge can fall outside it -- which would lose sight of the
+   lit cell just as the overlay did by covering it, only by scrolling
+   instead. `nearest` on both axes, so a cell already on screen does
+   not move and the grid does not jump under him.
+
+   Two frames, not one. Revealing the panel narrows the grid, and the
+   browser then adjusts the scroller's own `scrollLeft` to keep it in
+   range -- that adjustment lands after the first frame, so scrolling
+   on the first frame is undone by it. Measured: one frame left the
+   cell at x 1015 in a scroller ending at 984, and the same call by
+   hand a moment later moved it to 934. */
+function keepCellInView() {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (cellOpen && cellOpen.td && cellOpen.td.isConnected) {
+      cellOpen.td.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }));
+}
+
+function closeCell() {
+  litCell(null);
+  cellOpen = null;
+  document.getElementById("cellpanel").hidden = true;
+}
+
+function litCell(td) {
+  if (!td) {
+    for (const lit of document.querySelectorAll("#progress-grid td.cell.open")) {
+      lit.classList.remove("open");
+    }
+    return;
+  }
+  td.classList.add("open");
+}
+
+/* The student above and the student below, as the grid is showing
+   them now. A `tr` with no cells is a section band, so it is stepped
+   over rather than opened. */
+function cellNeighbour(step) {
+  if (!cellOpen || !cellOpen.td || !cellOpen.td.isConnected) return null;
+  const td = cellOpen.td;
+  const at = td.cellIndex;
+  let row = td.parentElement;
+  for (;;) {
+    row = step < 0 ? row.previousElementSibling : row.nextElementSibling;
+    if (!row) return null;
+    const next = row.cells && row.cells[at];
+    if (next && next.classList.contains("cell")) return next;
+  }
+}
+
+function stepButtons() {
+  document.getElementById("cell-prev").disabled = !cellNeighbour(-1);
+  document.getElementById("cell-next").disabled = !cellNeighbour(1);
+}
+
+function stepCell(step) {
+  const next = cellNeighbour(step);
+  if (next) next.click();
 }
 
 async function drawCell() {
   const { student, skill } = cellOpen;
   const out = await api("/api/progress/cell",
                         { sid: student.sid, slug: skill.slug });
-  if (!out || !cellOpen) return;
+  // The panel may have been closed, or moved to another student,
+  // while the request was in the air.
+  if (!out || !cellOpen || cellOpen.student.sid !== student.sid
+      || cellOpen.skill.slug !== skill.slug) return;
+  paintCell(out.papers, skill, student);
+}
+
+function paintCell(papers, skill, student) {
   const list = document.getElementById("cell-papers");
   list.textContent = "";
   const none = document.getElementById("cell-none");
-  none.hidden = out.papers.length > 0;
-  if (!out.papers.length) {
+  none.hidden = papers.length > 0;
+  if (!papers.length) {
     // Not "no results": there is nothing to have a result about,
-    // and the fix is a print job, not this dialog.
+    // and the fix is a print job, not this panel.
     none.textContent = `${skill.slug} has never been printed for `
-      + `${student.name || student.sid}, so there is nothing to record `
-      + `yet. Put it in a print job first.`;
+      + `${displayName(student) || student.sid}, so there is nothing to `
+      + `record yet. Put it in a print job first.`;
     return;
   }
-  for (const paper of out.papers) list.appendChild(cellPaper(paper));
+  for (const paper of papers) list.appendChild(cellPaper(paper));
 }
 
+/* Which tone the badge on a page wears. The same three the grid uses,
+   so a cell and the attempt that produced it are the same colour. */
+const OUTCOME_TONE = {
+  passed: "passed", failed: "none-passed", queried: "query",
+};
+
 function cellPaper(paper) {
-  const row = document.createElement("div");
-  row.className = "cellpaper";
+  const step = document.createElement("div");
+  step.className = "flyout-step";
 
-  const when = document.createElement("div");
-  when.className = "cellwhen";
-  const date = document.createElement("div");
-  // The app's own date wording, which is the wording on the
-  // confirmation the student ticked.
-  date.textContent = spokenDay(paper.date) || paper.date;
-  const what = document.createElement("div");
-  what.className = "muted";
-  // The seed is how this exact paper is found again -- it is what
-  // `--seed` takes and what the manifest pins. Worth the room.
-  // The seed is how this exact paper is found again -- it is what
-  // `--seed` takes and what the manifest pins. Unless the run's
-  // index was rebuilt after the papers were printed, in which case
-  // the seed is a fresh draw and saying it plainly would be a
-  // claim about a paper nobody has.
-  what.textContent = paper.rebuilt
-    ? `${paper.title}, version ${paper.version} \u2014 index rebuilt, `
-      + `so the seed printed is not known`
-    : `${paper.title}, version ${paper.version}, seed ${paper.seed}`;
-  if (paper.rebuilt) what.classList.add("warnline");
-  when.append(date, what);
-
-  const said = document.createElement("div");
-  said.className = "muted cellread";
-  if (paper.reading) {
-    said.textContent = `scanner read it as ${paper.reading}`;
-  } else if (paper.outcome) {
-    said.textContent = "recorded by hand";
-  } else {
-    said.textContent = "never scanned";
+  const shot = document.createElement("div");
+  shot.className = "flyout-shot";
+  shot.appendChild(paperShot(paper));
+  if (paper.outcome && OUTCOME_TONE[paper.outcome]) {
+    const badge = document.createElement("div");
+    badge.className = "flyout-badge " + OUTCOME_TONE[paper.outcome];
+    badge.appendChild(icon(OUTCOME_GLYPH[paper.outcome]));
+    shot.appendChild(badge);
   }
 
+  const body = document.createElement("div");
+  const when = document.createElement("div");
+  when.className = "flyout-when";
+  // The app's own date wording, which is the wording on the
+  // confirmation the student ticked.
+  when.textContent = spokenDay(paper.date) || paper.date;
+  const run = document.createElement("div");
+  run.className = "flyout-run";
+  run.textContent = paper.title;
+  // The seed is not drawn, so a rebuilt index no longer makes the
+  // panel say something false about which paper this was -- but it
+  // still means the stored seed is a fresh draw, and that is worth
+  // knowing if you go looking for the exercise.
+  if (paper.rebuilt) {
+    run.title = "this run's index was rebuilt after it was printed, "
+      + "so the seed on record is not the one that was printed";
+  }
+  body.append(when, run, cellTrack(paper));
+
+  step.append(shot, body);
+  return step;
+}
+
+/* The page, small, as the thing you click -- never the words "see
+   the paper". A control standing in for a thing should look like the
+   thing. Where nothing was scanned there is nothing to click, and
+   the empty frame says so without a sentence.
+
+   The picture is fetched per attempt rather than with the list: a
+   panel is opened far more often than its pages are looked at, and
+   the list has to be on screen before the first one arrives anyway. */
+function paperShot(paper) {
+  if (!paper.scan) {
+    const none = document.createElement("div");
+    none.className = "flyout-thumb none";
+    none.title = "never scanned";
+    return none;
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "flyout-paper";
+  button.title = "See the whole page";
+  const img = document.createElement("img");
+  img.className = "flyout-thumb";
+  img.alt = "";
+  button.appendChild(img);
+  button.onclick = () => openCellSheet(paper);
+  api("/api/scan/sheet",
+      { file: paper.scan, page: paper.scanPage, thumb: true })
+    .then(out => { if (out) img.src = out.image; });
+  return button;
+}
+
+async function openCellSheet(paper) {
+  const { student, skill } = cellOpen;
+  await openSheet(
+    { name: displayName(student) || student.sid, skill: skill.slug },
+    { file: paper.scan, page: paper.scanPage });
+}
+
+/* The mark track, the same control the Scans table draws.
+
+   "Did not sit it" is only an offer for a paper that never came
+   back: a sheet that came back was sat, whatever is on it. The same
+   rule `matchedMarkCell` follows, for the same reason. */
+function cellTrack(paper) {
   const picks = document.createElement("div");
-  picks.className = "review-picks";
+  picks.className = "review-picks track tight";
   picks.setAttribute("role", "radiogroup");
   for (const outcome of OUTCOME_LIST) {
+    if (outcome.id === "absent" && paper.scan) continue;
     const b = document.createElement("button");
     b.type = "button";
     b.className = "review-pick";
@@ -1509,27 +1662,39 @@ function cellPaper(paper) {
     b.onclick = () => setCellOutcome(paper.runId, outcome.id);
     picks.appendChild(b);
   }
-
-  row.append(when, said, picks);
-  return row;
+  return picks;
 }
 
 async function setCellOutcome(runId, outcome) {
   const { student, skill } = cellOpen;
   const out = await api("/api/progress/set", {
     runId, sid: student.sid, slug: skill.slug, outcome });
-  if (!out) return;
+  if (!out || !cellOpen) return;
   // Saved as it is clicked. There is no draft here -- one click is
   // one decision about one paper -- and a Save button would be a
   // second state to get wrong.
-  const list = document.getElementById("cell-papers");
-  list.textContent = "";
-  for (const paper of out.papers) list.appendChild(cellPaper(paper));
+  paintCell(out.papers, skill, student);
   toast("Saved.");
   // The grid behind is now wrong. Redrawn rather than patched: the
   // cell's state depends on counts, thresholds and which run the
   // pass came from, and three of those are the server's answer.
+  //
+  // Redrawing replaces every `td`, so the one the panel is holding
+  // is no longer in the page. It is found again by where it was.
+  const at = cellOpen.td
+    ? { row: cellOpen.td.parentElement.rowIndex, col: cellOpen.td.cellIndex }
+    : null;
   await loadProgress();
+  if (!cellOpen) return;
+  if (at) {
+    const grid = document.getElementById("progress-grid");
+    const row = grid && grid.rows[at.row];
+    const td = row && row.cells[at.col];
+    cellOpen.td = td && td.classList.contains("cell") ? td : null;
+    litCell(cellOpen.td);
+    keepCellInView();
+  }
+  stepButtons();
 }
 
 /* The four outcomes, as the review grid gets them from the server.
@@ -3507,7 +3672,10 @@ function matchedBoxCell(row) {
 
 function matchedMarkCell(row) {
   const picks = document.createElement("span");
-  picks.className = "review-picks";
+  // `track` is what styles it as one pill with the verdict filled in
+  // place. It used to be keyed on `table.matched`; the drill-in draws
+  // the same control, so the class says it instead of the ancestor.
+  picks.className = "review-picks track";
   picks.setAttribute("role", "radiogroup");
   for (const outcome of reviewOutcomes) {
     // "Did not sit it" is only an answer for a paper that is not
@@ -6060,12 +6228,24 @@ async function boot() {
   document.getElementById("store-open").onclick = openStacks;
   document.getElementById("sheet-close").onclick = () =>
     document.getElementById("sheet").close();
-  document.getElementById("cell-close").onclick = () => {
-    cellOpen = null;
-    document.getElementById("cell").close();
-  };
-  document.getElementById("cell").addEventListener("close", () => {
-    cellOpen = null;
+  const shutCell = document.getElementById("cell-close");
+  shutCell.appendChild(icon("forward"));
+  shutCell.onclick = closeCell;
+  const cellPrev = document.getElementById("cell-prev");
+  cellPrev.appendChild(icon("back"));
+  cellPrev.onclick = () => stepCell(-1);
+  const cellNext = document.getElementById("cell-next");
+  cellNext.appendChild(icon("forward"));
+  cellNext.onclick = () => stepCell(1);
+  // A panel is not a dialog, so Escape is not free. It is what the
+  // rest of the app closes things with, and the panel sits over the
+  // grid, so it has to be.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !cellOpen) return;
+    // Not while the enlarged page is up -- that is what Escape is
+    // closing then, and the dialog handles it.
+    if (document.getElementById("sheet").open) return;
+    closeCell();
   });
   document.getElementById("print-save").onclick = savePrint;
   document.getElementById("print-revert").onclick = revertPrint;
