@@ -2820,21 +2820,26 @@ button.act.chip:hover { border-color: var(--line-strong); }
    The grid already scrolls sideways, so narrowing it costs columns
    on screen and costs no access at all.
 
-   320px, which is what the parts that cannot shrink actually need:
-   the page at 58, the mark track at 117 when it carries four stops,
-   the gap between them, and the panel's own padding -- a step comes
-   to 188 and the footer to 148. It was 400 first, carried over from
-   the mockup where it was being compared against a 620px dialog,
-   and that was about 105px more than anything in it asked for.
+   240px, from the one thing in here that cannot give way: the mark
+   track is 117 when it carries four stops, the page beside it 58,
+   the gap 12 and the panel's own padding 32, so nothing can work
+   below 219. Measured over fourteen students, the widest date is 99
+   and the widest name 93, which both sit inside that, and a run
+   title simply wraps.
 
-   The one part that can want more is the skill's title, and it has
-   an ellipsis and a tooltip, so it gives way rather than the grid
-   doing. `width` as well as `flex-basis` because below the
+   It was 400 first, carried over from the mockup where it was drawn
+   against a 620px dialog, and then 320, which was read off the
+   strip -- but the strip wants 434 for a long skill title and has
+   an ellipsis, so it was never the thing to measure. A part that
+   can give way should not set the width. The skill title and the
+   student's name both ellipsize, with tooltips, so the grid does
+   not pay for a long one. `width` as well as `flex-basis` because
+   below the
    breakpoint the panel is taken out of flow, where a flex basis
    means nothing and it would otherwise shrink-wrap. */
 .flyout {
-  flex: 0 0 320px;
-  width: 320px;
+  flex: 0 0 240px;
+  width: 240px;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -2865,7 +2870,17 @@ button.act.chip:hover { border-color: var(--line-strong); }
   gap: var(--s2);
   padding: var(--s3) var(--s4) var(--s2);
 }
-.flyout-who { font-size: var(--t-lg); color: var(--ink); }
+/* A long name gives way rather than the grid doing. `min-width: 0`
+   because a flex item refuses to shrink below its content without
+   it, which is how an ellipsis that is set still never appears. */
+.flyout-who {
+  font-size: var(--t-lg);
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .flyout-where { font-size: var(--t-xs); color: var(--muted); }
 
 /* The skill as a strip rather than a second heading. Tinted, so it
@@ -2874,7 +2889,10 @@ button.act.chip:hover { border-color: var(--line-strong); }
    with the name for what the panel is about. */
 .flyout-strip {
   display: flex;
-  align-items: baseline;
+  /* Centred rather than on a baseline. Two of the three are text,
+     and the third is a glyph in a box whose baseline is the box's
+     own bottom edge -- which sat it low beside the slug. */
+  align-items: center;
   gap: var(--s2);
   padding: var(--s2) var(--s4);
   background: var(--surface-2);
@@ -2899,16 +2917,26 @@ button.act.chip:hover { border-color: var(--line-strong); }
    a highlight reads as a highlight rather than as ink behind the
    glyph; the colour and the background come from the grid's own
    rules, which name this class beside each `td`. Nothing when the
-   cell is blank -- an empty strip is the honest answer. */
+   cell is blank -- an empty strip is the honest answer.
+
+   The outline is `currentColor`, so it is the mark's own colour
+   without naming a colour here: green round a tick, red round a
+   cross, amber round a query, and the highlight's own colour where
+   there is one. The slug beside it is outlined too, which is what
+   makes the pair read as two chips rather than a chip and a stray
+   glyph -- so it takes the slug's shape and padding as well. */
 .flyout-verdict {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 26px;
-  padding: 2px var(--s2);
-  border-radius: var(--r-sm);
+  min-width: 24px;
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--r-pill);
   white-space: nowrap;
 }
+/* Nothing recorded: no chip at all, rather than an empty outline. */
+.flyout-verdict:empty { border: 0; padding: 0; min-width: 0; }
 
 /* The attempts. Scrolls on its own, so the header and the step to
    the next student stay put however many times a skill was sat. */
