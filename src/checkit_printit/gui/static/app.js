@@ -1447,7 +1447,10 @@ async function openCell(student, skill, cell, state, td) {
   litCell(td);
 
   const who = displayName(student) || student.sid;
-  document.getElementById("cell-who").textContent = who;
+  const whoEl = document.getElementById("cell-who");
+  whoEl.textContent = who;
+  // Allowed to be cut at this width, so recoverable by pointing.
+  whoEl.title = who;
   document.getElementById("cell-where").textContent = student.section || "";
   document.getElementById("cell-slug").textContent = skill.slug;
   // A bank whose skill is titled with its own slug would otherwise
