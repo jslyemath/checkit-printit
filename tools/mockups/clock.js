@@ -38,18 +38,33 @@
      (-sin, cos). Getting that backwards points the head the way the
      arc came from, which looks almost right and is the sort of
      thing nobody spots at 21px. */
-  function dial(a, b, r, head, cx = 12, cy = 12) {
-    const [ax, ay] = at(a, r, cx, cy);
-    const [bx, by] = at(b, r, cx, cy);
-    const travelled = ((a - b) + 360) % 360;
-    const tx = Math.sin(b * RAD), ty = -Math.cos(b * RAD);
+  function dial(gapA, gapB, r, head, cx = 12, cy = 12, cw = false) {
+    // gapA..gapB is the GAP. Travel takes the long way round, from one
+    // edge of the gap to the other, so the head always lands on a gap
+    // edge and the arc is always the large one.
+    const start = cw ? gapB : gapA;
+    const end = cw ? gapA : gapB;
+    const [ax, ay] = at(start, r, cx, cy);
+    const [bx, by] = at(end, r, cx, cy);
+    const tx = cw ? -Math.sin(end * RAD) : Math.sin(end * RAD);
+    const ty = cw ? Math.cos(end * RAD) : -Math.cos(end * RAD);
     const wing = (deg) => {
       const c = Math.cos(deg * RAD), s = Math.sin(deg * RAD);
       return `${(bx - (tx * c - ty * s) * head).toFixed(2)} `
            + `${(by - (tx * s + ty * c) * head).toFixed(2)}`;
     };
-    return `M${ax} ${ay}A${r} ${r} 0 ${travelled > 180 ? 1 : 0} 0 ${bx} ${by}`
+    return `M${ax} ${ay}A${r} ${r} 0 1 ${cw ? 1 : 0} ${bx} ${by}`
          + `M${wing(34)}L${bx} ${by}L${wing(-34)}`;
+  }
+
+  /* A plain sheet. Written out rather than left as a <rect> because
+     these get combined with partial outlines below, and one shape
+     kind per family keeps the editing honest. */
+  function sheet(x0, y0, x1, y1, r) {
+    return `M${x0 + r} ${y0}H${x1 - r}A${r} ${r} 0 0 1 ${x1} ${y0 + r}`
+         + `V${y1 - r}A${r} ${r} 0 0 1 ${x1 - r} ${y1}`
+         + `H${x0 + r}A${r} ${r} 0 0 1 ${x0} ${y1 - r}`
+         + `V${y0 + r}A${r} ${r} 0 0 1 ${x0 + r} ${y0}Z`;
   }
 
   const RING = "M12 3.7a8.3 8.3 0 1 1 0 16.6 8.3 8.3 0 0 1 0-16.6";
@@ -91,6 +106,87 @@
               + "a1.8 1.8 0 0 1-1.8-1.8V5.2a1.8 1.8 0 0 1 1.8-1.8z",
               "M15.3 3.4v3.3h3.3",
               "M9.3 11.4h5.4M9.3 15.0h3.6"] },
+
+    /* --- paper plus a circular arrow, after he liked the page ---
+
+       Two objects in a 24-unit box with a 1.714-unit stroke, which
+       the arithmetic says should not fit: a badge small enough to
+       sit beside a page is about 9 units across, and the page's
+       corner lands inside it.
+
+       It fits anyway, because of a knockout. The page outline is
+       simply **not drawn** where the badge sits -- its bottom edge
+       and its right edge stop short, and the gap reads as the page
+       passing behind. An overlap that would have merged becomes a
+       gap drawn on purpose. That is the trick worth remembering
+       from this round; it is how every badged icon in every set
+       does it, and it was not obvious from the measurements. */
+
+    { key: "7 page, arrow inside",
+      note: "the arrow where the page's text lines would be. Biggest "
+          + "arrow of the lot and the clearest, but it is the browser "
+          + "reload icon, and that is a strong prior reading",
+      parts: [sheet(4.0, 2.4, 20.0, 21.6, 1.8),
+              dial(250, 290, 4.6, 2.5, 12, 12.6)] },
+    { key: "8 stack, arrow inside",
+      note: "two sheets, the arrow on the front one. The second "
+          + "sheet is what says *runs* rather than *a run*",
+      parts: ["M7.6 4.2h10.6a1.8 1.8 0 0 1 1.8 1.8v10.6",
+              sheet(3.0, 7.6, 16.4, 21.4, 1.8),
+              dial(250, 290, 3.9, 2.2, 9.7, 14.7)] },
+    { key: "9 arrow round page",
+      note: "the ring outside, the page inside. At 21px the page has "
+          + "no room for anything on it, so it is a rounded rectangle "
+          + "in a circle",
+      parts: [dial(248, 292, 10.0, 3.2), sheet(7.6, 7.4, 16.4, 18.6, 1.4)] },
+    { key: "10 arrow over stack",
+      note: "drawn and failed. The sheets below the arc read as a "
+          + "bowl, and the arc's ends have nothing to land on",
+      parts: [dial(196, 330, 9.6, 3.0, 12, 13.6),
+              "M5.8 21.4h12.4", "M4.6 17.6h14.8",
+              sheet(6.2, 8.6, 17.8, 14.0, 1.3)] },
+    { key: "11 page + badge",
+      note: "the knockout. The page's bottom edge stops at x=11 and "
+          + "its right edge at y=9.6, so the badge sits in the gap "
+          + "instead of fighting the corner",
+      parts: ["M11.0 17.4H4.4A1.8 1.8 0 0 1 2.6 15.6V4.4"
+              + "A1.8 1.8 0 0 1 4.4 2.6H13.0A1.8 1.8 0 0 1 14.8 4.4V9.6",
+              dial(250, 290, 4.6, 2.4, 17.2, 17.0)] },
+    { key: "12 stack + badge",
+      note: "the same with a second sheet behind. Paper and arrow "
+          + "stay two separate ideas rather than one inside the "
+          + "other, and the stack says there is a list of them",
+      parts: ["M6.6 3.8h8.8a1.6 1.6 0 0 1 1.6 1.6v6.2",
+              "M9.4 16.2H4.0A1.6 1.6 0 0 1 2.4 14.6V8.2"
+              + "A1.6 1.6 0 0 1 4.0 6.6H12.2A1.6 1.6 0 0 1 13.8 8.2V11.4",
+              dial(250, 290, 4.8, 2.5, 16.6, 16.8)] },
+
+    /* The same three the other way round. Anticlockwise is history
+       -- these runs already happened -- and clockwise is re-run,
+       which the tab also supports: "start a new run from these
+       settings". Both are defensible, so both are drawn.
+
+       Turning one round is not a sweep-flag change. The head has to
+       stay on the end of *travel*, so the two gap edges swap roles
+       as start and end; flipping only the flag draws the 40-degree
+       gap instead of the 320-degree arc, which is exactly what
+       happened on the first attempt. */
+    { key: "13 stack+inside, re-run",
+      parts: ["M7.6 4.2h10.6a1.8 1.8 0 0 1 1.8 1.8v10.6",
+              sheet(3.0, 7.6, 16.4, 21.4, 1.8),
+              dial(250, 290, 3.9, 2.2, 9.7, 14.7, true)],
+      note: "clockwise" },
+    { key: "14 page+badge, re-run",
+      parts: ["M11.0 17.4H4.4A1.8 1.8 0 0 1 2.6 15.6V4.4"
+              + "A1.8 1.8 0 0 1 4.4 2.6H13.0A1.8 1.8 0 0 1 14.8 4.4V9.6",
+              dial(250, 290, 4.6, 2.4, 17.2, 17.0, true)],
+      note: "clockwise" },
+    { key: "15 stack+badge, re-run",
+      parts: ["M6.6 3.8h8.8a1.6 1.6 0 0 1 1.6 1.6v6.2",
+              "M9.4 16.2H4.0A1.6 1.6 0 0 1 2.4 14.6V8.2"
+              + "A1.6 1.6 0 0 1 4.0 6.6H12.2A1.6 1.6 0 0 1 13.8 8.2V11.4",
+              dial(250, 290, 4.8, 2.5, 16.6, 16.8, true)],
+      note: "clockwise" },
   ];
 
   const NS = "http://www.w3.org/2000/svg";
