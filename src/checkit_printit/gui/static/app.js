@@ -547,15 +547,37 @@ const GLYPH = {
   seating: [{ r: [7.5, 2.5, 9, 7, 2] },
             { r: [4, 11, 16, 3.2, 1.6] },
             { d: "M7 21v-6.8M17 21v-6.8" }],
-  /* A gear. It was two sliders, which is a picture of *adjusting*
-     things and read as an equaliser; the tab is where the course is
-     set up once. Eight teeth as short radial strokes plus two
-     circles, because a toothed outline drawn as one path is unreadable
-     at 21px. */
-  setup: [{ o: [12, 12, 3.1] }, { o: [12, 12, 6.4] },
-          { d: "M12 2.6v2.6M12 18.8v2.6M21.4 12h-2.6M5.2 12H2.6"
-               + "M18.6 5.4l-1.8 1.8M7.2 16.8l-1.8 1.8"
-               + "M18.6 18.6l-1.8-1.8M7.2 7.2L5.4 5.4" }],
+  /* A gear, drawn as a gear. It was two sliders -- a picture of
+     *adjusting* things, which read as an equaliser -- and then two
+     circles with eight radial sticks, on the belief that "a toothed
+     outline drawn as one path is unreadable at 21px". That belief was
+     never tested. Five toothed outlines were rasterised at 21px and
+     magnified, and all five read as gears; the sticks version is the
+     one that reads as a sun.
+
+     The number that decides it is not the tooth count, it is how much
+     white is left in a valley. At 21px the stroke is 24*1.5/21 = 1.71
+     user units wide, so a valley arc narrower than that has no white
+     in it at all and the teeth close up into a plain circle. Valley
+     arc is root*angle, so the fix is to push the *root* circle out,
+     not to cut teeth: at root 7.5 the first attempt left 0.51 of
+     white, at root 8.1 this one leaves 1.40.
+
+     8 teeth, outer 10.5, root 8.1, hub 3.6, tooth 23 degrees at the
+     root narrowing to 18 at the tip. Arcs across the tips and the
+     valleys, not chords: a gear with flat valleys reads as a star.
+     Ink reaches 11.36 of the 12 the box allows. */
+  setup: [
+          { d: "M10.39 4.06L10.36 1.63A10.5 10.5 0 0 1 13.64 1.63L13.61 4.06A8.1 8.1 0 0 1 16.47 5.25"
+               + "L18.17 3.51A10.5 10.5 0 0 1 20.49 5.83L18.75 7.53A8.1 8.1 0 0 1 19.94 10.39"
+               + "L22.37 10.36A10.5 10.5 0 0 1 22.37 13.64L19.94 13.61A8.1 8.1 0 0 1 18.75 16.47"
+               + "L20.49 18.17A10.5 10.5 0 0 1 18.17 20.49L16.47 18.75A8.1 8.1 0 0 1 13.61 19.94"
+               + "L13.64 22.37A10.5 10.5 0 0 1 10.36 22.37L10.39 19.94A8.1 8.1 0 0 1 7.53 18.75"
+               + "L5.83 20.49A10.5 10.5 0 0 1 3.51 18.17L5.25 16.47A8.1 8.1 0 0 1 4.06 13.61"
+               + "L1.63 13.64A10.5 10.5 0 0 1 1.63 10.36L4.06 10.39A8.1 8.1 0 0 1 5.25 7.53"
+               + "L3.51 5.83A10.5 10.5 0 0 1 5.83 3.51L7.53 5.25A8.1 8.1 0 0 1 10.39 4.06"
+               + "Z" },
+          { o: [12, 12, 3.6] }],
   /* Corner brackets with a line across them -- the reticle every
      scanner app draws. A flatbed, which is the literal object, is a
      shallow box with a lid and reads as a drawer at 21px; this says

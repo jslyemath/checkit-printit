@@ -44,7 +44,43 @@ the app's own -- which is how the first one failed to draw at all.
 |---|---|
 | `drillin.js` | three fly-out panel layouts for the Progress drill-in, all timelines. **C was chosen.** See `PRINT_TOOL_DESIGN.md` 17. |
 | `drillin-c.js` | C refined -- no seed, no attempt number, the Scans track one size down -- with three headers. **H3, the strip, was chosen and built.** |
+| `gear.js` | five toothed gears for the Settings glyph, against the two-circles-and-sticks one in the app, at 13/18/21/32/64 and in the rail. **a8 was chosen and built.** |
 
 `drillin.js` is kept rather than deleted: it is the comparison the
 choice was made from, and a decision whose alternatives have been
-thrown away is a decision that gets reopened.
+thrown away is a decision that gets reopened. Same for the four
+gears nobody picked.
+
+## Judging a glyph at its real size
+
+A screenshot does not settle it. The browser pane downscales, and
+`zoom` crops rather than magnifies, so both hand back a blur that
+argues for whichever answer you already wanted.
+
+Rasterise it at the size it will really be drawn, then magnify
+*that*. In the console, with the glyph's `innerHTML` in `inner`:
+
+```js
+const CSSPX = 21, DEV = Math.round(CSSPX * devicePixelRatio);
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"`
+  + ` width="${DEV}" height="${DEV}"><g fill="none" stroke="#e8e8e8"`
+  + ` stroke-width="${(24 * 1.5 / CSSPX).toFixed(3)}"`
+  + ` stroke-linecap="round" stroke-linejoin="round">${inner}</g></svg>`;
+const img = new Image();
+await new Promise(r => { img.onload = r;
+  img.src = "data:image/svg+xml;base64," + btoa(svg); });
+const c = document.createElement("canvas");
+c.width = c.height = DEV;
+c.getContext("2d").drawImage(img, 0, 0, DEV, DEV);
+const big = document.createElement("canvas");
+big.width = big.height = DEV * 8;
+const g = big.getContext("2d");
+g.imageSmoothingEnabled = false;          // the whole point
+g.drawImage(c, 0, 0, DEV * 8, DEV * 8);
+document.body.appendChild(big);
+```
+
+`stroke-width` has to be written in by hand there: `.glyph` is a
+class in the page's stylesheet and a data-URL SVG is its own
+document, so neither the class nor `currentColor` reaches inside
+it. The formula is the one in `style.css`.
