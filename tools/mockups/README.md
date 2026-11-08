@@ -45,7 +45,7 @@ the app's own -- which is how the first one failed to draw at all.
 | `drillin.js` | three fly-out panel layouts for the Progress drill-in, all timelines. **C was chosen.** See `PRINT_TOOL_DESIGN.md` 17. |
 | `drillin-c.js` | C refined -- no seed, no attempt number, the Scans track one size down -- with three headers. **H3, the strip, was chosen and built.** |
 | `gear.js` | five toothed gears for the Settings glyph, against the two-circles-and-sticks one in the app, at 13/18/21/32/64 and in the rail. **a8 was chosen and built.** |
-| `door.js` | seven `drop`/`restore` doors, at 13 and 18 and as a pair of real buttons. **The open-frame leaning leaf was chosen and built.** |
+| `door.js` | eleven `drop`/`restore` doors in two rounds, at 13 and 18 and as a pair of real buttons. **`returns` was built** -- corner returns for the frame, the leaf a quadrilateral with slanted top and bottom. |
 
 `drillin.js` is kept rather than deleted: it is the comparison the
 choice was made from, and a decision whose alternatives have been

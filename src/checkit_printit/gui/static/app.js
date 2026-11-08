@@ -539,7 +539,31 @@ const GLYPH = {
   print: "M7.2 9.4V4.2h9.6v5.2M7.2 17.8H5.6a1.6 1.6 0 0 1-1.6-1.6v-4.8"
     + "a1.6 1.6 0 0 1 1.6-1.6h12.8a1.6 1.6 0 0 1 1.6 1.6v4.8"
     + "a1.6 1.6 0 0 1-1.6 1.6h-1.6M7.2 14.2h9.6v5.6H7.2z",
-  record: "M12 7.4v4.9l3.1 2M3.6 12a8.4 8.4 0 1 0 2.6-6.1M6.2 3.2v2.9H3.3",
+  /* A clock with the arrow going back round it: Runs is the list of
+     things that already happened.
+
+     **The arrowhead was a right-angle corner**, not an arrowhead --
+     `M6.2 3.2v2.9H3.3` draws a stub down and a stub left meeting at
+     a square corner, which is an L sitting beside the dial rather
+     than a point on the end of it. It also had nothing to do with
+     the arc: the arc ended at (6.2, 5.9) and the corner's vertex sat
+     at (6.2, 6.1), near it by coincidence of hand-tuning and aimed
+     nowhere in particular. That, plus a gap the corner did not fill,
+     is what read as weird around the top.
+
+     Both wings are now placed off the **tangent** at the arc's own
+     end point, 34 degrees either side of it, so the head points the
+     way the arc is travelling by construction rather than by eye.
+     The arc runs anticlockwise -- backwards, which is the whole idea
+     -- from 178 degrees round to 262, leaving the gap in the
+     upper-left where the head lives. Three gap widths were drawn and
+     magnified at 21px; this is the widest, because the two narrower
+     ones let the head touch the far end of the arc.
+
+     Only the rail draws this, at 21px, so unlike the door there is
+     one size to satisfy. */
+  record: "M3.8 12.3A8.2 8.2 0 1 0 10.9 3.9M14.1 5.5L10.9 3.9L13.5 1.5"
+    + "M12 7.2v5l3.2 2.1",
   /* Seating's own chair, front on, lifted from `seating.js`. It was
      three rectangles -- the Groups glyph -- which is a picture of one
      mode inside the tab rather than of the tab, and too nondescript to
@@ -675,51 +699,64 @@ const GLYPH = {
      mirrored frame would put the doorway on the other side, which
      says the room moved rather than the person.
 
-     It was a bare panel with a knob, and the arrowhead was drawn
-     *inside* it: the head ended at x=10.4 and the panel's left edge
-     was at x=9, so the two overlapped by 1.4 before the stroke was
-     counted. That is why it read as a box with a stub rather than as
-     anything going anywhere.
-
      Not a bin, ever: dropping deletes nobody, and it is an unkind
      picture of a person.
 
+     Third drawing. The first was a bare panel with a knob and an
+     arrowhead drawn *inside* the panel's wall -- the head ended at
+     x=10.4 and the wall was at x=9. The second kept the arrow clear
+     but got two things wrong that he had actually asked for:
+
+     * **the frame was not suggested around the arrow.** It was an
+       open-sided rectangle, so the arrow arrived at a box rather
+       than through a doorway. The frame is now two corner returns
+       at the left -- a short upright and a short horizontal at each
+       of the top and bottom -- with the gap between them exactly
+       where the arrow passes. That is the part of a door frame you
+       actually see beside someone walking through it.
+     * **the leaf was one leaning line**, which reads as a divider.
+       It is a closed quadrilateral now: **vertical sides, slanted
+       top and bottom.** The slant has to be on the top and bottom,
+       not the sides -- a leaning side is a door falling over, where
+       a slanted head and foot is a door turned toward you. Free
+       edge x=14.6 from y=5.2 to 18.8; hinge edge x=21 from 2.4 to
+       21.6, so the hinge is the taller of the two, as in the icon
+       he pointed at.
+
      **The binding size is 13px, not 18.** The Roster draws these at
-     `.iconbtn` (18) and the Runs tab at `.iconbtn.tiny` (13), where
-     the stroke is 24 * 1.5 / 13 = 2.77 units wide in a 24-unit box.
-     Every gap here was checked at 13 as well as 18, by rasterising
-     and magnifying -- see `tools/mockups/README.md`. Checking only
-     the Roster would have shipped a blob to the other tab, which is
-     the "a fix applied to one path is not applied to the others"
-     failure in picture form.
+     `.iconbtn` (18) and the Runs tab at `.iconbtn.tiny` (13), beside
+     a tiny bin, so it cannot simply be made bigger. At 13 the stroke
+     is 24 * 1.5 / 13 = 2.77 units wide in a 24-unit box, and every
+     gap here was checked there as well as at 18, by rasterising and
+     magnifying -- see `tools/mockups/README.md`. Checking only the
+     Roster is the "a fix applied to one path is not applied to the
+     others" failure in a third form: not a second copy of the code,
+     a second *size* of the same copy.
 
-     The instructor pointed at a stock icon: frame, leaf hinged at the
-     right and swung toward the viewer, arrow through the opening.
-     **The whole of that does not fit.** It stacks five horizontal
-     things up the middle -- leaf top, lintel, arrow, threshold, leaf
-     bottom -- and five strokes at 2.77 is 13.9 units of ink in a box
-     24 tall. So the frame and the leaf share the top and bottom
-     lines, which is what a door only slightly open actually looks
-     like, and that takes it to three.
+     What that budget rules out is drawing the frame's lintel and
+     threshold as well. Five horizontal things up the middle -- leaf
+     top, lintel, arrow, threshold, leaf bottom -- is 13.9 units of
+     ink at 13px in a box 24 tall, so there is no white anywhere. It
+     is drawn as `faithful` in the mockup and it is a blob. The
+     corner returns carry the frame instead, for a quarter of the
+     ink.
 
-     What survives of the reference: the opening is on the left and
-     has no stubs across it, so nothing crowds the arrow; the leaf
-     leans 3.2 units over its height, which is the only thing saying
-     "door" rather than "divider"; and the arrow's tip stops at 11.0,
-     3.6 short of where the leaf crosses its lane, so the head stays a
-     head at 13px instead of dissolving into the leaf.
+     The arrow's tip stops at 11.4, 3.2 short of the leaf's free
+     edge. Any closer and the head dissolves into it at 13px.
 
-     The knob is gone with the panel. It was a zero-length segment
-     rather than a circle, which is still the right way to draw a dot
-     in a glyph -- `M18.4 12h0.01` under `stroke-linecap: round` is
-     exactly one stroke-width across and scales with everything else.
-     On a leaf one line wide there is nowhere to put one. */
-  drop: [{ d: "M8.4 3.6H21.2V20.4H8.4" },
-         { d: "M16.2 3.9L13 20.1" },
-         { d: "M1.4 12H11M8 9L11 12L8 15" }],
-  restore: [{ d: "M8.4 3.6H21.2V20.4H8.4" },
-            { d: "M16.2 3.9L13 20.1" },
-            { d: "M11 12H1.4M4.4 9L1.4 12L4.4 15" }],
+     The old panel's knob is gone. It was a zero-length segment
+     rather than a circle -- `M18.4 12h0.01` under `stroke-linecap:
+     round` is exactly one stroke-width across, where a stroked
+     r=0.6 circle thinned away -- and it was the set's last user of
+     that trick, which printit's CLAUDE.md now says. */
+  drop: [{ d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H12.2" },
+         { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H12.2" },
+         { d: "M14.6 5.2L21 2.4V21.6L14.6 18.8Z" },
+         { d: "M1.6 12H11.4M8.4 9L11.4 12L8.4 15" }],
+  restore: [{ d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H12.2" },
+            { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H12.2" },
+            { d: "M14.6 5.2L21 2.4V21.6L14.6 18.8Z" },
+            { d: "M11.4 12H1.6M4.6 9L1.6 12L4.6 15" }],
   /* An arrow coming back round to where it started. */
   reset: "M19.4 12a7.4 7.4 0 1 1-2.2-5.3M19.6 4.4v4.2h-4.2",
   back: "M14.5 5.5 8 12l6.5 6.5",

@@ -38,14 +38,29 @@
    `door` plus an arrow given as numbers, and the two renderings come
    from the same pair.
 
-   **Chosen and built: `ajar`, with the open frame rather than the
-   stubbed one, and a stronger lean.** `ajar` as written below keeps
-   the reference's little corner returns on the left; they sit 3.0
-   from the arrow's lane, which is 0.2 of white at 13px, and they
-   closed up on it. Dropping them, leaning the leaf 3.2 units
-   instead of 1.5, and pulling the arrow's tip back to 11.0 survives
-   both sizes. The built paths are in `app.js`; this file is the
-   field the choice was made from. */
+   **Chosen and built: `returns`, at the bottom of the list.**
+
+   `ajar` was chosen first and rejected by him, for two reasons
+   worth keeping:
+
+   * **the frame was not suggested around the arrow.** Every
+     candidate above puts the frame's opening at the left as a plain
+     break in a rectangle, so the arrow arrives at a box rather than
+     passing through a doorway. What you actually see beside someone
+     walking through a door is the *corner returns* -- a short
+     upright and a short horizontal at the head and the foot of the
+     opening. Two small marks, and they sit above and below the
+     arrow's lane rather than in it.
+   * **a leaning line is not a leaf.** It reads as a divider. The
+     leaf has to be a closed quadrilateral, and -- his words -- the
+     **top and bottom** are what slant, not the sides. A leaning
+     side is a door falling over; a slanted head and foot is a door
+     turned toward you.
+
+   Both notes were right, and neither is a matter of taste: a single
+   stroke cannot be a panel, and the lean was on the wrong pair of
+   edges. The candidates from that round are kept below the first
+   set, and the paths that shipped are in `app.js`. */
 (function () {
   /* A single-stroke arrow. `h` is the head's half-height, which is
      also how far back along the shaft each head line reaches, so the
@@ -143,6 +158,62 @@
           + "single-stroke head. 1.6 of white in the gap",
       door: [{ r: [14.8, 2.6, 6.6, 18.8, 1.6] }, { d: "M19.6 12h0.01" }],
       arrow: [1.6, 11.2, 12, 3.2],
+    },
+
+    /* --- second round, after the first was rejected --- */
+
+    {
+      key: "returns",
+      note: "**built.** The frame is two corner returns at the left, "
+          + "which is the part of a frame you see beside someone "
+          + "walking through. The leaf is a closed quadrilateral: "
+          + "vertical sides, slanted top and bottom, hinge edge the "
+          + "taller of the two as in the icon he pointed at",
+      door: [
+        { d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H12.2" },
+        { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H12.2" },
+        { d: "M14.6 5.2L21 2.4V21.6L14.6 18.8Z" },
+      ],
+      arrow: [1.6, 11.4, 12, 3],
+    },
+    {
+      key: "free taller",
+      note: "the same with the perspective the other way: the free "
+          + "edge nearer and so taller, which is what a door opening "
+          + "*toward* you really looks like. Reads fine; it is not "
+          + "what the reference draws",
+      door: [
+        { d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H12.2" },
+        { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H12.2" },
+        { d: "M14.4 2.6L21 5.0V19.0L14.4 21.4Z" },
+      ],
+      arrow: [1.5, 11.2, 12, 3],
+    },
+    {
+      key: "parallelogram",
+      note: "a true parallelogram -- both sides the same height, the "
+          + "whole leaf sheared up to the right. It reads as a door "
+          + "tilted rather than turned, and looks like it is floating",
+      door: [
+        { d: "M6.2 8.6V4.8A1.8 1.8 0 0 1 8 3H12.2" },
+        { d: "M6.2 15.4V19.2A1.8 1.8 0 0 0 8 21H12.2" },
+        { d: "M14.8 6.0L21.0 3.2V18.0L14.8 20.8Z" },
+      ],
+      arrow: [1.6, 11.6, 12, 3],
+    },
+    {
+      key: "lintel",
+      note: "corner returns replaced by a whole frame, with the "
+          + "leaf's slanted edges running onto its corners. The "
+          + "converging wedges fill in and the corners go solid",
+      door: [
+        { d: "M6.2 8.6V4.4A1.8 1.8 0 0 1 8 2.6H21.2V21.4H8"
+             + "A1.8 1.8 0 0 0 6.2 19.6V15.4" },
+        { d: "M14.6 6.6L21.2 2.6" },
+        { d: "M14.6 6.6V17.4" },
+        { d: "M14.6 17.4L21.2 21.4" },
+      ],
+      arrow: [1.6, 11.4, 12, 3],
     },
   ];
 
