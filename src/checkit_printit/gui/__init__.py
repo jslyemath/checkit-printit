@@ -2407,6 +2407,12 @@ def api_scan_sheet(course, body):
     # could not ask at all. `basename` is the whole check now.
     want = os.path.basename(str(body.get("file") or ""))
     page = int(body.get("page") or 0)
+    # A thumbnail is for telling one page from another at 54px and
+    # seeing whether the working is dense or empty -- not for reading.
+    # The drill-in opens one per attempt, so a panel for a student who
+    # has sat a skill four times would otherwise cost four full-page
+    # renders at once, where a look used to cost one.
+    thumb = bool(body.get("thumb"))
     folder = os.path.join(course.path, "scans")
     full = os.path.join(folder, want)
     if not want or not os.path.abspath(full).startswith(
@@ -2425,11 +2431,14 @@ def api_scan_sheet(course, body):
             raise GuiError(f"{os.path.basename(full)} has no page {page}.")
         # Smaller than the read's own render: this is for looking at,
         # and the reading was done long ago at full resolution.
-        image = doc[page - 1].render(scale=110 / 72).to_pil()
+        # `scale` is against 72dpi, so 14/72 puts a letter page at
+        # about 120px across -- twice the 54px it is drawn at, which
+        # is what a sharp picture on a dense screen needs and no more.
+        image = doc[page - 1].render(scale=(14 if thumb else 110) / 72).to_pil()
     finally:
         doc.close()
     buf = io.BytesIO()
-    image.convert("RGB").save(buf, format="JPEG", quality=70)
+    image.convert("RGB").save(buf, format="JPEG", quality=55 if thumb else 70)
     return {"file": os.path.basename(full), "page": page,
             "image": "data:image/jpeg;base64,"
                      + base64.b64encode(buf.getvalue()).decode()}
