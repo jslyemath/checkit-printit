@@ -1280,12 +1280,14 @@ function drawProgressLegend(lit, graded) {
   bar.append(red, amber, green);
 }
 
-function progressCell(student, skill, cell, lit) {
-  const td = document.createElement("td");
-  const state = cellState(cell, skill.threshold, lit);
-  td.className = "cell " + state.kind;
-  if (state.tone) td.classList.add("tone-" + state.tone);
+/* What a cell shows: a glyph, or the fraction, or nothing.
 
+   The drill-in's header shows the same thing for the cell it was
+   opened from, so this is drawn once and used in both places. The
+   colour is not set here -- it is on the cell, and the glyph and
+   the fraction both take `currentColor` -- so whatever carries this
+   also carries the state's own classes. */
+function cellFace(state) {
   if (state.mark) {
     // The glyph, from the app's own set -- `pass`, `fail` and `query`
     // are the same three the drill-in's mark track draws, so a cell
@@ -1293,13 +1295,25 @@ function progressCell(student, skill, cell, lit) {
     const wrap = document.createElement("span");
     wrap.className = "cellmark";
     wrap.appendChild(icon(state.mark));
-    td.appendChild(wrap);
-  } else if (state.count) {
+    return wrap;
+  }
+  if (state.count) {
     const n = document.createElement("span");
     n.className = "cellcount";
     n.textContent = state.count;
-    td.appendChild(n);
+    return n;
   }
+  return null;
+}
+
+function progressCell(student, skill, cell, lit) {
+  const td = document.createElement("td");
+  const state = cellState(cell, skill.threshold, lit);
+  td.className = "cell " + state.kind;
+  if (state.tone) td.classList.add("tone-" + state.tone);
+
+  const face = cellFace(state);
+  if (face) td.appendChild(face);
   if (state.kind !== "none") {
     td.title = describeCell(student, skill, cell, state);
   }
@@ -1441,24 +1455,25 @@ async function openCell(student, skill, cell, state, td) {
   // place when it says something the pill did not.
   const title = document.getElementById("cell-skill");
   title.textContent = skill.title === skill.slug ? "" : skill.title;
+  // It is the one thing here allowed to be cut, so it has to be
+  // recoverable by pointing at it.
+  title.title = title.textContent;
   document.getElementById("cell-footsay").textContent = who;
 
-  // The verdict the cell itself shows, in the cell's own words, so
-  // the panel confirms you opened the one you meant to.
+  // The cell itself, repeated. Not a description of it: the same
+  // glyph or fraction the grid drew, wearing the same state and tone
+  // classes so it takes the same colour and the same highlight. A
+  // cell that is amber in the grid is amber here, and a cell with no
+  // mark shows nothing rather than a sentence saying so.
   const verdict = document.getElementById("cell-verdict");
   verdict.textContent = "";
+  verdict.className = "flyout-verdict";
   if (state && state.kind !== "none") {
-    if (state.count) {
-      const n = document.createElement("span");
-      n.className = "cellcount";
-      n.textContent = state.count;
-      const say = document.createElement("span");
-      say.textContent = "passed";
-      verdict.append(n, say);
-    } else {
-      verdict.textContent = state.kind === "passed" ? "passed"
-        : state.kind === "query" ? "in question" : "no passes yet";
-    }
+    verdict.classList.add(state.kind);
+    if (state.tone) verdict.classList.add("tone-" + state.tone);
+    const face = cellFace(state);
+    if (face) verdict.appendChild(face);
+    verdict.title = describeCell(student, skill, cell, state);
   }
 
   document.getElementById("cell-papers").textContent = "";
