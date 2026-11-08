@@ -63,6 +63,80 @@ def strip_comments(css):
     return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
 
 
+def stray_comment_closes(css):
+    """Lines carrying a `*/` that closes nothing.
+
+    CSS comments do not nest, so `/* a */ b */` leaves the second
+    close dangling. Walked rather than matched with a regex, because
+    the question is about state -- am I inside a comment -- and a
+    regex that answers it is harder to read than the loop.
+    """
+    bad = []
+    line = 1
+    inside = False
+    i = 0
+    while i < len(css):
+        if css[i] == "\n":
+            line += 1
+        if not inside and css.startswith("/*", i):
+            inside = True
+            i += 2
+            continue
+        if inside and css.startswith("*/", i):
+            inside = False
+            i += 2
+            continue
+        if not inside and css.startswith("*/", i):
+            bad.append(line)
+        i += 1
+    return bad, inside
+
+
+@pytest.mark.parametrize("sheet", ["style.css", "seating/seating.css"])
+def test_no_comment_closes_a_comment_that_was_never_opened(sheet):
+    """A dangling `*/` silently eats the rule after it.
+
+    Extending a comment that already ended -- writing another
+    paragraph after its `*/` and closing again -- leaves prose
+    sitting as bare CSS and a second `*/` closing nothing. The parser
+    recovers by discarding to the next brace, which takes the rule
+    underneath with it. Nothing errors and nothing is logged: the
+    stylesheet loads, and one rule is simply absent.
+
+    This shipped twice in one sitting, in two different paragraphs,
+    and was found only because a panel came out 245px wide when its
+    rule said 320. The rule had not been overridden; it had been
+    swallowed.
+    """
+    bad, unterminated = stray_comment_closes(read(sheet))
+    assert not bad, (
+        f"{sheet}: `*/` closing nothing at line(s) "
+        + ", ".join(str(n) for n in bad)
+        + ". The rule after it is being discarded. Did a comment get "
+          "extended past its own close?")
+    assert not unterminated, (
+        f"{sheet}: a comment is opened and never closed, so everything "
+        f"after it is being swallowed.")
+
+
+def test_that_comment_check_would_have_caught_the_one_that_shipped():
+    """The stylesheet as it was when the panel lost its width."""
+    broken = (
+        "/* why the panel takes width rather than floating. */\n"
+        "   320px, which is what the parts that cannot shrink need. */\n"
+        ".flyout { flex: 0 0 320px; }\n")
+    bad, unterminated = stray_comment_closes(broken)
+    assert bad == [2], bad
+    assert not unterminated
+    # And the shape it should have been.
+    fixed = (
+        "/* why the panel takes width rather than floating.\n"
+        "\n"
+        "   320px, which is what the parts that cannot shrink need. */\n"
+        ".flyout { flex: 0 0 320px; }\n")
+    assert stray_comment_closes(fixed) == ([], False)
+
+
 def bare_classes(css):
     """Class names used as a selector on their own, e.g. `.band {`.
 
@@ -787,11 +861,23 @@ class TestTheColourOfWhatIsInACell:
 
     @staticmethod
     def block(selector):
-        """The body of the one rule with exactly this selector."""
+        """The body of the one rule that applies to this selector.
+
+        The selector need not be the whole of the rule's own, only
+        one of the comma-separated selectors in it. The drill-in's
+        header repeats a cell and is named beside each cell rule so
+        the colour is said once, and asking for an exact match would
+        make that the failure rather than the second copy it avoids.
+        """
         import re
-        found = re.findall(
-            r"(?:^|\})\s*" + re.escape(selector) + r"\s*\{([^{}]*)\}",
-            rules_only())
+        found = []
+        # No `\}` anchor: it would be eaten by the previous match and
+        # every rule after the first would be missed. A selector and a
+        # body both simply hold no braces, which is enough to split on
+        # and skips an `@media`'s own line for free.
+        for whole, body in re.findall(r"([^{}]*)\{([^{}]*)\}", rules_only()):
+            if selector in [s.strip() for s in whole.split(",")]:
+                found.append(body)
         assert len(found) == 1, f"{selector}: {len(found)} rules, wanted 1"
         return found[0]
 

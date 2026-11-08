@@ -2671,13 +2671,13 @@ button.act.chip:hover { border-color: var(--line-strong); }
 
    `currentColor` is how the icons take their colour, so the cell's
    own rule below is the only place a colour is said. */
-#progress-grid .cellmark {
+#progress-grid .cellmark, .flyout-verdict .cellmark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   vertical-align: middle;
 }
-#progress-grid .cellmark svg {
+#progress-grid .cellmark svg, .flyout-verdict .cellmark svg {
   width: 15px;
   height: 15px;
   --glyph-size: 15;
@@ -2692,15 +2692,21 @@ button.act.chip:hover { border-color: var(--line-strong); }
    green, a cross is red, a query is amber. Passing is still quiet --
    it is the instructor's call and the right one, and 1,300 green
    ticks would drown the four that matter -- but quiet here means
-   small and unhighlighted, not grey. */
-#progress-grid td.passed      { color: var(--accent); }
-#progress-grid td.none-passed { color: var(--bad); }
-#progress-grid td.query       { color: var(--warn); }
-#progress-grid td.part        { color: var(--ink); }
+   small and unhighlighted, not grey.
+
+   The drill-in's header repeats the cell it was opened from, so it
+   is named beside each cell rule rather than given rules of its own.
+   One declaration block per colour, as the paragraph above promises
+   -- a second block with the same values is the thing that goes out
+   of step. */
+#progress-grid td.passed,      .flyout-verdict.passed      { color: var(--accent); }
+#progress-grid td.none-passed, .flyout-verdict.none-passed { color: var(--bad); }
+#progress-grid td.query,       .flyout-verdict.query       { color: var(--warn); }
+#progress-grid td.part,        .flyout-verdict.part        { color: var(--ink); }
 
 /* Part way: the fraction, and no glyph beside it. It is the only
    number on the grid now, so it can only mean one thing. */
-#progress-grid .cellcount {
+#progress-grid .cellcount, .flyout-verdict .cellcount {
   font-size: var(--t-xs);
   font-variant-numeric: tabular-nums;
   color: inherit;
@@ -2719,15 +2725,15 @@ button.act.chip:hover { border-color: var(--line-strong); }
    light -- a tick is already green and a cross already red -- but
    the rule is written for all three so it stays true if the pairings
    ever change. */
-#progress-grid td.tone-justin {
+#progress-grid td.tone-justin, .flyout-verdict.tone-justin {
   background: var(--accent-soft);
   color: var(--accent);
 }
-#progress-grid td.tone-open {
+#progress-grid td.tone-open, .flyout-verdict.tone-open {
   background: var(--warn-soft);
   color: var(--warn);
 }
-#progress-grid td.tone-stuck {
+#progress-grid td.tone-stuck, .flyout-verdict.tone-stuck {
   background: var(--bad-soft);
   color: var(--bad);
 }
@@ -2812,9 +2818,23 @@ button.act.chip:hover { border-color: var(--line-strong); }
    at 1100 sat underneath it, and on a full roster that is about two
    columns by forty-five rows unreachable without closing the panel.
    The grid already scrolls sideways, so narrowing it costs columns
-   on screen and costs no access at all. */
+   on screen and costs no access at all.
+
+   320px, which is what the parts that cannot shrink actually need:
+   the page at 58, the mark track at 117 when it carries four stops,
+   the gap between them, and the panel's own padding -- a step comes
+   to 188 and the footer to 148. It was 400 first, carried over from
+   the mockup where it was being compared against a 620px dialog,
+   and that was about 105px more than anything in it asked for.
+
+   The one part that can want more is the skill's title, and it has
+   an ellipsis and a tooltip, so it gives way rather than the grid
+   doing. `width` as well as `flex-basis` because below the
+   breakpoint the panel is taken out of flow, where a flex basis
+   means nothing and it would otherwise shrink-wrap. */
 .flyout {
-  flex: 0 0 400px;
+  flex: 0 0 320px;
+  width: 320px;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -2875,15 +2895,20 @@ button.act.chip:hover { border-color: var(--line-strong); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The cell, repeated. It needs a cell's padding and corner so that
+   a highlight reads as a highlight rather than as ink behind the
+   glyph; the colour and the background come from the grid's own
+   rules, which name this class beside each `td`. Nothing when the
+   cell is blank -- an empty strip is the honest answer. */
 .flyout-verdict {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s1);
-  font-size: var(--t-xs);
-  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  padding: 2px var(--s2);
+  border-radius: var(--r-sm);
   white-space: nowrap;
 }
-.flyout-verdict .cellcount { color: var(--ink); }
 
 /* The attempts. Scrolls on its own, so the header and the step to
    the next student stay put however many times a skill was sat. */
