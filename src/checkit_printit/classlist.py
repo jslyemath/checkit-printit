@@ -33,7 +33,15 @@ from .roster import Roster, RosterError, Student
 #: Column labels seen in the wild, lower-cased and stripped. Order inside a
 #: list is preference: the first match wins when a file offers several.
 SYNONYMS = {
-    "sid": ["student id", "sid", "banner id", "id"],
+    # `osw_id` is Oswego's, and the vendor-specific `banner id` was
+    # already here, so institution-specific spellings belong in this
+    # list rather than in a second one somewhere. A column nobody
+    # recognises is not a disaster -- the masker blanks it and the
+    # importer ignores it -- but it is useless, and this is the column
+    # MAT 106 matches on, because an email that arrived in Brightspace
+    # from another institution is often stale.
+    "sid": ["student id", "sid", "banner id", "osw_id", "osw id",
+            "oswego id", "id"],
     "alt_id": ["global id", "orgdefinedid", "org defined id", "user id",
                "username", "user name"],
     "last": ["student last name", "last name", "last", "surname",

@@ -1836,37 +1836,44 @@ def gradebook_map(source, course, pair, student_column, matches, ignore_row,
 
 
 @gradebook.command(name="export")
-@click.argument("source", type=click.Path(exists=True))
+@click.argument("sources", nargs=-1, required=True,
+                type=click.Path(exists=True))
 @click.option("-c", "--course", default="", help="Which course.")
-@click.option("-o", "--out", default=None, type=click.Path(),
-              help="Where to write the filled-in file. **Without this "
-                   "nothing is written** -- the run only reports, which is "
-                   "the right default for something that changes grades.")
-@click.option("--allow-downgrades", is_flag=True,
-              help="Also replace a cell that already says passed with a "
-                   "non-pass. Held back by default: a pass already in the "
-                   "gradebook may have come from outside printit.")
+@click.option("-o", "--out", "out_dir", default=None, type=click.Path(),
+              help="A directory to write the filled-in copies into, named "
+                   "`<original>_UPDATED.csv`. **Without this nothing is "
+                   "written** -- the run only reports, which is the right "
+                   "default for something that changes grades.")
+@click.option("--not-yet", "not_yet", default="", metavar="SLUGS",
+              help="Comma-separated skills for which a non-pass may be "
+                   "written, and then only into an empty cell. Without "
+                   "this, only passes are written. Entering a non-pass "
+                   "raises that student's denominator where the subtotals "
+                   "count filled cells, so it is named deliberately for "
+                   "the skills in play.")
 @click.option("--header-row", default=None, type=int,
               help="Which row holds the column names, 1-based.")
-def gradebook_export(source, course, out, allow_downgrades, header_row):
+def gradebook_export(sources, course, out_dir, not_yet, header_row):
     """Fill in the cells there is a result for, and change nothing else.
 
-    Hand it the file you exported from the LMS. It comes back with the
-    same columns in the same order, the same rows, every untouched
-    value exactly as it was, and the same line endings and
-    byte-order-mark -- so what you upload is the file you downloaded,
-    with results in it.
+    Give it every file you exported -- **one per section**, all at once.
+    A student should appear in exactly one of them, and that is only
+    checkable with all of them in hand.
+
+    Each file comes back as a copy with the same columns in the same
+    order, the same rows, and **every untouched line byte for byte**:
+    changed lines are spliced, the rest are copied, so what you upload
+    is the file you downloaded.
 
     \b
-    Three rules decide a cell:
-      ever passed            -> the profile's pass value
-      attempted, not passed  -> its non-pass value
-      never attempted, or
-        only ever absent     -> left exactly as found
+    A pass goes in where the cell is empty or says not-yet.
+    A non-pass goes in only for a skill named in --not-yet, and
+      only into an empty cell.
+    A pass already in the gradebook is NEVER replaced.
+    An absence writes nothing: it is not an attempt at the skill.
+    A cell holding anything else stops the export.
 
-    That last one matters. An absence is not an attempt, and where the
-    subtotals count filled cells, writing a non-pass into a blank
-    raises that student's denominator for a paper they never sat.
+    These are the rules `apply_to_brightspace.py` already follows.
     """
     if not course:
         raise click.ClickException("say which course, with -c/--course.")
@@ -1876,6 +1883,8 @@ def gradebook_export(source, course, out, allow_downgrades, header_row):
     except gradebook_mod.GradebookError as exc:
         raise click.ClickException(str(exc))
 
+    wanted = {s.strip() for s in not_yet.split(",") if s.strip()}
+
     roster_path = course_mod.file_in(course, "roster")
     if not os.path.isfile(roster_path):
         raise click.ClickException(f"no roster at {roster_path}.")
@@ -1884,15 +1893,24 @@ def gradebook_export(source, course, out, allow_downgrades, header_row):
     except roster_mod.RosterError as exc:
         raise click.ClickException(f"{roster_path}: {exc}")
 
-    rows = mask_mod.read_rows(source)
-    if not rows:
-        raise click.ClickException(f"{source} is empty.")
-    try:
-        index = mask_mod.find_header(rows, header_row)
-        profile.validate(rows[index])
-    except (mask_mod.MaskError, gradebook_mod.GradebookError) as exc:
-        raise click.ClickException(str(exc))
-    rows = rows[index:]
+    sheets, header_lines = [], {}
+    for path in sources:
+        rows = mask_mod.read_rows(path)
+        if not rows:
+            raise click.ClickException(f"{path} is empty.")
+        try:
+            index = mask_mod.find_header(rows, header_row)
+            profile.validate(rows[index])
+        except (mask_mod.MaskError, gradebook_mod.GradebookError) as exc:
+            raise click.ClickException(f"{path}: {exc}")
+        sheet = gradebook_mod.sheet_from(path, rows[index:],
+                                         header_line=index + 1)
+        if any(s.name == sheet.name for s in sheets):
+            raise click.ClickException(
+                f"two of these files are called {sheet.name!r}. They are "
+                "told apart by name, so rename one.")
+        sheets.append(sheet)
+        header_lines[sheet.name] = path
 
     record_path = course_mod.file_in(course, "record")
     progress = record_mod.progress(record_path)
@@ -1902,57 +1920,112 @@ def gradebook_export(source, course, out, allow_downgrades, header_row):
             "result to export. Read a stack in on the Scans tab first.")
 
     changes, report = gradebook_mod.plan_export(
-        rows, profile, people, progress, slugs)
+        sheets, profile, people, progress, slugs, not_yet=wanted)
 
-    click.echo(f"{len(rows) - 1} rows, {len(people.live())} students "
-               f"enrolled, {len(progress)} graded (student, skill) pair(s)")
+    click.echo(f"{len(sheets)} file(s), "
+               f"{sum(len(s.body) for s in sheets)} rows, "
+               f"{len(people.live())} students enrolled, "
+               f"{len(progress)} graded (student, skill) pair(s)")
+    for sheet in sheets:
+        where = f", looks like section {sheet.section}" if sheet.section \
+            else ""
+        click.echo(f"  {sheet.name}  {len(sheet.body)} rows{where}")
+    click.echo(f"matching on the roster's {profile.student_matches}, "
+               f"against {profile.student_column!r}")
+    if wanted:
+        click.echo("a non-pass may be written for: "
+                   + ", ".join(sorted(wanted)))
+    else:
+        click.echo("no --not-yet given, so only passes will be written")
     click.echo("")
     click.echo(report.describe())
 
-    if report.changes:
+    for sheet in sheets:
+        mine = report.for_sheet(sheet.name)
+        if not mine:
+            continue
         click.echo("")
+        click.echo(f"  {sheet.name}: {len(mine)} cell(s)")
         by_skill = {}
-        for change in report.changes:
+        for change in mine:
             by_skill.setdefault(change.slug, []).append(change)
         for slug in sorted(by_skill):
-            filling = sum(1 for c in by_skill[slug] if not c.was.strip())
-            click.echo(f"    {slug:<8} {len(by_skill[slug]):>3} cell(s), "
-                       f"{filling} of them currently blank")
+            group = by_skill[slug]
+            blank = sum(1 for c in group if not c.was.strip())
+            click.echo(f"    {slug:<8} {len(group):>3} cell(s), "
+                       f"{blank} into a blank, {len(group) - blank} over a "
+                       "non-pass")
 
-    if report.downgrades:
+    passes = report.kept_passes()
+    if passes:
         click.echo("")
-        click.echo("  these would replace a pass, and are held back:")
-        for change in report.downgrades:
-            click.echo(f"    row {change.row:>3}  {change.slug:<8} "
-                       f"{change.was!r} -> {change.now!r}")
-        if not allow_downgrades:
-            click.echo("  pass --allow-downgrades to write them too.")
+        click.echo("  a pass stands here although the record disagrees "
+                   "-- never replaced:")
+        for keep in passes:
+            click.echo(f"    {keep.sheet} row {keep.row:>3}  {keep.slug}")
 
     if report.refused:
         raise click.ClickException(
             "nothing was written: the problems above have to be settled "
             "first.")
 
-    if out is None:
+    if out_dir is None:
         click.echo("")
-        click.echo("nothing was written -- pass -o to write the filled-in "
-                   "file.")
+        click.echo("nothing was written -- pass -o DIR to write the "
+                   "filled-in copies.")
         return
-    if os.path.abspath(out) == os.path.abspath(source):
-        raise click.ClickException(
-            "that would overwrite the file you exported. Write somewhere "
-            "else and upload that.")
 
-    filled, written = gradebook_mod.apply_export(
-        rows, changes, allow_downgrades=allow_downgrades)
-    # The same line endings and byte-order-mark as the file he gave us,
-    # because what he uploads has to be the file he downloaded.
-    fmt = mask_mod.sniff(source)
-    mask_mod.write_csv(out, filled, fmt)
+    os.makedirs(out_dir, exist_ok=True)
+    written = []
+    try:
+        for sheet in sheets:
+            source = header_lines[sheet.name]
+            filled = gradebook_mod.apply_export(sheet, changes)
+            problems = gradebook_mod.verify_export(
+                sheet.rows, filled, changes, sheet.name)
+            if problems:
+                raise gradebook_mod.GradebookError(
+                    "the filled-in rows did not match the plan:\n  "
+                    + "\n  ".join(problems))
+
+            stem, ext = os.path.splitext(os.path.basename(source))
+            target = os.path.join(out_dir, f"{stem}_UPDATED{ext or '.csv'}")
+            if os.path.abspath(target) == os.path.abspath(source):
+                raise gradebook_mod.GradebookError(
+                    f"{target} is the file you exported. Choose another -o.")
+            data = gradebook_mod.splice(source, changes, sheet.name,
+                                        header_line=sheet.header_line)
+            with open(target, "wb") as f:
+                f.write(data)
+            written.append((sheet, source, target))
+
+            # And read it back, because what was checked above was the
+            # rows in memory and not the file that will be uploaded.
+            back = mask_mod.read_rows(target)
+            problems = gradebook_mod.verify_export(
+                sheet.rows, back[sheet.header_line - 1:], changes, sheet.name)
+            if problems:
+                raise gradebook_mod.GradebookError(
+                    f"{target} did not match the plan:\n  "
+                    + "\n  ".join(problems))
+    except gradebook_mod.GradebookError as exc:
+        for _, _, target in written:
+            if os.path.isfile(target):
+                os.remove(target)
+        raise click.ClickException(
+            f"{exc}\n\nNothing was left behind: any copy already written "
+            "has been deleted, because a half-updated set is worse than "
+            "none.")
+
     click.echo("")
-    click.echo(f"wrote {written} cell(s) into {out}")
-    click.echo(f"  {fmt.describe()}, as the file you gave it")
-    click.echo("  every other cell, row and column is unchanged")
+    for sheet, source, target in written:
+        mine = len(report.for_sheet(sheet.name))
+        click.echo(f"wrote {mine} cell(s) into {target}")
+    click.echo("  untouched lines are copied byte for byte")
+    click.echo("  checked after writing: exactly the planned cells differ")
+    click.echo("")
+    click.echo("Import these soon after exporting. A grade changed in the "
+               "LMS in between would be set back to the exported value.")
 
 
 @gradebook.command(name="show")

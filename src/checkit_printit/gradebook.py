@@ -384,73 +384,126 @@ def guess_marks(rows, columns, max_distinct=6):
 
 # ---------------------------------------------------------- the export --
 #
-# What export is: **take the file the instructor exported, fill in the
-# cells there is a recorded result for, change nothing else, hand it
-# back.** Not "generate a CSV". Nothing here adds or removes a row, and
-# nothing writes to a column no skill in the bank claims.
+# What export is: **take the files the instructor exported, fill in the
+# cells there is a recorded result for, change nothing else, hand them
+# back.** Not "generate a CSV". Nothing here adds or removes a row.
+#
+# The rules are not invented. They are the ones
+# `apply_to_brightspace.py` -- the instructor's own script, in
+# production since October -- already follows, and they are stricter
+# than the obvious ones in several places. Where this module and that
+# script disagree, that script is right.
+
+
+@dataclasses.dataclass
+class Sheet:
+    """One exported file. A course with two sections exports two."""
+    name: str
+    rows: list
+    #: Where the header sits in the file, 1-based, for splicing.
+    header_line: int = 1
+    #: Inferred from the file name when it carries one.
+    section: str = ""
+
+    @property
+    def head(self):
+        return self.rows[0]
+
+    @property
+    def body(self):
+        return self.rows[1:]
+
+
+def sheet_from(path, rows, header_line=1):
+    """A `Sheet`, with the section read out of the file name if it is there.
+
+    The section is only used to check that students are in the file for
+    their own section, so guessing wrong is a false warning and never a
+    wrong write. A three-digit group in the name is the convention his
+    exports already follow.
+    """
+    import os as _os
+    name = _os.path.basename(path)
+    found = re.search(r"(?<!\d)(\d{3})(?!\d)", name)
+    return Sheet(name=name, rows=rows, header_line=header_line,
+                 section=found.group(1) if found else "")
 
 
 @dataclasses.dataclass
 class Change:
-    """One cell that would change. Row and column are 1-based."""
+    """One cell that will change. Row and column are 1-based."""
+    sheet: str
     row: int
     column: int
     slug: str
     was: str
     now: str
+    why: str = ""
 
-    @property
-    def downgrade(self):
-        """Whether this replaces a pass with something that is not one.
 
-        Counted apart and refused by default. A pass already in the
-        gradebook may have come from somewhere printit knows nothing
-        about -- a skill passed before printit was used, or outside it
-        -- and overwriting it is the one genuinely destructive thing
-        this export can do.
-        """
-        return bool(self.was.strip()) and self.was != self.now \
-            and self._was_a_pass
-
-    _was_a_pass: bool = False
+@dataclasses.dataclass
+class Kept:
+    """One cell deliberately left as it is, and why."""
+    sheet: str
+    row: int
+    column: int
+    slug: str
+    value: str
+    why: str
 
 
 @dataclasses.dataclass
 class ExportReport:
     changes: list = dataclasses.field(default_factory=list)
-    downgrades: list = dataclasses.field(default_factory=list)
+    kept: list = dataclasses.field(default_factory=list)
     already_right: int = 0
-    no_result: int = 0
+    not_written: int = 0
     rows_matched: int = 0
     rows_ignored: list = dataclasses.field(default_factory=list)
     rows_unmatched: list = dataclasses.field(default_factory=list)
     students_unmatched: list = dataclasses.field(default_factory=list)
     skills_unmatched: list = dataclasses.field(default_factory=list)
+    notes: list = dataclasses.field(default_factory=list)
     refused: list = dataclasses.field(default_factory=list)
+
+    def kept_passes(self):
+        """Cells where a pass stands against a non-pass result.
+
+        Never written, and not behind a flag. His rule: a pass already
+        in the gradebook is never replaced, because it may have come
+        from somewhere printit knows nothing about.
+        """
+        return [k for k in self.kept if k.why == "a pass is never replaced"]
+
+    def for_sheet(self, name):
+        return [c for c in self.changes if c.sheet == name]
 
     def describe(self):
         lines = [
-            f"{len(self.changes)} cell(s) to fill in, "
+            f"{len(self.changes)} cell(s) to write, "
             f"{self.already_right} already right, "
-            f"{self.no_result} left alone for want of a result",
+            f"{self.not_written} not written",
             f"{self.rows_matched} row(s) matched a student",
         ]
+        passes = self.kept_passes()
+        if passes:
+            lines.append(f"  {len(passes)} cell(s) keep a pass the record "
+                         "does not agree with -- never replaced")
         if self.rows_ignored:
             lines.append(f"  {len(self.rows_ignored)} row(s) skipped by an "
-                         "ignore rule: " + ", ".join(
-                             str(r) for r in self.rows_ignored))
+                         "ignore rule: "
+                         + ", ".join(str(r) for r in self.rows_ignored))
+        for note in self.notes:
+            lines.append(f"  {note}")
         if self.rows_unmatched:
             lines.append(f"  {len(self.rows_unmatched)} row(s) matched no "
-                         "student in the roster: " + ", ".join(
-                             str(r) for r in self.rows_unmatched))
+                         "student: "
+                         + ", ".join(str(r) for r in self.rows_unmatched))
         if self.students_unmatched:
             lines.append(f"  {len(self.students_unmatched)} student(s) have "
-                         "no row in the gradebook")
+                         "no row in any of these files")
         if self.skills_unmatched:
             lines.append("  no column for: " + " ".join(self.skills_unmatched))
-        if self.downgrades:
-            lines.append(f"  {len(self.downgrades)} cell(s) would replace a "
-                         "pass with a non-pass -- refused unless allowed")
         for problem in self.refused:
             lines.append(f"  REFUSED  {problem}")
         return "\n".join(lines)
@@ -459,44 +512,64 @@ class ExportReport:
 def _core(value):
     """An id with its punctuation and any trailing marker removed.
 
-    The gradebook writes `#2041000001` and a roster imported from a
-    class list holds `2041000001`. The same normalisation the vault uses
-    to join two exports about one student.
+    A 9-digit student id is written plainly in both the roster and the
+    gradebook, but the same normalisation that lets the vault join two
+    exports costs nothing and absorbs a stray `#`.
     """
     from .vault import id_core
     return id_core(value)
 
 
-def plan_export(rows, profile, students, progress, slugs):
-    """Work out every cell to change. Writes nothing.
+def _filled(row, columns):
+    return sum(1 for i in columns if i < len(row) and row[i].strip())
 
-    `students` is a roster; `progress` is `record.progress(...)`, whose
-    rows are keyed by the roster's `sid`. Returns
-    `(changes_by_position, ExportReport)`.
 
-    Three rules decide a cell:
+def plan_export(sheets, profile, students, progress, slugs, not_yet=()):
+    """Work out every cell to change, across every file. Writes nothing.
 
-    * **ever passed** -> the profile's `passed` string;
-    * **attempted and not passed** -> its `not_passed` string;
-    * **never attempted, or only absent** -> left exactly as found.
+    `sheets` is a list of `Sheet`. `students` is a roster; `progress` is
+    `record.progress(...)`, keyed by the roster's `sid`. `not_yet` is
+    the set of slugs for which a non-pass may be written at all.
 
-    The third is the one that matters. An absence is not an attempt at
-    the skill, and on a gradebook whose subtotals count filled cells,
-    writing a non-pass into that student's blank would raise their
-    denominator for a paper they never sat.
+    Returns `(changes, report)`, where `changes` maps
+    `(sheet name, row, column)` to a `Change`.
+
+    **A pass** goes in where the cell is empty or holds the non-pass
+    value. **A non-pass** goes in only when its slug is named in
+    `not_yet` *and* the cell is empty -- writing it raises the student's
+    denominator wherever the subtotals count filled cells, so it is a
+    deliberate act for the skills in play. **A pass is never replaced.**
+    **An absence writes nothing**, being no attempt at the skill. And a
+    cell holding anything else **stops the export**, because
+    overwriting a value this tool does not understand is guessing.
     """
     report = ExportReport()
-    head, body = rows[0], rows[1:]
-    columns = match(head, slugs, pairs=profile.pairs)
-    report.skills_unmatched = list(columns.missing)
+    not_yet = set(not_yet)
+    changes = {}
 
-    if profile.student_column not in head:
+    unknown = sorted(s for s in not_yet if s not in slugs)
+    if unknown:
         report.refused.append(
-            f"the file has no column called {profile.student_column!r}")
-        return {}, report
-    student_column = head.index(profile.student_column)
+            "asked to write a non-pass for " + ", ".join(unknown)
+            + ", which the bank does not publish")
 
-    #: (sid, slug) -> the progress row
+    columns, student_columns, skill_columns = {}, {}, {}
+    for sheet in sheets:
+        found = match(sheet.head, slugs, pairs=profile.pairs)
+        columns[sheet.name] = found
+        skill_columns[sheet.name] = sorted(found.found.values())
+        for slug in found.missing:
+            if slug not in report.skills_unmatched:
+                report.skills_unmatched.append(slug)
+        if profile.student_column not in sheet.head:
+            report.refused.append(
+                f"{sheet.name} has no column called "
+                f"{profile.student_column!r}")
+            continue
+        student_columns[sheet.name] = sheet.head.index(profile.student_column)
+    if report.refused:
+        return {}, report
+
     results = {(r["sid"], r["slug"]): r for r in progress}
 
     by_key = {}
@@ -505,85 +578,241 @@ def plan_export(rows, profile, students, progress, slugs):
         if key:
             by_key.setdefault(key, []).append(student)
 
-    seen_students = set()
-    changes = {}
-    for number, row in enumerate(body, 2):
-        if not any(c.strip() for c in row):
-            continue
-        raw = row[student_column] if student_column < len(row) else ""
-        if not raw.strip():
-            report.rows_unmatched.append(number)
-            continue
-        if any(marker and marker in raw for marker in profile.ignore_rows):
-            report.rows_ignored.append(number)
+    #: student -> [(sheet, row number, row)]
+    rows_for = {}
+    for sheet in sheets:
+        column = student_columns[sheet.name]
+        for number, row in enumerate(sheet.body, 2):
+            if not any(c.strip() for c in row):
+                continue
+            raw = row[column] if column < len(row) else ""
+            if not raw.strip():
+                report.rows_unmatched.append(f"{sheet.name}:{number}")
+                continue
+            if any(marker and marker in raw
+                   for marker in profile.ignore_rows):
+                report.rows_ignored.append(f"{sheet.name}:{number}")
+                continue
+            matched = by_key.get(_core(raw)) or []
+            if len(matched) > 1:
+                report.refused.append(
+                    f"{sheet.name} row {number}: this id matches "
+                    f"{len(matched)} students in the roster. Two roster "
+                    "entries share an id; fix that first.")
+                continue
+            if not matched:
+                report.rows_unmatched.append(f"{sheet.name}:{number}")
+                continue
+            rows_for.setdefault(id(matched[0]), []).append(
+                (sheet, number, row))
+
+    for student in students:
+        here = rows_for.get(id(student)) or []
+        if not here:
             continue
 
-        matched = by_key.get(_core(raw)) or []
-        if len(matched) > 1:
+        files = {sheet.name for sheet, _, _ in here}
+        if len(files) > 1:
+            # His check. A student in two sections' exports means one of
+            # them is wrong about who is enrolled, and writing to both
+            # would record the same result twice.
             report.refused.append(
-                f"row {number}'s id matches {len(matched)} students in the "
-                "roster. Two roster entries share an id; fix that first.")
-            continue
-        if not matched:
-            report.rows_unmatched.append(number)
+                f"{student.sid or student.name} appears in "
+                f"{len(files)} files ({', '.join(sorted(files))}). A "
+                "student should be in the export for one section only.")
             continue
 
-        student = matched[0]
-        if id(student) in seen_students:
-            report.refused.append(
-                f"row {number} is a second row for a student already matched "
-                "on an earlier row. Add an ignore rule for the one that is "
-                "not live, or nothing will be written for them.")
-            continue
-        seen_students.add(id(student))
+        sheet = here[0][0]
+        if sheet.section and student.section \
+                and sheet.section != student.section:
+            report.notes.append(
+                f"{student.sid or student.name} is in {sheet.name}, which "
+                f"looks like section {sheet.section}, but the roster says "
+                f"{student.section}")
+
+        if len(here) > 1:
+            # His rule: update the row with more grades on it. A tie is
+            # refused, because there is then nothing to choose by.
+            graded = skill_columns[sheet.name]
+            ranked = sorted(here, key=lambda item: _filled(item[2], graded),
+                            reverse=True)
+            if _filled(ranked[0][2], graded) == _filled(ranked[1][2], graded):
+                report.refused.append(
+                    f"{sheet.name} rows "
+                    + ", ".join(str(n) for _, n, _ in here)
+                    + " are the same student with the same number of "
+                    "grades, so there is nothing to choose between them. "
+                    "Add an ignore rule for the one that is not live.")
+                continue
+            report.notes.append(
+                f"{sheet.name} rows "
+                + ", ".join(str(n) for _, n, _ in here)
+                + f" are one student; writing to row {ranked[0][1]} "
+                f"({_filled(ranked[0][2], graded)} grades) and leaving the "
+                "other(s) alone")
+            here = [ranked[0]]
+
+        sheet, number, row = here[0]
         report.rows_matched += 1
 
-        for slug, column in sorted(columns.found.items()):
+        for slug, column in sorted(columns[sheet.name].found.items()):
             result = results.get((student.sid, slug))
             if result is None:
-                report.no_result += 1
+                report.not_written += 1
                 continue
-            if result["passes"]:
-                want = profile.passed
-            elif result["last_sat"]:
-                want = profile.not_passed
-            else:
-                # Only absences. Not an attempt at the skill.
-                report.no_result += 1
+            was = row[column] if column < len(row) else ""
+
+            if was.strip() and was not in (profile.passed,
+                                           profile.not_passed):
+                report.refused.append(
+                    f"{sheet.name} row {number}, {slug}: the cell holds a "
+                    "value this tool does not know, so nothing was planned "
+                    "for it")
                 continue
 
-            was = row[column] if column < len(row) else ""
-            if was == want:
+            key = (sheet.name, number, column)
+            if result["passes"]:
+                if was == profile.passed:
+                    report.already_right += 1
+                    continue
+                changes[key] = Change(
+                    sheet=sheet.name, row=number, column=column + 1,
+                    slug=slug, was=was, now=profile.passed,
+                    why="passed on the record")
+                continue
+
+            if not result["last_sat"]:
+                report.not_written += 1          # only absences
+                continue
+            if slug not in not_yet:
+                report.not_written += 1
+                continue
+            if was == profile.passed:
+                report.kept.append(Kept(
+                    sheet=sheet.name, row=number, column=column + 1,
+                    slug=slug, value=was, why="a pass is never replaced"))
+                continue
+            if was == profile.not_passed:
                 report.already_right += 1
                 continue
-            change = Change(row=number, column=column + 1, slug=slug,
-                            was=was, now=want,
-                            _was_a_pass=was == profile.passed)
-            if change.downgrade:
-                report.downgrades.append(change)
-            else:
-                report.changes.append(change)
-            changes[(number, column)] = change
+            changes[key] = Change(
+                sheet=sheet.name, row=number, column=column + 1, slug=slug,
+                was=was, now=profile.not_passed,
+                why="not passed, and this skill was named")
 
+    report.changes = sorted(changes.values(),
+                            key=lambda c: (c.sheet, c.row, c.column))
     report.students_unmatched = sorted(
         getattr(s, "sid", "") or s.name for s in students
-        if id(s) not in seen_students and not s.dropped)
+        if id(s) not in rows_for and not s.dropped)
     return changes, report
 
 
-def apply_export(rows, changes, allow_downgrades=False):
-    """Return new rows with the changes in. The input is left alone."""
-    out = [list(r) for r in rows]
-    written = 0
-    for (number, column), change in changes.items():
-        if change.downgrade and not allow_downgrades:
+def apply_export(sheet, changes):
+    """New rows for one sheet, with its changes in. The input is untouched.
+
+    Used for checking and for tests. The file that is actually written
+    is produced by `splice`, which does not go through this.
+    """
+    out = [list(r) for r in sheet.rows]
+    for (name, number, column), change in changes.items():
+        if name != sheet.name:
             continue
         row = out[number - 1]
         while len(row) <= column:
             row.append("")
         row[column] = change.now
-        written += 1
-    return out, written
+    return out
+
+
+def verify_export(before, after, changes, sheet_name):
+    """Check that exactly the planned cells of one sheet differ.
+
+    The post-condition. A plan that is right and a write that is wrong
+    look identical from the plan's side; his own script does this with
+    a second independent planner, and this is the cheaper half of the
+    same idea.
+    """
+    problems = []
+    if len(before) != len(after):
+        return [f"{sheet_name}: the row count changed, {len(before)} -> "
+                f"{len(after)}"]
+    planned = {(number, column)
+               for (name, number, column) in changes if name == sheet_name}
+    for index, (old, new) in enumerate(zip(before, after)):
+        if len(old) != len(new):
+            problems.append(f"{sheet_name} row {index + 1} changed width")
+            continue
+        for column, (a, b) in enumerate(zip(old, new)):
+            if a == b:
+                continue
+            if index == 0:
+                problems.append(f"{sheet_name}: the header row was written "
+                                "to")
+            elif (index + 1, column) not in planned:
+                problems.append(
+                    f"{sheet_name} row {index + 1}, column {column + 1} "
+                    "changed and was not in the plan")
+    for number, column in planned:
+        want = changes[(sheet_name, number, column)].now
+        if after[number - 1][column] != want:
+            problems.append(
+                f"{sheet_name} row {number}, column {column + 1} was "
+                "planned and did not change")
+    return problems
+
+
+def splice(path, changes, sheet_name, header_line=1):
+    """The bytes to write for one file: changed lines edited, rest copied.
+
+    **Untouched lines are copied byte for byte.** Re-serialising through
+    a CSV writer normalises quoting, so a cell the LMS quoted
+    unnecessarily would come back bare and the file would no longer be
+    the file that was downloaded -- which is the whole promise of a
+    round-trip. Splicing cannot do that.
+
+    The price is that a line to be edited must not contain a quote
+    character, because splitting such a line on commas is wrong. That
+    is a refusal rather than a guess, and his script makes it too. A
+    line nobody edits may contain anything, since it is never parsed.
+    """
+    with open(path, "rb") as f:
+        raw = f.read()
+    bom = raw.startswith(b"\xef\xbb\xbf")
+    lines = raw.decode("utf-8-sig").splitlines(keepends=True)
+
+    by_row = {}
+    for (name, number, column), change in changes.items():
+        if name == sheet_name:
+            by_row.setdefault(number, []).append(change)
+
+    out = []
+    for index, line in enumerate(lines, 1):
+        row_number = index - header_line + 1
+        if row_number not in by_row:
+            out.append(line)
+            continue
+        body = line.rstrip("\r\n")
+        ending = line[len(body):]
+        if '"' in body:
+            raise GradebookError(
+                f"{path}, line {index}: this row has quoted fields, and "
+                "editing it by splitting on commas would be wrong. Nothing "
+                "was written.")
+        fields = body.split(",")
+        for change in by_row[row_number]:
+            position = change.column - 1
+            while len(fields) <= position:
+                fields.append("")
+            if fields[position] != change.was:
+                raise GradebookError(
+                    f"{path}, line {index}: the cell this was planned "
+                    "against has changed. Export again and re-run.")
+            fields[position] = change.now
+        out.append(",".join(fields) + ending)
+
+    text = "".join(out)
+    return (b"\xef\xbb\xbf" if bom else b"") + text.encode("utf-8")
 
 
 # --------------------------------------------- does a blank cell count? --
