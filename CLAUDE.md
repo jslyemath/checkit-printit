@@ -504,26 +504,64 @@ lowers their grade. Filling is the destructive direction.
 
 ### Export fills cells; it does not generate a file
 
-`gradebook export` takes the file the instructor exported and hands it
-back with results in it. Same columns in the same order, same rows,
-every untouched value as it was, **and the same line endings and
-byte-order-mark**, read off the source by `mask.sniff` -- so what he
-uploads is the file he downloaded.
+**Read `~/Downloads/Student_PDFs/Skill_Checker/apply_to_brightspace.py`
+before changing anything here.** That is the instructor's own script,
+in production since October, and `gradebook export`'s rules are copied
+from it rather than invented. Where the two disagree, it is right. The
+first version of the export disagreed with it in five places, all of
+them in the direction of writing more than he wanted.
 
-Three rules decide a cell: ever passed takes the pass value; attempted
-and not passed takes the non-pass value; **never attempted, or only
-ever absent, is left exactly as found.** The third is the one that
-protects grades, since a denominator that counts filled cells means
-writing a non-pass into a blank raises it for a paper nobody sat.
+The rules, which are his:
 
-Two guards, both deliberate:
+* **A pass** goes in where the cell is empty or holds the non-pass
+  value.
+* **A non-pass** goes in only for a skill named in `--not-yet`, and
+  **only into an empty cell**. Writing one raises that student's
+  denominator wherever the subtotals count filled cells, so it is a
+  deliberate act for the skills in play that round, not a side effect
+  of having a record.
+* **A pass is never replaced.** Not a default -- a rule. There is no
+  flag, and a test asserts that there is no flag.
+* **An absence writes nothing.** It is no attempt at the skill.
+* **A cell holding anything else stops the export**, because
+  overwriting a value the tool does not understand is guessing.
+* **A student on two rows** loses to the row with more grades; a tie
+  stops the export.
+* **A student in two files** stops the export: a course exports one
+  file per section and nobody belongs to two.
+* **A cell that changed since the plan was made** stops the export.
 
-* **It writes nothing without `-o`.** The dry run is the default for
-  something that changes grades; writing is the extra step.
-* **It will not replace an existing pass** unless `--allow-downgrades`
-  is passed. A pass already in the gradebook may have come from
-  outside printit, and destroying it is the one irreversible thing
-  here. Those cells are counted and listed one by one.
+Two more things that are easy to get wrong:
+
+* **It takes every file at once**, one per section. The "appears in
+  exactly one file" check cannot be made by a tool looking at one
+  file, and running it per file buries each run under the other
+  section's students.
+* **Untouched lines are copied byte for byte.** `splice` edits the
+  changed lines and copies the rest verbatim. Re-serialising through a
+  CSV writer -- which the first version did -- normalises quoting, so a
+  cell the LMS quoted unnecessarily comes back bare and the uploaded
+  file is no longer the downloaded one. The price is refusing to edit a
+  line containing a quote character, since splitting it on commas would
+  be wrong; a line nobody edits is never parsed and may hold anything.
+
+It writes nothing without `-o`, which names a directory for the
+`<original>_UPDATED.csv` copies, and if any file fails its checks every
+copy already written is deleted.
+
+### `OSW_ID`, and why not an email
+
+MAT 106 matches on the institution's own student id, not an address:
+**an email that reached Brightspace from another institution is often
+stale**, so the LMS address can disagree with the roster's for a
+perfectly well enrolled student. Matching on the address reports them
+as missing while their paper sits on the desk.
+
+`osw_id` is therefore in `classlist.SYNONYMS["sid"]` alongside the
+vendor-specific `banner id`. Without it the column is unrecognised: the
+masker blanks it, which is safe but useless, and the importer ignores
+it. With it, the gradebook can be matched on the student id directly
+and **no LMS id has to be imported at all**.
 
 ### Getting the LMS id onto the roster needs no new command
 

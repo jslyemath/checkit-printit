@@ -67,6 +67,95 @@ def incoming(tmp_path):
     return classlist.parse(str(path))
 
 
+#: A Brightspace export carrying the institution's own student id. He
+#: matches on this rather than on an email, because an address that
+#: reached Brightspace from another institution is often stale -- so the
+#: email in the LMS can disagree with the one the roster knows, for a
+#: student who is perfectly well enrolled.
+WITH_OSW = """\
+OrgDefinedId,Last Name,First Name,Email,OSW_ID,End-of-Line Indicator
+#2041000001,Lovelace,Ada,stale.address@elsewhere.edu,806000111,#
+#2041000002,Turing,Alan,aturing@institute.edu,806000222,#
+"""
+
+
+def test_osw_id_is_read_as_the_student_id(tmp_path):
+    """Oswego's spelling of the student id, in the synonym table.
+
+    Without it the column is not recognised: the masker blanks it --
+    safe, since a bare 9-digit column reads as "possibly an id" -- and
+    the importer ignores it. Safe but useless, and this is the column
+    MAT 106 has to match on.
+    """
+    path = tmp_path / "export.csv"
+    path.write_text(WITH_OSW, encoding="utf-8")
+    students, mapping, _ = classlist.parse(str(path))
+    assert "sid" in mapping.columns
+    assert [s.sid for s in students] == ["806000111", "806000222"]
+    # And the LMS id is still read, into its own field.
+    assert [s.alt_id for s in students] == ["#2041000001", "#2041000002"]
+
+
+def test_the_masker_masks_the_osw_id_rather_than_blanking_it(tmp_path,
+                                                            monkeypatch):
+    """The whole column would otherwise come back empty in a twin."""
+    monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(tmp_path))
+    from checkit_printit import mask as mask_mod
+    from checkit_printit.vault import Vault
+
+    path = tmp_path / "export.csv"
+    path.write_text(WITH_OSW, encoding="utf-8")
+    rows = mask_mod.read_rows(str(path))
+    plan = mask_mod.plan(rows)
+    osw = [d for d in plan.decisions if d.header == "OSW_ID"][0]
+    assert osw.action == "mask"
+    assert osw.kind == "sid"
+
+    out = str(tmp_path / "twin.csv")
+    mask_mod.mask_file(str(path), out, Vault(course="T"))
+    twin = mask_mod.read_rows(out)
+    column = twin[0].index("OSW_ID")
+    masked = [r[column] for r in twin[1:]]
+    assert all(len(v) == 9 and v.isdigit() for v in masked), masked
+    assert "806000111" not in "".join(masked)
+
+
+def test_a_stale_email_does_not_stop_the_match(tmp_path):
+    """Why the id and not the address.
+
+    Ada's address in Brightspace came from another institution and does
+    not match the roster's. Matching on the id finds her anyway; matching
+    on the address would have reported her as "not in the gradebook"
+    while her paper sat on the desk.
+    """
+    from checkit_printit import gradebook as gb
+
+    path = tmp_path / "export.csv"
+    path.write_text(WITH_OSW, encoding="utf-8")
+    rows = [r for r in __import__(
+        "csv").reader(open(path, encoding="utf-8"))]
+
+    roster_path = tmp_path / "roster.toml"
+    roster_path.write_text(BEFORE, encoding="utf-8")
+    people = roster_mod.load(str(roster_path))
+
+    sheet = gb.Sheet(name="MAT106-820.csv", rows=rows, section="820")
+    profile = gb.Profile(
+        name="t", student_column="OSW_ID", student_matches="sid",
+        passed="P", not_passed="N", blank_means="not attempted")
+    _, report = gb.plan_export([sheet], profile, people, [], [])
+    assert report.rows_matched == 2
+    assert report.rows_unmatched == []
+
+    # And on the address it would not have.
+    by_email = gb.Profile(
+        name="t", student_column="Email", student_matches="email",
+        passed="P", not_passed="N", blank_means="not attempted")
+    _, worse = gb.plan_export([sheet], by_email, people, [], [])
+    assert worse.rows_unmatched == ["MAT106-820.csv:2"], \
+        "the stale address was expected to miss"
+
+
 def test_the_existing_importer_reads_the_lms_id(incoming):
     """`OrgDefinedId` is already in the synonym table, as `alt_id`."""
     students, mapping, _ = incoming
@@ -154,6 +243,7 @@ def test_the_export_can_then_find_everybody(before, incoming):
     head = ["OrgDefinedId",
             "W1 Grade Symbol <Selectbox MaxPoints:1 Category:Core>"]
     rows = [head, ["#2041000001", ""], ["#2041000002", ""]]
+    sheet = gb.Sheet(name="MAT106-820.csv", rows=rows, section="820")
     profile = gb.Profile(
         name="t", student_column="OrgDefinedId", student_matches="alt_id",
         passed="P", not_passed="N", blank_means="not attempted")
@@ -161,7 +251,7 @@ def test_the_export_can_then_find_everybody(before, incoming):
                  "passes": 1, "queries": 0, "absents": 0, "last": "passed",
                  "passed_in": "r1", "last_sat": "passed",
                  "last_date": "2026-11-01"}]
-    _, report = gb.plan_export(rows, profile, merged, progress, ["W1"])
+    _, report = gb.plan_export([sheet], profile, merged, progress, ["W1"])
 
     assert report.rows_matched == 2
     assert report.rows_unmatched == []
