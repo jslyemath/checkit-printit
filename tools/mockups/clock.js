@@ -57,6 +57,161 @@
          + `M${wing(34)}L${bx} ${by}L${wing(-34)}`;
   }
 
+  /* ---- measuring, because eyeballing these was wrong three times ----
+
+     Sample every stroke into points and ask how close two parts that
+     should not touch actually get. At 21px the stroke is 1.714 units
+     wide, so two strokes need about 2.55 between their centrelines
+     before any white survives between them. GAP is that number. */
+  const GAP = 2.55;
+
+  function arcPts(cx, cy, r, a0, a1, cw, step = 0.12) {
+    const span = cw ? ((a1 - a0) + 360) % 360 : ((a0 - a1) + 360) % 360;
+    const n = Math.max(2, Math.ceil(span * RAD * r / step));
+    const out = [];
+    for (let i = 0; i <= n; i++) {
+      const t = a0 + (cw ? 1 : -1) * span * i / n;
+      out.push([cx + r * Math.cos(t * RAD), cy + r * Math.sin(t * RAD)]);
+    }
+    return out;
+  }
+
+  function linePts(p, q, step = 0.12) {
+    const n = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / step));
+    const out = [];
+    for (let i = 0; i <= n; i++)
+      out.push([p[0] + (q[0] - p[0]) * i / n, p[1] + (q[1] - p[1]) * i / n]);
+    return out;
+  }
+
+  function minDist(A, B) {
+    let m = Infinity;
+    for (const a of A) for (const b of B) {
+      const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+      if (d < m) m = d;
+    }
+    return +m.toFixed(2);
+  }
+
+  /* ---- the circular arrow, with a head that clears its own arc ----
+
+     **This is the thing that kept going wrong.** Wings splayed about
+     the tangent do not work on a small circle: the arc curves into
+     the inner wing. The wing's far end sits at radius
+
+         |W - C| = hypot(r + h*sin(psi), h*cos(psi))
+
+     from the centre, psi positive meaning away from it, so the inner
+     wing ends `r - |W-C|` inside the arc -- and at r=4.8, h=2.5,
+     psi=34 that is **0.82**, well under one stroke. The two merge
+     into a hook. Every circular arrow drawn here before this was
+     measured had a negative number there, the rail clock included.
+
+     What works is an **asymmetric head**: the inner wing steep
+     (about -70 degrees, so it dives away from the arc) and the outer
+     shallow (about +45). A search over r, h and both angles, keeping
+     the opening between 75 and 115 degrees so it still looks like a
+     head, found nothing at all below r = 5.8. A circular arrow
+     smaller than that cannot carry an arrowhead at 21px; it has to
+     be a corner, or a filled triangle, or bigger. */
+  function head(cx, cy, r, endDeg, h, inner, outer, cw) {
+    const dir = cw ? 1 : -1;
+    const beta = endDeg - dir * 90;          // backward along the tangent
+    const tip = [cx + r * Math.cos(endDeg * RAD),
+                 cy + r * Math.sin(endDeg * RAD)];
+    const w = (psi) => {
+      const a = (beta + dir * psi) * RAD;
+      return [+(tip[0] + Math.cos(a) * h).toFixed(2),
+              +(tip[1] + Math.sin(a) * h).toFixed(2)];
+    };
+    return { tip, wi: w(inner), wo: w(outer) };
+  }
+
+  function badge(cx, cy, r, gapA, gapB, h, inner, outer, cw) {
+    const start = cw ? gapB : gapA, end = cw ? gapA : gapB;
+    const H = head(cx, cy, r, end, h, inner, outer, cw);
+    const s = [cx + r * Math.cos(start * RAD), cy + r * Math.sin(start * RAD)];
+    const t = `${H.tip[0].toFixed(2)} ${H.tip[1].toFixed(2)}`;
+    return {
+      d: `M${s[0].toFixed(2)} ${s[1].toFixed(2)}`
+       + `A${r} ${r} 0 1 ${cw ? 1 : 0} ${t}`
+       + `M${H.wi[0]} ${H.wi[1]}L${t}L${H.wo[0]} ${H.wo[1]}`,
+      pts: arcPts(cx, cy, r, start, end, cw)
+             .concat(linePts(H.wi, H.tip), linePts(H.tip, H.wo)),
+    };
+  }
+
+  /* The page, with its bottom and right edges stopped where the badge
+     would crowd them -- the knockout.
+
+     **Solve on the offset circle of radius r + GAP, not on the badge.**
+     Stopping an edge where its own distance *along that edge* reaches
+     GAP leaves the corner nearer than it looks, because the badge is
+     round: the first version of this under-cut by nearly a unit and
+     measured 0.05 of clearance where it claimed 2.55. */
+  function knocked(x0, y0, x1, y1, rr, bcx, bcy, br) {
+    const R = br + GAP;
+    const dxr = Math.abs(x1 - bcx), dyb = Math.abs(y1 - bcy);
+    const yStop = dxr < R ? bcy - Math.sqrt(R * R - dxr * dxr) : y1 - rr;
+    const xStop = dyb < R ? bcx - Math.sqrt(R * R - dyb * dyb) : x1 - rr;
+    return {
+      d: `M${xStop.toFixed(2)} ${y1}H${(x0 + rr).toFixed(2)}`
+       + `A${rr} ${rr} 0 0 1 ${x0} ${(y1 - rr).toFixed(2)}`
+       + `V${(y0 + rr).toFixed(2)}A${rr} ${rr} 0 0 1 ${(x0 + rr).toFixed(2)} ${y0}`
+       + `H${(x1 - rr).toFixed(2)}A${rr} ${rr} 0 0 1 ${x1} ${(y0 + rr).toFixed(2)}`
+       + `V${yStop.toFixed(2)}`,
+      pts: linePts([xStop, y1], [x0 + rr, y1])
+        .concat(arcPts(x0 + rr, y1 - rr, rr, 90, 180, false),
+                linePts([x0, y1 - rr], [x0, y0 + rr]),
+                arcPts(x0 + rr, y0 + rr, rr, 180, 270, false),
+                linePts([x0 + rr, y0], [x1 - rr, y0]),
+                arcPts(x1 - rr, y0 + rr, rr, 270, 360, false),
+                linePts([x1, y0 + rr], [x1, yStop])),
+      xStop: +xStop.toFixed(2), yStop: +yStop.toFixed(2),
+    };
+  }
+
+  /* The sheet behind. Offsetting it diagonally puts two rounded
+     corners face to face, and **the diagonal pinch is much tighter
+     than the offset**: at an offset of 3.0 with radii 1.6 and 1.7 the
+     corners are 1.08 apart, not 3.0. The offset has to be about 4
+     before that clears. */
+  function backHint(x, y, w, down, rr) {
+    return {
+      d: `M${x.toFixed(2)} ${y.toFixed(2)}h${w.toFixed(2)}`
+       + `a${rr} ${rr} 0 0 1 ${rr} ${rr}v${down.toFixed(2)}`,
+      pts: linePts([x, y], [x + w, y])
+        .concat(arcPts(x + w, y + rr, rr, 270, 360, false),
+                linePts([x + w + rr, y + rr], [x + w + rr, y + rr + down])),
+    };
+  }
+
+  /* One stack-and-arrow, measured.
+
+     **Do not report the page-to-badge distance.** The knockout moves
+     the stop point until that distance is exactly GAP, so it reads
+     2.55 for every layout including hopeless ones -- shove the badge
+     1.5 units left, or stretch the page to x=13, and it still says
+     2.55. A number that cannot come out wrong is not a check. It was
+     reported here for one round before that was noticed.
+
+     The two that do move are the gap to the sheet behind -- break the
+     offset to 2.6 and it drops to 1.28 -- and how much of the page's
+     own right and bottom edges survive the knockout, which is what
+     decides whether it still reads as a page. */
+  function stackRerun(p) {
+    const B = badge(p.bcx, p.bcy, p.br, 290, 340, p.h, -70, 45, true);
+    const S = knocked(2.0, p.y0, p.x1, p.y1, 1.7, p.bcx, p.bcy, p.br);
+    const H = backHint(2.0 + p.off, p.y0 - p.off, p.x1 - 3.6, 3.4, 1.6);
+    return {
+      parts: [H.d, S.d, B.d],
+      toBack: minDist(B.pts, H.pts),
+      behind: minDist(H.pts, S.pts),
+      rightEdge: +((S.yStop - (p.y0 + 1.7)) / (p.y1 - p.y0 - 3.4)).toFixed(2),
+      bottomEdge: +Math.min(1, (S.xStop - 3.7) / (p.x1 - 5.4)).toFixed(2),
+    };
+  }
+
   /* A plain sheet. Written out rather than left as a <rect> because
      these get combined with partial outlines below, and one shape
      kind per family keeps the editing honest. */
@@ -187,6 +342,49 @@
               + "A1.6 1.6 0 0 1 4.0 6.6H12.2A1.6 1.6 0 0 1 13.8 8.2V11.4",
               dial(250, 290, 4.8, 2.5, 16.6, 16.8, true)],
       note: "clockwise" },
+
+    /* ---- measured, after he picked stack-plus-clockwise ----
+
+       Two faults in everything above, both of which he spotted and
+       both of which turned out to be arithmetic:
+
+       1. the arrowhead's inner wing merged into its own arc. The
+          wings were splayed about the tangent; on a small circle the
+          arc curves into them. Measured clearance was negative in
+          every single one, the rail clock included.
+       2. the badge and the page ran into each other at low
+          resolution. The knockout was solved on the badge's own
+          radius instead of the badge plus the gap, which leaves the
+          corner far nearer than the number claims.
+
+       These are built by `stackRerun`, which measures every pair and
+       prints the worst. The badge is r = 5.8, which is the smallest
+       the search allows: nothing below that can carry a head. */
+    (() => { const r = stackRerun({ br: 5.8, bcx: 17.2, bcy: 17.2,
+               y0: 6.2, x1: 10.0, y1: 16.0, off: 4.0, h: 3.4 });
+      return { key: "16 measured, badge-led", parts: r.parts,
+        note: `behind ${r.behind}, to back ${r.toBack} (need ${GAP}); `
+            + `right edge ${r.rightEdge}, bottom ${r.bottomEdge} of the `
+            + `page still drawn. The arrow is the larger object here, `
+            + `because r=5.8 is the floor for a head` }; })(),
+    (() => { const r = stackRerun({ br: 5.8, bcx: 17.2, bcy: 17.2,
+               y0: 5.0, x1: 10.0, y1: 17.2, off: 3.8, h: 3.4 });
+      return { key: "17 measured, tall page", parts: r.parts,
+        note: `behind ${r.behind}, to back ${r.toBack}; right edge `
+            + `${r.rightEdge}, bottom ${r.bottomEdge}. A taller page `
+            + `reads more like paper at the same badge size` }; })(),
+    (() => { const r = stackRerun({ br: 5.8, bcx: 17.0, bcy: 17.0,
+               y0: 4.6, x1: 11.2, y1: 18.0, off: 3.6, h: 3.4 });
+      return { key: "18 measured, big page", parts: r.parts,
+        note: `behind ${r.behind}, to back ${r.toBack}; right edge `
+            + `${r.rightEdge}, bottom ${r.bottomEdge}. The largest page `
+            + `the clearances allow, so paper and arrow are even` }; })(),
+    (() => { const r = stackRerun({ br: 5.8, bcx: 17.0, bcy: 17.0,
+               y0: 4.6, x1: 11.8, y1: 17.2, off: 3.6, h: 3.4 });
+      return { key: "19 measured, widest page", parts: r.parts,
+        note: `behind ${r.behind}, to back ${r.toBack}; right edge `
+            + `${r.rightEdge}, bottom ${r.bottomEdge}. Wider still, and `
+            + `starting to read as a square rather than a sheet` }; })(),
   ];
 
   const NS = "http://www.w3.org/2000/svg";
