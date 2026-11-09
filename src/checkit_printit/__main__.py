@@ -16,6 +16,7 @@ from . import record as record_mod
 from . import responses as responses_mod
 from . import course as course_mod
 from . import mask as mask_mod
+from . import maskcourse as maskcourse_mod
 from . import vault as vault_mod
 from . import manifest as manifest_mod
 from . import provision as provision_mod
@@ -1287,6 +1288,164 @@ def vault_mask(source, course, out, vault_path, header_row, keep, mask_as,
     click.echo("The vault holds real student data and is the only way to "
                "unmask. Keep it out of every repository, and do not send it "
                "anywhere with the twin.")
+
+
+@vault.command(name="learn")
+@click.option("-c", "--course", default="", help="Which course's vault.")
+@click.option("--roster", "roster_path", default=None, type=click.Path(),
+              help="The roster to learn from, instead of the course's own.")
+@click.option("--vault", "vault_path", default=None, type=click.Path(),
+              help="The vault file, instead of the one named for the course.")
+def vault_learn(course, roster_path, vault_path):
+    """Teach the vault everybody in a roster, without masking anything.
+
+    `roster.toml` is an authoritative list of who exists, with real
+    fields rather than a guess at which column is which. Once the vault
+    has been through it, `mask-text` can mask a traceback or a log, and
+    `mask-course` has what it needs.
+
+    Run this first when the thing you want to share is not a table.
+    """
+    path = _vault_path(course, vault_path)
+    if roster_path is None:
+        if not course:
+            raise click.ClickException(
+                "say which course, with -c/--course, or name a roster with "
+                "--roster.")
+        roster_path = course_mod.file_in(course, "roster")
+    if not os.path.isfile(roster_path):
+        raise click.ClickException(f"no roster at {roster_path}.")
+
+    try:
+        store = vault_mod.Vault.open_or_create(path, course)
+        before = len(store.people)
+        count = maskcourse_mod.learn(store, roster_path)
+        store.save(path)
+    except (maskcourse_mod.CourseMaskError, vault_mod.VaultError) as exc:
+        raise click.ClickException(str(exc))
+
+    added = len(store.people) - before
+    click.echo(f"read {count} students from {roster_path}")
+    click.echo(f"  {added} new, {len(store.people)} in the vault now")
+    click.echo(f"vault {path}")
+
+
+@vault.command(name="mask-course")
+@click.option("-c", "--course", default="", help="Which course.")
+@click.option("-o", "--out", default=None, type=click.Path(),
+              help="Where to write the twin. Defaults to "
+                   "`<course>-masked` in the current directory. It may not "
+                   "be inside the course folder or under the courses root.")
+@click.option("--vault", "vault_path", default=None, type=click.Path(),
+              help="The vault file, instead of the one named for the course.")
+@click.option("--allow-digits", is_flag=True,
+              help="Proceed when the twin still holds a 9+ digit run that is "
+                   "not a known pseudonym. Seeds and hashes look like that; "
+                   "look at the reported lines before passing this.")
+def vault_mask_course(course, out, vault_path, allow_digits):
+    """Write a masked twin of a whole course folder.
+
+    For when the problem is in the course state itself rather than in a
+    file you can hand over: the roster, the seating chart, the room, the
+    print record.
+
+    \b
+    Two folders are never copied, and that is not an option:
+      secrets/  credentials, which cannot be masked
+      scans/    scanned papers -- images of handwriting, with names on
+
+    An unrecognised file is skipped and reported, never copied.
+
+    Everything written is checked twice: for any real value the vault
+    knows, and for anything that still *looks* personal -- an address on
+    an unknown domain, or a long number that is not a pseudonym. On any
+    failure the whole output directory is removed, because a half-masked
+    course folder is worse than none: it looks like a twin.
+    """
+    if not course:
+        raise click.ClickException("say which course, with -c/--course.")
+    path = _vault_path(course, vault_path)
+    course_path = course_mod.path_for(course)
+    if out is None:
+        out = os.path.join(os.getcwd(), f"{course}-masked".replace(" ", "-"))
+
+    try:
+        store = vault_mod.Vault.open_or_create(path, course)
+        report = maskcourse_mod.mask_course(course_path, out, store,
+                                            allow_digits=allow_digits)
+        # Saved last, as with `mask`: a vault written before the checks
+        # passed would describe a directory that has just been removed.
+        store.save(path)
+    except (maskcourse_mod.CourseMaskError, vault_mod.VaultError) as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(report.describe())
+    click.echo("")
+    click.echo("  checked: no real value, no stray address, no unexplained "
+               "long number")
+    click.echo("")
+    click.echo(f"wrote {report.out_path}/")
+    click.echo(f"vault {path}")
+    click.echo("")
+    click.echo("The vault holds real student data and is the only way to "
+               "unmask. Keep it out of every repository, and do not send it "
+               "anywhere with the twin.")
+
+
+@vault.command(name="mask-text")
+@click.argument("source", type=click.Path(exists=True))
+@click.option("-c", "--course", default="", help="Which course's vault.")
+@click.option("-o", "--out", default=None, type=click.Path(),
+              help="Where to write. Defaults to the source name with "
+                   "`-masked` before the extension.")
+@click.option("--vault", "vault_path", default=None, type=click.Path(),
+              help="The vault file, instead of the one named for the course.")
+def vault_mask_text(source, course, out, vault_path):
+    """Mask a traceback, a log, or anything else that is not a table.
+
+    Substitution only: it replaces what the vault already knows, so run
+    `vault learn` first. It cannot classify columns, because there are
+    none.
+
+    The report says both how much was replaced **and** what still looks
+    personal. Zero replacements on its own is ambiguous -- it reads as
+    "clean" and may mean "the vault does not know these people" -- so
+    the second number is what to believe.
+    """
+    path = _vault_path(course, vault_path)
+    if out is None:
+        stem, ext = os.path.splitext(source)
+        out = stem + "-masked" + (ext or ".txt")
+
+    try:
+        store = vault_mod.Vault.load(path)
+    except vault_mod.VaultError as exc:
+        raise click.ClickException(str(exc))
+    hits = maskcourse_mod.mask_text_file(source, out, store)
+
+    with open(out, encoding="utf-8", errors="replace") as f:
+        written = f.read()
+    leaked = store.leaks(written)
+    addresses, digits = maskcourse_mod.residual(written, store)
+
+    click.echo(f"{hits} substitution(s) from {len(store.people)} students")
+    if leaked:
+        os.remove(out)
+        raise click.ClickException(
+            f"{len(leaked)} real value(s) still present, so nothing was "
+            "written. That should not happen after a substitution pass -- "
+            "run `vault check` on the source to see what the vault knows.")
+    if addresses:
+        click.echo(f"  ! address-shaped text remains on line(s) "
+                   + ", ".join(str(n) for n in addresses[:12]))
+    if digits:
+        click.echo(f"  ! {len(digits)} line(s) hold a 9+ digit run that is "
+                   f"not a known pseudonym, first at line {digits[0]}")
+    if not addresses and not digits:
+        click.echo("  nothing left that looks personal")
+    else:
+        click.echo("  look at those lines before sending this.")
+    click.echo(f"wrote {out}")
 
 
 @vault.command(name="unmask")

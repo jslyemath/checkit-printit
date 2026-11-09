@@ -430,6 +430,39 @@ column cannot be restored. Everything else round-trips exactly -- a
 masked LMS class list unmasked back to the original byte for byte in
 testing, 24 rows by 6 columns.
 
+**A whole course folder can be masked too**, with `vault mask-course`.
+That inverts the strategy: `roster.toml` is an authoritative list of
+who exists, so the vault learns the people from it properly and then
+*substitutes* known values through every other file -- seating chart,
+room, record database -- none of which has to be understood to be
+masked. `secrets/` and `scans/` are never copied, and that is not an
+option: one holds credentials, the other holds images of handwriting
+with names on them.
+
+Because substitution can only replace what the roster taught it,
+everything written is also **sniffed for anything that still looks
+personal** -- an address on a domain the vault does not know, or a run
+of nine or more digits that is not a pseudonym. Either one deletes the
+whole output directory.
+
+Three things in there that were wrong and are worth not repeating:
+
+* **`with sqlite3.connect(...)` does not close the connection.** It
+  commits or rolls back the transaction. The file stayed locked, the
+  clean-up could not delete a twin that had failed its checks, and
+  `ignore_errors=True` meant the call returned quietly -- so a
+  half-masked course folder sat on disk under a message saying it had
+  been destroyed.
+* **Read and write text with `newline=""`.** Universal newlines turn a
+  CRLF file into LF, so the twin differed from the original on every
+  single line and a diff between them was worthless.
+* **Substitute in one pass, never pair by pair.** See `Vault._apply`.
+  Replacing one pair at a time rescans text already replaced, so a
+  pseudonym that happens to equal another student's real name gets
+  masked twice -- which merged two students into one and then unmasked
+  to the wrong person's name. `Vault.avoid` keeps the collision from
+  arising; the single pass is what makes it harmless when it does.
+
 ---
 
 ## The CLI
@@ -463,6 +496,9 @@ that outlives one print job.
 | `vault unmask FILE` | `-c`, `-o`. Real values back. Zero replacements is an error |
 | `vault check FILE` | `-c`. Scan any file for real values before sending it |
 | `vault show` | `-c`. Who is in the vault. Prints real names, for your eyes |
+| `vault learn` | `-c`, `--roster`. Teach the vault a roster, masking nothing |
+| `vault mask-course` | `-c`, `-o`, `--allow-digits`. A twin of a whole course folder. Never copies `secrets/` or `scans/` |
+| `vault mask-text FILE` | `-c`, `-o`. A traceback or a log. Reports what still looks personal |
 
 `tools/check.py` is the one to run before a commit: printit's tests, the
 audit, and the platform's tests, with **one exit code and three lines of
