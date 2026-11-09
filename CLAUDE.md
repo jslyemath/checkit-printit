@@ -463,6 +463,91 @@ Three things in there that were wrong and are worth not repeating:
   to the wrong person's name. `Vault.avoid` keeps the collision from
   arising; the single pass is what makes it harmless when it does.
 
+### The gradebook profile is data, and carries nothing personal
+
+`gradebook.toml`, beside the course's other state, holds the five facts
+an LMS round-trip needs: which column is the student and which roster
+field it joins to, the two mark strings, whether a blank cell counts,
+the slugs that needed pairing by hand, and the rows and columns never
+to write to.
+
+**None of it is student data** -- column names, two mark strings, a row
+marker -- which is why `gradebook map` gives the same answers run
+against a masked twin as against the real export, and why the profile
+can be read out or kept anywhere. There is a test that asserts this
+against a vault, and it checks for pseudonyms as well as for real
+values: a pseudonym is not a *leak*, but it is still student-linked and
+has no business in the one file meant to travel.
+
+Three things in it are worked out from the file rather than configured:
+
+* **A skill's column** is found by matching the slug against the first
+  word of the header, then two looser rules. On the real MAT 106 export
+  that places 28 of 29 with no configuration; `FCP` is spelled out as
+  `Fundamentals Checkpoint` and is the only one paired by hand. Only
+  the hand pairings are saved -- everything else is matched afresh, so
+  a renamed column is noticed instead of silently remembered wrong.
+* **The mark strings** are read out of the file, never composed. On the
+  real export a pass is `U+1F3C6` followed *immediately* by `Pass` and
+  a non-pass is `U+1F4AD` followed immediately by `Not Yet`. An
+  invented fixture had a space after the second emoji.
+* **Whether a blank counts** is proved by looking for a numeric column
+  that equals the number of *filled* cells in a category, in every row.
+  On the real export that is the Core Skills denominator, and it holds
+  in all 20 rows. A column equal to the *passes* is rejected -- that is
+  a numerator and says nothing about blanks. Where the file does not
+  settle it, the cautious answer stands: leave blanks alone.
+
+**Why cautious is "leave alone":** the subtotals count filled cells, so
+writing a non-pass into a blank raises that student's denominator and
+lowers their grade. Filling is the destructive direction.
+
+### Export fills cells; it does not generate a file
+
+`gradebook export` takes the file the instructor exported and hands it
+back with results in it. Same columns in the same order, same rows,
+every untouched value as it was, **and the same line endings and
+byte-order-mark**, read off the source by `mask.sniff` -- so what he
+uploads is the file he downloaded.
+
+Three rules decide a cell: ever passed takes the pass value; attempted
+and not passed takes the non-pass value; **never attempted, or only
+ever absent, is left exactly as found.** The third is the one that
+protects grades, since a denominator that counts filled cells means
+writing a non-pass into a blank raises it for a paper nobody sat.
+
+Two guards, both deliberate:
+
+* **It writes nothing without `-o`.** The dry run is the default for
+  something that changes grades; writing is the extra step.
+* **It will not replace an existing pass** unless `--allow-downgrades`
+  is passed. A pass already in the gradebook may have come from
+  outside printit, and destroying it is the one irreversible thing
+  here. Those cells are counted and listed one by one.
+
+### Getting the LMS id onto the roster needs no new command
+
+`roster import` already recognises `OrgDefinedId` -- it is in the same
+synonym table -- and already matches an incoming row against every
+identifier a student answers to, an email among them. So a Brightspace
+class list imports the ids onto the students who are already there.
+
+**Pass `--covers`.** A Brightspace class list has no section column, and
+`classlist.merge` treats a file naming no section as covering everyone,
+so importing one section's list marks the other section dropped -- and
+a dropped student loses their seat, which is what stops their paper
+printing. Both halves are pinned by tests in `test_lms_ids.py`.
+
+### The CLI dies on a console that cannot encode what it prints
+
+Fixed once, in `main()`, by reconfiguring stdout and stderr with
+`errors="backslashreplace"`. A Windows console is often cp1252, and
+`gradebook map` prints the gradebook's own mark values, which begin
+with an emoji: writing one raised `UnicodeEncodeError` and killed the
+command **half way through its report**. It is not only the
+gradebook's problem -- `vault show` and `vault check` print student
+names, and one accented letter would have done the same.
+
 ---
 
 ## The CLI
@@ -499,6 +584,9 @@ that outlives one print job.
 | `vault learn` | `-c`, `--roster`. Teach the vault a roster, masking nothing |
 | `vault mask-course` | `-c`, `-o`, `--allow-digits`. A twin of a whole course folder. Never copies `secrets/` or `scans/` |
 | `vault mask-text FILE` | `-c`, `-o`. A traceback or a log. Reports what still looks personal |
+| `gradebook map FILE` | `-c`, `--pair SLUG=N`, `--student-column N`, `--matches`, `--ignore-row`, `--header-row`, `--dry-run`. Which column is which |
+| `gradebook export FILE` | `-c`, `-o`, `--allow-downgrades`, `--header-row`. Fills the cells there is a result for. **Writes nothing without `-o`** |
+| `gradebook show` | `-c`. The saved profile. Carries no student data, so it is safe to read out |
 
 `tools/check.py` is the one to run before a commit: printit's tests, the
 audit, and the platform's tests, with **one exit code and three lines of
