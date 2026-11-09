@@ -437,10 +437,14 @@ class Report:
     people_seen: int
     people_new: int
     out_path: str = ""
+    fmt: "FileFormat" = None
 
     def describe(self):
-        return (f"{self.rows_written} rows, {self.people_seen} students "
-                f"({self.people_new} new to the vault)")
+        out = (f"{self.rows_written} rows, {self.people_seen} students "
+               f"({self.people_new} new to the vault)")
+        if self.fmt:
+            out += f"\n  format: {self.fmt.describe()}"
+        return out
 
 
 def apply(rows, the_plan, vault, limit=None):
@@ -514,17 +518,80 @@ def apply(rows, the_plan, vault, limit=None):
     return out, len(seen), new
 
 
-def write_csv(path, rows):
-    """UTF-8, no BOM, LF endings -- what §14.6 found in the real export.
+@dataclasses.dataclass
+class FileFormat:
+    """How a source file is physically written.
 
-    The twin is **not** byte-faithful: quoting is normalised by the
-    writer, so a cell the LMS quoted unnecessarily comes back bare. That
-    is fine for a file meant to be read and reasoned about, and is
-    stated here so nobody tries to feed a twin back to an LMS.
+    None of this is student data -- it is the shape of the container --
+    so it is carried into the twin and reported. That matters because
+    the point of the gradebook work is to hand the LMS back **its own
+    file** with some cells filled in, and a file whose line endings or
+    byte-order-mark have quietly changed is not that file.
+
+    The twin used to be written as UTF-8, no BOM, LF, always. So a
+    reader of the twin learned the masker's habits rather than the
+    source's, and could not tell whether the real export had a BOM at
+    all. Found while reading a real export's twin for exactly that.
     """
+    bom: bool = False
+    newline: str = "\n"
+    quote_all: bool = False
+    cells: int = 0
+    quoted_chars: int = 0
+
+    def describe(self):
+        return (("UTF-8 with BOM" if self.bom else "UTF-8, no BOM")
+                + ", " + ("CRLF" if self.newline == "\r\n" else "LF")
+                + " line endings, "
+                + ("every cell quoted" if self.quote_all
+                   else f"{self.quoted_chars} quote character(s)"))
+
+
+def sniff(path):
+    """Read a delimited file's physical format. Returns a `FileFormat`.
+
+    A spreadsheet has no such format, so it comes back as the defaults
+    and the twin is written as plain UTF-8 LF -- which is honest,
+    because a `.xlsx` twin is a CSV and was never going to be
+    byte-faithful.
+    """
+    if os.path.splitext(path)[1].lower() not in (".csv", ".tsv", ".txt"):
+        return FileFormat()
+    with open(path, "rb") as f:
+        raw = f.read()
+    crlf = raw.count(b"\r\n")
+    lf = raw.count(b"\n") - crlf
+    quotes = raw.count(b'"')
+    text = raw.decode("utf-8-sig", errors="replace")
+    cells = sum(len(row) for row in csv.reader(text.splitlines()))
+    return FileFormat(
+        bom=raw[:3] == b"\xef\xbb\xbf",
+        # Whichever ending dominates. A file mixing the two is already
+        # damaged and there is no faithful answer.
+        newline="\r\n" if crlf > lf else "\n",
+        # Two quotes per cell is what quoting everything looks like.
+        quote_all=cells > 0 and quotes >= 2 * cells,
+        cells=cells,
+        quoted_chars=quotes)
+
+
+def write_csv(path, rows, fmt=None):
+    """Write the twin in the source file's own physical format.
+
+    Quoting is still only approximated: `csv` either quotes everything
+    or quotes what it must, whereas a real file may have quoted some
+    cells and not others. So a twin is **structurally** faithful -- same
+    rows, same columns, same cell contents, same endings, same BOM --
+    but not necessarily byte-identical in its punctuation. Anything that
+    needs byte fidelity must work from the original.
+    """
+    fmt = fmt or FileFormat()
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f, lineterminator="\n")
+    encoding = "utf-8-sig" if fmt.bom else "utf-8"
+    with open(path, "w", encoding=encoding, newline="") as f:
+        writer = csv.writer(
+            f, lineterminator=fmt.newline,
+            quoting=csv.QUOTE_ALL if fmt.quote_all else csv.QUOTE_MINIMAL)
         writer.writerows(rows)
 
 
@@ -544,9 +611,10 @@ def mask_file(path, out_path, vault, header_row=None, keep=(), mask_as=None,
     the_plan = plan(rows, header_row=header_row, keep=keep, mask_as=mask_as,
                     vault=vault)
     out_rows, seen, new = apply(rows, the_plan, vault, limit=limit)
-    write_csv(out_path, out_rows)
+    fmt = sniff(path)
+    write_csv(out_path, out_rows, fmt)
 
-    with open(out_path, encoding="utf-8") as f:
+    with open(out_path, encoding="utf-8-sig") as f:
         written = f.read()
     leaked = vault.leaks(written, min_length=min_length)
     if leaked:
@@ -561,7 +629,8 @@ def mask_file(path, out_path, vault, header_row=None, keep=(), mask_as=None,
             "re-run with --mask-as <column>=<kind> for those columns."
         )
     return Report(plan=the_plan, rows_written=len(out_rows),
-                  people_seen=seen, people_new=new, out_path=out_path)
+                  people_seen=seen, people_new=new, out_path=out_path,
+                  fmt=fmt)
 
 
 def _locate(rows, leaked):
