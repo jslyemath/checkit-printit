@@ -15,6 +15,7 @@ from . import form as form_mod
 from . import record as record_mod
 from . import responses as responses_mod
 from . import course as course_mod
+from . import gradebook as gradebook_mod
 from . import mask as mask_mod
 from . import maskcourse as maskcourse_mod
 from . import vault as vault_mod
@@ -28,10 +29,35 @@ from .compile import compile_pdf, CompileError
 
 
 
+def _survive_a_narrow_console():
+    """Print escapes rather than dying on a character the console lacks.
+
+    A Windows console is often cp1252, and `gradebook map` prints the
+    gradebook's own mark values -- which on a real export begin with an
+    emoji. Writing one raised `UnicodeEncodeError` and killed the
+    command **half way through its report**, after the column matching
+    had been printed and before anything was saved.
+
+    `backslashreplace` keeps the emoji on a console that can show them
+    and degrades to `\U0001f3c6` on one that cannot, instead of
+    stopping. Applied once here rather than at each `echo`, because
+    this is not only the gradebook's problem: `vault show` and
+    `vault check` print student names, and one accented letter would
+    have done the same thing.
+    """
+    import sys as _sys
+    for stream in (_sys.stdout, _sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except (AttributeError, OSError, ValueError):   # pragma: no cover
+            pass
+
+
 @click.group()
 @click.version_option(__version__)
 def main():
     """Print a class set of CheckIt exercises."""
+    _survive_a_narrow_console()
 
 
 @main.command()
@@ -1558,6 +1584,412 @@ def vault_show(course, vault_path):
         click.echo("")
         for real, fake in sorted(store.domains.items()):
             click.echo(f"        {fake:<28} {real}")
+
+
+# ---------------------------------------------------------------------------
+# The gradebook
+# ---------------------------------------------------------------------------
+
+#: Which roster field an LMS id column most likely joins to, best first.
+_ID_PREFERENCE = ("alt_id", "handle", "sid", "email")
+
+
+def _bank_slugs(course):
+    bank = course_mod.bank_for(course)
+    if bank is None:
+        raise click.ClickException(
+            f"{course} is not pointed at a bank, so there is no list of "
+            "skills to match the gradebook's columns against. Set one with "
+            "`course init` or by editing the course's `course.toml`.")
+    return bank.slugs()
+
+
+@main.group()
+def gradebook():
+    """Match a gradebook's columns to this course's skills.
+
+    An LMS export is round-tripped, not generated: the file you
+    exported comes back with the cells there is a result for filled in
+    and nothing else touched. That needs five facts about your file,
+    and `gradebook map` works out as many of them as it can and asks
+    about the rest.
+
+    The answers live in `gradebook.toml` beside the course's other
+    state. It is an ordinary readable file; correct it by hand if the
+    tool got something wrong.
+    """
+
+
+@gradebook.command(name="map")
+@click.argument("source", type=click.Path(exists=True))
+@click.option("-c", "--course", default="", help="Which course.")
+@click.option("--pair", multiple=True, metavar="SLUG=N",
+              help="Pair a skill with a column number, for one the tool "
+                   "could not find -- as --pair FCP=9. Repeatable, and "
+                   "remembered.")
+@click.option("--student-column", default=None, type=int, metavar="N",
+              help="Which column holds the LMS id, if the tool picked wrong.")
+@click.option("--matches", default=None,
+              type=click.Choice(_ID_PREFERENCE),
+              help="Which roster field that id joins to.")
+@click.option("--ignore-row", multiple=True, metavar="TEXT",
+              help="Never write to a row whose id contains this, such as "
+                   "-DoNotUse. Repeatable.")
+@click.option("--header-row", default=None, type=int,
+              help="Which row holds the column names, 1-based.")
+@click.option("--dry-run", is_flag=True,
+              help="Report, and write nothing.")
+def gradebook_map(source, course, pair, student_column, matches, ignore_row,
+                  header_row, dry_run):
+    """Work out which column is which, and save the answers.
+
+    Run it on the file you exported from the LMS -- or on a masked twin
+    of it, which gives exactly the same answers, because none of what
+    gets saved is student data: column names, two mark strings, and a
+    row marker.
+
+    Nothing is guessed where guessing could be wrong. A skill that
+    matches no column, or more than one, is reported and left for you
+    to pair with `--pair`.
+    """
+    if not course:
+        raise click.ClickException("say which course, with -c/--course.")
+    slugs = _bank_slugs(course)
+    rows = mask_mod.read_rows(source)
+    if not rows:
+        raise click.ClickException(f"{source} is empty.")
+
+    try:
+        index = mask_mod.find_header(rows, header_row)
+    except mask_mod.MaskError as exc:
+        raise click.ClickException(str(exc))
+    head, body = rows[index], rows[index + 1:]
+    body = [r for r in body if any(c.strip() for c in r)]
+    click.echo(f"{len(head)} columns, {len(body)} rows, header row "
+               f"{index + 1}")
+
+    profile_path = gradebook_mod.path_for(course)
+    existing = None
+    if os.path.isfile(profile_path):
+        try:
+            existing = gradebook_mod.load(profile_path)
+        except gradebook_mod.GradebookError as exc:
+            raise click.ClickException(str(exc))
+        click.echo(f"building on {profile_path}")
+
+    # ---------------------------------------------------- the student --
+    chosen = None
+    if student_column is not None:
+        if not 1 <= student_column <= len(head):
+            raise click.ClickException(
+                f"--student-column {student_column} is outside the file, "
+                f"which has {len(head)} columns.")
+        chosen = student_column - 1
+    elif existing and existing.student_column in head:
+        chosen = head.index(existing.student_column)
+
+    # The masker's synonym table already knows what an id column is
+    # called, so it is reused rather than a second list being kept.
+    found = {}
+    for decision in mask_mod.plan(rows, header_row=header_row).decisions:
+        if decision.action == "mask" and decision.kind in _ID_PREFERENCE:
+            found.setdefault(decision.kind, decision.index)
+    if chosen is None:
+        for kind in _ID_PREFERENCE:
+            if kind in found:
+                chosen = found[kind]
+                break
+    if chosen is None:
+        raise click.ClickException(
+            "no column in this file reads as a student identifier. Name it "
+            "with --student-column N; the columns are numbered in "
+            "`vault columns`.")
+    joins = (matches
+             or (existing.student_matches if existing else None)
+             or next((k for k, i in found.items() if i == chosen),
+                     "alt_id"))
+    click.echo(f"\nstudent: column {chosen + 1}, {head[chosen]!r}, "
+               f"joined on the roster's {joins}")
+    others = [i for k, i in found.items() if i != chosen]
+    if others:
+        click.echo("  other identifier-ish columns: "
+                   + ", ".join(str(i + 1) for i in sorted(others)))
+
+    # ------------------------------------------------------ the pairs --
+    pairs = dict(existing.pairs) if existing else {}
+    for item in pair:
+        slug, _, number = item.partition("=")
+        slug = slug.strip()
+        if not number.strip().isdigit():
+            raise click.ClickException(
+                f"--pair {item!r}: expected SLUG=<column number>, such as "
+                "--pair FCP=9.")
+        position = int(number) - 1
+        if not 0 <= position < len(head):
+            raise click.ClickException(
+                f"--pair {item!r}: column {number} is outside the file.")
+        if slug not in slugs:
+            raise click.ClickException(
+                f"--pair {item!r}: {slug!r} is not a skill in this bank. "
+                f"It has {', '.join(slugs)}.")
+        pairs[slug] = head[position]
+
+    report = gradebook_mod.match(head, slugs, pairs=pairs)
+    click.echo("")
+    click.echo(report.describe(head))
+
+    # ------------------------------------------------------ the marks --
+    skill_columns = sorted(report.found.values())
+    passed, not_passed, extra = gradebook_mod.guess_marks(body, skill_columns)
+    click.echo("")
+    if passed and not_passed:
+        click.echo(f"marks: a pass is {passed!r}, a non-pass is "
+                   f"{not_passed!r}")
+        # The codepoints as well as the characters. On the real export a
+        # pass is a trophy followed *immediately* by `Pass`, and whether
+        # there is a space after the emoji is invisible when the
+        # characters are shown but obvious here. The export has to write
+        # these bytes exactly.
+        for label, value in (("pass", passed), ("non-pass", not_passed)):
+            points = " ".join("U+%04X" % ord(c) for c in value)
+            click.echo(f"  {label:<9} {points}")
+        click.echo("  taken from the file, never retyped -- the exact "
+                   "characters are what gets written back")
+        if extra:
+            click.echo(f"  also present, and treated as a non-pass: "
+                       + ", ".join(repr(e) for e in extra))
+    else:
+        click.echo("marks: could not tell which value means a pass.")
+        if extra:
+            click.echo("  the values in those columns are: "
+                       + ", ".join(repr(e) for e in extra[:12]))
+        click.echo("  set `passed` and `not_passed` by hand in "
+                   + profile_path)
+
+    # ------------------------------------------------------ the blanks --
+    meaning, evidence = gradebook_mod.blank_evidence(
+        body, head, skill_columns, passed)
+    click.echo("")
+    click.echo(f"a blank cell means: {meaning}")
+    if evidence:
+        click.echo(f"  shown by {evidence}")
+    else:
+        click.echo("  nothing in the file settles this, so the cautious "
+                   "answer stands: blanks are left alone. If your gradebook "
+                   "counts a blank as a zero, set blank_means = \"zero\".")
+
+    # -------------------------------------------------- rows to avoid --
+    ignore_rows = list(existing.ignore_rows) if existing else []
+    ignore_rows += [r for r in ignore_row if r not in ignore_rows]
+    shared = gradebook_mod.shared_base_ids(body, chosen)
+    if shared:
+        click.echo("")
+        click.echo(f"{len(shared)} id(s) appear on more than one row:")
+        import re as _re
+        suggest = set()
+        for base, hits in sorted(shared.items()):
+            click.echo(f"  {len(hits)} rows share a base id, on rows "
+                       + ", ".join(str(n) for n, _ in hits))
+            for _, value in hits:
+                marker = _re.search(r"(?<=\d)(\D+)$", value)
+                if marker:
+                    suggest.add(marker.group(1))
+        for marker in sorted(suggest - set(ignore_rows)):
+            click.echo(f"  one of them is marked {marker!r}. If that is a "
+                       f"retired enrolment, add --ignore-row {marker!r} so "
+                       "nothing is ever written to it.")
+        if not suggest:
+            click.echo("  none of them carries a marker, so there is nothing "
+                       "to tell them apart by. Decide before exporting.")
+
+    # ----------------------------------------------------- the profile --
+    claimed = set(report.found.values()) | {chosen}
+    profile = gradebook_mod.Profile(
+        name=(existing.name if existing and existing.name
+              else f"{course} gradebook"),
+        student_column=head[chosen], student_matches=joins,
+        passed=passed, not_passed=not_passed, blank_means=meaning,
+        pairs={s: h for s, h in pairs.items() if s in report.found},
+        ignore_rows=ignore_rows,
+        ignore_columns=[h for i, h in enumerate(head) if i not in claimed])
+
+    click.echo("")
+    if report.missing:
+        click.echo(f"  {len(report.missing)} skill(s) still have no column: "
+                   + " ".join(report.missing))
+        click.echo("  they will be skipped on export until paired. Pick from "
+                   "the spare columns above, as --pair SLUG=N.")
+    click.echo(f"  {len(profile.ignore_columns)} column(s) belong to nothing "
+               "in the bank and will never be written to")
+
+    if dry_run:
+        click.echo("\ndry run -- nothing was written.")
+        return
+    try:
+        profile.validate(head)
+    except gradebook_mod.GradebookError as exc:
+        raise click.ClickException(
+            f"{exc}\n\nNothing was written. Correct it on the command line, "
+            f"or write {profile_path} by hand.")
+    gradebook_mod.save(profile_path, profile)
+    click.echo(f"\nwrote {profile_path}")
+
+
+@gradebook.command(name="export")
+@click.argument("source", type=click.Path(exists=True))
+@click.option("-c", "--course", default="", help="Which course.")
+@click.option("-o", "--out", default=None, type=click.Path(),
+              help="Where to write the filled-in file. **Without this "
+                   "nothing is written** -- the run only reports, which is "
+                   "the right default for something that changes grades.")
+@click.option("--allow-downgrades", is_flag=True,
+              help="Also replace a cell that already says passed with a "
+                   "non-pass. Held back by default: a pass already in the "
+                   "gradebook may have come from outside printit.")
+@click.option("--header-row", default=None, type=int,
+              help="Which row holds the column names, 1-based.")
+def gradebook_export(source, course, out, allow_downgrades, header_row):
+    """Fill in the cells there is a result for, and change nothing else.
+
+    Hand it the file you exported from the LMS. It comes back with the
+    same columns in the same order, the same rows, every untouched
+    value exactly as it was, and the same line endings and
+    byte-order-mark -- so what you upload is the file you downloaded,
+    with results in it.
+
+    \b
+    Three rules decide a cell:
+      ever passed            -> the profile's pass value
+      attempted, not passed  -> its non-pass value
+      never attempted, or
+        only ever absent     -> left exactly as found
+
+    That last one matters. An absence is not an attempt, and where the
+    subtotals count filled cells, writing a non-pass into a blank
+    raises that student's denominator for a paper they never sat.
+    """
+    if not course:
+        raise click.ClickException("say which course, with -c/--course.")
+    slugs = _bank_slugs(course)
+    try:
+        profile = gradebook_mod.load(gradebook_mod.path_for(course))
+    except gradebook_mod.GradebookError as exc:
+        raise click.ClickException(str(exc))
+
+    roster_path = course_mod.file_in(course, "roster")
+    if not os.path.isfile(roster_path):
+        raise click.ClickException(f"no roster at {roster_path}.")
+    try:
+        people = roster_mod.load(roster_path)
+    except roster_mod.RosterError as exc:
+        raise click.ClickException(f"{roster_path}: {exc}")
+
+    rows = mask_mod.read_rows(source)
+    if not rows:
+        raise click.ClickException(f"{source} is empty.")
+    try:
+        index = mask_mod.find_header(rows, header_row)
+        profile.validate(rows[index])
+    except (mask_mod.MaskError, gradebook_mod.GradebookError) as exc:
+        raise click.ClickException(str(exc))
+    rows = rows[index:]
+
+    record_path = course_mod.file_in(course, "record")
+    progress = record_mod.progress(record_path)
+    if not progress:
+        raise click.ClickException(
+            f"nothing has been graded in {record_path}, so there is no "
+            "result to export. Read a stack in on the Scans tab first.")
+
+    changes, report = gradebook_mod.plan_export(
+        rows, profile, people, progress, slugs)
+
+    click.echo(f"{len(rows) - 1} rows, {len(people.live())} students "
+               f"enrolled, {len(progress)} graded (student, skill) pair(s)")
+    click.echo("")
+    click.echo(report.describe())
+
+    if report.changes:
+        click.echo("")
+        by_skill = {}
+        for change in report.changes:
+            by_skill.setdefault(change.slug, []).append(change)
+        for slug in sorted(by_skill):
+            filling = sum(1 for c in by_skill[slug] if not c.was.strip())
+            click.echo(f"    {slug:<8} {len(by_skill[slug]):>3} cell(s), "
+                       f"{filling} of them currently blank")
+
+    if report.downgrades:
+        click.echo("")
+        click.echo("  these would replace a pass, and are held back:")
+        for change in report.downgrades:
+            click.echo(f"    row {change.row:>3}  {change.slug:<8} "
+                       f"{change.was!r} -> {change.now!r}")
+        if not allow_downgrades:
+            click.echo("  pass --allow-downgrades to write them too.")
+
+    if report.refused:
+        raise click.ClickException(
+            "nothing was written: the problems above have to be settled "
+            "first.")
+
+    if out is None:
+        click.echo("")
+        click.echo("nothing was written -- pass -o to write the filled-in "
+                   "file.")
+        return
+    if os.path.abspath(out) == os.path.abspath(source):
+        raise click.ClickException(
+            "that would overwrite the file you exported. Write somewhere "
+            "else and upload that.")
+
+    filled, written = gradebook_mod.apply_export(
+        rows, changes, allow_downgrades=allow_downgrades)
+    # The same line endings and byte-order-mark as the file he gave us,
+    # because what he uploads has to be the file he downloaded.
+    fmt = mask_mod.sniff(source)
+    mask_mod.write_csv(out, filled, fmt)
+    click.echo("")
+    click.echo(f"wrote {written} cell(s) into {out}")
+    click.echo(f"  {fmt.describe()}, as the file you gave it")
+    click.echo("  every other cell, row and column is unchanged")
+
+
+@gradebook.command(name="show")
+@click.option("-c", "--course", default="", help="Which course.")
+def gradebook_show(course):
+    """Print this course's gradebook profile.
+
+    Nothing in it is student data -- column names, two mark strings and
+    a row marker -- so it is safe to read out and to share.
+    """
+    if not course:
+        raise click.ClickException("say which course, with -c/--course.")
+    path = gradebook_mod.path_for(course)
+    try:
+        profile = gradebook_mod.load(path)
+    except gradebook_mod.GradebookError as exc:
+        raise click.ClickException(str(exc))
+    click.echo(path)
+    click.echo("")
+    click.echo(f"  name            {profile.name}")
+    click.echo(f"  student column  {profile.student_column!r}")
+    click.echo(f"  joined on       the roster's {profile.student_matches}")
+    click.echo(f"  a pass is       {profile.passed!r}")
+    click.echo(f"  a non-pass is   {profile.not_passed!r}")
+    click.echo(f"  a blank means   {profile.blank_means}")
+    if profile.pairs:
+        click.echo("")
+        click.echo("  paired by hand:")
+        for slug in sorted(profile.pairs):
+            click.echo(f"    {slug:<8} {profile.pairs[slug]!r}")
+    if profile.ignore_rows:
+        click.echo("")
+        click.echo("  never write to a row whose id contains: "
+                   + ", ".join(repr(r) for r in profile.ignore_rows))
+    click.echo("")
+    click.echo(f"  {len(profile.ignore_columns)} column(s) are never "
+               "written to")
 
 
 
