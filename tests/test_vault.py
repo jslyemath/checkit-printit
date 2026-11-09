@@ -402,6 +402,65 @@ def test_two_email_domains_stay_two_different_domains(home, tmp_path):
     assert "institute.edu" not in read(out)
 
 
+class TestTheTwinKeepsTheSourcesFormat:
+    """Line endings and a byte-order-mark are carried into the twin.
+
+    They are the shape of the container, not student data, and the
+    gradebook work is about handing an LMS back **its own file** with
+    some cells filled in. A file whose endings or BOM have quietly
+    changed is not that file.
+
+    The twin used to be written as UTF-8, no BOM, LF, whatever the
+    source was. Reading a real export's twin to find out how the real
+    export is written therefore told me only about the masker's habits.
+    """
+
+    def _write(self, path, text, bom, ending):
+        import re
+        body = re.sub(r"\r?\n", ending, text)
+        with open(path, "w", encoding="utf-8-sig" if bom else "utf-8",
+                  newline="") as f:
+            f.write(body)
+        return str(path)
+
+    @pytest.mark.parametrize("bom", [False, True])
+    @pytest.mark.parametrize("ending", ["\n", "\r\n"])
+    def test_it_round_trips_the_format(self, home, tmp_path, bom, ending):
+        src = self._write(tmp_path / "class.csv", CLASSLIST, bom, ending)
+        out = str(tmp_path / "twin.csv")
+        vault = Vault(course="TEST 100")
+        report = mask_mod.mask_file(src, out, vault)
+
+        assert report.fmt.bom is bom
+        assert report.fmt.newline == ending
+
+        with open(out, "rb") as f:
+            raw = f.read()
+        assert (raw[:3] == b"\xef\xbb\xbf") is bom
+        crlf = raw.count(b"\r\n")
+        bare = raw.count(b"\n") - crlf
+        if ending == "\r\n":
+            assert bare == 0, "a bare LF crept into a CRLF twin"
+            assert crlf == len(rows_of(out))
+        else:
+            assert crlf == 0, "a CR crept into an LF twin"
+
+    def test_the_format_is_reported(self, home, tmp_path):
+        src = self._write(tmp_path / "class.csv", CLASSLIST, True, "\r\n")
+        vault = Vault(course="TEST 100")
+        report = mask_mod.mask_file(src, str(tmp_path / "twin.csv"), vault)
+        said = report.describe()
+        assert "with BOM" in said
+        assert "CRLF" in said
+
+
+def test_a_spreadsheet_has_no_physical_format_to_copy(home, tmp_path):
+    """And says so by coming back as the defaults, not by guessing."""
+    fmt = mask_mod.sniff(str(tmp_path / "book.xlsx"))
+    assert fmt.bom is False
+    assert fmt.newline == "\n"
+
+
 def test_the_grade_cells_come_through_untouched(home, tmp_path):
     src = write(tmp_path / "grades.csv", GRADES)
     out = str(tmp_path / "twin.csv")
