@@ -539,31 +539,63 @@ const GLYPH = {
   print: "M7.2 9.4V4.2h9.6v5.2M7.2 17.8H5.6a1.6 1.6 0 0 1-1.6-1.6v-4.8"
     + "a1.6 1.6 0 0 1 1.6-1.6h12.8a1.6 1.6 0 0 1 1.6 1.6v4.8"
     + "a1.6 1.6 0 0 1-1.6 1.6h-1.6M7.2 14.2h9.6v5.6H7.2z",
-  /* A clock with the arrow going back round it: Runs is the list of
-     things that already happened.
+  /* A stack of printed papers with a re-run arrow beside it. Runs
+     is the list of print jobs that have been built, and the tab can
+     start a new one from an old one's settings -- so the arrow turns
+     **clockwise**, which is re-run. Anticlockwise would be history,
+     and was the other candidate.
 
-     **The arrowhead was a right-angle corner**, not an arrowhead --
-     `M6.2 3.2v2.9H3.3` draws a stub down and a stub left meeting at
-     a square corner, which is an L sitting beside the dial rather
-     than a point on the end of it. It also had nothing to do with
-     the arc: the arc ended at (6.2, 5.9) and the corner's vertex sat
-     at (6.2, 6.1), near it by coincidence of hand-tuning and aimed
-     nowhere in particular. That, plus a gap the corner did not fill,
-     is what read as weird around the top.
+     It was a clock with a history arrow, twice over, and neither
+     worked. The first had an arrowhead that was a right-angle corner
+     aimed nowhere. The second fixed that and was still, in his
+     words, "incredibly imbalanced and awkward" -- a quarter of the
+     circle missing from one side while the hands weighed the other.
 
-     Both wings are now placed off the **tangent** at the arc's own
-     end point, 34 degrees either side of it, so the head points the
-     way the arc is travelling by construction rather than by eye.
-     The arc runs anticlockwise -- backwards, which is the whole idea
-     -- from 178 degrees round to 262, leaving the gap in the
-     upper-left where the head lives. Three gap widths were drawn and
-     magnified at 21px; this is the widest, because the two narrower
-     ones let the head touch the far end of the arc.
+     **Everything here is measured, not placed by eye.** The harness
+     is in `tools/mockups/clock.js`: it samples every stroke into
+     points and asks how close two parts that should not touch
+     actually get. At 21px -- the rail, and the only size this glyph
+     is drawn at -- the stroke is 1.714 units wide, so two centrelines
+     need about 2.55 between them before any white survives.
 
-     Only the rail draws this, at 21px, so unlike the door there is
-     one size to satisfy. */
-  record: "M3.8 12.3A8.2 8.2 0 1 0 10.9 3.9M14.1 5.5L10.9 3.9L13.5 1.5"
-    + "M12 7.2v5l3.2 2.1",
+     **Why the arrow is the bigger object.** A wing drawn at angle
+     psi off the backward tangent ends at hypot(r + h*sin psi,
+     h*cos psi) from the circle's centre, so the inner wing finishes
+     that far *inside* the arc. At r=4.8, h=2.5, psi=34 -- which is
+     what every circular arrow in this app used to be -- that is 0.82,
+     less than half a stroke, and the wing merges into the arc. He
+     spotted it and named the cause exactly.
+
+     Widening the splay symmetrically gives a bow rather than a head.
+     An asymmetric head works: inner wing at -70 degrees so it dives
+     away from the arc, outer at +45. A search over r, h and both
+     angles, holding the opening between 75 and 115 degrees so it
+     still reads as a head, **found nothing below r = 5.8**. A stroked
+     circular arrow smaller than that cannot carry an arrowhead at
+     21px; it has to be a corner, a filled triangle, or bigger. So the
+     badge is 5.8 and is the larger of the two shapes. That is forced.
+
+     **The page is knocked out, not shrunk.** Its bottom edge stops at
+     x=8.71 and its right edge at y=10.99, and the gap reads as the
+     page passing behind the badge. Those two numbers are solved on
+     the circle of radius 5.8 + 2.55, **not** on the badge itself:
+     stopping an edge where its distance measured along that edge
+     reaches the gap leaves the corner far nearer, because the badge
+     is round. That error claimed 2.55 and measured 0.05.
+
+     **The sheet behind is offset 3.6, not 2.6.** Two rounded corners
+     facing each other pinch much tighter than the offset between
+     them -- at 3.0, with radii 1.6 and 1.7, the corners are 1.08
+     apart.
+
+     Measured on what shipped: 2.61 to the sheet behind, 3.27 from
+     badge to that sheet, and the page keeps 45% of its right edge and
+     77% of its bottom. */
+  record: [{ d: "M5.6 1.0h7.6a1.6 1.6 0 0 1 1.6 1.6v3.4" },
+           { d: "M8.71 18H3.7A1.7 1.7 0 0 1 2 16.3V6.3"
+                + "A1.7 1.7 0 0 1 3.7 4.6H9.5A1.7 1.7 0 0 1 11.2 6.3V10.99" },
+           { d: "M22.45 15.02A5.8 5.8 0 1 1 18.98 11.55"
+                + "M16.8 14.15L18.98 11.55L17.55 8.47" }],
   /* Seating's own chair, front on, lifted from `seating.js`. It was
      three rectangles -- the Groups glyph -- which is a picture of one
      mode inside the tab rather than of the tab, and too nondescript to

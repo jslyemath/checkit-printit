@@ -46,7 +46,7 @@ the app's own -- which is how the first one failed to draw at all.
 | `drillin-c.js` | C refined -- no seed, no attempt number, the Scans track one size down -- with three headers. **H3, the strip, was chosen and built.** |
 | `gear.js` | five toothed gears for the Settings glyph, against the two-circles-and-sticks one in the app, at 13/18/21/32/64 and in the rail. **a8 was chosen and built.** |
 | `door.js` | thirteen `drop`/`restore` doors over three rounds, at 13 and 18 and as a pair of real buttons. **`parallelogram` was built** -- corner returns for the frame, and a leaf whose top and bottom are parallel. |
-| `clock.js` | fifteen for the Runs glyph, at 21 and 40 and in a rail row: six dials, then paper-and-arrow after he liked the page. Three complaints behind it -- an arrowhead that was a square corner, a dial with all its weight on one diagonal, and then a change of idea. **Nothing built yet.** |
+| `clock.js` | fifteen for the Runs glyph, at 21 and 40 and in a rail row: six dials, then paper-and-arrow after he liked the page. Three complaints behind it -- an arrowhead that was a square corner, a dial with all its weight on one diagonal, and then a change of idea. **Option 18, the big page with a clockwise arrow, was built.** |
 
 `drillin.js` is kept rather than deleted: it is the comparison the
 choice was made from, and a decision whose alternatives have been
