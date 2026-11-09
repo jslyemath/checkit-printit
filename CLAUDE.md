@@ -404,6 +404,32 @@ of them in a transcript.
 Fixtures under `tests/` are synthetic on purpose -- shaped exactly like the
 real exports, with no real person in them. Keep it that way.
 
+**There is now a tool for the other direction.** `checkit-printit vault`
+makes a masked twin of a file that carries names, ids or addresses, so
+the file itself can be shared. One fake person per real person, kept in
+`~/CheckItPrintIt/vaults/<course>.json` -- a **sibling** of `courses/`,
+never a child, so that masking a course folder cannot walk into the
+vault. `vault unmask` turns whatever comes back into the real thing.
+
+Three things about it that matter more than the rest:
+
+* **It checks its own output.** After writing a twin it reads it back
+  and searches it for every real value the vault knows; if one survives,
+  the twin is deleted. The failure message prints column numbers and
+  never the values.
+* **An unrecognised column is blanked, not passed through.** The header
+  and the column stay, so the shape survives for round-trip work; the
+  cells are emptied, because a column nobody classified is a column
+  nobody has shown to be safe.
+* **The vault is the only way back.** No recovery key, deliberately.
+  Back it up somewhere the twins are not.
+
+Two deliberate holes, both documented in `vault.py`: a one-letter value
+(a middle initial) is masked to `X` and does not unmask, and a blanked
+column cannot be restored. Everything else round-trips exactly -- a
+masked LMS class list unmasked back to the original byte for byte in
+testing, 24 rows by 6 columns.
+
 ---
 
 ## The CLI
@@ -432,6 +458,11 @@ that outlives one print job.
 | `form pull` | `-c`, `--dry-run`, `--force`. Responses into the roster |
 | `form setup` / `form connect --url` | the manual path, for when clasp is not an option |
 | `gui` | `-c`, `--port`, `--open/--no-open`. The local web app (8a-8d) |
+| `vault columns FILE` | `-c`, `--vault`, `--header-row`, `--keep`. What masking would do. Writes nothing |
+| `vault mask FILE` | `-c`, `-o`, `--header-row`, `--keep`, `--mask-as N=kind`, `--rows N`. The twin, plus the output check |
+| `vault unmask FILE` | `-c`, `-o`. Real values back. Zero replacements is an error |
+| `vault check FILE` | `-c`. Scan any file for real values before sending it |
+| `vault show` | `-c`. Who is in the vault. Prints real names, for your eyes |
 
 `tools/check.py` is the one to run before a commit: printit's tests, the
 audit, and the platform's tests, with **one exit code and three lines of

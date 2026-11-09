@@ -15,6 +15,8 @@ from . import form as form_mod
 from . import record as record_mod
 from . import responses as responses_mod
 from . import course as course_mod
+from . import mask as mask_mod
+from . import vault as vault_mod
 from . import manifest as manifest_mod
 from . import provision as provision_mod
 from . import runner
@@ -1131,6 +1133,272 @@ def _report(result):
         click.echo(f"  WARNING  not in the seating chart, printed last: "
                    f"{', '.join(report['unseated'])}")
 
+
+
+# ---------------------------------------------------------------------------
+# Masking
+# ---------------------------------------------------------------------------
+
+def _vault_path(course, given):
+    """Where this course's vault is. `--vault` overrides the default."""
+    if given:
+        return given
+    if not course:
+        raise click.ClickException(
+            "say which course this is, with -c/--course. The vault is named "
+            "after the course so that every file from one course shares one "
+            "set of pseudonyms -- two vaults would give one student two fake "
+            "identities, which defeats the point.")
+    return vault_mod.path_for(course)
+
+
+def _parse_mask_as(values):
+    """`--mask-as 3=sid` -> {3: "sid"}."""
+    out = {}
+    for item in values:
+        column, _, kind = item.partition("=")
+        if not kind or not column.strip().isdigit():
+            raise click.ClickException(
+                f"--mask-as {item!r}: expected <column number>=<kind>, "
+                "such as --mask-as 1=alt_id.")
+        out[column.strip()] = kind.strip()
+    return out
+
+
+@main.group()
+def vault():
+    """Make a masked twin of a file, and put the real values back.
+
+    For sharing a file that carries student names, ids or addresses --
+    with an assistant, in a bug report, in a question to a colleague --
+    without sharing the students.
+
+    Every real person gets one fake person, kept in a vault outside
+    every repository, and the fake one stands in for them. The twin has
+    the same rows, the same columns and the same shape of value in every
+    cell; `vault unmask` turns whatever comes back into the real thing.
+
+    Three things worth knowing before relying on it:
+
+    \b
+    * The vault is the only way back. There is no recovery key. Back it
+      up somewhere the masked files are not.
+    * It masks files and text. Not screenshots, not tracebacks, not
+      paths, not window titles.
+    * Marks and grades come through unmasked, because a twin without
+      them cannot be used to debug a gradebook.
+    """
+
+
+@vault.command(name="columns")
+@click.argument("source", type=click.Path(exists=True))
+@click.option("-c", "--course", default="", help="Which course's vault.")
+@click.option("--vault", "vault_path", default=None, type=click.Path(),
+              help="The vault file, instead of the one named for the course.")
+@click.option("--header-row", default=None, type=int,
+              help="Which row holds the column names, 1-based, when it "
+                   "cannot be found automatically.")
+@click.option("--keep", multiple=True,
+              help="A column to pass through verbatim. Repeatable. Use it "
+                   "only on a column you have looked at.")
+def vault_columns(source, course, vault_path, header_row, keep):
+    """Say what masking would do to each column. Writes nothing.
+
+    Run this first on an unfamiliar file. Every column is listed,
+    including the ones that would pass through -- a report of only the
+    exceptions makes "nothing to see here" and "I did not look" print
+    the same way.
+    """
+    try:
+        rows = mask_mod.read_rows(source)
+        known = None
+        path = vault_path or (vault_mod.path_for(course) if course else None)
+        if path and os.path.isfile(path):
+            known = vault_mod.Vault.load(path)
+        plan = mask_mod.plan(rows, header_row=header_row, keep=keep,
+                             vault=known)
+    except (mask_mod.MaskError, vault_mod.VaultError) as exc:
+        raise click.ClickException(str(exc))
+    click.echo(plan.describe())
+    click.echo("")
+    click.echo("  masked   replaced by this student's pseudonym")
+    click.echo("  blanked  emptied: not recognised, so not trusted")
+    click.echo("  kept     passed through unchanged")
+
+
+@vault.command(name="mask")
+@click.argument("source", type=click.Path(exists=True))
+@click.option("-c", "--course", default="", help="Which course's vault.")
+@click.option("-o", "--out", default=None, type=click.Path(),
+              help="Where to write the twin. Defaults to the source name "
+                   "with `-masked.csv` on the end, beside it.")
+@click.option("--vault", "vault_path", default=None, type=click.Path(),
+              help="The vault file, instead of the one named for the course.")
+@click.option("--header-row", default=None, type=int,
+              help="Which row holds the column names, 1-based.")
+@click.option("--keep", multiple=True,
+              help="A column to pass through verbatim. Repeatable.")
+@click.option("--mask-as", "mask_as", multiple=True,
+              help="Force a column to be masked as a kind, as 3=sid. For a "
+                   "column whose header the tool does not recognise. "
+                   "Repeatable.")
+@click.option("--rows", default=None, type=int,
+              help="Only the first N data rows. Fewer rows is less shared; "
+                   "use it when the whole file is not needed.")
+def vault_mask(source, course, out, vault_path, header_row, keep, mask_as,
+               rows):
+    """Write a masked twin of a file.
+
+    The vault is created on first use and grown on every run after: a
+    student seen before keeps the pseudonym they already had, which is
+    what lets two files be masked and still agree about who is who.
+
+    After writing, the twin is read back and searched for every real
+    value the vault knows. If one survives, the twin is deleted and
+    nothing is handed over.
+    """
+    path = _vault_path(course, vault_path)
+    if out is None:
+        stem, _ = os.path.splitext(source)
+        out = stem + "-masked.csv"
+    if os.path.abspath(out) == os.path.abspath(source):
+        raise click.ClickException(
+            "the twin would overwrite the source. Pass -o.")
+
+    try:
+        store = vault_mod.Vault.open_or_create(path, course)
+        report = mask_mod.mask_file(
+            source, out, store, header_row=header_row, keep=keep,
+            mask_as=_parse_mask_as(mask_as), limit=rows)
+        # Saved only now. A vault written before the output check passed
+        # would describe a twin the check had just deleted.
+        store.save(path)
+    except (mask_mod.MaskError, vault_mod.VaultError) as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(report.plan.describe())
+    click.echo("")
+    click.echo(f"  {report.describe()}")
+    click.echo(f"  checked: no real value survives in the twin")
+    click.echo("")
+    click.echo(f"wrote {out}")
+    click.echo(f"vault {path}")
+    click.echo("")
+    click.echo("The vault holds real student data and is the only way to "
+               "unmask. Keep it out of every repository, and do not send it "
+               "anywhere with the twin.")
+
+
+@vault.command(name="unmask")
+@click.argument("source", type=click.Path(exists=True))
+@click.option("-c", "--course", default="", help="Which course's vault.")
+@click.option("-o", "--out", default=None, type=click.Path(),
+              help="Where to write. Defaults to the source name with "
+                   "`-real` before the extension.")
+@click.option("--vault", "vault_path", default=None, type=click.Path(),
+              help="The vault file, instead of the one named for the course.")
+def vault_unmask(source, course, out, vault_path):
+    """Put the real values back into a file that came back masked.
+
+    A plain text pass, so it works on whatever shape it is given: a
+    corrected CSV, a gradebook profile, a diff, a patch, an answer
+    saved to a file.
+
+    A run that replaces nothing is an error, not a success. Zero
+    replacements reads as "nothing needed changing" and nearly always
+    means this vault does not describe this file.
+
+    One known gap: a one-letter value does not come back. Middle
+    initials are masked to `X` and stay that way -- see the note in
+    `vault.py` for why a per-person mapping of single letters is worse
+    than no mapping at all.
+    """
+    path = _vault_path(course, vault_path)
+    if out is None:
+        stem, ext = os.path.splitext(source)
+        out = stem + "-real" + (ext or ".txt")
+
+    try:
+        store = vault_mod.Vault.load(path)
+        hits = mask_mod.unmask_file(source, out, store)
+    except (mask_mod.MaskError, vault_mod.VaultError) as exc:
+        raise click.ClickException(str(exc))
+
+    if not hits:
+        os.remove(out)
+        raise click.ClickException(
+            f"nothing in {source} matched anything in {path}, so nothing was "
+            "written. Either the file is not masked, or it was masked under a "
+            "different vault. Check -c/--course.")
+    click.echo(f"{hits} replacement(s)")
+    click.echo(f"wrote {out}")
+
+
+@vault.command(name="check")
+@click.argument("source", type=click.Path(exists=True))
+@click.option("-c", "--course", default="", help="Which course's vault.")
+@click.option("--vault", "vault_path", default=None, type=click.Path(),
+              help="The vault file, instead of the one named for the course.")
+def vault_check(source, course, vault_path):
+    """Search a file for real values, before sending it anywhere.
+
+    The same scan `vault mask` runs on its own output, pointed at any
+    file. Use it on anything hand-edited, and on anything assembled
+    from several twins.
+
+    This one does print the values it finds, because it is meant to be
+    run by the person who already has them. `vault mask` deliberately
+    does not.
+    """
+    path = _vault_path(course, vault_path)
+    try:
+        store = vault_mod.Vault.load(path)
+    except vault_mod.VaultError as exc:
+        raise click.ClickException(str(exc))
+    with open(source, encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    found = store.leaks(text)
+    if not found:
+        click.echo(f"{source}: clean against {len(store.people)} students "
+                   f"in {path}")
+        return
+    click.echo(f"{source}: {len(found)} real value(s) present")
+    for value in found:
+        click.echo(f"  {value}")
+    raise click.ClickException("do not send this file.")
+
+
+@vault.command(name="show")
+@click.option("-c", "--course", default="", help="Which course's vault.")
+@click.option("--vault", "vault_path", default=None, type=click.Path(),
+              help="The vault file, instead of the one named for the course.")
+def vault_show(course, vault_path):
+    """List who is in the vault, real name beside pseudonym.
+
+    For your eyes. It prints real student data by definition -- that is
+    what it is for, when you need to know which real student a
+    pseudonym in an answer refers to.
+    """
+    path = _vault_path(course, vault_path)
+    try:
+        store = vault_mod.Vault.load(path)
+    except vault_mod.VaultError as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(f"{path}")
+    click.echo(f"  course {store.course or '(unnamed)'}, "
+               f"{len(store.people)} students, created {store.created}")
+    click.echo("")
+    for person in store.people:
+        real = " ".join(w for w in (person.real.get("first"),
+                                    person.real.get("last")) if w)
+        fake = " ".join(w for w in (person.fake.get("first"),
+                                    person.fake.get("last")) if w)
+        click.echo(f"  {person.tag}  {fake:<28} {real}")
+    if store.domains:
+        click.echo("")
+        for real, fake in sorted(store.domains.items()):
+            click.echo(f"        {fake:<28} {real}")
 
 
 
