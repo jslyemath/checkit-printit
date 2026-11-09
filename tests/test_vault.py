@@ -155,6 +155,75 @@ def test_a_points_column_is_kept(home, tmp_path):
     assert action == "keep"
 
 
+def test_points_written_to_five_decimal_places_are_kept(home):
+    """What Brightspace actually writes, and what it cost.
+
+    A real export's `Participation Attendance and Homework` column holds
+    `10.00000`. Those five zeros after the point are a run of five
+    digits, so the "this might be a student id" test blanked the whole
+    column -- an ordinary grade column emptied on his real file.
+    """
+    action, why = mask_mod.classify(["10.00000", "8.50000", "0.00000"])
+    assert action == "keep", why
+
+
+def test_a_whole_number_id_is_still_caught(home):
+    """The decimal exemption must not let a real id through.
+
+    The last case is the one that matters, and the first version of this
+    test did not have it. `_whole_part` claims in its docstring that it
+    only trims cells that are numbers all the way through, "so this can
+    never quietly shorten an id that happens to sit next to other
+    text". Breaking it to strip everything after the first dot left the
+    suite green: the other two cases below do not exercise the guard at
+    all, because stripping after a dot does not change either of them.
+
+    A claim made in a comment and not tested is a claim nobody has
+    checked.
+    """
+    action, _ = mask_mod.classify(["806000111", "806000222", "806000333"])
+    assert action == "blank"
+
+    # Still id-shaped before the point.
+    action, _ = mask_mod.classify(["806000111.0", "806000222.0"])
+    assert action == "blank"
+
+    # Not a number, so not trimmed: the id after the dot must survive
+    # the test and still be seen.
+    action, why = mask_mod.classify(["ref.806000111", "ref.806000222",
+                                     "ref.806000333", "ref.806000444",
+                                     "ref.806000555"])
+    assert action == "blank", why
+
+
+def test_the_column_report_fits_the_terminal(home, monkeypatch):
+    """Long gradebook headers wrapped, and a wrapped table is unreadable.
+
+    On his real export the console redrew wrapped rows and whole lines
+    repeated down the screen; he could not tell the report from the
+    corruption.
+    """
+    import collections
+    import shutil as shutil_mod
+
+    header = ["OrgDefinedId",
+              "Participation Attendance and Homework (PAHW) Points Grade "
+              "<Numeric MaxPoints:100 Category:Other>"]
+    rows = [header, ["#2041000001", "10.00000"], ["#2041000002", "8.50000"],
+            ["#2041000003", "9.00000"], ["#2041000004", "7.00000"],
+            ["#2041000005", "6.00000"]]
+
+    for columns in (80, 100, 200):
+        monkeypatch.setattr(
+            shutil_mod, "get_terminal_size",
+            lambda _default=None, c=columns: collections.namedtuple(
+                "size", "columns lines")(c, 24))
+        text = mask_mod.plan(rows).describe()
+        longest = max(len(line) for line in text.splitlines())
+        assert longest <= columns, (
+            f"at {columns} columns the widest line was {longest}")
+
+
 def test_a_free_text_column_is_blanked(home, tmp_path):
     action, why = mask_mod.classify([f"note number {n}" for n in range(20)])
     assert action == "blank"
@@ -549,6 +618,97 @@ def test_unmasking_does_not_match_inside_a_longer_word(home):
     out, hits = vault.unmask_text(f"the word {fake}ness is not a name")
     assert hits == 0
     assert f"{fake}ness" in out
+
+
+class TestOnePassSubstitution:
+    """A pseudonym must never be masked a second time.
+
+    Found against invented data at 45 students: one student's fake
+    given name was `Rosalind` and another student's *real* given name
+    was `Rosalind`. Masking ran one substitution per pair, so the pass
+    for the second student rewrote the first student's already-masked
+    name into the second student's pseudonym. Two people became one in
+    the twin, and unmasking returned the wrong student's name without
+    any sign that anything was wrong.
+    """
+
+    def _collided(self):
+        """A vault where one person's fake name is another's real one."""
+        vault = Vault(course="TEST 100")
+        a, _ = vault.resolve({"first": "Thaddeus", "last": "Thorneycroft"})
+        b, _ = vault.resolve({"first": "Rosalind", "last": "Netherfield"})
+        # Force the collision rather than wait for the name pool to
+        # produce it: the bug is about what happens when it does.
+        a.fake["first"] = "Rosalind"
+        a.strings["Thaddeus"] = "Rosalind"
+        a.strings["Thaddeus Thorneycroft"] = "Rosalind " + a.fake["last"]
+        return vault, a, b
+
+    def test_a_pseudonym_is_not_masked_again(self, home):
+        vault, a, b = self._collided()
+        out, _ = vault.mask_text("seating Thaddeus Thorneycroft today")
+        assert "Rosalind" in out
+        assert b.fake["first"] not in out, \
+            "one student's pseudonym was rewritten into another's"
+
+    def test_it_unmasks_to_the_right_student(self, home):
+        vault, a, b = self._collided()
+        masked, _ = vault.mask_text("seating Thaddeus Thorneycroft today")
+        back, _ = vault.unmask_text(masked)
+        assert "Thaddeus" in back
+        assert "Rosalind" not in back
+
+    def test_the_longest_real_value_wins_at_each_position(self, home):
+        vault = Vault(course="TEST 100")
+        person, _ = vault.resolve({"first": "Marguerite",
+                                   "last": "Vanterpool Reyes"})
+        vault.mask("full", "Marguerite Vanterpool Reyes", person)
+        vault.mask("last", "Vanterpool Reyes", person)
+        out, hits = vault.mask_text("desk: Marguerite Vanterpool Reyes")
+        assert hits == 1, "it matched the parts instead of the whole name"
+        assert person.fake["last"] in out
+
+
+def test_a_pseudonym_is_never_another_students_real_name(home):
+    """`avoid` keeps the collision from arising at all.
+
+    Written first as "forbid six of the sixty names, then draw six" --
+    which passes about half the time with `avoid` disabled, because six
+    random draws from fifty-four remaining names usually miss the
+    forbidden six. The breakage harness caught that; the suite had gone
+    green on it once already.
+
+    Both assertions here are deterministic instead: forbidding the
+    whole pool leaves `_pick` no choice but its numbered fallback, and
+    forbidding all but six makes a wrong draw a one-in-ten-million
+    coincidence rather than a coin toss.
+    """
+    from checkit_printit.vault import FIRST_NAMES
+
+    vault = Vault(course="TEST 100")
+    vault.avoid(FIRST_NAMES)
+    person, _ = vault.resolve({"first": "Real", "last": "Surname"})
+    assert person.fake["first"] not in FIRST_NAMES
+
+    vault = Vault(course="TEST 100")
+    free = set(FIRST_NAMES[:6])
+    vault.avoid([n for n in FIRST_NAMES if n not in free])
+    for n in range(6):
+        vault.resolve({"first": f"Real{n}", "last": f"Surname{n}"})
+    picked = {p.fake["first"] for p in vault.people}
+    assert picked <= free, f"picked a forbidden name: {picked - free}"
+
+
+def test_the_scan_does_not_cry_wolf_over_a_pseudonym(home):
+    """A value that is also a pseudonym cannot be evidence of a leak."""
+    vault = Vault(course="TEST 100")
+    a, _ = vault.resolve({"first": "Thaddeus", "last": "Thorneycroft"})
+    b, _ = vault.resolve({"first": "Rosalind", "last": "Netherfield"})
+    a.fake["first"] = "Rosalind"
+    assert "Rosalind" not in vault.real_values()
+    # The longer values are still looked for.
+    assert "Thorneycroft" in vault.real_values()
+    assert "Netherfield" in vault.real_values()
 
 
 def test_a_vault_round_trips_through_disk(home, tmp_path):

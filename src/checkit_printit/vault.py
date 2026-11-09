@@ -388,6 +388,10 @@ class Vault:
         #: column; empty here, because a vault on its own cannot know.
         self.prefix_keep = {}
 
+        #: Lower-cased names never to invent, because they are somebody
+        #: real's. See `avoid`.
+        self._avoid = set()
+
         self._rng = random.Random(self.seed + len(self.people) * 7919)
         self._index = {}
         for person in self.people:
@@ -585,6 +589,27 @@ class Vault:
         self._absorb(person, fields)
         return person
 
+    def avoid(self, values):
+        """Never invent a pseudonym equal to any of these.
+
+        Called with every real name in a roster **before** any
+        pseudonym is invented, because a fake name that is some *other*
+        student's real name causes two separate problems.
+
+        It used to corrupt the twin outright -- see `_apply`, where the
+        single-pass rewrite now prevents that. What remains is that the
+        output scan cannot tell the two apart: finding `Rosalind` in a
+        twin is either a real name that leaked or a pseudonym doing its
+        job, and the scan has to assume the worse one and delete a
+        perfectly good twin.
+
+        The fake pool is historical scientists and a roster of real
+        students will contain Grace, Mary, John, Thomas, Julia and Paul
+        soon enough, so this is the common case and not a corner.
+        """
+        self._avoid |= {str(v).strip().lower() for v in values
+                        if str(v).strip()}
+
     def _pick(self, pool, used):
         """A name not already taken, else a name with a number on it.
 
@@ -592,6 +617,7 @@ class Vault:
         -- and must not be silent, because a repeat would give two real
         students one fake identity. Numbering is ugly on purpose.
         """
+        used = set(used) | {w for w in pool if w.lower() in self._avoid}
         free = [w for w in pool if w not in used]
         if free:
             return self._rng.choice(free)
@@ -709,9 +735,91 @@ class Vault:
             )
         if value in person.strings:
             return person.strings[value]
-        made = self._render(kind, value, person)
-        person.strings[value] = made
-        return made
+
+        # **Injective within a person, and checked rather than hoped
+        # for.** A roster carries `name = "Chidi Okonkwo"` and
+        # `preferred = "Chi Okonkwo"`, two different real strings for
+        # one student, and both rendered to the same fake name because
+        # the fake given name does not depend on which real spelling
+        # was asked for. Unmasking then had to guess, and put the
+        # roster spelling where the file said the preferred one. So
+        # candidates are offered best-first and the first unused one
+        # wins.
+        taken = set(person.strings.values())
+        for candidate in self._candidates(kind, value, person):
+            if candidate not in taken:
+                person.strings[value] = candidate
+                return candidate
+        raise VaultError(
+            f"could not find a pseudonym for a {kind} that is not already "
+            f"standing in for something else of this student's. Masking it "
+            "anyway would make unmasking guess, which is the bug this check "
+            "exists to stop.")
+
+    def _candidates(self, kind, value, person):
+        """Possible fakes for one cell, best first.
+
+        Yielding rather than returning one, so that `mask` can keep the
+        real-to-fake map injective. Ids and addresses are unique by
+        construction and offer one each; names offer variants.
+        """
+        if kind in ID_KINDS or kind == "email" or kind == "middle":
+            yield self._render(kind, value, person)
+            return
+
+        if kind == "first":
+            yield from self._given_names(person, len(value))
+            return
+        if kind == "last":
+            yield person.fake["last"]
+            return
+
+        yield from self._full_names(value, person)
+
+    def _given_names(self, person, want):
+        """The fake given name, then shortenings of it, then lengthenings.
+
+        A second spelling of somebody's given name is nearly always a
+        shortening -- Chi for Chidi, Matt for Matthew -- so a shortened
+        fake keeps that relationship visible in the twin. `classlist`
+        matches a surname against a first initial for exactly this
+        reason, and a twin that turned every spelling into one string
+        could not be used to test it.
+        """
+        base = person.fake["first"]
+        yield base
+        for n in range(min(want, len(base)), 1, -1):
+            if base[:n] != base:
+                yield base[:n]
+        for n in range(2, len(base)):
+            yield base[:n]
+
+    def _full_names(self, value, person):
+        from .classlist import split_full_name
+        _, first, middle = split_full_name(value)
+        fake_middle = _initial_like(middle, self._rng) if middle else ""
+        want = len(first) if first else len(person.fake["first"])
+        for fake_first in self._given_names(person, want):
+            yield self._compose(value, person, fake_first, fake_middle)
+
+    def _compose(self, value, person, fake_first, fake_middle):
+        """One whole name, in the shape the cell wrote it.
+
+        `Last, First M.` comes back as `Last, First M.` and `First Last`
+        as `First Last`, because which form a file uses is exactly the
+        sort of thing a reader of the twin needs to see.
+        """
+        from .classlist import split_full_name
+        _, first, middle = split_full_name(value)
+        fake_last = person.fake["last"]
+        if "," in value:
+            right = " ".join(w for w in (fake_first, fake_middle) if w)
+            return f"{fake_last}, {right}".strip().rstrip(",")
+        if not first and not middle:
+            # A single word. Which part it is cannot be known, so the
+            # surname is used -- it is the one a one-word cell usually is.
+            return fake_last
+        return " ".join(w for w in (fake_first, fake_middle, fake_last) if w)
 
     def _render(self, kind, value, person):
         if kind in ID_KINDS:
@@ -741,31 +849,9 @@ class Vault:
         if kind == "last":
             return person.fake["last"]
         if kind == "middle":
-            return person.fake.get("middle") or _initial_like(value, self._rng)
+            return _initial_like(value, self._rng)
 
-        return self._render_full(value, person)
-
-    def _render_full(self, value, person):
-        """A whole name, in the shape the cell wrote it.
-
-        `Last, First M.` comes back as `Last, First M.` and `First Last`
-        as `First Last`, because which form a file uses is exactly the
-        sort of thing a reader of the twin needs to see.
-        """
-        from .classlist import split_full_name
-        last, first, middle = split_full_name(value)
-        fake_last = person.fake["last"]
-        fake_first = person.fake["first"]
-        fake_middle = (_initial_like(middle, self._rng) if middle else "")
-
-        if "," in value:
-            right = " ".join(w for w in (fake_first, fake_middle) if w)
-            return f"{fake_last}, {right}".strip().rstrip(",")
-        if not first and not middle:
-            # A single word. Which part it is cannot be known, so the
-            # surname is used -- it is the one a one-word cell usually is.
-            return fake_last
-        return " ".join(w for w in (fake_first, fake_middle, fake_last) if w)
+        return next(iter(self._full_names(value, person)))
 
     # -------------------------------------------------------- unmasking --
 
@@ -803,6 +889,93 @@ class Vault:
         unique.sort(key=lambda pair: len(pair[0]), reverse=True)
         return unique
 
+    def substitutions(self):
+        """Every reversible (real, fake) literal, longest real first.
+
+        The mirror of `pairs()`, for masking text rather than a table:
+        a traceback, a log, a seating chart, a course folder. Longest
+        real first so that a two-word surname is replaced before either
+        of its words is.
+
+        One-character values are left out, for the reason in
+        `_initial_like`: substituting a lone letter would rewrite every
+        standalone `T` in a sentence.
+        """
+        out, seen = [], set()
+        for person in self.people:
+            for real, fake in person.strings.items():
+                if len(real.strip()) >= 2 and real not in seen:
+                    seen.add(real)
+                    out.append((real, fake))
+            for real, fake in zip(person.real.get("emails") or [],
+                                  person.fake.get("emails") or []):
+                if real not in seen:
+                    seen.add(real)
+                    out.append((real, fake))
+            for field in ("first", "last") + ID_KINDS:
+                real, fake = person.real.get(field), person.fake.get(field)
+                if real and fake and len(real) >= 2 and real not in seen:
+                    seen.add(real)
+                    out.append((real, fake))
+        for real, fake in self.domains.items():
+            if real not in seen:
+                seen.add(real)
+                out.append((real, fake))
+        out.sort(key=lambda pair: len(pair[0]), reverse=True)
+        return out
+
+    def _apply(self, text, pairs):
+        """Replace any of `pairs`' keys. **One pass over the text.**
+
+        One pass, not one pass per pair, and that is a correctness
+        requirement rather than a speed one.
+
+        Replacing pair by pair rescans text that has already been
+        replaced, so a *fake* value that happens to equal some other
+        student's *real* value gets masked a second time. It happened:
+        one student's pseudonym was `Rosalind`, another student's real
+        given name was `Rosalind`, and the second substitution rewrote
+        the first student's masked name into the second student's
+        pseudonym. Two people merged into one in the twin, and
+        unmasking then returned the wrong student's name with complete
+        confidence.
+
+        A single alternation consumes each character of the input once
+        and never looks at its own output, so that cannot happen.
+        Alternatives are ordered longest-first, because Python's regex
+        alternation takes the first that matches at a position and a
+        two-word surname must win over either of its words.
+
+        Case-insensitive: a roster lower-cases an address and a log may
+        not, and a surname is capitalised in one file and upper-cased
+        in another. The replacement is the stored spelling -- matching
+        the original's case would mean inventing a case for a name that
+        never had one.
+        """
+        mapping = {}
+        for key, value in pairs:
+            if key and key.strip():
+                mapping.setdefault(key.lower(), value)
+        if not mapping:
+            return text, 0
+        keys = sorted(mapping, key=len, reverse=True)
+        pattern = re.compile(
+            r"(?<![\w.@+-])(?:" + "|".join(re.escape(k) for k in keys)
+            + r")(?![\w.@+-])", re.IGNORECASE)
+        # A function as the replacement, so the pseudonym is inserted
+        # literally: a backslash in it is not an escape.
+        return pattern.subn(lambda m: mapping[m.group(0).lower()], text)
+
+    def mask_text(self, text):
+        """Replace every real value with its pseudonym. `(text, count)`.
+
+        Used for anything that is not a table -- see `maskcourse.py`,
+        where it is the whole strategy, since `roster.toml` is an
+        authoritative list of who exists and everything else in the
+        folder just names them.
+        """
+        return self._apply(text, self.substitutions())
+
     def unmask_text(self, text):
         """Put the real values back. Returns `(text, replacements)`.
 
@@ -815,25 +988,18 @@ class Vault:
         a zero. A silent zero is the failure that matters here -- it
         reads as "nothing needed unmasking" and means "the vault does not
         describe this file".
+
+        One pass, for the reason in `_apply`. The person tags go in the
+        same pass rather than a second one, so that a tag cannot be
+        rewritten by a name substitution or the other way round.
         """
-        hits = 0
-        for fake, real in self.pairs():
-            if not fake:
-                continue
-            if re.fullmatch(r"[\w.@+-]+", fake):
-                pattern = r"(?<![\w.@+-])" + re.escape(fake) + r"(?![\w.@+-])"
-            else:
-                pattern = re.escape(fake)
-            text, n = re.subn(pattern, real.replace("\\", "\\\\"), text)
-            hits += n
+        pairs = list(self.pairs())
         for person in self.people:
-            pattern = r"\b" + re.escape(person.tag) + r"\b"
             name = " ".join(w for w in (person.real.get("first"),
                                         person.real.get("last")) if w)
             if name:
-                text, n = re.subn(pattern, name, text)
-                hits += n
-        return text, hits
+                pairs.append((person.tag, name))
+        return self._apply(text, pairs)
 
     # ------------------------------------------------------- the check --
 
@@ -859,7 +1025,31 @@ class Vault:
             for address in person.real.get("emails") or []:
                 out.add(address)
         out.update(self.domains)
-        return {v for v in out if len(v.strip()) >= min_length}
+
+        # A value that is *also* somebody's pseudonym cannot be
+        # evidence. If `Rosalind` is one student's real given name and
+        # another's fake one, finding it in a twin says nothing, and
+        # treating it as a leak would destroy a correct twin. `avoid`
+        # stops this arising in the first place where the real names
+        # are known up front; this is the fallback for where they are
+        # not, and it is a genuine narrowing of the check -- the full
+        # name, the ids and the address are all longer values and are
+        # still looked for.
+        fakes = {v.lower() for v in self.fake_values()}
+        return {v for v in out
+                if len(v.strip()) >= min_length and v.lower() not in fakes}
+
+    def fake_values(self):
+        """Every pseudonym this vault has issued."""
+        out = set()
+        for person in self.people:
+            out |= {v for v in person.strings.values() if v}
+            for field in ("first", "last", "middle") + ID_KINDS:
+                if person.fake.get(field):
+                    out.add(person.fake[field])
+            out |= {a for a in (person.fake.get("emails") or []) if a}
+        out |= {d for d in self.domains.values() if d}
+        return out
 
     def leaks(self, text, min_length=3):
         """Which real values survive in this text. Empty is the good case."""

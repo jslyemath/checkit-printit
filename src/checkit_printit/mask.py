@@ -78,6 +78,7 @@ import csv
 import dataclasses
 import os
 import re
+import shutil
 
 from .classlist import SYNONYMS, read_rows
 from .vault import ID_KINDS, Vault, VaultError
@@ -130,6 +131,9 @@ ID_DIGITS = 5
 EMAILISH = re.compile(r"[^@\s]+@[^@\s]+")
 LONG_DIGITS = re.compile(r"\d{%d,}" % ID_DIGITS)
 
+#: The fractional part of a decimal number.
+DECIMALS = re.compile(r"(?<=\d)\.\d+$")
+
 
 def _looks_numeric(value):
     try:
@@ -137,6 +141,26 @@ def _looks_numeric(value):
     except ValueError:
         return False
     return True
+
+
+def _whole_part(value):
+    """`10.00000` -> `10`, for the long-digit-run test only.
+
+    Brightspace writes a points column to five decimal places, so a
+    perfectly ordinary `10.00000` carries a run of five digits after the
+    point. The id test saw that run and blanked the column -- the real
+    `Participation Attendance and Homework` column of a real export,
+    emptied for looking like a student number.
+
+    A student id is a whole number, so digits after a decimal point
+    cannot be part of one. Only cells that are numbers all the way
+    through are trimmed, so this can never quietly shorten an id that
+    happens to sit next to other text.
+    """
+    value = value.strip()
+    if _looks_numeric(value):
+        return DECIMALS.sub("", value)
+    return value
 
 
 # ------------------------------------------------------------- the header --
@@ -215,13 +239,23 @@ class Plan:
     def by_kind(self, kind):
         return [d for d in self.decisions if d.kind == kind]
 
-    def describe(self, width=46):
+    def describe(self, width=None):
         """A table of every column and its fate.
 
         Every column is listed, including the kept ones. A report that
         showed only the exceptions would make "nothing to see here" and
         "I did not look" print identically.
+
+        The header column is sized to the actual terminal, because a
+        gradebook's column names run to seventy characters and a fixed
+        width wrapped every line. Wrapped, the table was unreadable: on
+        his real export whole rows repeated down the screen as the
+        console redrew them, and he could not tell the report from the
+        corruption.
         """
+        if width is None:
+            total = shutil.get_terminal_size((110, 24)).columns
+            width = max(18, min(46, total - 54))
         lines = [f"header row {self.header_row + 1}", ""]
         order = {"mask": 0, "blank": 1, "keep": 2}
         for d in sorted(self.decisions, key=lambda d: (order[d.action],
@@ -274,7 +308,7 @@ def classify(values):
         return "keep", "empty"
     if any(EMAILISH.search(v) for v in filled):
         return "mask", "holds an address"
-    if any(LONG_DIGITS.search(v) for v in filled):
+    if any(LONG_DIGITS.search(_whole_part(v)) for v in filled):
         return "blank", f"a run of {ID_DIGITS}+ digits: possibly an id"
     if all(_looks_numeric(v) for v in filled):
         return "keep", "all numeric"
@@ -423,6 +457,17 @@ def apply(rows, the_plan, vault, limit=None):
     if limit is not None:
         body = body[:limit]
 
+    # Every real name in the file, before a single pseudonym is
+    # invented. A pseudonym that is some other row's real name leaves
+    # the output scan unable to tell a leak from a pseudonym -- see
+    # `Vault.avoid`. The rows are already in hand, so this is free.
+    name_columns = [d.index for d in the_plan.decisions
+                    if d.kind in ("full", "first", "last")]
+    vault.avoid([word
+                 for row in body
+                 for col in name_columns if col < len(row)
+                 for word in row[col].replace(",", " ").split()])
+
     masked = {d.index: d for d in the_plan.decisions if d.action == "mask"}
     blanked = {d.index for d in the_plan.decisions if d.action == "blank"}
     out = [list(rows[r]) for r in range(the_plan.header_row + 1)]
@@ -542,7 +587,11 @@ def unmask_file(path, out_path, vault):
     "nothing needed changing" and almost always means "this vault does
     not describe this file".
     """
-    with open(path, encoding="utf-8") as f:
+    # `newline=""` both ways: reading with universal newlines turns a
+    # CRLF file into LF and writing it back emits LF, so every line of
+    # the result differs from the file it came from and a diff against
+    # the original is worthless.
+    with open(path, encoding="utf-8", newline="") as f:
         text = f.read()
     out, hits = vault.unmask_text(text)
     os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".",
@@ -550,3 +599,9 @@ def unmask_file(path, out_path, vault):
     with open(out_path, "w", encoding="utf-8", newline="") as f:
         f.write(out)
     return hits
+
+
+def unmask_bytes_identical(original, restored):
+    """Whether two files match byte for byte. For a round-trip check."""
+    with open(original, "rb") as a, open(restored, "rb") as b:
+        return a.read() == b.read()
