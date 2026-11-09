@@ -376,9 +376,9 @@
     (() => { const r = stackRerun({ br: 5.8, bcx: 17.0, bcy: 17.0,
                y0: 4.6, x1: 11.2, y1: 18.0, off: 3.6, h: 3.4 });
       return { key: "18 measured, big page", parts: r.parts,
-        note: `behind ${r.behind}, to back ${r.toBack}; right edge `
-            + `${r.rightEdge}, bottom ${r.bottomEdge}. The largest page `
-            + `the clearances allow, so paper and arrow are even` }; })(),
+        note: `**BUILT.** behind ${r.behind}, to back ${r.toBack}; right `
+            + `edge ${r.rightEdge}, bottom ${r.bottomEdge}. The largest `
+            + `page the clearances allow, so paper and arrow are even` }; })(),
     (() => { const r = stackRerun({ br: 5.8, bcx: 17.0, bcy: 17.0,
                y0: 4.6, x1: 11.8, y1: 17.2, off: 3.6, h: 3.4 });
       return { key: "19 measured, widest page", parts: r.parts,
