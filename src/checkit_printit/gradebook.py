@@ -424,7 +424,13 @@ def sheet_from(path, rows, header_line=1):
     """
     import os as _os
     name = _os.path.basename(path)
-    found = re.search(r"(?<!\d)(\d{3})(?!\d)", name)
+    # **After a hyphen or an underscore.** A bare "three digits not
+    # surrounded by digits" picks `106` out of
+    # `MAT106-820_GradesExport_...`, which made every row in both of
+    # his real exports look like a section mismatch -- 42 false notes.
+    # His own script anchors on `MAT\d+-(\d{3})`; this is the same idea
+    # without the course code baked in.
+    found = re.search(r"[-_](\d{3})(?!\d)", name)
     return Sheet(name=name, rows=rows, header_line=header_line,
                  section=found.group(1) if found else "")
 
@@ -520,6 +526,28 @@ def _core(value):
     return id_core(value)
 
 
+def ignored_by(row, markers):
+    """`(marker, column index)` if any marker appears in this row, else None.
+
+    Every cell, not only the one holding the id being matched on. The
+    LMS marks a retired enrolment on whichever identifier it likes --
+    Brightspace appends `-DoNotUse` to `OrgDefinedId` -- and a rule that
+    only inspected the student column stopped firing when the match
+    moved to a different id column, without saying so.
+
+    The column is returned so a caller can report *where* the marker
+    was found. A marker matching somewhere unexpected is then visible
+    instead of just effective.
+    """
+    for marker in markers:
+        if not marker:
+            continue
+        for index, cell in enumerate(row):
+            if marker in cell:
+                return marker, index
+    return None
+
+
 def _filled(row, columns):
     return sum(1 for i in columns if i < len(row) and row[i].strip())
 
@@ -578,6 +606,9 @@ def plan_export(sheets, profile, students, progress, slugs, not_yet=()):
         if key:
             by_key.setdefault(key, []).append(student)
 
+    #: (file, file's section, roster's section) -> row numbers
+    wrong_section = {}
+
     #: student -> [(sheet, row number, row)]
     rows_for = {}
     for sheet in sheets:
@@ -589,9 +620,19 @@ def plan_export(sheets, profile, students, progress, slugs, not_yet=()):
             if not raw.strip():
                 report.rows_unmatched.append(f"{sheet.name}:{number}")
                 continue
-            if any(marker and marker in raw
-                   for marker in profile.ignore_rows):
+            # Anywhere in the row, not just in the id being matched
+            # on. Brightspace puts `-DoNotUse` on the `OrgDefinedId`,
+            # and he matches on `OSW_ID` -- so looking only at the
+            # student column made the rule stop firing the moment the
+            # match moved to the other id, silently.
+            found = ignored_by(row, profile.ignore_rows)
+            if found:
+                marker, where = found
                 report.rows_ignored.append(f"{sheet.name}:{number}")
+                note = (f"{sheet.name} row {number} skipped: "
+                        f"{marker!r} in column {where + 1}")
+                if note not in report.notes:
+                    report.notes.append(note)
                 continue
             matched = by_key.get(_core(raw)) or []
             if len(matched) > 1:
@@ -616,19 +657,28 @@ def plan_export(sheets, profile, students, progress, slugs, not_yet=()):
             # His check. A student in two sections' exports means one of
             # them is wrong about who is enrolled, and writing to both
             # would record the same result twice.
+            # Named by where, not by who: this message is printed,
+            # and a report that can carry a student's id is a report
+            # that cannot be shown to anybody.
             report.refused.append(
-                f"{student.sid or student.name} appears in "
-                f"{len(files)} files ({', '.join(sorted(files))}). A "
-                "student should be in the export for one section only.")
+                "one student appears in more than one file, at "
+                + "; ".join(f"{sheet.name} row {number}"
+                            for sheet, number, _ in sorted(
+                                here, key=lambda item: (item[0].name,
+                                                        item[1])))
+                + ". A student should be in the export for one section "
+                "only.")
             continue
 
         sheet = here[0][0]
         if sheet.section and student.section \
                 and sheet.section != student.section:
-            report.notes.append(
-                f"{student.sid or student.name} is in {sheet.name}, which "
-                f"looks like section {sheet.section}, but the roster says "
-                f"{student.section}")
+            # Counted per file and per roster section, not one line
+            # per student: forty-two near-identical lines buried the
+            # rest of the report when the inference above was wrong.
+            wrong_section.setdefault((sheet.name, sheet.section,
+                                      student.section), []).append(
+                                          here[0][1])
 
         if len(here) > 1:
             # His rule: update the row with more grades on it. A tie is
@@ -700,8 +750,22 @@ def plan_export(sheets, profile, students, progress, slugs, not_yet=()):
                 was=was, now=profile.not_passed,
                 why="not passed, and this skill was named")
 
+    for (name, theirs, ours), numbers in sorted(wrong_section.items()):
+        report.notes.append(
+            f"{name}: {len(numbers)} row(s) hold students the roster puts "
+            f"in section {ours}, while this file looks like section "
+            f"{theirs} -- rows "
+            + ", ".join(str(n) for n in sorted(numbers)[:10])
+            + (" ..." if len(numbers) > 10 else ""))
+
     report.changes = sorted(changes.values(),
                             key=lambda c: (c.sheet, c.row, c.column))
+    # **Ids, and never printed.** `describe` reports the count only,
+    # because a student with no row is ordinary when the exports cover
+    # one section each, and because a list of ids in a report is the
+    # thing this module is otherwise careful never to produce. The
+    # count is the useful part; who they are is in the course's own
+    # records, where it belongs.
     report.students_unmatched = sorted(
         getattr(s, "sid", "") or s.name for s in students
         if id(s) not in rows_for and not s.dropped)

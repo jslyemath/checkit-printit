@@ -1786,18 +1786,30 @@ def gradebook_map(source, course, pair, student_column, matches, ignore_row,
         click.echo("")
         click.echo(f"{len(shared)} id(s) appear on more than one row:")
         import re as _re
-        suggest = set()
+        suggest = {}
         for base, hits in sorted(shared.items()):
             click.echo(f"  {len(hits)} rows share a base id, on rows "
                        + ", ".join(str(n) for n, _ in hits))
-            for _, value in hits:
-                marker = _re.search(r"(?<=\d)(\D+)$", value)
-                if marker:
-                    suggest.add(marker.group(1))
-        for marker in sorted(suggest - set(ignore_rows)):
-            click.echo(f"  one of them is marked {marker!r}. If that is a "
-                       f"retired enrolment, add --ignore-row {marker!r} so "
-                       "nothing is ever written to it.")
+            # **Every column, not just the one being matched on.**
+            # Brightspace marks a retired enrolment on `OrgDefinedId`,
+            # and he matches on `OSW_ID` -- so looking only at the
+            # student column found nothing and reported that there was
+            # nothing to tell the rows apart by, which was wrong.
+            numbers = {n for n, _ in hits}
+            group = [r for i, r in enumerate(body, 2) if i in numbers]
+            for column in range(max(len(r) for r in group)):
+                values = [r[column] if column < len(r) else ""
+                          for r in group]
+                marks = [_re.search(r"(?<=\d)(\D+)$", v) for v in values]
+                if any(marks) and not all(marks):
+                    for found in marks:
+                        if found:
+                            suggest.setdefault(found.group(1), column + 1)
+        for marker in sorted(set(suggest) - set(ignore_rows)):
+            click.echo(f"  one of them is marked {marker!r}, in column "
+                       f"{suggest[marker]}. If that is a retired "
+                       f"enrolment, add --ignore-row {marker!r} so nothing "
+                       "is ever written to it.")
         if not suggest:
             click.echo("  none of them carries a marker, so there is nothing "
                        "to tell them apart by. Decide before exporting.")

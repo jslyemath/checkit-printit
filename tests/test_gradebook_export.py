@@ -302,6 +302,132 @@ def test_a_missing_student_column_is_refused(students):
     assert any("no column called" in r for r in report.refused)
 
 
+class TestTheSectionInTheFileName:
+    """Read after a hyphen or an underscore, not just "three digits".
+
+    `(?<!\\d)(\\d{3})(?!\\d)` picks `106` out of
+    `MAT106-820_GradesExport_...`, which made every row of both real
+    exports look like a section mismatch -- 42 false notes that buried
+    the rest of the report.
+    """
+
+    @pytest.mark.parametrize("name, expect", [
+        ("26FA Number Systems & Operations MAT106-820_GradesExport_"
+         "2026-11-09-05-32.csv", "820"),
+        ("26FA Number Systems & Operations MAT106-830_GradesExport_"
+         "2026-11-09-05-31.csv", "830"),
+        ("MAT106-820.csv", "820"),
+        ("MAT 206-001.csv", "001"),
+        ("export_830.csv", "830"),
+        ("export.csv", ""),
+        ("2026-11-09.csv", ""),
+    ])
+    def test_it_reads_the_section(self, name, expect):
+        assert gb.sheet_from(name, [[]]).section == expect
+
+    def test_the_course_code_is_not_mistaken_for_the_section(self):
+        """The whole bug, as its own assertion."""
+        assert gb.sheet_from("MAT106-820.csv", [[]]).section != "106"
+
+    def test_a_mismatch_is_one_line_per_file_not_one_per_student(self,
+                                                                 students):
+        """Forty-two near-identical lines is not a report."""
+        wrong = sheet([("806000111", "", "", ""),
+                       ("806000222", "", "", "")],
+                      name="MAT106-830.csv")
+        _, report = run(wrong, students,
+                        progress(("806000111", "W1", 1, "passed"),
+                                 ("806000222", "W1", 1, "passed")))
+        mismatch = [n for n in report.notes if "puts in section" in n]
+        assert len(mismatch) == 1, mismatch
+        assert "2 row(s)" in mismatch[0]
+        assert "rows 2, 3" in mismatch[0]
+
+    def test_a_file_with_no_section_in_its_name_says_nothing(self,
+                                                             students):
+        plain = sheet([("806000111", "", "", "")], name="export.csv")
+        _, report = run(plain, students,
+                        progress(("806000111", "W1", 1, "passed")))
+        assert [n for n in report.notes if "puts in section" in n] == []
+
+
+class TestTheMarkerIsFoundAnywhere:
+    """A retired enrolment is marked on whichever id the LMS chooses.
+
+    Brightspace appends `-DoNotUse` to the **`OrgDefinedId`**, and this
+    course matches students on **`OSW_ID`**. The rule used to be checked
+    against the student column only, so moving the match from one id to
+    the other made it stop firing -- silently. Both rows then looked
+    clean, fell through to the duplicate rule, and were separated by
+    their grade counts, which happens to pick the live row and is luck
+    rather than design.
+    """
+
+    def _rows(self):
+        """A header with both ids, and a retired row marked on the first."""
+        head = ["OrgDefinedId"]
+        for slug in SKILLS:
+            head.append(f"{slug} Grade Symbol <Selectbox MaxPoints:1 "
+                        f"Category:Core Skills Progress>")
+        head += ["OSW_ID", "End-of-Line Indicator"]
+        return [head,
+                ["#2041000001", "", "", "", "806000111", "#"],
+                ["#2041000001-DoNotUse", "", "", "", "806000111", "#"]]
+
+    def test_a_marker_in_another_column_still_skips_the_row(self, students):
+        one = gb.Sheet(name="MAT106-820.csv", rows=self._rows(),
+                       section="820")
+        _, report = gb.plan_export(
+            [one], profile(student_column="OSW_ID", student_matches="sid"),
+            students, progress(("806000111", "W1", 1, "passed")), SKILLS)
+        assert report.rows_ignored == ["MAT106-820.csv:3"]
+        assert report.rows_matched == 1
+        assert report.refused == []
+        assert [c.row for c in report.changes] == [2]
+
+    def test_the_note_says_which_column_it_was_found_in(self, students):
+        """So a surprising match is visible rather than merely effective."""
+        one = gb.Sheet(name="MAT106-820.csv", rows=self._rows(),
+                       section="820")
+        _, report = gb.plan_export(
+            [one], profile(student_column="OSW_ID", student_matches="sid"),
+            students, progress(("806000111", "W1", 1, "passed")), SKILLS)
+        assert any("in column 1" in n for n in report.notes), report.notes
+        assert all("806000111" not in n for n in report.notes)
+
+    def test_without_the_rule_the_rows_are_only_told_apart_by_luck(
+            self, students):
+        """What used to happen, asserted so the old behaviour is on record.
+
+        With no ignore rule at all the two rows are a duplicate pair,
+        and only their grade counts separate them. Here they are equal,
+        so it is refused -- which is the honest outcome, and shows that
+        the marker rule is doing real work rather than tidying up.
+        """
+        one = gb.Sheet(name="MAT106-820.csv", rows=self._rows(),
+                       section="820")
+        _, report = gb.plan_export(
+            [one], profile(student_column="OSW_ID", student_matches="sid",
+                           ignore_rows=[]),
+            students, progress(("806000111", "W1", 1, "passed")), SKILLS)
+        assert report.changes == []
+        assert any("nothing to choose between them" in r
+                   for r in report.refused)
+
+    @pytest.mark.parametrize("row, expect", [
+        (["a", "b-DoNotUse", "c"], ("-DoNotUse", 1)),
+        (["a-DoNotUse", "b", "c"], ("-DoNotUse", 0)),
+        (["a", "b", "c"], None),
+        ([], None),
+    ])
+    def test_ignored_by_reports_the_marker_and_its_column(self, row, expect):
+        assert gb.ignored_by(row, ["-DoNotUse"]) == expect
+
+    def test_an_empty_marker_never_matches(self):
+        """An empty string is in every cell, so it must be skipped."""
+        assert gb.ignored_by(["a", "b"], ["", None]) is None
+
+
 # ------------------------------------------------- more than one section --
 
 def test_two_files_are_planned_together(students):
@@ -322,8 +448,10 @@ def test_a_student_in_two_files_stops_the_export(students):
     b = sheet([("806000111", "", "", "")], name="MAT106-830.csv")
     _, report = run([a, b], students,
                     progress(("806000111", "W1", 1, "passed")))
-    assert any("appears in 2 files" in r for r in report.refused)
+    assert any("more than one file" in r for r in report.refused)
     assert report.changes == []
+    # Named by where, not by who.
+    assert all("806000111" not in r for r in report.refused)
 
 
 def test_a_student_in_the_wrong_sections_file_is_noted(students):
@@ -331,9 +459,107 @@ def test_a_student_in_the_wrong_sections_file_is_noted(students):
     b = sheet([("806000111", "", "", "")], name="MAT106-830.csv")
     _, report = run(b, students,
                     progress(("806000111", "W1", 1, "passed")))
-    assert any("roster says 820" in n for n in report.notes)
+    assert any("puts in section 820" in n for n in report.notes)
     assert report.refused == []
     assert len(report.changes) == 1
+    assert all("806000111" not in n for n in report.notes)
+
+
+class TestTheReportCarriesNoIdentity:
+    """No printed line may hold a student's id or name.
+
+    Every report in this work gives locations rather than values: the
+    masker's leak message gives column numbers, the duplicate report
+    gives row numbers. The export broke that in two places, and it
+    matters because the report is the thing a person reads out, pastes
+    into a message, or shows to somebody who should not see the roster.
+
+    `students_unmatched` is excluded on purpose: it holds ids, and
+    `describe` prints its length and never its contents. That is
+    asserted below rather than assumed.
+    """
+
+    def _everything(self, report):
+        lines = [report.describe()]
+        lines += list(report.refused) + list(report.notes)
+        lines += [f"{k.sheet} {k.row} {k.slug} {k.value}"
+                  for k in report.kept]
+        lines += [f"{c.sheet} {c.row} {c.column} {c.slug} {c.was} {c.now} "
+                  f"{c.why}" for c in report.changes]
+        return "\n".join(lines)
+
+    #: Every scenario that makes the export report something. Each is
+    #: `(label, sheets, progress rows, not_yet)`. They are separate
+    #: runs because some branches end in `continue` and so exclude
+    #: others -- a student refused for being in two files reports
+    #: nothing else.
+    def _scenarios(self):
+        duplicates = sheet([("806000111", "", "", ""),
+                            ("806000111", PASS, "", ""),
+                            ("806999999", "", "", ""),
+                            ("806000444-DoNotUse", "", "", "")],
+                           name="MAT106-830.csv")
+        both = [sheet([("806000111", "", "", "")], name="MAT106-820.csv"),
+                sheet([("806000111", "", "", "")], name="MAT106-830.csv")]
+        unknown = sheet([("806000111", "Excused", "", "")])
+        return [
+            ("duplicates, unmatched, marker, section, kept, changes",
+             duplicates,
+             progress(("806000111", "W1", 1, "passed"),
+                      ("806000111", "W2", 0, "failed"),
+                      ("806000222", "W1", 1, "passed")), ["W2"]),
+            ("one student in two files", both,
+             progress(("806000111", "W1", 1, "passed")), []),
+            ("a cell holding something unknown", unknown,
+             progress(("806000111", "W1", 1, "passed")), []),
+            # A kept pass needs all three at once: the cell holds a
+            # pass, the record says not passed, and the skill is named.
+            ("a pass kept against the record",
+             sheet([("806000111", PASS, "", "")]),
+             progress(("806000111", "W1", 0, "failed")), ["W1"]),
+        ]
+
+    def test_no_line_holds_an_id(self, students):
+        """Driven through every branch that reports anything.
+
+        The scenarios are separate runs on purpose. Some branches end
+        the student's turn -- being in two files reports nothing else
+        about them -- so one arrangement of rows cannot reach them all.
+        A single-sheet version of this test left the two-files refusal
+        untested, and breaking that refusal to name the student kept
+        the suite green.
+        """
+        seen = set()
+        for label, sheets, prog, not_yet in self._scenarios():
+            _, report = run(sheets, students, prog, not_yet=not_yet)
+            text = self._everything(report)
+            for sid in ("806000111", "806000222", "806000333",
+                        "806000444", "806999999"):
+                assert sid not in text, \
+                    f"{sid} reached the report in {label}:\n{text}"
+            for name in ("Lovelace", "Turing", "Noether", "Gauss"):
+                assert name not in text, \
+                    f"{name} reached the report in {label}"
+            if report.refused:
+                seen.add("refused")
+            if report.notes:
+                seen.add("notes")
+            if report.kept:
+                seen.add("kept")
+            if report.changes:
+                seen.add("changes")
+        # And the scenarios really did reach each kind of line, so a
+        # future edit cannot quietly stop exercising one.
+        assert seen == {"refused", "notes", "kept", "changes"}, seen
+
+    def test_the_count_of_unmatched_students_is_printed_not_the_list(
+            self, students):
+        _, report = run(sheet([("806000111", "", "", "")]), students, [])
+        assert report.students_unmatched, "expected somebody unmatched"
+        said = report.describe()
+        for sid in report.students_unmatched:
+            assert sid not in said
+        assert f"{len(report.students_unmatched)} student(s)" in said
 
 
 def test_changes_are_reported_per_file(students):
