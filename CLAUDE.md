@@ -549,6 +549,45 @@ It writes nothing without `-o`, which names a directory for the
 `<original>_UPDATED.csv` copies, and if any file fails its checks every
 copy already written is deleted.
 
+### An ignore marker is looked for in every column
+
+Brightspace appends `-DoNotUse` to the **`OrgDefinedId`** of a retired
+enrolment, and this course matches students on **`OSW_ID`**. The rule
+used to be checked against the student column only, so moving the match
+from one id to the other made it **silently stop firing**: both rows
+looked clean, fell through to the duplicate rule, and were separated by
+their grade counts. That picks the live row here, because the retired
+one holds fewer marks, which is luck rather than design.
+
+`ignored_by` therefore scans every cell and reports which column the
+marker was in, so a surprising match is visible rather than merely
+effective.
+
+### A section is read after a hyphen, not as "three digits"
+
+`(?<!\d)(\d{3})(?!\d)` finds `106` in
+`MAT106-820_GradesExport_...`. Every row of both real exports then
+looked like a section mismatch -- 42 near-identical notes burying the
+rest of the report. The pattern is `[-_](\d{3})(?!\d)`, which is the
+general form of the `MAT\d+-(\d{3})` his own script uses, and a
+mismatch is reported once per file rather than once per student.
+
+### The report names rows, never students
+
+No line the export prints may hold a student's id or name. That is not
+tidiness: the report is the thing read out, pasted into a message, or
+shown to somebody who should not see the roster. Two lines broke it --
+a section note and the two-files refusal -- and the fix was not to run
+them carefully but to make the output incapable of carrying a name.
+
+`TestTheReportCarriesNoIdentity` drives four separate scenarios,
+because some branches end a student's turn and no single arrangement of
+rows reaches them all, and **asserts that all four kinds of report line
+were actually produced**. That assertion failed the moment it was
+written: none of the first three scenarios reached the kept-pass
+branch, which needs the cell holding a pass, the record saying not
+passed, and the skill named, all at once.
+
 ### `OSW_ID`, and why not an email
 
 MAT 106 matches on the institution's own student id, not an address:
