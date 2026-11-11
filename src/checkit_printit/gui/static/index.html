@@ -938,35 +938,31 @@
       </div>
 
       <!-- Getting what the grid holds into somebody else's gradebook.
-           A sub-section under Progress rather than a tab of its own,
-           because Progress *is* this course's gradebook and this is
-           only the sending of it.
+           A sub-section under Progress rather than a tab, because
+           Progress *is* this course's gradebook and this is only the
+           sending of it.
 
-           "Export to your LMS", and the direction is worth keeping
-           straight: you export from the LMS, printit fills the file
-           in, you import it back. Nothing here uploads anything, and
-           the panel says so rather than implying otherwise. -->
+           The direction is worth keeping straight: you export from the
+           LMS, printit fills the file in, you import it back. Nothing
+           here uploads anything. -->
       <section id="gradebook" class="lmsbox">
         <header class="pagehead">
-          <h3>Export to your LMS</h3>
+          <h3>LMS Export</h3>
           <button class="hint" type="button" aria-expanded="false"
                   aria-label="How this works">?</button>
           <span class="spacer"></span>
           <span id="gb-carrying" class="sec-count"></span>
         </header>
-        <p class="hint-text" hidden>Export your gradebook from the LMS,
-          drop the file here, and you get the same file back with the
-          cells there is a result for filled in &mdash; same columns,
-          same rows, every untouched line byte for byte. Then you
-          import it. Nothing is uploaded anywhere from here, and the
-          file you drop is never written to disk: it is read, and the
-          filled copy is handed straight back to you.</p>
+        <p class="hint-text" hidden>Drop the gradebook you exported. You
+          get the same file back with the cells there is a result for
+          filled in and nothing else touched, ready to import. It is
+          never written to disk.</p>
 
         <div class="scan-pick">
           <label class="dropzone" id="gb-drop" for="gb-files">
             <span class="dropzone-plus" aria-hidden="true">+</span>
-            <span class="dropzone-say" id="gb-say">Drop the gradebook
-              you exported &mdash; one file per section</span>
+            <span class="dropzone-say" id="gb-say">Drop your exported
+              gradebook</span>
             <span id="gb-chosen" class="dropzone-chosen"></span>
           </label>
           <input id="gb-files" type="file" accept=".csv,text/csv" multiple
@@ -976,21 +972,17 @@
         <p id="gb-error" class="warnline" hidden></p>
 
         <div id="gb-read" hidden>
-          <!-- What the tool made of the file. This is the step where
-               you check that it understood, so every answer shows its
-               reasoning: which column, and how it was found. -->
           <div id="gb-files-read"></div>
-
-          <!-- The five facts. An editor for `gradebook.toml`, which
-               stays the source of truth -- the path is shown so it can
-               be read and diffed outside the app. -->
-          <div id="gb-profile" class="lmsfacts"></div>
-
+          <!-- `.fields`, the same class the Print job and Settings
+               tabs use. Top-aligned labels, each field as wide as what
+               it holds, and every explanation in a `title` rather than
+               on the page. -->
+          <div id="gb-profile" class="fields"></div>
+          <p class="muted lmspath" id="gb-path"></p>
           <div class="toolbar">
-            <button id="gb-save">Save this mapping</button>
+            <button id="gb-save">Save mapping</button>
             <span class="spacer"></span>
-            <button id="gb-plan" class="primary">What would be
-              written?</button>
+            <button id="gb-plan" class="primary">Preview</button>
           </div>
         </div>
 
