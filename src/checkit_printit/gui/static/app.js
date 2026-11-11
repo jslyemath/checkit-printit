@@ -1233,7 +1233,132 @@ function cellSortKey(cell, threshold) {
   return CELL_RANK[state.kind] + String(1000 - (state.sat || 0));
 }
 
+/* How wide each skill column should be, given what its heading needs.
+ *
+ * **The problem.** The headings are slugs of different lengths -- N3,
+ * W1-E, FCP -- and a column sized to its own heading makes the grid a
+ * picket fence: 34px next to 41px next to 36px, so a row of cells
+ * reads as though it has gaps in it. The cells themselves are squares
+ * by design; it was only the headings pushing their columns around.
+ *
+ * **The rule, which is his.** Where the headings are all much of a
+ * muchness, take the widest and give that width to everyone. A bank
+ * with one or two unusually long slugs should not drag all
+ * twenty-nine columns out to match, so those are left out of the
+ * reckoning and given a width of their own, a little wider than the
+ * shared one. Anything longer still is cut off with an ellipsis,
+ * because a heading is not worth a column you cannot see past.
+ *
+ * `wants` are the natural widths in px, measured from the real
+ * headings. Returns one width per column.
+ *
+ * **An outlier is about four characters longer than typical, measured
+ * absolutely and not as a ratio.** The first version of this asked
+ * for half again the median width, and on his own bank that called
+ * `W4-E` an outlier against `N3`: slugs are two to four characters,
+ * so the ratio between the shortest and the longest is close to 2x
+ * while the real difference is three characters and three pixels of
+ * column. Ratios only mean something once the text is long enough for
+ * the fixed overhead to stop dominating, and a slug never is.
+ *
+ * Against the median rather than the mean, though -- with 29 columns
+ * and two long ones the mean is already dragged by the things it is
+ * meant to detect. `step` is the width of one wide capital, passed in
+ * because only the caller has measured the font.
+ *
+ * The cap is twice the shared width, which is what the ellipsis is
+ * for.
+ */
+function skillColumnWidths(wants, floor = 34, step = 7) {
+  if (!wants.length) return [];
+  const sorted = [...wants].sort((a, b) => a - b);
+  const mid = sorted.length % 2
+    ? sorted[(sorted.length - 1) / 2]
+    : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+  const outlier = mid + step * 4;
+
+  const ordinary = wants.filter(w => w <= outlier);
+  // Every column an outlier -- one heading, or all of them equally
+  // long -- leaves nothing to average against, and then the honest
+  // answer is that none of them is unusual.
+  const shared = Math.max(floor, ...(ordinary.length ? ordinary : wants));
+  const cap = shared * 2;
+
+  return wants.map(w => (w <= outlier
+    ? shared
+    : Math.max(shared, Math.min(cap, w))));
+}
+
 /* --- end pure: progress --- */
+
+/* Measure the skill headings, then give the columns their widths.
+ *
+ * The measuring is the awkward half. The table is `table-layout:
+ * fixed`, so a heading's rendered width is already whatever the
+ * layout gave it and tells us nothing about what the text wants. So
+ * the text is measured in a throwaway span carrying the heading's own
+ * font, letter-spacing and transform -- copied from a real heading
+ * rather than restated here, because a second copy of the type scale
+ * is a second thing to keep in step with the stylesheet.
+ *
+ * `skillColumnWidths` decides; this only measures and applies.
+ */
+function evenSkillColumns(head) {
+  const heads = [...head.querySelectorAll("th.skillcol")];
+  if (!heads.length) return;
+
+  const style = getComputedStyle(heads[0]);
+  const ruler = document.createElement("span");
+  ruler.style.cssText = "position:absolute;visibility:hidden;"
+    + "white-space:nowrap;top:-9999px;left:-9999px";
+  for (const property of ["font", "fontSize", "fontFamily", "fontWeight",
+                          "letterSpacing", "textTransform"]) {
+    ruler.style[property] = style[property];
+  }
+  document.body.appendChild(ruler);
+
+  // The padding and the 1px column rule come off the heading's own
+  // box, so the number is "what this column must be", not "how wide
+  // these letters are".
+  const around = parseFloat(style.paddingLeft)
+    + parseFloat(style.paddingRight) + 1;
+
+  const wants = heads.map(th => {
+    const label = th.querySelector(".sort") || th;
+    ruler.textContent = (label.textContent || "").trim();
+    return Math.ceil(ruler.getBoundingClientRect().width + around);
+  });
+  // One wide capital, so "four characters longer" is a real distance
+  // in this font rather than a number guessed here.
+  ruler.textContent = "W";
+  const step = Math.ceil(ruler.getBoundingClientRect().width) || 7;
+  ruler.remove();
+
+  const widths = skillColumnWidths(wants, 34, step);
+  heads.forEach((th, i) => {
+    const px = `${widths[i]}px`;
+    th.style.width = px;
+    th.style.minWidth = px;
+    th.style.maxWidth = px;
+    // Only the ones that had to be cut need the ellipsis, and saying
+    // so on the element rather than in the stylesheet keeps it tied
+    // to the measurement that caused it.
+    if (widths[i] < wants[i]) {
+      th.classList.add("clipped");
+      // The heading is now the only place the full slug is not
+      // readable, so it has to be recoverable by pointing. Appended
+      // to the title the caller already set, which is the skill's
+      // own sentence.
+      const label = th.querySelector(".sort") || th;
+      const slug = (label.textContent || "").trim();
+      if (th.title && !th.title.startsWith(slug)) {
+        th.title = `${slug} — ${th.title}`;
+      }
+    } else {
+      th.classList.remove("clipped");
+    }
+  });
+}
 
 /* Rebuilt on each load; see this file's note above `progressSort`. */
 const progressColumns = [];
@@ -1327,6 +1452,7 @@ function renderProgress() {
   });
   thead.appendChild(head);
   grid.appendChild(thead);
+  evenSkillColumns(head);
 
   const rows = progressSort.apply(data.students);
   const runs = sectionRuns(rows, "progress:") || [];
@@ -2302,29 +2428,38 @@ function sectionBand(run, span, redraw) {
   // table whose other numbers are ids and seeds.
   count.textContent = `${run.count} student${run.count === 1 ? "" : "s"}`;
 
-  /* **The band scrolls with the table, deliberately.**
+  /* **The band is measured against the viewport, not against the
+   * table.** His words, and they name the thing exactly: this row is
+   * not part of the table from a measurement standpoint. It is a
+   * label for the rows under it, and a label should sit across what
+   * you can see.
    *
-   * It was briefly pinned to the left, on the reading that a section
-   * header should stay in view the way the Name column does. That was
-   * wrong three times over:
+   * Two wrong answers came before this one.
    *
-   * * It never looked still. Pinned at `left: 0` while resting 12px
-   *   in on the cell's own padding, it slid those 12px and stopped --
-   *   a wiggle, which is worse than either end of it.
-   * * The count had to come with it, so "22 students" sat against the
-   *   section name instead of out at the right.
-   * * **Progress already pins a `Sec` column, immediately after
-   *   Name.** Every row carries its own section, in view at any
-   *   scroll position. A pinned band repeats, in a louder place, what
-   *   the row beside it already says.
+   * Pinning only the left end moved the name to the viewport edge and
+   * left the count at `margin-left: auto` out on the table's own
+   * right edge -- 1,255px out, so it appeared only at the end of a
+   * scroll. Making the whole band static put both back in the table's
+   * coordinates, so the section name itself scrolled away. Neither is
+   * what a band is for, and the second was argued from the pinned
+   * `Sec` column making the band redundant -- which answers "can you
+   * still tell which section a row is in" and not "can you read the
+   * band", the question actually being asked.
    *
-   * So: no sticky, and the cell needs no `overflow` exception either.
-   * What the attempt turned up is worth keeping and is recorded in
-   * `style.css`: that cell's `overflow: hidden` silently defeats a
-   * sticky descendant, because a clipping ancestor between a sticky
-   * element and the scrollport becomes the scrollport.
+   * So both ends stick, each to its own edge of the scrollport: the
+   * name and its chevron at the left, the count at the right. The
+   * button still spans the whole row, because the whole band is the
+   * control that opens and shuts the group. Nothing moves at any
+   * scroll position, because the thresholds are set to the padding
+   * the pair already rests on -- see `.secband-label`. A sticky
+   * threshold that disagrees with the resting inset is what produced
+   * the 12px wiggle he saw.
    */
-  button.append(icon("chev"), name, count);
+  const label = document.createElement("span");
+  label.className = "secband-label";
+  label.append(icon("chev"), name);
+
+  button.append(label, count);
   button.onclick = () => toggleBand(run.key, redraw);
   if (shut) tr.classList.add("shut");
   td.appendChild(button);
