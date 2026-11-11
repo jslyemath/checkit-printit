@@ -27,6 +27,7 @@ import json
 import mimetypes
 import os
 import secrets
+import shutil
 import socketserver
 import sys
 import threading
@@ -53,6 +54,8 @@ from .. import form as form_mod
 from ..bank import Bank, BankError
 from .. import roster as roster_mod
 from .. import seating as seating_mod
+from .. import gradebook as gradebook_mod
+from .. import mask as mask_mod
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 TOKEN_HEADER = "X-Printit-Token"
@@ -2941,11 +2944,449 @@ def api_progress_set(course, body):
     return api_progress_cell(course, {"sid": sid, "slug": slug})
 
 
+# ------------------------------------------- getting it into the LMS --
+#
+# Progress *is* the gradebook; what this is for is getting what it
+# holds into somebody else's. So it lives under Progress rather than in
+# a tab of its own, and it is called "Export to your LMS" -- which is
+# the instructor's own phrase, and worth keeping straight: he exports
+# from the LMS, printit fills the file in, and he imports it back.
+# Nothing here uploads anything.
+#
+# **The uploaded gradebooks are held in memory and never written to
+# disk.** Every other file this app receives gets stored -- a scan goes
+# into `scans/`, a roster into `roster.toml` -- and a gradebook export
+# is the one file that should not, because it carries every student's
+# name, id and marks and the tool has no reason to keep it past the
+# minute it is being read. The filled copies go back to the browser as
+# a download. So this adds no new place for student data to accumulate,
+# and `vault mask-course` needs no new exclusion.
+
+
+class _Carried:
+    """The gradebook files of one visit, in memory.
+
+    Module-level for the same reason the scan reader is: mapping,
+    planning and writing are three requests about one pile of files,
+    and asking for them again between steps would be asking him to
+    find them three times.
+
+    One course at a time. A second course's upload replaces the first,
+    rather than the two being mixed into one plan -- which is the only
+    failure worth guarding here, because the plan's whole job is to
+    decide that a student appears in exactly one file.
+    """
+
+    def __init__(self):
+        self.course = ""
+        #: name -> the file's bytes, exactly as uploaded.
+        self.files = {}
+
+    def put(self, course, name, blob):
+        if course != self.course:
+            self.clear()
+            self.course = course
+        self.files[name] = blob
+
+    def clear(self):
+        self.course = ""
+        self.files = {}
+
+    def __bool__(self):
+        return bool(self.files)
+
+
+CARRIED = _Carried()
+
+
+def _gradebook_profile(course):
+    """The saved profile, or None. Never raises on a missing file."""
+    path = gradebook_mod.path_for(course.name)
+    if not os.path.isfile(path):
+        return None
+    try:
+        return gradebook_mod.load(path)
+    except gradebook_mod.GradebookError as exc:
+        raise GuiError(str(exc)) from None
+
+
+def _profile_json(profile):
+    if profile is None:
+        return None
+    return {
+        "name": profile.name,
+        "studentColumn": profile.student_column,
+        "matches": profile.student_matches,
+        "passed": profile.passed,
+        "notPassed": profile.not_passed,
+        # The codepoints as well as the characters. On his export a pass
+        # is a trophy followed *immediately* by `Pass`, and whether
+        # there is a space after the emoji is invisible in the glyphs
+        # and obvious here. The export writes these bytes exactly.
+        "passedPoints": " ".join("U+%04X" % ord(c) for c in profile.passed),
+        "notPassedPoints": " ".join("U+%04X" % ord(c)
+                                    for c in profile.not_passed),
+        "blankMeans": profile.blank_means,
+        "pairs": dict(profile.pairs),
+        "ignoreRows": list(profile.ignore_rows),
+        "ignoreColumns": list(profile.ignore_columns),
+    }
+
+
+def api_gradebook(course, _body):
+    """What is known before any file is in hand.
+
+    The profile, the thresholds it will apply, and the bank's slugs.
+    The thresholds are shown here although they are *set* in Settings:
+    they belong to the course whatever you are doing, and the one bug
+    this whole feature had was the export not reading them. A number
+    that decides what gets written should be visible where the writing
+    happens.
+    """
+    profile = _gradebook_profile(course)
+    try:
+        slugs = _bank_slugs_for(course)
+    except GuiError:
+        slugs = []
+    return {
+        "profile": _profile_json(profile),
+        "profilePath": gradebook_mod.path_for(course.name),
+        "slugs": slugs,
+        "thresholds": course_mod.thresholds(course.name),
+        "matchChoices": list(gradebook_mod.ID_FIELDS),
+        "blankChoices": list(gradebook_mod.BLANK_MEANINGS),
+        "carrying": sorted(CARRIED.files) if CARRIED.course == course.name
+        else [],
+    }
+
+
+def api_gradebook_read(course, body):
+    """Take the uploaded gradebook files and say what they look like.
+
+    Reads: the header row, every skill column it can find and **how**
+    it found it, the mark strings as they appear in the file, and what
+    a blank cell seems to mean. Saves nothing: this is the step where
+    he checks that the tool has understood his file.
+    """
+    files = body.get("files") or []
+    if not files:
+        raise GuiError("no files were chosen.")
+
+    for item in files:
+        name = os.path.basename(str(item.get("name") or "export.csv"))
+        if not name.lower().endswith((".csv", ".txt")):
+            raise GuiError(f"{name} is not a CSV.")
+        try:
+            blob = base64.b64decode(item.get("data") or "", validate=True)
+        except (ValueError, TypeError):
+            raise GuiError(f"{name} did not arrive intact.") from None
+        if b"\0" in blob[:4096]:
+            raise GuiError(f"{name} looks like a binary file, not a CSV.")
+        CARRIED.put(course.name, name, blob)
+
+    return api_gradebook_look(course, body)
+
+
+def api_gradebook_look(course, body):
+    """The same report, from the files already carried.
+
+    Split from `read` so re-reading after a profile change costs
+    nothing and does not ask for the files again.
+    """
+    if not CARRIED or CARRIED.course != course.name:
+        raise GuiError("no gradebook file is in hand. Drop one first.")
+
+    header_row = int(body.get("headerRow") or 1)
+    profile = _gradebook_profile(course)
+    slugs = _bank_slugs_for(course)
+    out = []
+
+    for name in sorted(CARRIED.files):
+        rows = _rows_of(CARRIED.files[name])
+        if not rows:
+            raise GuiError(f"{name} is empty.")
+        try:
+            index = mask_mod.find_header(rows, header_row)
+        except mask_mod.MaskError as exc:
+            raise GuiError(f"{name}: {exc}") from None
+        head = rows[index]
+        body_rows = [r for r in rows[index + 1:]
+                     if any(c.strip() for c in r)]
+
+        found = gradebook_mod.match(
+            head, slugs, pairs=(profile.pairs if profile else None))
+        columns = sorted(found.found.values())
+        guessed = gradebook_mod.guess_marks(body_rows, columns)
+        passed = (profile.passed if profile and profile.passed
+                  else guessed[0])
+        meaning, evidence = gradebook_mod.blank_evidence(
+            body_rows, head, columns, passed)
+        sheet = gradebook_mod.sheet_from(name, rows, header_line=index + 1)
+
+        out.append({
+            "name": name,
+            "headerRow": index + 1,
+            "columns": len(head),
+            "rows": len(body_rows),
+            "section": sheet.section,
+            "headers": list(head),
+            # slug -> {column, header, how}. One row per skill in the
+            # view, because "which column is N3" is the question he is
+            # actually checking.
+            "matched": {
+                slug: {"column": column + 1, "header": head[column],
+                       "how": found.how.get(slug, "")}
+                for slug, column in sorted(found.found.items())},
+            "missing": list(found.missing),
+            "ambiguous": {s: [c + 1 for c in cs]
+                          for s, cs in found.ambiguous.items()},
+            "spare": [{"column": c + 1, "header": head[c]}
+                      for c in found.spare],
+            "guessedPassed": guessed[0],
+            "guessedNotPassed": guessed[1],
+            "otherValues": list(guessed[2]),
+            "blankMeans": meaning,
+            "blankEvidence": evidence,
+        })
+    return {"files": out, "profile": _profile_json(_gradebook_profile(course)),
+            "slugs": slugs}
+
+
+def api_gradebook_save(course, body):
+    """Write the profile. The file on disk stays the source of truth.
+
+    This page is a view and an editor of `gradebook.toml`, never a
+    second place the answers live: the module's own note says a
+    decision the tool made about a column should be greppable and
+    diffable, and a web page that holds it is a page you have to open
+    to find out what the tool believes.
+    """
+    profile = _gradebook_profile(course) or gradebook_mod.Profile()
+    fields = {
+        "name": ("name", str),
+        "studentColumn": ("student_column", str),
+        "matches": ("student_matches", str),
+        "passed": ("passed", str),
+        "notPassed": ("not_passed", str),
+        "blankMeans": ("blank_means", str),
+    }
+    changes = {}
+    for key, (attribute, cast) in fields.items():
+        if key in body:
+            changes[attribute] = cast(body[key])
+    for key, attribute in (("pairs", "pairs"),
+                           ("ignoreRows", "ignore_rows"),
+                           ("ignoreColumns", "ignore_columns")):
+        if key in body:
+            changes[attribute] = (dict(body[key]) if key == "pairs"
+                                  else list(body[key]))
+    profile = dataclasses.replace(profile, **changes)
+
+    # Checked against the real headers when a file is in hand, because
+    # a profile naming a column the file does not have is the failure
+    # that otherwise shows up as "nothing exported" with no reason.
+    headers = None
+    if CARRIED and CARRIED.course == course.name:
+        rows = _rows_of(CARRIED.files[sorted(CARRIED.files)[0]])
+        try:
+            index = mask_mod.find_header(rows, int(body.get("headerRow") or 1))
+            headers = rows[index]
+        except mask_mod.MaskError:
+            headers = None
+    try:
+        profile.validate(headers)
+    except gradebook_mod.GradebookError as exc:
+        raise GuiError(str(exc)) from None
+
+    path = gradebook_mod.path_for(course.name)
+    gradebook_mod.save(path, profile)
+    return {"saved": path, "profile": _profile_json(profile)}
+
+
+def _gradebook_plan(course, body):
+    """`(sheets, changes, report, profile)` for the carried files."""
+    if not CARRIED or CARRIED.course != course.name:
+        raise GuiError("no gradebook file is in hand. Drop one first.")
+    profile = _gradebook_profile(course)
+    if profile is None:
+        raise GuiError(
+            "this course has no gradebook profile yet. Check the "
+            "columns below and save it first.")
+    try:
+        profile.validate()
+    except gradebook_mod.GradebookError as exc:
+        raise GuiError(str(exc)) from None
+
+    header_row = int(body.get("headerRow") or 1)
+    slugs = _bank_slugs_for(course)
+    record_path = course.file("record")
+    people = roster_mod.load(course.file("roster"))
+    progress = record_mod.progress(record_path)
+    if not progress:
+        raise GuiError(
+            "nothing has been graded in this course yet, so there is no "
+            "result to export. Read a stack in on the Scans tab first.")
+
+    wanted = [s for s in (body.get("notYet") or []) if s in slugs]
+    sheets = []
+    for name in sorted(CARRIED.files):
+        rows = _rows_of(CARRIED.files[name])
+        try:
+            index = mask_mod.find_header(rows, header_row)
+        except mask_mod.MaskError as exc:
+            raise GuiError(f"{name}: {exc}") from None
+        sheets.append(gradebook_mod.sheet_from(name, rows,
+                                               header_line=index + 1))
+
+    changes, report = gradebook_mod.plan_export(
+        sheets, profile, people, progress, slugs, not_yet=wanted,
+        thresholds=course_mod.thresholds(course.name))
+    return sheets, changes, report, profile
+
+
+def api_gradebook_plan(course, body):
+    """What would be written. Writes nothing.
+
+    The default, and the only safe one for something that changes
+    grades: he sees the plan, then asks for the files.
+    """
+    sheets, changes, report, _ = _gradebook_plan(course, body)
+
+    per_file = []
+    for sheet in sheets:
+        mine = report.for_sheet(sheet.name)
+        by_skill = {}
+        for change in mine:
+            row = by_skill.setdefault(change.slug, {"cells": 0, "blank": 0,
+                                                    "over": 0})
+            row["cells"] += 1
+            if change.was.strip():
+                row["over"] += 1
+            else:
+                row["blank"] += 1
+        per_file.append({
+            "name": sheet.name, "section": sheet.section,
+            "cells": len(mine),
+            "bySkill": [{"slug": slug, **counts}
+                        for slug, counts in sorted(by_skill.items())],
+        })
+
+    return {
+        "cells": len(report.changes),
+        "alreadyRight": report.already_right,
+        "notWritten": report.not_written,
+        "rowsMatched": report.rows_matched,
+        "files": per_file,
+        "keptPasses": len(report.kept_passes()),
+        # Rows and columns, never a student. This report is printed and
+        # shown, and a report that can carry a name is one that cannot
+        # be shown to anybody.
+        "rowsIgnored": list(report.rows_ignored),
+        "rowsUnmatched": list(report.rows_unmatched),
+        "studentsUnmatched": len(report.students_unmatched),
+        "skillsUnmatched": list(report.skills_unmatched),
+        "short": dict(report.short),
+        "notes": list(report.notes),
+        "refused": list(report.refused),
+        "thresholds": course_mod.thresholds(course.name),
+    }
+
+
+def api_gradebook_write(course, body):
+    """Splice the files and hand them back for download.
+
+    Not written to disk here either. The browser saves them wherever
+    he keeps downloads, which is where the originals came from.
+    """
+    sheets, changes, report, _ = _gradebook_plan(course, body)
+    if report.refused:
+        raise GuiError("; ".join(report.refused))
+    if not changes:
+        raise GuiError("there is nothing to write.")
+
+    out = []
+    for sheet in sheets:
+        if not report.for_sheet(sheet.name):
+            continue
+        # `splice` reads the file by path, and the file only exists in
+        # memory -- so it is handed a temporary copy, written and
+        # removed inside this call. The point of not storing the
+        # upload is that it does not outlive the request; a scratch
+        # file that does not either keeps that true.
+        import tempfile
+        folder = tempfile.mkdtemp(prefix="printit-gb-")
+        path = os.path.join(folder, sheet.name)
+        try:
+            with open(path, "wb") as handle:
+                handle.write(CARRIED.files[sheet.name])
+            try:
+                data = gradebook_mod.splice(
+                    path, changes, sheet.name,
+                    header_line=sheet.header_line)
+            except gradebook_mod.GradebookError as exc:
+                raise GuiError(str(exc)) from None
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+        stem, extension = os.path.splitext(sheet.name)
+        out.append({
+            "name": f"{stem}_UPDATED{extension}",
+            "data": base64.b64encode(data).decode("ascii"),
+            "cells": len(report.for_sheet(sheet.name)),
+        })
+    return {"files": out, "cells": len(report.changes)}
+
+
+def api_gradebook_clear(course, _body):
+    """Forget the carried files."""
+    CARRIED.clear()
+    return {"carrying": []}
+
+
+def _rows_of(blob):
+    """A carried file's bytes as rows, the way `mask.read_rows` reads a
+    path -- same encoding handling, same BOM handling, no temporary
+    file."""
+    import csv
+    import io
+    text = blob.decode("utf-8-sig")
+    return [row for row in csv.reader(io.StringIO(text, newline=""))]
+
+
+def _bank_slugs_for(course):
+    """The bank's slugs, or a GuiError saying why not.
+
+    The same path the CLI's `_bank_slugs` takes, and the same reason
+    for the message: without a bank there is no list of skills to
+    match the gradebook's columns against, and "nothing matched" would
+    be a confusing way to learn that.
+    """
+    bank = course_mod.bank_for(course.name)
+    if bank is None:
+        raise GuiError(
+            "this course is not pointed at a bank, so there is no list "
+            "of skills to match the gradebook's columns against. Set "
+            "one in Settings, or in the course's `course.toml`.")
+    try:
+        return list(bank.slugs())
+    except BankError as exc:
+        raise GuiError(f"cannot read this course's bank: {exc}") from None
+
+
 ROUTES = {
     "/api/course": api_course,
     "/api/progress": api_progress,
     "/api/progress/cell": api_progress_cell,
     "/api/progress/set": api_progress_set,
+    # Under Progress, because Progress is the gradebook and this is
+    # getting what it holds into somebody else's.
+    "/api/gradebook": api_gradebook,
+    "/api/gradebook/read": api_gradebook_read,
+    "/api/gradebook/look": api_gradebook_look,
+    "/api/gradebook/save": api_gradebook_save,
+    "/api/gradebook/plan": api_gradebook_plan,
+    "/api/gradebook/write": api_gradebook_write,
+    "/api/gradebook/clear": api_gradebook_clear,
     "/api/scan/start": api_scan_start,
     "/api/scan/list": api_scan_list,
     "/api/scan/reopen": api_scan_reopen,

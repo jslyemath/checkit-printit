@@ -1143,6 +1143,12 @@ async function loadProgress() {
   if (!out) return;
   progressData = out;
   renderProgress();
+  // The LMS panel under the grid. Wired once -- `wireGradebook` guards
+  // itself, because this runs on every visit to the tab and a second
+  // drop handler would upload the same file twice.
+  wireGradebook();
+  try { await gbLoad(); }
+  catch (err) { /* the grid is the page; the panel can say so itself */ }
 }
 
 /* --- pure: progress ---
@@ -6811,3 +6817,409 @@ async function boot() {
 }
 
 boot();
+
+
+/* ---- Export to your LMS ------------------------------------------------
+ *
+ * Under Progress, because Progress is this course's gradebook and this
+ * is only the sending of it. The direction matters and the wording
+ * keeps it straight: you export from the LMS, printit fills the file
+ * in, you import it back. Nothing here uploads anything.
+ *
+ * Four steps, and the order is the point. Drop the file; read what the
+ * tool made of it and correct anything wrong; ask what *would* be
+ * written; then ask for the files. Nothing is written until the last
+ * one, which is the only safe default for something that changes
+ * grades.
+ */
+
+//: The read of the files currently in hand, as the server described
+//: them. Kept so saving the mapping can redraw without another upload.
+let gbRead = null;
+
+//: `/api/gradebook`'s answer: the choices, the profile path, the
+//: thresholds, and what is in hand. Declared before the functions that
+//: read it, because `gbDrawProfile` runs during the first draw.
+let gbOptions = {};
+
+function gbSay(words) {
+  const el = document.getElementById("gb-error");
+  el.textContent = words || "";
+  el.hidden = !words;
+}
+
+/* One fetch of `/api/gradebook`, and the only one.
+ *
+ * There were three functions doing this -- a refresh, a load and a
+ * count -- and two of them fired on every visit to the tab, so the
+ * page asked the same question twice before drawing anything. The
+ * answer carries the choices, the profile path, the thresholds *and*
+ * what is in hand, so one call tells all of it. */
+async function gbLoad() {
+  const out = await api("/api/gradebook", {});
+  if (!out) return null;
+  gbOptions = out;
+  const held = out.carrying || [];
+  document.getElementById("gb-carrying").textContent =
+    held.length ? `${held.length} file${held.length === 1 ? "" : "s"} in hand`
+                : "";
+  if (held.length) {
+    // Carried over from earlier in this visit, so the panel comes back
+    // where it was rather than asking for the files again.
+    try { gbRead = await api("/api/gradebook/look", {}); gbDrawRead(); }
+    catch (err) { gbSay(err.message); }
+  }
+  return out;
+}
+
+/* One block per file: what it is, and which column each skill came
+ * from. **How it was found is shown beside it**, because this is the
+ * step where he checks the tool understood his file, and "N3 is column
+ * 18" is not checkable without knowing why it thinks so. */
+function gbDrawRead() {
+  const holder = document.getElementById("gb-files-read");
+  holder.textContent = "";
+  if (!gbRead) { document.getElementById("gb-read").hidden = true; return; }
+  document.getElementById("gb-read").hidden = false;
+
+  for (const file of gbRead.files) {
+    const box = document.createElement("section");
+    box.className = "lmsfile";
+
+    const head = document.createElement("header");
+    head.className = "jobline";
+    const name = document.createElement("span");
+    name.className = "jobstat";
+    name.textContent = file.name;
+    const facts = document.createElement("span");
+    facts.className = "jobsoft";
+    facts.textContent = `${file.rows} rows, ${file.columns} columns, `
+      + `header row ${file.headerRow}`
+      + (file.section ? `, looks like section ${file.section}` : "");
+    head.append(name, facts);
+    box.appendChild(head);
+
+    const matched = Object.entries(file.matched);
+    const table = document.createElement("table");
+    table.className = "matched lmsmatch";
+    const body = document.createElement("tbody");
+    for (const [slug, found] of matched) {
+      const tr = document.createElement("tr");
+      for (const text of [slug, `column ${found.column}`, found.header,
+                          found.how]) {
+        const td = document.createElement("td");
+        td.textContent = text;
+        tr.appendChild(td);
+      }
+      body.appendChild(tr);
+    }
+    table.appendChild(body);
+
+    const summary = document.createElement("p");
+    summary.className = "muted";
+    summary.textContent = `${matched.length} of ${gbRead.slugs.length} `
+      + `skills found a column.`;
+    box.append(summary);
+
+    // Only the exceptions are worth reading in full. Twenty-seven
+    // skills with no column is the ordinary state of a gradebook that
+    // covers one unit, not a problem to list.
+    if (Object.keys(file.ambiguous).length) {
+      const warn = document.createElement("p");
+      warn.className = "warnline";
+      warn.textContent = "more than one column could be: "
+        + Object.entries(file.ambiguous)
+            .map(([s, cs]) => `${s} (${cs.join(", ")})`).join("; ")
+        + " \u2014 pair these by hand in the profile.";
+      box.appendChild(warn);
+    }
+
+    const fold = document.createElement("details");
+    const label = document.createElement("summary");
+    label.textContent = "which column each skill came from";
+    fold.append(label, table);
+    box.appendChild(fold);
+
+    const marks = document.createElement("p");
+    marks.className = "muted";
+    if (file.guessedPassed && file.guessedNotPassed) {
+      marks.textContent = `marks found in the file: a pass looks like `
+        + `${JSON.stringify(file.guessedPassed)}, a non-pass like `
+        + `${JSON.stringify(file.guessedNotPassed)}`;
+    } else if (file.otherValues.length) {
+      marks.textContent = "could not tell which value means a pass. "
+        + "The values in those columns are: "
+        + file.otherValues.map(v => JSON.stringify(v)).join(", ")
+        + " \u2014 say which is which below.";
+    } else {
+      marks.textContent = "no marks in the skill columns yet, so there "
+        + "is nothing to learn them from. Set them below.";
+    }
+    box.appendChild(marks);
+    holder.appendChild(box);
+  }
+  gbDrawProfile();
+}
+
+/* The five facts, as fields. An editor for `gradebook.toml`, and the
+ * path is on the page: the file stays the source of truth, and a
+ * decision the tool made about a column should be readable and
+ * diffable without opening a web page to find it. */
+function gbDrawProfile() {
+  const holder = document.getElementById("gb-profile");
+  holder.textContent = "";
+  if (!gbRead) return;
+  const profile = gbRead.profile || {};
+  const first = gbRead.files[0] || { headers: [], otherValues: [] };
+
+  const field = (id, label, note) => {
+    const wrap = document.createElement("label");
+    wrap.className = "lmsfield";
+    const name = document.createElement("span");
+    name.className = "lmslabel";
+    name.textContent = label;
+    wrap.appendChild(name);
+    const el = document.createElement(
+      id === "gb-f-matches" || id === "gb-f-blank" || id === "gb-f-student"
+        ? "select" : "input");
+    el.id = id;
+    wrap.appendChild(el);
+    if (note) {
+      const hint = document.createElement("span");
+      hint.className = "lmshint";
+      hint.textContent = note;
+      wrap.appendChild(hint);
+    }
+    holder.appendChild(wrap);
+    return el;
+  };
+
+  const student = field("gb-f-student", "Which column is the student?",
+                        "joined to a roster field, below");
+  for (const header of first.headers) {
+    const option = document.createElement("option");
+    option.value = header;
+    option.textContent = header.length > 60
+      ? header.slice(0, 57) + "\u2026" : header;
+    student.appendChild(option);
+  }
+  student.value = profile.studentColumn || first.headers[0] || "";
+
+  const matches = field("gb-f-matches", "It holds the roster's\u2026",
+                        "an email can be stale; an id is not");
+  for (const choice of (gbOptions.matchChoices || ["sid"])) {
+    const option = document.createElement("option");
+    option.value = choice;
+    option.textContent = choice;
+    matches.appendChild(option);
+  }
+  matches.value = profile.matches || "sid";
+
+  // Typed, not picked: the exact characters are what gets written
+  // back, and on his export a pass is a trophy followed *immediately*
+  // by `Pass`. A dropdown of what the file happens to contain cannot
+  // offer a mark for a column that is still empty.
+  const passed = field("gb-f-passed", "A pass is exactly",
+                       profile.passedPoints || "the exact characters");
+  passed.value = profile.passed || first.guessedPassed || "";
+  const notPassed = field("gb-f-not", "A non-pass is exactly",
+                          profile.notPassedPoints || "");
+  notPassed.value = profile.notPassed || first.guessedNotPassed || "";
+
+  const blank = field("gb-f-blank", "An empty cell means",
+                      "a zero raises the denominator where subtotals "
+                      + "count filled cells");
+  for (const choice of (gbOptions.blankChoices || ["not attempted"])) {
+    const option = document.createElement("option");
+    option.value = choice;
+    option.textContent = choice;
+    blank.appendChild(option);
+  }
+  blank.value = profile.blankMeans || first.blankMeans || "not attempted";
+
+  const ignore = field("gb-f-ignore", "Never write to a row containing",
+                       "one per comma, such as -DoNotUse");
+  ignore.value = (profile.ignoreRows || []).join(", ");
+
+  const where = document.createElement("p");
+  where.className = "muted lmspath";
+  where.textContent = "saved in " + (gbOptions.profilePath || "");
+  holder.appendChild(where);
+}
+
+async function gbUpload(chosen) {
+  if (!chosen || !chosen.length) return;
+  gbSay("");
+  const files = [];
+  for (const file of chosen) {
+    const buffer = await file.arrayBuffer();
+    let binary = "";
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < bytes.length; i += 0x8000)
+      binary += String.fromCharCode.apply(
+        null, bytes.subarray(i, i + 0x8000));
+    files.push({ name: file.name, data: btoa(binary) });
+  }
+  document.getElementById("gb-chosen").textContent =
+    files.map(f => f.name).join(", ");
+  try {
+    gbRead = await api("/api/gradebook/read", { files });
+    document.getElementById("gb-plan-out").hidden = true;
+    gbDrawRead();
+    // For the "n files in hand" count and the profile path, from the
+    // one call that knows both.
+    await gbLoad();
+  } catch (err) { gbSay(err.message); }
+}
+
+async function gbSaveProfile() {
+  const value = (id) => (document.getElementById(id) || {}).value || "";
+  const body = {
+    name: "lms",
+    studentColumn: value("gb-f-student"),
+    matches: value("gb-f-matches"),
+    passed: value("gb-f-passed"),
+    notPassed: value("gb-f-not"),
+    blankMeans: value("gb-f-blank"),
+    ignoreRows: value("gb-f-ignore").split(",")
+      .map(s => s.trim()).filter(Boolean),
+  };
+  gbSay("");
+  try {
+    const out = await api("/api/gradebook/save", body);
+    toast("Mapping saved");
+    gbRead = await api("/api/gradebook/look", {});
+    gbDrawRead();
+    await gbLoad();
+    return out;
+  } catch (err) { gbSay(err.message); }
+}
+
+/* What would be written, per file and per skill. Counts and column
+ * numbers, never a student: this panel is on screen next to somebody
+ * else's screen often enough, and the report it is built from is
+ * careful never to carry a name. */
+async function gbShowPlan() {
+  gbSay("");
+  const out = document.getElementById("gb-plan-out");
+  out.textContent = "";
+  let plan;
+  try { plan = await api("/api/gradebook/plan", {}); }
+  catch (err) { gbSay(err.message); out.hidden = true; return; }
+  out.hidden = false;
+
+  const line = (text, cls) => {
+    const p = document.createElement("p");
+    if (cls) p.className = cls;
+    p.textContent = text;
+    out.appendChild(p);
+  };
+
+  line(`${plan.cells} cell(s) to write, ${plan.alreadyRight} already `
+       + `right, ${plan.notWritten} not written`, "lmstotal");
+  line(`${plan.rowsMatched} row(s) matched a student`, "muted");
+
+  for (const file of plan.files) {
+    if (!file.cells) continue;
+    const box = document.createElement("div");
+    box.className = "lmsfile";
+    const head = document.createElement("p");
+    head.className = "jobstat";
+    head.textContent = `${file.name}: ${file.cells} cell(s)`;
+    box.appendChild(head);
+    const list = document.createElement("ul");
+    list.className = "lmsskills";
+    for (const skill of file.bySkill) {
+      const item = document.createElement("li");
+      item.textContent = `${skill.slug}: ${skill.cells} `
+        + `(${skill.blank} into a blank, ${skill.over} over a non-pass)`;
+      list.appendChild(item);
+    }
+    box.appendChild(list);
+    out.appendChild(box);
+  }
+
+  if (plan.keptPasses)
+    line(`${plan.keptPasses} cell(s) keep a pass the record does not `
+         + `agree with \u2014 never replaced`, "muted");
+  for (const [slug, n] of Object.entries(plan.short || {}))
+    line(`${slug}: ${n} student(s) have a pass but not enough of them `
+         + `yet, so nothing was written`, "muted");
+  if (plan.rowsIgnored.length)
+    line(`${plan.rowsIgnored.length} row(s) skipped by an ignore rule: `
+         + plan.rowsIgnored.join(", "), "muted");
+  if (plan.rowsUnmatched.length)
+    line(`${plan.rowsUnmatched.length} row(s) matched no student: `
+         + plan.rowsUnmatched.join(", "), "muted");
+  if (plan.studentsUnmatched)
+    line(`${plan.studentsUnmatched} student(s) have no row in these `
+         + `files`, "muted");
+  for (const note of plan.notes) line(note, "muted");
+  for (const problem of plan.refused) line("REFUSED  " + problem,
+                                           "warnline");
+
+  if (plan.cells && !plan.refused.length) {
+    const bar = document.createElement("div");
+    bar.className = "toolbar";
+    const spacer = document.createElement("span");
+    spacer.className = "spacer";
+    const go = document.createElement("button");
+    go.className = "primary";
+    go.textContent = `Give me the filled file`
+      + (plan.files.filter(f => f.cells).length > 1 ? "s" : "");
+    go.onclick = gbWrite;
+    bar.append(spacer, go);
+    out.appendChild(bar);
+    const after = document.createElement("p");
+    after.className = "muted";
+    after.textContent = "Then import it in your LMS. Nothing is sent "
+      + "anywhere from here.";
+    out.appendChild(after);
+  }
+}
+
+/* The filled copies, as downloads. Not written into the course: the
+ * file is full of names and marks, and the one place it belongs is
+ * wherever he keeps the original. */
+async function gbWrite() {
+  gbSay("");
+  let got;
+  try { got = await api("/api/gradebook/write", {}); }
+  catch (err) { gbSay(err.message); return; }
+  for (const file of got.files) {
+    const bytes = Uint8Array.from(atob(file.data), c => c.charCodeAt(0));
+    const url = URL.createObjectURL(
+      new Blob([bytes], { type: "text/csv" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = file.name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+  toast(got.cells === 1 ? "1 cell written into 1 file"
+                        : `${got.cells} cells written`);
+}
+
+function wireGradebook() {
+  const input = document.getElementById("gb-files");
+  const drop = document.getElementById("gb-drop");
+  if (!input || !drop || drop.dataset.wired) return;
+  drop.dataset.wired = "1";
+
+  input.onchange = () => gbUpload(input.files);
+  for (const event of ["dragenter", "dragover"])
+    drop.addEventListener(event, (e) => {
+      e.preventDefault(); drop.classList.add("over");
+    });
+  for (const event of ["dragleave", "drop"])
+    drop.addEventListener(event, () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => {
+    e.preventDefault();
+    gbUpload(e.dataTransfer.files);
+  });
+
+  document.getElementById("gb-save").onclick = gbSaveProfile;
+  document.getElementById("gb-plan").onclick = gbShowPlan;
+}
