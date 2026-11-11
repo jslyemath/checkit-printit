@@ -6872,10 +6872,10 @@ async function gbLoad() {
   return out;
 }
 
-/* One block per file: what it is, and which column each skill came
- * from. **How it was found is shown beside it**, because this is the
- * step where he checks the tool understood his file, and "N3 is column
- * 18" is not checkable without knowing why it thinks so. */
+/* One card per file: what it is, and where each skill's column came
+ * from. Folded, because 29 rows of "which column is this" is
+ * reference -- but it is the only place the tool's reasoning shows, so
+ * it is one click away and never further. */
 function gbDrawRead() {
   const holder = document.getElementById("gb-files-read");
   holder.textContent = "";
@@ -6886,165 +6886,150 @@ function gbDrawRead() {
     const box = document.createElement("section");
     box.className = "lmsfile";
 
-    const head = document.createElement("header");
+    const head = document.createElement("div");
     head.className = "jobline";
     const name = document.createElement("span");
     name.className = "jobstat";
     name.textContent = file.name;
     const facts = document.createElement("span");
     facts.className = "jobsoft";
-    facts.textContent = `${file.rows} rows, ${file.columns} columns, `
-      + `header row ${file.headerRow}`
-      + (file.section ? `, looks like section ${file.section}` : "");
+    const matched = Object.entries(file.matched);
+    facts.textContent = `${file.rows} rows \u00b7 `
+      + `${matched.length}/${gbRead.slugs.length} skills`
+      + (file.section ? ` \u00b7 section ${file.section}` : "");
     head.append(name, facts);
     box.appendChild(head);
 
-    const matched = Object.entries(file.matched);
+    if (Object.keys(file.ambiguous).length) {
+      const warn = document.createElement("p");
+      warn.className = "warnline";
+      warn.textContent = "ambiguous: "
+        + Object.entries(file.ambiguous)
+            .map(([s, cs]) => `${s} (${cs.join(", ")})`).join("; ");
+      box.appendChild(warn);
+    }
+
     const table = document.createElement("table");
     table.className = "matched lmsmatch";
-    const body = document.createElement("tbody");
+    const rows = document.createElement("tbody");
     for (const [slug, found] of matched) {
       const tr = document.createElement("tr");
-      for (const text of [slug, `column ${found.column}`, found.header,
-                          found.how]) {
+      for (const text of [slug, found.column, found.header, found.how]) {
         const td = document.createElement("td");
         td.textContent = text;
         tr.appendChild(td);
       }
-      body.appendChild(tr);
+      rows.appendChild(tr);
     }
-    table.appendChild(body);
-
-    const summary = document.createElement("p");
-    summary.className = "muted";
-    summary.textContent = `${matched.length} of ${gbRead.slugs.length} `
-      + `skills found a column.`;
-    box.append(summary);
-
-    // Only the exceptions are worth reading in full. Twenty-seven
-    // skills with no column is the ordinary state of a gradebook that
-    // covers one unit, not a problem to list.
-    if (Object.keys(file.ambiguous).length) {
-      const warn = document.createElement("p");
-      warn.className = "warnline";
-      warn.textContent = "more than one column could be: "
-        + Object.entries(file.ambiguous)
-            .map(([s, cs]) => `${s} (${cs.join(", ")})`).join("; ")
-        + " \u2014 pair these by hand in the profile.";
-      box.appendChild(warn);
-    }
-
+    table.appendChild(rows);
     const fold = document.createElement("details");
     const label = document.createElement("summary");
-    label.textContent = "which column each skill came from";
+    label.textContent = "Columns";
     fold.append(label, table);
     box.appendChild(fold);
-
-    const marks = document.createElement("p");
-    marks.className = "muted";
-    if (file.guessedPassed && file.guessedNotPassed) {
-      marks.textContent = `marks found in the file: a pass looks like `
-        + `${JSON.stringify(file.guessedPassed)}, a non-pass like `
-        + `${JSON.stringify(file.guessedNotPassed)}`;
-    } else if (file.otherValues.length) {
-      marks.textContent = "could not tell which value means a pass. "
-        + "The values in those columns are: "
-        + file.otherValues.map(v => JSON.stringify(v)).join(", ")
-        + " \u2014 say which is which below.";
-    } else {
-      marks.textContent = "no marks in the skill columns yet, so there "
-        + "is nothing to learn them from. Set them below.";
-    }
-    box.appendChild(marks);
     holder.appendChild(box);
   }
   gbDrawProfile();
 }
 
-/* The five facts, as fields. An editor for `gradebook.toml`, and the
- * path is on the page: the file stays the source of truth, and a
- * decision the tool made about a column should be readable and
- * diffable without opening a web page to find it. */
+/* The five facts, in the app's own `.fields`: a two-word label above a
+ * field as wide as what it holds, and the explanation in a `title`.
+ *
+ * An editor for `gradebook.toml`, with the path under it. The file
+ * stays the source of truth -- a decision the tool made about a column
+ * should be greppable and diffable, not shut inside a web page. */
 function gbDrawProfile() {
   const holder = document.getElementById("gb-profile");
   holder.textContent = "";
+  document.getElementById("gb-path").textContent = gbOptions.profilePath || "";
   if (!gbRead) return;
   const profile = gbRead.profile || {};
   const first = gbRead.files[0] || { headers: [], otherValues: [] };
 
-  const field = (id, label, note) => {
+  /* **Two groups, because they answer two questions.** Which row is
+     which student, then what the marks in it mean. Left as one
+     wrapping row, the wrap split `Pass is` from `Non-pass is` -- a
+     pair, broken across lines by the width of the student column,
+     which is exactly the grouping a form is supposed to hold together.
+     Two rows also put the widest field on a line of its own, where it
+     cannot push anything around. */
+  const group = () => {
+    const row = document.createElement("div");
+    row.className = "fields";
+    holder.appendChild(row);
+    return row;
+  };
+  const who = group();
+  const marks = group();
+
+  /* `<label>Words <control></label>`, which is what every other form
+     in this app is. The words are the label; `why` is the tooltip. */
+  const field = (row, id, words, why, kind) => {
     const wrap = document.createElement("label");
-    wrap.className = "lmsfield";
-    const name = document.createElement("span");
-    name.className = "lmslabel";
-    name.textContent = label;
-    wrap.appendChild(name);
-    const el = document.createElement(
-      id === "gb-f-matches" || id === "gb-f-blank" || id === "gb-f-student"
-        ? "select" : "input");
+    wrap.title = why;
+    wrap.append(document.createTextNode(words + " "));
+    const el = document.createElement(kind === "pick" ? "select" : "input");
     el.id = id;
+    if (kind !== "pick") el.spellcheck = false;
     wrap.appendChild(el);
-    if (note) {
-      const hint = document.createElement("span");
-      hint.className = "lmshint";
-      hint.textContent = note;
-      wrap.appendChild(hint);
-    }
-    holder.appendChild(wrap);
+    row.appendChild(wrap);
     return el;
   };
+  const fill = (el, values, chosen) => {
+    for (const value of values) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value.length > 48
+        ? value.slice(0, 45) + "\u2026" : value;
+      el.appendChild(option);
+    }
+    el.value = chosen;
+  };
 
-  const student = field("gb-f-student", "Which column is the student?",
-                        "joined to a roster field, below");
-  for (const header of first.headers) {
-    const option = document.createElement("option");
-    option.value = header;
-    option.textContent = header.length > 60
-      ? header.slice(0, 57) + "\u2026" : header;
-    student.appendChild(option);
-  }
-  student.value = profile.studentColumn || first.headers[0] || "";
+  const student = field(
+    who, "gb-f-student", "Student column",
+    "The column holding the id this joins the roster on. A Brightspace "
+    + "export has OrgDefinedId; a Canvas one has SIS User ID. Not a "
+    + "name column.", "pick");
+  fill(student, first.headers,
+       profile.studentColumn || first.headers[0] || "");
 
-  const matches = field("gb-f-matches", "It holds the roster's\u2026",
-                        "an email can be stale; an id is not");
-  for (const choice of (gbOptions.matchChoices || ["sid"])) {
-    const option = document.createElement("option");
-    option.value = choice;
-    option.textContent = choice;
-    matches.appendChild(option);
-  }
-  matches.value = profile.matches || "sid";
+  const matches = field(
+    who, "gb-f-matches", "Joins on",
+    "Which roster field that column holds. Emails arrive stale from "
+    + "other institutions often enough that an id is the safer join.",
+    "pick");
+  fill(matches, gbOptions.matchChoices || ["sid"], profile.matches || "sid");
 
-  // Typed, not picked: the exact characters are what gets written
-  // back, and on his export a pass is a trophy followed *immediately*
-  // by `Pass`. A dropdown of what the file happens to contain cannot
-  // offer a mark for a column that is still empty.
-  const passed = field("gb-f-passed", "A pass is exactly",
-                       profile.passedPoints || "the exact characters");
+  // Typed, not picked: the exact characters are what gets written, and
+  // a list of what the file happens to contain cannot offer a mark for
+  // a column that is still empty.
+  const passed = field(
+    marks, "gb-f-passed", "Pass is",
+    "The exact cell contents for a pass, written back byte for byte"
+    + (profile.passedPoints ? ` \u2014 ${profile.passedPoints}` : ""));
   passed.value = profile.passed || first.guessedPassed || "";
-  const notPassed = field("gb-f-not", "A non-pass is exactly",
-                          profile.notPassedPoints || "");
+
+  const notPassed = field(
+    marks, "gb-f-not", "Non-pass is",
+    "The exact cell contents for a non-pass"
+    + (profile.notPassedPoints ? ` \u2014 ${profile.notPassedPoints}` : ""));
   notPassed.value = profile.notPassed || first.guessedNotPassed || "";
 
-  const blank = field("gb-f-blank", "An empty cell means",
-                      "a zero raises the denominator where subtotals "
-                      + "count filled cells");
-  for (const choice of (gbOptions.blankChoices || ["not attempted"])) {
-    const option = document.createElement("option");
-    option.value = choice;
-    option.textContent = choice;
-    blank.appendChild(option);
-  }
-  blank.value = profile.blankMeans || first.blankMeans || "not attempted";
+  const blank = field(
+    marks, "gb-f-blank", "Blank means",
+    "Whether an empty cell is counted. Where subtotals count filled "
+    + "cells, writing a non-pass into a blank raises that student's "
+    + "denominator and lowers their grade.", "pick");
+  fill(blank, gbOptions.blankChoices || ["not attempted"],
+       profile.blankMeans || first.blankMeans || "not attempted");
 
-  const ignore = field("gb-f-ignore", "Never write to a row containing",
-                       "one per comma, such as -DoNotUse");
+  const ignore = field(
+    who, "gb-f-ignore", "Skip rows with",
+    "Never write to a row holding any of these, anywhere in it. "
+    + "Brightspace marks a retired enrolment -DoNotUse. Comma "
+    + "separated.");
   ignore.value = (profile.ignoreRows || []).join(", ");
-
-  const where = document.createElement("p");
-  where.className = "muted lmspath";
-  where.textContent = "saved in " + (gbOptions.profilePath || "");
-  holder.appendChild(where);
 }
 
 async function gbUpload(chosen) {
@@ -7115,48 +7100,59 @@ async function gbShowPlan() {
     out.appendChild(p);
   };
 
-  line(`${plan.cells} cell(s) to write, ${plan.alreadyRight} already `
-       + `right, ${plan.notWritten} not written`, "lmstotal");
-  line(`${plan.rowsMatched} row(s) matched a student`, "muted");
+  line(`${plan.cells} to write \u00b7 ${plan.alreadyRight} already right`
+       + ` \u00b7 ${plan.notWritten} not written`, "lmstotal");
 
   for (const file of plan.files) {
     if (!file.cells) continue;
     const box = document.createElement("div");
     box.className = "lmsfile";
-    const head = document.createElement("p");
-    head.className = "jobstat";
-    head.textContent = `${file.name}: ${file.cells} cell(s)`;
+    const head = document.createElement("div");
+    head.className = "jobline";
+    const name = document.createElement("span");
+    name.className = "jobstat";
+    name.textContent = file.name;
+    const count = document.createElement("span");
+    count.className = "jobsoft";
+    count.textContent = `${file.cells} cells`;
+    head.append(name, count);
     box.appendChild(head);
     const list = document.createElement("ul");
     list.className = "lmsskills";
     for (const skill of file.bySkill) {
       const item = document.createElement("li");
-      item.textContent = `${skill.slug}: ${skill.cells} `
-        + `(${skill.blank} into a blank, ${skill.over} over a non-pass)`;
+      // "3 blank, 1 over" -- the second number is the one worth
+      // seeing, because it is a cell that already said something.
+      item.textContent = `${skill.slug} \u00b7 ${skill.cells}`
+        + (skill.over ? ` (${skill.over} over a non-pass)` : "");
       list.appendChild(item);
     }
     box.appendChild(list);
     out.appendChild(box);
   }
 
+  /* The exceptions, one short line each. Rows and columns, never a
+     student: this panel is on screen beside other people often
+     enough, and the report it is built from is careful never to carry
+     a name. */
   if (plan.keptPasses)
-    line(`${plan.keptPasses} cell(s) keep a pass the record does not `
-         + `agree with \u2014 never replaced`, "muted");
+    line(`${plan.keptPasses} kept \u2014 a pass is never replaced`, "muted");
   for (const [slug, n] of Object.entries(plan.short || {}))
-    line(`${slug}: ${n} student(s) have a pass but not enough of them `
-         + `yet, so nothing was written`, "muted");
+    line(`${slug} \u00b7 ${n} short of its threshold`, "muted");
   if (plan.rowsIgnored.length)
-    line(`${plan.rowsIgnored.length} row(s) skipped by an ignore rule: `
+    line(`${plan.rowsIgnored.length} rows skipped: `
          + plan.rowsIgnored.join(", "), "muted");
   if (plan.rowsUnmatched.length)
-    line(`${plan.rowsUnmatched.length} row(s) matched no student: `
+    line(`${plan.rowsUnmatched.length} rows matched nobody: `
          + plan.rowsUnmatched.join(", "), "muted");
   if (plan.studentsUnmatched)
-    line(`${plan.studentsUnmatched} student(s) have no row in these `
-         + `files`, "muted");
+    line(`${plan.studentsUnmatched} students have no row`, "muted");
+  // Not the skills with no column. A gradebook covering one unit has
+  // twenty-seven of them, so the list is a wall *and* the ordinary
+  // case -- and the card above already says "2/29 skills", which is
+  // the same fact where you are already looking.
   for (const note of plan.notes) line(note, "muted");
-  for (const problem of plan.refused) line("REFUSED  " + problem,
-                                           "warnline");
+  for (const problem of plan.refused) line(problem, "warnline");
 
   if (plan.cells && !plan.refused.length) {
     const bar = document.createElement("div");
@@ -7165,16 +7161,12 @@ async function gbShowPlan() {
     spacer.className = "spacer";
     const go = document.createElement("button");
     go.className = "primary";
-    go.textContent = `Give me the filled file`
-      + (plan.files.filter(f => f.cells).length > 1 ? "s" : "");
+    go.textContent = "Download";
+    go.title = "The same file with those cells filled in, ready to "
+      + "import. Nothing is sent anywhere from here.";
     go.onclick = gbWrite;
     bar.append(spacer, go);
     out.appendChild(bar);
-    const after = document.createElement("p");
-    after.className = "muted";
-    after.textContent = "Then import it in your LMS. Nothing is sent "
-      + "anywhere from here.";
-    out.appendChild(after);
   }
 }
 

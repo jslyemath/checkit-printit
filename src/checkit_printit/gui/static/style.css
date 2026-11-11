@@ -3343,88 +3343,104 @@ button.act.chip:hover { border-color: var(--line-strong); }
 /* Four columns now: who, how sure, the picture, the four marks. */
 
 
-/* ---- Export to your LMS, under the Progress grid --------------------
+/* ---- LMS Export, under the Progress grid ----------------------------
  *
  * A sub-section, not a tab: Progress is this course's gradebook and
- * this is the sending of it. So it reads as part of the page rather
- * than competing with it -- a rule above, generous space, and nothing
- * coloured until there is something to say. */
+ * this is the sending of it. A rule above and generous space, so it
+ * reads as part of the page rather than competing with it.
+ *
+ * Everything here uses the app's own tokens and the app's own
+ * `.fields` form idiom. The first version invented a parallel one and
+ * reached for `--r-1` and `--r-2`, which are not tokens this app has
+ * -- the scale is `--r-xs/sm/md/lg` -- so every corner came out square
+ * against an app of rounded ones. */
 .lmsbox {
   margin-top: var(--s6);
   padding-top: var(--s5);
   border-top: 1px solid var(--line);
 }
 
-/* One per dropped file. The same card the Scans job summaries use, so
-   two panels that both answer "what did you make of this file" look
-   like the same kind of thing. */
+/* One card per dropped file, matching the Scans job cards: two panels
+   answering "what did you make of this file" should look alike. */
 .lmsfile {
   margin: var(--s3) 0;
   padding: var(--s3);
   border: 1px solid var(--line);
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
   background: var(--surface-1);
 }
 
-/* The matched columns, folded away. 29 rows of "which column is this"
-   is reference, not something to read every time -- but it is the only
-   place the tool's reasoning is visible, so it is one click away and
-   never further. */
+/* **The value is content; the label is only a caption.** `.fields`
+   sets its labels to 12px and its inputs take `font: inherit`, so the
+   text you actually read and type came out at 12px -- too small to
+   check a mark string character by character, which is the one thing
+   this form exists to do. The label goes up a step and the value to
+   the body size.
+
+   Scoped here rather than changed in `.fields`: that class is the
+   Print job and Settings forms too, and raising their type is a
+   decision about the whole app rather than about this panel. */
+#gb-profile label { font-size: var(--t-md); }
+#gb-profile input,
+#gb-profile select { font-size: var(--t-base); }
+
+/* Two groups, one per question: which row is which student, then what
+   the marks mean. The space between them is larger than the space
+   inside one, which is what makes them read as two rather than six --
+   and a top-aligned label otherwise reads as belonging to the field
+   above it. */
+#gb-profile { margin: var(--s4) 0 0; }
+#gb-profile .fields + .fields { margin-top: var(--s4); }
+
+/* **Each field as wide as what it holds.** A field longer or shorter
+   than its data makes people re-read the label to check they
+   understood it, and the first version gave a one-character pass mark
+   the same full width as a sixty-character column header. */
+#gb-f-student { min-width: 24em; max-width: 34em; }
+#gb-f-matches { width: 9em; }
+#gb-f-passed,
+#gb-f-not { width: 10em; }
+#gb-f-blank { width: 13em; }
+#gb-f-ignore { width: 15em; }
+
+/* The mark strings are checked character by character against the
+   codepoints in their tooltip, and a proportional font hides a
+   leading space. */
+#gb-f-passed,
+#gb-f-not { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+
+.lmspath {
+  /* Clear of the last field above it: a line sitting tight under an
+     input reads as that input's caption, which this is not. */
+  margin: var(--s4) 0 0;
+  /* The path is the point of the line: this panel edits a file, and
+     the file stays the source of truth. */
+  word-break: break-all;
+}
+
+/* Which column each skill came from, folded away. Reference, not
+   something to read every visit -- but it is the only place the
+   tool's reasoning shows, so it is one click away and never further. */
+.lmsmatch { margin-top: var(--s2); }
 .lmsmatch td {
-  padding: 2px var(--s2);
-  font-size: var(--t-sm);
+  padding: 3px var(--s2);
   border-bottom: none;
 }
-.lmsmatch td:nth-child(1) { font-weight: 600; }
+.lmsmatch td:nth-child(1) { font-weight: 600; white-space: nowrap; }
 .lmsmatch td:nth-child(2) { color: var(--muted); white-space: nowrap; }
 .lmsmatch td:nth-child(3) {
   color: var(--ink-2);
-  max-width: 26em;
+  max-width: 30em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.lmsmatch td:nth-child(4) { color: var(--muted); font-style: italic; }
+.lmsmatch td:nth-child(4) { color: var(--muted); }
 
-/* The five facts. A column of labelled fields rather than a grid: they
-   are read in order, each one's hint belongs under it, and a two-up
-   layout put a hint beside an unrelated field. */
-.lmsfacts {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-  margin: var(--s4) 0;
-  max-width: 44em;
-}
-.lmsfield { display: flex; flex-direction: column; gap: 2px; }
-.lmslabel { font-size: var(--t-sm); color: var(--ink-2); font-weight: 600; }
-.lmsfield input,
-.lmsfield select {
-  padding: var(--s2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-1);
-  background: var(--surface-2);
-  color: var(--ink);
-  font: inherit;
-  /* A mark string is read character by character when it is checked
-     against the codepoints beside it, and a proportional font makes
-     a leading space invisible. */
-  font-variant-ligatures: none;
-}
-.lmsfield select { max-width: 100%; }
-.lmshint { font-size: var(--t-xs); color: var(--muted); }
-.lmspath {
-  font-size: var(--t-xs);
-  /* The path is the point of the line: this panel edits a file, and
-     the file is the source of truth. */
-  word-break: break-all;
-}
-
-.lmstotal { font-size: var(--t-base); font-weight: 600; }
+.lmstotal { font-weight: 600; }
 .lmsskills {
   margin: var(--s1) 0 0;
   padding-left: var(--s4);
-  font-size: var(--t-sm);
   color: var(--ink-2);
 }
-.lmsskills li { margin: 1px 0; }
+.lmsskills li { margin: 2px 0; }
