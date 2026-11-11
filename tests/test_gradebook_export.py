@@ -111,11 +111,11 @@ def progress(*rows):
             for sid, slug, passes, last_sat in rows]
 
 
-def run(sheets, students, prog, not_yet=(), **over):
+def run(sheets, students, prog, not_yet=(), thresholds=None, **over):
     if isinstance(sheets, gb.Sheet):
         sheets = [sheets]
     return gb.plan_export(sheets, profile(**over), students, prog, SKILLS,
-                          not_yet=not_yet)
+                          not_yet=not_yet, thresholds=thresholds)
 
 
 # ------------------------------------------------------------- a pass in --
@@ -696,16 +696,48 @@ class TestSplice:
         assert edited[1] == PASS
         assert edited[2:] == ["", "", "0", "3", "#"]
 
-    def test_a_quoted_line_is_refused_rather_than_mangled(self, tmp_path,
-                                                          students):
-        """Splitting such a line on commas would be wrong."""
+    def test_a_quoted_row_is_spliced_and_keeps_its_quoting(self, tmp_path,
+                                                           students):
+        """**This used to be refused**, and the refusal ruled out most
+        of the world: every data row of a Canvas export is quoted,
+        because every one holds `"Last, First"`. His Brightspace export
+        escapes it only by having no name column at all.
+
+        The quoted field here holds a comma, so splitting the line on
+        commas would put the mark in the wrong column."""
         path = self._file(tmp_path, quoted=True)
         rows = __import__("csv").reader(
             open(path, encoding="utf-8-sig", newline=""))
         one = gb.Sheet(name="MAT106-820.csv", rows=list(rows), section="820")
         changes, _ = run(one, students,
                          progress(("806000222", "W1", 1, "passed")))
-        with pytest.raises(GradebookError, match="quoted fields"):
+        assert changes, "nothing was planned, so this proves nothing"
+
+        after = gb.splice(path, changes, one.name).decode("utf-8")
+        edited = after.splitlines()[2]
+        fields = [f[0] for f in gb.fields_of(edited)]
+
+        assert len(fields) == len(head()), "a field was added or lost"
+        assert fields[0] == "806000222", "the id moved"
+        assert fields[1] == PASS, "the mark did not land in W1"
+        assert fields[5] == "3,4", "the quoted field's value changed"
+        assert '"3,4"' in edited, \
+            "the quoted field lost its quotes, so the file is no " \
+            "longer the file that was downloaded"
+
+    def test_an_unterminated_quote_is_refused(self, tmp_path, students):
+        """A line that will not parse is a line nobody should be
+        editing. Refused rather than guessed at."""
+        path = self._file(tmp_path)
+        with open(path, "r", encoding="utf-8", newline="") as handle:
+            text = handle.read()
+        broken = text.replace("806000111,,,,0,3,#", '806000111,,,,0,"3,#')
+        assert broken != text, "the fixture line changed shape"
+        with open(path, "w", encoding="utf-8", newline="") as handle:
+            handle.write(broken)
+        one, (changes, _) = self._plan(path, students)
+        assert changes, "nothing was planned, so this proves nothing"
+        with pytest.raises(GradebookError, match="never closed"):
             gb.splice(path, changes, one.name)
 
     def test_a_cell_that_moved_under_us_is_refused(self, tmp_path, students):
@@ -754,3 +786,150 @@ def test_it_works_against_a_real_record_database(tmp_path, students,
 
     assert {(c.row, c.slug): c.now for c in report.changes} == \
         {(2, "W1"): PASS, (2, "W2"): NOT_YET}
+
+
+class TestReadingACsvLine:
+    """`fields_of` is what makes a quoted row editable at all: it
+    gives each field's value *and* its span, so one field can be
+    replaced and every other byte of the line copied as it arrived."""
+
+    def test_a_plain_line(self):
+        assert [f[0] for f in gb.fields_of("a,b,c")] == ["a", "b", "c"]
+
+    def test_a_quoted_field_may_hold_a_comma(self):
+        assert [f[0] for f in gb.fields_of('a,"b,c",d')] == \
+            ["a", "b,c", "d"]
+
+    def test_a_doubled_quote_is_one_quote(self):
+        assert [f[0] for f in gb.fields_of('a,"say ""hi""",b')] == \
+            ["a", 'say "hi"', "b"]
+
+    def test_empty_fields_are_counted(self):
+        assert [f[0] for f in gb.fields_of("a,,,b")] == ["a", "", "", "b"]
+
+    def test_a_trailing_comma_leaves_an_empty_field(self):
+        assert [f[0] for f in gb.fields_of("a,b,")] == ["a", "b", ""]
+
+    def test_one_empty_line_is_one_empty_field(self):
+        assert [f[0] for f in gb.fields_of("")] == [""]
+
+    def test_the_span_covers_the_quotes(self):
+        line = 'a,"b,c",d'
+        value, start, end = gb.fields_of(line)[1]
+        assert line[start:end] == '"b,c"', \
+            "the span must include the quotes, or replacing it would " \
+            "leave one behind"
+        assert value == "b,c"
+
+    def test_replacing_one_span_leaves_every_other_byte(self):
+        line = 'x,"b,c",bare,"d"'
+        _, start, end = gb.fields_of(line)[2]
+        assert line[:start] + "NEW" + line[end:] == 'x,"b,c",NEW,"d"', \
+            "a field the LMS quoted unnecessarily has to stay quoted"
+
+    def test_an_unterminated_quote_raises(self):
+        with pytest.raises(GradebookError, match="never closed"):
+            gb.fields_of('a,"b,c')
+
+
+class TestWritingACsvField:
+    """Minimal quoting: a mark written into a bare cell stays bare."""
+
+    def test_a_plain_value_stays_bare(self):
+        assert gb.as_field("Pass") == "Pass"
+
+    def test_a_comma_forces_quotes(self):
+        assert gb.as_field("a,b") == '"a,b"'
+
+    def test_a_quote_is_doubled(self):
+        assert gb.as_field('say "hi"') == '"say ""hi"""'
+
+    def test_a_newline_forces_quotes(self):
+        assert gb.as_field("a\r\nb") == '"a\r\nb"'
+
+    def test_nothing_is_an_empty_field(self):
+        assert gb.as_field("") == ""
+        assert gb.as_field(None) == ""
+
+    def test_what_it_writes_reads_back_the_same(self):
+        for value in ["Pass", "a,b", 'say "hi"', "", "3,4",
+                      '"already quoted"', "trailing,"]:
+            line = "x," + gb.as_field(value) + ",y"
+            assert [f[0] for f in gb.fields_of(line)] == ["x", value, "y"], \
+                f"{value!r} did not survive a round trip"
+
+
+class TestThresholds:
+    """A skill can need more than one pass -- `course.thresholds` says
+    which, and Progress has always read it.
+
+    **The export did not.** It branched on `passes` being non-zero, so
+    a skill needing two was written as passed after one: Progress
+    showing it unearned while the gradebook said otherwise, the tool's
+    two halves disagreeing in the direction of overstating a grade. No
+    skill in his course needs two, which is why it went unnoticed.
+    """
+
+    def test_one_pass_is_not_enough_when_two_are_needed(self, students):
+        changes, report = run(
+            sheet([("806000111", "", "", "")]), students,
+            progress(("806000111", "W1", 1, "passed")),
+            thresholds={"W1": 2})
+        assert not changes, "one pass of two was exported as a pass"
+        assert report.short == {"W1": 1}, \
+            "and it has to say so, because 'not written' for a student " \
+            "who has passed once reads as a bug"
+
+    def test_two_passes_earn_it(self, students):
+        changes, _ = run(sheet([("806000111", "", "", "")]), students,
+                         progress(("806000111", "W1", 2, "passed")),
+                         thresholds={"W1": 2})
+        assert [(c.slug, c.now) for c in changes.values()] == [("W1", PASS)]
+
+    def test_more_than_enough_still_earns_it(self, students):
+        changes, _ = run(sheet([("806000111", "", "", "")]), students,
+                         progress(("806000111", "W1", 3, "passed")),
+                         thresholds={"W1": 2})
+        assert len(changes) == 1
+
+    def test_a_skill_not_named_needs_one(self, students):
+        """`thresholds` holds only the exceptions, so an absent slug
+        must not be read as needing zero or as needing the same as its
+        neighbour."""
+        changes, _ = run(sheet([("806000111", "", "", "")]), students,
+                         progress(("806000111", "W2", 1, "passed")),
+                         thresholds={"W1": 2})
+        assert [(c.slug, c.now) for c in changes.values()] == [("W2", PASS)]
+
+    def test_no_thresholds_at_all_behaves_as_before(self, students):
+        """His course today. One pass, one write."""
+        changes, _ = run(sheet([("806000111", "", "", "")]), students,
+                         progress(("806000111", "W1", 1, "passed")))
+        assert len(changes) == 1
+
+    def test_being_short_does_not_write_a_non_pass_unasked(self, students):
+        """Short of the threshold is not the same as having failed, and
+        a non-pass still only goes in for a named skill."""
+        changes, _ = run(sheet([("806000111", "", "", "")]), students,
+                         progress(("806000111", "W1", 1, "passed")),
+                         thresholds={"W1": 2})
+        assert not changes
+
+    def test_short_of_the_threshold_can_be_written_as_not_yet(self, students):
+        """And when the skill *is* named, a non-pass is the honest
+        thing to write: they have not earned it yet."""
+        changes, _ = run(sheet([("806000111", "", "", "")]), students,
+                         progress(("806000111", "W1", 1, "passed")),
+                         not_yet=("W1",), thresholds={"W1": 2})
+        assert [(c.slug, c.now) for c in changes.values()] == \
+            [("W1", NOT_YET)]
+
+    def test_a_pass_already_there_is_still_never_replaced(self, students):
+        """Even short of the threshold. A pass in the gradebook may
+        have come from somewhere printit knows nothing about."""
+        changes, report = run(
+            sheet([("806000111", PASS, "", "")]), students,
+            progress(("806000111", "W1", 1, "passed")),
+            not_yet=("W1",), thresholds={"W1": 2})
+        assert not changes
+        assert report.kept_passes(), "the pass was not reported as kept"
