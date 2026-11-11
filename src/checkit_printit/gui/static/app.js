@@ -2302,27 +2302,29 @@ function sectionBand(run, span, redraw) {
   // table whose other numbers are ids and seeds.
   count.textContent = `${run.count} student${run.count === 1 ? "" : "s"}`;
 
-  /* **The label is what sticks, not the cell.**
+  /* **The band scrolls with the table, deliberately.**
    *
-   * Scrolled sideways, this band used to carry its name off the left
-   * edge while the pinned Name column stayed put -- so on a wide grid
-   * you could see twenty-nine skill columns and have nothing saying
-   * which section you were reading.
+   * It was briefly pinned to the left, on the reading that a section
+   * header should stay in view the way the Name column does. That was
+   * wrong three times over:
    *
-   * The obvious fix is `position: sticky` on the band's `<td>`, and
-   * the note in `style.css` records it being tried and reverted: a
-   * sticky cell breaks a `table-layout: fixed` row the same way a
-   * sticky `<th>` does, and this cell carries a `colSpan` across the
-   * whole table. So the cell stays where it is and an element *inside*
-   * it sticks. The button still spans the row, because the whole band
-   * is the control that opens and shuts the group, and only the words
-   * stand still.
+   * * It never looked still. Pinned at `left: 0` while resting 12px
+   *   in on the cell's own padding, it slid those 12px and stopped --
+   *   a wiggle, which is worse than either end of it.
+   * * The count had to come with it, so "22 students" sat against the
+   *   section name instead of out at the right.
+   * * **Progress already pins a `Sec` column, immediately after
+   *   Name.** Every row carries its own section, in view at any
+   *   scroll position. A pinned band repeats, in a louder place, what
+   *   the row beside it already says.
+   *
+   * So: no sticky, and the cell needs no `overflow` exception either.
+   * What the attempt turned up is worth keeping and is recorded in
+   * `style.css`: that cell's `overflow: hidden` silently defeats a
+   * sticky descendant, because a clipping ancestor between a sticky
+   * element and the scrollport becomes the scrollport.
    */
-  const label = document.createElement("span");
-  label.className = "secband-label";
-  label.append(icon("chev"), name, count);
-
-  button.append(label);
+  button.append(icon("chev"), name, count);
   button.onclick = () => toggleBand(run.key, redraw);
   if (shut) tr.classList.add("shut");
   td.appendChild(button);
