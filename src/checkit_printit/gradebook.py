@@ -472,6 +472,12 @@ class ExportReport:
     notes: list = dataclasses.field(default_factory=list)
     refused: list = dataclasses.field(default_factory=list)
 
+    #: slug -> how many cells held a pass but not enough of them, for a
+    #: skill whose threshold is above one. Reported rather than left
+    #: silent: "not written" is the right action and a surprising one
+    #: to read, because the student *has* passed the skill once.
+    short: dict = dataclasses.field(default_factory=dict)
+
     def kept_passes(self):
         """Cells where a pass stands against a non-pass result.
 
@@ -510,6 +516,12 @@ class ExportReport:
                          "no row in any of these files")
         if self.skills_unmatched:
             lines.append("  no column for: " + " ".join(self.skills_unmatched))
+        # Said out loud, because "not written" for a student who has
+        # passed the skill once reads as a bug until you remember the
+        # skill needs two.
+        for slug, n in sorted(self.short.items()):
+            lines.append(f"  {slug}: {n} student(s) have a pass but not "
+                         f"enough of them yet, so nothing was written")
         for problem in self.refused:
             lines.append(f"  REFUSED  {problem}")
         return "\n".join(lines)
@@ -552,12 +564,22 @@ def _filled(row, columns):
     return sum(1 for i in columns if i < len(row) and row[i].strip())
 
 
-def plan_export(sheets, profile, students, progress, slugs, not_yet=()):
+def plan_export(sheets, profile, students, progress, slugs, not_yet=(),
+                thresholds=None):
     """Work out every cell to change, across every file. Writes nothing.
 
     `sheets` is a list of `Sheet`. `students` is a roster; `progress` is
     `record.progress(...)`, keyed by the roster's `sid`. `not_yet` is
     the set of slugs for which a non-pass may be written at all.
+
+    `thresholds` is `{slug: passes needed}` from `course.thresholds`,
+    holding only the skills that need more than one. **It has to be
+    passed, and it was not.** This branched on `passes` being non-zero,
+    so a skill set to need two passes was exported as passed after
+    one -- Progress showing it unearned while the gradebook said
+    otherwise, with the tool's two halves disagreeing in the direction
+    of overstating a grade. No skill in his course needs two today,
+    which is why it went unnoticed.
 
     Returns `(changes, report)`, where `changes` maps
     `(sheet name, row, column)` to a `Change`.
@@ -721,7 +743,12 @@ def plan_export(sheets, profile, students, progress, slugs, not_yet=()):
                 continue
 
             key = (sheet.name, number, column)
-            if result["passes"]:
+            # `>= needed`, not "any pass at all". `thresholds` holds
+            # only the exceptions, so a slug absent from it needs one.
+            needed = (thresholds or {}).get(slug, 1)
+            if needed > 1 and 0 < (result["passes"] or 0) < needed:
+                report.short[slug] = report.short.get(slug, 0) + 1
+            if (result["passes"] or 0) >= needed:
                 if was == profile.passed:
                     report.already_right += 1
                     continue
@@ -826,19 +853,88 @@ def verify_export(before, after, changes, sheet_name):
     return problems
 
 
+def fields_of(line):
+    """`[(value, start, end)]` for one CSV line, with source spans.
+
+    The value is what the field *means*, with its surrounding quotes
+    removed and any doubled quote inside it halved. `start` and `end`
+    bracket the field's own characters in `line`, quotes included --
+    so a caller can replace one field's text and copy every other byte
+    of the line exactly as it arrived.
+
+    That is the whole point. `line.split(",")` cannot do it, because a
+    quoted field may hold a comma; a CSV writer cannot either, because
+    re-serialising normalises quoting and a field the LMS quoted
+    unnecessarily would come back bare. Spans give both: real parsing,
+    and untouched text preserved to the byte.
+
+    Unterminated quotes raise, rather than being guessed at: a line
+    that does not parse is a line nobody should be editing.
+    """
+    spans, at, n = [], 0, len(line)
+    while True:
+        start = at
+        if at < n and line[at] == '"':
+            at += 1
+            chunk = []
+            while True:
+                if at >= n:
+                    raise GradebookError(
+                        "a quoted field is never closed, so this line "
+                        "cannot be read as CSV")
+                if line[at] == '"':
+                    # A doubled quote is one literal quote; a single one
+                    # ends the field.
+                    if at + 1 < n and line[at + 1] == '"':
+                        chunk.append('"')
+                        at += 2
+                        continue
+                    at += 1
+                    break
+                chunk.append(line[at])
+                at += 1
+            value = "".join(chunk)
+        else:
+            while at < n and line[at] != ",":
+                at += 1
+            value = line[start:at]
+        spans.append((value, start, at))
+        if at < n and line[at] == ",":
+            at += 1
+            continue
+        break
+    return spans
+
+
+def as_field(value):
+    """`value` as CSV text, quoted only if it has to be.
+
+    Minimal quoting on purpose: a mark written into a bare cell should
+    stay bare, so the only lines that gain quotes are the ones whose
+    content requires them.
+    """
+    text = "" if value is None else str(value)
+    if any(ch in text for ch in ',"\r\n'):
+        return '"' + text.replace('"', '""') + '"'
+    return text
+
+
 def splice(path, changes, sheet_name, header_line=1):
     """The bytes to write for one file: changed lines edited, rest copied.
 
-    **Untouched lines are copied byte for byte.** Re-serialising through
-    a CSV writer normalises quoting, so a cell the LMS quoted
-    unnecessarily would come back bare and the file would no longer be
-    the file that was downloaded -- which is the whole promise of a
-    round-trip. Splicing cannot do that.
+    **Untouched lines are copied byte for byte, and so is every
+    untouched field of an edited line.** Re-serialising through a CSV
+    writer normalises quoting, so a cell the LMS quoted unnecessarily
+    would come back bare and the file would no longer be the file that
+    was downloaded -- which is the whole promise of a round-trip.
 
-    The price is that a line to be edited must not contain a quote
-    character, because splitting such a line on commas is wrong. That
-    is a refusal rather than a guess, and his script makes it too. A
-    line nobody edits may contain anything, since it is never parsed.
+    This used to refuse any line containing a quote character, because
+    it split on commas and that is wrong for a quoted field. The
+    refusal was honest but it ruled out most of the world: **every data
+    row of a Canvas export is quoted**, because every one holds
+    `"Last, First"`. His own Brightspace export escapes it only by
+    having no name column at all. So the line is parsed properly now,
+    by `fields_of`, and only the changed field's own span is replaced.
     """
     with open(path, "rb") as f:
         raw = f.read()
@@ -858,22 +954,33 @@ def splice(path, changes, sheet_name, header_line=1):
             continue
         body = line.rstrip("\r\n")
         ending = line[len(body):]
-        if '"' in body:
+        try:
+            spans = fields_of(body)
+        except GradebookError as exc:
             raise GradebookError(
-                f"{path}, line {index}: this row has quoted fields, and "
-                "editing it by splitting on commas would be wrong. Nothing "
-                "was written.")
-        fields = body.split(",")
-        for change in by_row[row_number]:
+                f"{path}, line {index}: {exc}. Nothing was written.")
+
+        # Right to left, so replacing one field cannot move the spans
+        # of the ones still to be replaced.
+        edits = sorted(by_row[row_number],
+                       key=lambda c: c.column, reverse=True)
+        for change in edits:
             position = change.column - 1
-            while len(fields) <= position:
-                fields.append("")
-            if fields[position] != change.was:
+            if position >= len(spans):
+                # A short row, which a trailing empty cell produces.
+                # Commas are appended to reach the column rather than
+                # the row being rewritten, so everything already on the
+                # line keeps its own text.
+                body += "," * (position - len(spans) + 1)
+                spans = fields_of(body)
+            value, start, end = spans[position]
+            if value != change.was:
                 raise GradebookError(
                     f"{path}, line {index}: the cell this was planned "
                     "against has changed. Export again and re-run.")
-            fields[position] = change.now
-        out.append(",".join(fields) + ending)
+            body = body[:start] + as_field(change.now) + body[end:]
+            spans = fields_of(body)
+        out.append(body + ending)
 
     text = "".join(out)
     return (b"\xef\xbb\xbf" if bom else b"") + text.encode("utf-8")

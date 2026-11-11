@@ -1637,10 +1637,19 @@ def gradebook():
                    "-DoNotUse. Repeatable.")
 @click.option("--header-row", default=None, type=int,
               help="Which row holds the column names, 1-based.")
+@click.option("--passed", "passed_mark", default=None, metavar="TEXT",
+              help="The exact cell contents for a pass, when the tool "
+                   "cannot tell which of the values it found is which. "
+                   "It decides by looking for 'pass' in the string, so "
+                   "a gradebook marked 1 and 0, or with ticks, or in "
+                   "another language, needs telling.")
+@click.option("--not-passed", "not_passed_mark", default=None,
+              metavar="TEXT", help="The exact cell contents for a "
+                                   "non-pass. Goes with --passed.")
 @click.option("--dry-run", is_flag=True,
               help="Report, and write nothing.")
 def gradebook_map(source, course, pair, student_column, matches, ignore_row,
-                  header_row, dry_run):
+                  header_row, passed_mark, not_passed_mark, dry_run):
     """Work out which column is which, and save the answers.
 
     Run it on the file you exported from the LMS -- or on a masked twin
@@ -1741,6 +1750,35 @@ def gradebook_map(source, course, pair, student_column, matches, ignore_row,
     # ------------------------------------------------------ the marks --
     skill_columns = sorted(report.found.values())
     passed, not_passed, extra = gradebook_mod.guess_marks(body, skill_columns)
+    # What he said beats what the file suggested. `guess_marks` decides
+    # by looking for "pass" in the string, which settles a Brightspace
+    # export and settles nothing for one marked 1 and 0, or with ticks,
+    # or in another language -- and until these flags existed the only
+    # way out was editing the TOML by hand.
+    told = [m for m in (passed_mark, not_passed_mark) if m is not None]
+    if len(told) == 1:
+        raise click.ClickException(
+            "--passed and --not-passed go together: naming one and "
+            "guessing the other is how the wrong string gets written.")
+    if passed_mark is not None:
+        if passed_mark == not_passed_mark:
+            raise click.ClickException(
+                "--passed and --not-passed are the same string.")
+        seen = set(extra) | {v for v in (passed, not_passed) if v}
+        for label, value in (("--passed", passed_mark),
+                             ("--not-passed", not_passed_mark)):
+            # A warning, not a refusal: a column may be entirely blank
+            # on the day it is mapped, and the mark still has to be
+            # nameable.
+            if seen and value not in seen:
+                click.echo(f"note: {label} {value!r} does not appear in "
+                           f"any skill column of this file")
+        passed, not_passed = passed_mark, not_passed_mark
+        extra = [e for e in extra if e not in (passed, not_passed)]
+        click.echo("")
+        click.echo("marks: given on the command line, not read from the "
+                   "file")
+
     click.echo("")
     if passed and not_passed:
         click.echo(f"marks: a pass is {passed!r}, a non-pass is "
@@ -1763,8 +1801,8 @@ def gradebook_map(source, course, pair, student_column, matches, ignore_row,
         if extra:
             click.echo("  the values in those columns are: "
                        + ", ".join(repr(e) for e in extra[:12]))
-        click.echo("  set `passed` and `not_passed` by hand in "
-                   + profile_path)
+        click.echo("  name them with --passed and --not-passed, or set "
+                   "them by hand in " + profile_path)
 
     # ------------------------------------------------------ the blanks --
     meaning, evidence = gradebook_mod.blank_evidence(
@@ -1931,8 +1969,18 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
             f"nothing has been graded in {record_path}, so there is no "
             "result to export. Read a stack in on the Scans tab first.")
 
+    # The course's own thresholds, so a skill that needs two passes is
+    # not exported as passed after one. Progress has always read these;
+    # the export did not, and the two disagreed in the direction of
+    # overstating a grade.
+    needs = course_mod.thresholds(course)
     changes, report = gradebook_mod.plan_export(
-        sheets, profile, people, progress, slugs, not_yet=wanted)
+        sheets, profile, people, progress, slugs, not_yet=wanted,
+        thresholds=needs)
+    if needs:
+        click.echo("thresholds above one: "
+                   + ", ".join(f"{slug} needs {n}"
+                               for slug, n in sorted(needs.items())))
 
     click.echo(f"{len(sheets)} file(s), "
                f"{sum(len(s.body) for s in sheets)} rows, "
