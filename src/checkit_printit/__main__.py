@@ -1591,7 +1591,10 @@ def vault_show(course, vault_path):
 # ---------------------------------------------------------------------------
 
 #: Which roster field an LMS id column most likely joins to, best first.
-_ID_PREFERENCE = ("alt_id", "handle", "sid", "email")
+#: Kept as a name here because the flags and the masking code below
+#: read it, but it is `gradebook.ID_FIELDS` and no longer a second copy
+#: of the list.
+_ID_PREFERENCE = gradebook_mod.ID_FIELDS
 
 
 def _bank_slugs(course):

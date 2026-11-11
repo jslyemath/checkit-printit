@@ -3341,3 +3341,90 @@ button.act.chip:hover { border-color: var(--line-strong); }
 }
 
 /* Four columns now: who, how sure, the picture, the four marks. */
+
+
+/* ---- Export to your LMS, under the Progress grid --------------------
+ *
+ * A sub-section, not a tab: Progress is this course's gradebook and
+ * this is the sending of it. So it reads as part of the page rather
+ * than competing with it -- a rule above, generous space, and nothing
+ * coloured until there is something to say. */
+.lmsbox {
+  margin-top: var(--s6);
+  padding-top: var(--s5);
+  border-top: 1px solid var(--line);
+}
+
+/* One per dropped file. The same card the Scans job summaries use, so
+   two panels that both answer "what did you make of this file" look
+   like the same kind of thing. */
+.lmsfile {
+  margin: var(--s3) 0;
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-1);
+}
+
+/* The matched columns, folded away. 29 rows of "which column is this"
+   is reference, not something to read every time -- but it is the only
+   place the tool's reasoning is visible, so it is one click away and
+   never further. */
+.lmsmatch td {
+  padding: 2px var(--s2);
+  font-size: var(--t-sm);
+  border-bottom: none;
+}
+.lmsmatch td:nth-child(1) { font-weight: 600; }
+.lmsmatch td:nth-child(2) { color: var(--muted); white-space: nowrap; }
+.lmsmatch td:nth-child(3) {
+  color: var(--ink-2);
+  max-width: 26em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lmsmatch td:nth-child(4) { color: var(--muted); font-style: italic; }
+
+/* The five facts. A column of labelled fields rather than a grid: they
+   are read in order, each one's hint belongs under it, and a two-up
+   layout put a hint beside an unrelated field. */
+.lmsfacts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  margin: var(--s4) 0;
+  max-width: 44em;
+}
+.lmsfield { display: flex; flex-direction: column; gap: 2px; }
+.lmslabel { font-size: var(--t-sm); color: var(--ink-2); font-weight: 600; }
+.lmsfield input,
+.lmsfield select {
+  padding: var(--s2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  /* A mark string is read character by character when it is checked
+     against the codepoints beside it, and a proportional font makes
+     a leading space invisible. */
+  font-variant-ligatures: none;
+}
+.lmsfield select { max-width: 100%; }
+.lmshint { font-size: var(--t-xs); color: var(--muted); }
+.lmspath {
+  font-size: var(--t-xs);
+  /* The path is the point of the line: this panel edits a file, and
+     the file is the source of truth. */
+  word-break: break-all;
+}
+
+.lmstotal { font-size: var(--t-base); font-weight: 600; }
+.lmsskills {
+  margin: var(--s1) 0 0;
+  padding-left: var(--s4);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+.lmsskills li { margin: 1px 0; }

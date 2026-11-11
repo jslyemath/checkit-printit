@@ -54,6 +54,16 @@ FILENAME = "gradebook.toml"
 #: un-attempted skill should be filled in.
 BLANK_MEANINGS = ("not attempted", "zero")
 
+#: The roster fields a gradebook's id column may join to, in the order
+#: worth trying them.
+#:
+#: Here rather than in the CLI, because there were three copies: the
+#: CLI's `_ID_PREFERENCE`, the tuple hardcoded inside
+#: `Profile.validate`, and the `click.Choice` built from the first --
+#: and a fourth was about to be written for the web app. A list of
+#: what the tool accepts belongs with the thing that accepts it.
+ID_FIELDS = ("alt_id", "handle", "sid", "email")
+
 
 class GradebookError(Exception):
     pass
@@ -119,10 +129,10 @@ class Profile:
             problems.append(
                 f"`blank_means` is {self.blank_means!r}; expected one of "
                 + ", ".join(repr(m) for m in BLANK_MEANINGS))
-        if self.student_matches not in ("alt_id", "sid", "handle", "email"):
+        if self.student_matches not in ID_FIELDS:
             problems.append(
-                f"`matches` is {self.student_matches!r}; expected alt_id, "
-                "sid, handle or email")
+                f"`matches` is {self.student_matches!r}; expected "
+                + ", ".join(ID_FIELDS))
         if headers is not None:
             if self.student_column and self.student_column not in headers:
                 problems.append(
