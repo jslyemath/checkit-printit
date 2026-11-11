@@ -1165,3 +1165,99 @@ class TestTheClashFlag:
             "markClashes(rows);"
             "console.log(JSON.stringify(rows.map(r => Boolean(r.clash))));")
         assert flags == [False, False]
+
+
+# ------------------------------------------ skill column widths --
+#
+# The grid's cells are squares by design, and it was the *headings*
+# pushing their columns around: 34px beside 41px beside 36px, so a row
+# of cells read as though it had gaps in it.
+#
+# His rule. Where the headings are much of a muchness, the widest one
+# sets the width for all of them. One or two unusually long slugs must
+# not drag all twenty-nine columns out to match, so they are left out
+# of the reckoning and given a width of their own, a little wider.
+# Longer still is cut off with an ellipsis.
+
+
+def widths(wants, floor=34, step=7):
+    return run_progress_js(
+        "console.log(JSON.stringify(skillColumnWidths("
+        f"{wants}, {floor}, {step})));")
+
+
+class TestSkillColumnWidths:
+    def test_his_own_bank_comes_out_all_one_width(self):
+        """The 29 measured headings of MAT 106, in pixels, as the
+        ruler reports them. `N3` wants 22 and `W4-E` wants 42, so the
+        ratio between them is nearly 2x -- and every one of these is a
+        two-to-four character slug, which is what "relatively close"
+        means here. They all get the widest."""
+        mat106 = [33, 24, 24, 25, 39, 25, 25, 25, 39, 25, 25, 24, 23,
+                  37, 23, 23, 23, 22, 22, 36, 22, 36, 22, 22, 24, 38,
+                  24, 24, 24]
+        assert set(widths(mat106)) == {39}, \
+            "one width for every column, and it is the widest heading's"
+
+    def test_headings_of_a_muchness_all_take_the_widest(self):
+        assert widths([34, 34, 41, 36, 38, 34]) == [41] * 6
+
+    def test_nothing_goes_below_the_cell_floor(self):
+        """The cells are 34px squares, so a column of narrow headings
+        is still 34 wide. Without the floor the heading would set a
+        width the cells then broke out of."""
+        assert widths([12, 14, 13]) == [34, 34, 34]
+
+    def test_a_ratio_would_have_called_four_characters_an_outlier(self):
+        """The rule this replaced. 22 and 42 are two and four
+        characters, and 42 > 1.5 * median(27) -- so the ratio version
+        pulled `W4-E` out of the reckoning and left the grid with two
+        widths. An absolute margin does not, because three characters
+        is not an outlier however the ratio reads."""
+        got = widths([22, 22, 23, 24, 39, 42])
+        assert len(set(got)) == 1, "still a picket fence"
+
+    def test_one_outlier_does_not_drag_the_others_out(self):
+        got = widths([34, 34, 36, 34, 120])
+        assert got[:4] == [36, 36, 36, 36]
+        assert got[4] > 36, "the long one is wider than the shared width"
+
+    def test_the_outlier_is_only_as_wide_as_it_needs(self):
+        """A little wider than the others, not as wide as it likes:
+        capped at twice the shared width, which is what the ellipsis
+        is for."""
+        got = widths([34, 34, 36, 400])
+        assert got[3] == 72, "capped at 2x the 36px shared width"
+
+    def test_two_equally_long_headings_are_both_outliers(self):
+        """Neither hides the other. Compared against the median, not
+        against the widest of the rest -- where two equal outliers
+        would each look ordinary beside the other."""
+        got = widths([40, 40, 40, 80, 80])
+        assert got[:3] == [40, 40, 40]
+        assert got[3] == 80 and got[4] == 80
+
+    def test_the_median_decides_not_the_mean(self):
+        """With two long headings out of five, a mean is already
+        dragged by the very thing it is meant to detect.
+
+        These numbers are the only shape that shows it. The median of
+        40, 40, 40, 80, 80 is 40, so the margin puts the threshold at
+        68 and the two 80s are outliers -- the short columns stay at
+        40. The mean is 56, which puts it at 84, makes the 80s
+        ordinary, and drags all five columns out to 80.
+
+        Earlier versions used 90s, where both measures call them
+        outliers and the test passed with the median swapped for the
+        mean."""
+        assert widths([40, 40, 40, 80, 80]) == [40, 40, 40, 80, 80]
+
+    def test_all_headings_equally_long_is_not_all_outliers(self):
+        """Nothing to compare against means nothing is unusual."""
+        assert widths([80, 80, 80]) == [80, 80, 80]
+
+    def test_one_column_is_never_an_outlier_against_itself(self):
+        assert widths([200]) == [200]
+
+    def test_no_columns_is_no_widths(self):
+        assert widths([]) == []

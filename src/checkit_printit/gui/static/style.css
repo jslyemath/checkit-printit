@@ -598,7 +598,21 @@ button.iconbtn.danger:hover {
   border-color: var(--bad);
   background: var(--bad-soft);
 }
-th .namefmt { float: right; margin-top: -1px; }
+/* The two controls a heading can carry, both at its right-hand end.
+   **Floated, and in this order: the swap, then the reset.** A
+   right-floated element goes to the right edge and the next one lands
+   to its left, so the reset coming first in the markup puts it
+   rightmost -- which is where he asked for it, immediately after the
+   swap.
+
+   The reset used to be in the normal flow, so it sat at the far left
+   of the cell, ahead of the heading text, and read as a control
+   belonging to nothing. `margin-top: -1px` on both, because a 20px
+   button against 12px uppercase text otherwise rides a pixel low --
+   that was the misalignment. */
+th .namefmt,
+th .undo { float: right; margin-top: -1px; }
+th .undo { margin-left: var(--s1); }
 
 /* Restoring is the undo, so it is not the colour of a thing to do. */
 button.iconbtn.undo:hover {
@@ -660,32 +674,35 @@ th {
    collision in stage 2, committed one stage after writing down the
    rule that prevents it.
 
-   **Nothing here is pinned, and it was tried.** The band scrolls with
-   the table: Progress pins a `Sec` column right after Name, so every
-   row says which section it is in at any scroll position, and a
-   pinned band only repeats that more loudly. The reasoning is in
-   `sectionBand`.
+   **The band is measured against the viewport, not the table.** Both
+   ends of its label stick, each to its own edge of the scrollport, so
+   the pair reads as a band across what you can see however far the
+   twenty-nine skill columns are scrolled. See `.secband-label` and
+   `.secband-count`, and `sectionBand` for why.
 
-   Two things that attempt established, worth keeping because both
-   cost time:
-
-   * `position: sticky` on *this cell* does leave a fixed table layout,
-     the way a sticky `<th>` does, and this one carries a `colSpan`
-     across the whole table.
-   * **a sticky element *inside* the cell is defeated by
-     `th, td { overflow: hidden }`,** silently. A clipping ancestor
-     between a sticky element and the scrollport becomes the
-     scrollport -- the same rule written down above `table`, met from
-     the other side. The cell never scrolls, so the label was offset
-     by nothing and rode off the left edge while reporting
-     `position: sticky; left: 0` the whole time. Reading the computed
-     style said it was working; measuring its screen position before
-     and after a scroll is what found it. */
+   `position: sticky` on *this cell* is still wrong, and was tried: it
+   leaves a fixed table layout the way a sticky `<th>` does, and this
+   one carries a `colSpan` across the whole table. The elements inside
+   it stick instead -- which needs `overflow: visible` below, and that
+   is not optional. */
 tr.secband td {
   background: var(--surface-2);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   padding: 0;
+  /* **`th, td` sets `overflow: hidden`, and it silently defeats every
+     sticky descendant.** A clipping ancestor between a sticky element
+     and the scrollport *becomes* the scrollport -- the same rule
+     written down above `table`, met from the other side. This cell
+     never scrolls, so a sticky label inside it is offset by nothing
+     and rides off the edge while still reporting
+     `position: sticky; left: 0`. Reading the computed style said it
+     was working; measuring the element's screen position across a
+     scroll is what found it.
+
+     Safe here and nowhere else: this cell spans the whole row and
+     holds one short label, so there is nothing to spill. */
+  overflow: visible;
 }
 /* The whole band is the control that opens and shuts its group. */
 .bandtoggle {
@@ -712,21 +729,43 @@ tr.secband td {
 }
 tr.secband.shut .bandtoggle .glyph { transform: rotate(180deg); }
 
+/* The left end of the band: the chevron and the section name.
+   **`left` is the button's own horizontal padding, not zero.** Sticky
+   clamps an element when its natural position would cross the
+   threshold, so a threshold of 0 against a label resting 12px in
+   means the label slides those 12px on the first scroll and then
+   stops. Matching the two makes it motionless at every scroll
+   position, which is what "pinned" has to mean to look deliberate. */
+.secband-label {
+  position: sticky;
+  left: var(--s3);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  /* Above the count, so a very narrow viewport overlaps rather than
+     pushing the name out of its own band. */
+  z-index: 1;
+}
+
 .secband-name {
   font-size: var(--t-sm);
   font-weight: 600;
   letter-spacing: .04em;
   color: var(--ink-2);
 }
-/* `margin-left: auto`, not `float: right`. Floated out of the flow it
-   sat above the name's baseline, which read as misaligned.
+/* The right end of the band. `margin-left: auto` puts it at the
+   table's right edge in the flow -- 1,255px out on Progress, so it
+   only appeared at the very end of a scroll -- and `right: var(--s3)`
+   then holds it at the viewport's right edge instead, by the same
+   padding the left end uses. Flow position and sticky threshold agree
+   here too, so it does not move either.
 
-   At the right-hand end of the row, which is where he wants it. It
-   was moved next to the name while the band was pinned, because half
-   a pinned label staying behind defeats the pinning -- the band is
-   not pinned any more, so the count goes back. */
+   Not `float: right`: out of the flow it sat above the name's
+   baseline, which read as misaligned. */
 .secband-count {
   margin-left: auto;
+  position: sticky;
+  right: var(--s3);
   font-size: var(--t-sm);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -2644,7 +2683,23 @@ button.act.chip:hover { border-color: var(--line-strong); }
   z-index: 3;
   background: var(--surface-2);
 }
-#progress-grid thead th.who { z-index: 4; }
+/* **The heading row is one colour all the way across.**
+   `th.who` and `th.seccol` take `--surface-1` so that body rows
+   cannot show through them as the grid scrolls sideways -- right for
+   a body cell, and wrong in the heading, where it made those two
+   read as a darker block against the Roster's headings and against
+   this grid's own skill headings. A class beats an element in
+   specificity, so the generic rule above lost; these two name the
+   heading row explicitly to win it back.
+
+   The weight comes with it: `th.who` sets 500 for the body, where a
+   name is not a shout, and the heading should match the 600 every
+   other heading in the app uses. */
+#progress-grid thead th.who,
+#progress-grid thead th.seccol {
+  background: var(--surface-2);
+}
+#progress-grid thead th.who { z-index: 4; font-weight: 600; }
 /* A name is not a heading, whatever the markup says. `th` is right
    here -- the cell heads its row -- but the app's `th` style is
    12px muted uppercase, and that turns a person into a shout. */
@@ -2660,12 +2715,26 @@ button.act.chip:hover { border-color: var(--line-strong); }
   white-space: nowrap;
 }
 
+/* Width is set per column from JavaScript -- see `evenSkillColumns`.
+   It cannot be a rule here: it depends on what the bank's slugs
+   actually measure, and this file does not know them. */
 #progress-grid th.skillcol {
   font-size: var(--t-sm);
   font-weight: 600;
   letter-spacing: 0.02em;
   text-align: center;
   padding: var(--s2) var(--s1);
+}
+/* A heading too long for even a widened column. The ellipsis goes on
+   the button inside, not the cell: the cell is the sticky, bordered
+   box and clipping its text there would clip the sort indicator with
+   it. */
+#progress-grid th.skillcol.clipped .sort {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Section: narrow, and stuck to the name column rather than scrolling
