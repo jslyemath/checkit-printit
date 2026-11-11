@@ -20,7 +20,14 @@ const VIEWS = [
   { id: "roster", label: "Roster", short: "Roster", icon: "roster" },
   { id: "form", label: "Update form", short: "Form", icon: "form" },
   { id: "print", label: "Print job", short: "Print", icon: "print" },
-  { id: "runs", label: "Runs", short: "Runs", icon: "record" },
+  /* "Prior assessments", not "Runs". A run is what the code calls a
+     print job and what the record keys on, and the instructor does
+     not call them that -- he calls them assessments, by title and
+     date. `short` is what the rail shows when it folds, and the rail
+     has room for one word. The id stays `runs`: it is in the URL
+     fragment, in `localStorage`, and in every test. */
+  { id: "runs", label: "Prior assessments", short: "Prior",
+    icon: "record" },
   { id: "scans", label: "Scans", short: "Scans", icon: "scan" },
   { id: "progress", label: "Progress", short: "Progress",
     icon: "grid" },
@@ -276,7 +283,7 @@ const COLUMNS = [
     floor: 150, rank: 1, pin: "left", grow: true,
     // Measured as it is shown, or the column is sized for a string the
     // table is not displaying.
-    value: s => displayName(s),
+    value: s => displayName(s, "roster"),
     sortKeys: [["sort_last", "last"], ["sort_first", "first"]],
     /* The name format lives in the Name heading, not in a box above
        the table. It is a property of this column, so it belongs on it
@@ -286,19 +293,13 @@ const COLUMNS = [
        Seating's "two ways round" arrows, because that is exactly what
        it does and the glyph already means that elsewhere. It is also
        why nothing else in a name column may wear `swapby`: there, it
-       means the name order and nothing else. */
-    headExtra: (th) => {
-      const swap = document.createElement("button");
-      swap.className = "iconbtn tiny namefmt";
-      swap.type = "button";
-      swap.appendChild(icon("swapby"));
-      swap.title = filedNames()
-        ? "Showing surname first. Switch to First Last."
-        : "Showing given name first. Switch to Last, First.";
-      swap.setAttribute("aria-label", swap.title);
-      swap.onclick = (e) => { e.stopPropagation(); setFiledNames(!filedNames()); };
-      th.appendChild(swap);
-    } },
+       means the name order and nothing else.
+
+       The button was built inline here and again in
+       `nameFormatSwitch`, two copies of one control, and when the
+       preference was split per table only one of them would have
+       been fixed. One function now, told which table it is on. */
+    headExtra: (th) => nameFormatSwitch(th, "roster") },
   // Not "Nickname": that invites "Matt", and this replaces the whole
   // printed name. Same widths as Name, because it holds the same thing
   // -- when it holds anything; its floor is the heading, because on a
@@ -865,21 +866,57 @@ function icon(name) {
  *
  * Remembered, like the rail: a statement about how this person reads a
  * roster, not about this visit.
+ *
+ * **Per table.** This was one shared preference, on the argument that
+ * a name reads one way for one person and a tab left showing the
+ * other form disagrees with itself. In use that is wrong: these are
+ * three tables read for three different jobs, and setting the Roster
+ * to `First Last` to check an enrolment should not reformat Progress
+ * behind you. The instructor asked for them separated.
+ *
+ * Two things follow from the old shape and are fixed with it. The
+ * stored key was `filedNames`, which is now the Roster's; reading it
+ * for all three is what tied them together. And `setFiledNames`
+ * redrew the Roster and Progress but never the matched table, so that
+ * one silently kept the old form until something else redrew it --
+ * which is why the switch is now one function that knows its own
+ * table and redraws exactly that.
  */
-function filedNames() {
-  try { return localStorage.getItem("filedNames") === "1"; }
-  catch (err) { return false; }
+const NAME_TABLES = {
+  roster: { key: "filedNames", redraw: () => renderRoster() },
+  progress: { key: "filedNames.progress",
+              redraw: () => { if (progressData) renderProgress(); } },
+  matched: { key: "filedNames.matched",
+             redraw: () => { if (reviewRows.length) renderMatched(); } },
+};
+
+/* **Filed by default**, which it was not.
+ *
+ * It was off on the argument that the surname split is a guess and
+ * showing a wrong one as the name is worse than sorting a row into an
+ * odd place. The guard that makes it safe was written at the same
+ * time and is still here: `displayName` shows the stored name
+ * whenever the two parts do not add up to the whole of it, so a
+ * compound surname is never silently shortened. With that in place,
+ * off by default only meant that a class list came up in a form
+ * nobody reads a class list in.
+ *
+ * Unset is filed, so an existing browser with no stored choice gets
+ * the new default; an explicit "0" is still honoured.
+ */
+function filedNames(table = "roster") {
+  const where = NAME_TABLES[table] || NAME_TABLES.roster;
+  try {
+    const stored = localStorage.getItem(where.key);
+    return stored === null ? true : stored === "1";
+  } catch (err) { return true; }
 }
 
-function setFiledNames(on) {
-  try { localStorage.setItem("filedNames", on ? "1" : "0"); }
+function setFiledNames(on, table = "roster") {
+  const where = NAME_TABLES[table] || NAME_TABLES.roster;
+  try { localStorage.setItem(where.key, on ? "1" : "0"); }
   catch (err) { /* a private window still gets a working roster */ }
-  // Both tables that show a name, not just the Roster. The switch is
-  // one preference about how a name reads, so a tab that was left
-  // showing the other form is a tab that disagrees with itself the
-  // next time it is looked at.
-  renderRoster();
-  if (progressData) renderProgress();
+  where.redraw();
 }
 
 /* "Lynott, Kilah", from the server's split and never from one done here.
@@ -897,9 +934,9 @@ function setFiledNames(on) {
  * and the choice is off by default. Making a wrong split correctable is
  * a roster feature, not a display toggle, and is not built.
  */
-function displayName(student) {
+function displayName(student, table = "roster") {
   const full = student.name || "";
-  if (!filedNames()) return full;
+  if (!filedNames(table)) return full;
   const last = (student.sort_last || student.last || "").trim();
   const first = (student.sort_first || student.first || "").trim();
   if (!last || !first) return full;
@@ -1205,25 +1242,16 @@ function fillProgressColumns(data) {
   progressColumns.length = 0;
   progressColumns.push({
     key: "name", label: "Name", pin: "left", cls: "who",
-    value: s => displayName(s),
+    value: s => displayName(s, "progress"),
     sortKeys: [["sort_last", "last"], ["sort_first", "first"]],
     resetHere: true,
     /* The same control the Roster's Name heading carries, and for the
        same reason: how a name reads is a property of the name column.
-       `swapby` means the name order here and nowhere else -- see the
-       note on the Roster's copy. */
-    headExtra: (th) => {
-      const swap = document.createElement("button");
-      swap.className = "iconbtn tiny namefmt";
-      swap.type = "button";
-      swap.appendChild(icon("swapby"));
-      swap.title = filedNames()
-        ? "Showing surname first. Switch to First Last."
-        : "Showing given name first. Switch to Last, First.";
-      swap.setAttribute("aria-label", swap.title);
-      swap.onclick = (e) => { e.stopPropagation(); setFiledNames(!filedNames()); };
-      th.appendChild(swap);
-    },
+       **Its own preference, though** -- setting the Roster to
+       `First Last` to check an enrolment used to reformat this grid
+       behind you. `swapby` means the name order here and nowhere
+       else; see the note on `nameFormatSwitch`. */
+    headExtra: (th) => nameFormatSwitch(th, "progress"),
   });
   progressColumns.push({
     key: "section", label: "Sec", cls: "seccol",
@@ -1243,11 +1271,20 @@ function fillProgressColumns(data) {
 
 const progressSort = makeSorter({
   columns: progressColumns,
-  // Surname, then section: the same default the Roster opens on, so
-  // one student is in the same place on both tabs.
-  defaults: [{ key: "sort_last", desc: false }],
+  /* Section, then surname within it -- the same `DEFAULT_SORT` the
+     Roster opens on, so one student is in the same place on both
+     tabs.
+
+     The comment here used to say "surname, then section: the same
+     default the Roster opens on", and the list under it held one key.
+     Neither half was true: the Roster opens on section *then*
+     surname, and with only `sort_last` the sections interleaved, so
+     this grid came up with no section bands at all -- the bands are
+     drawn from runs of rows that share a section, so an interleaved
+     sort produces none. */
+  defaults: DEFAULT_SORT,
   redraw: () => renderProgress(),
-  resetTitle: "Back to the roster's own order.",
+  resetTitle: "Back to section, then surname.",
 });
 
 function renderProgress() {
@@ -1310,7 +1347,8 @@ function renderProgress() {
     const name = document.createElement("th");
     name.className = "who";
     name.scope = "row";
-    name.textContent = displayName(student) || student.sid;
+    name.textContent = displayName(student, "progress")
+      || student.sid;
     tr.appendChild(name);
     const sec = document.createElement("td");
     sec.className = "seccol";
@@ -1575,7 +1613,7 @@ async function openCell(student, skill, cell, state, td) {
   cellOpen = { student, skill, td };
   litCell(td);
 
-  const who = displayName(student) || student.sid;
+  const who = displayName(student, "progress") || student.sid;
   const whoEl = document.getElementById("cell-who");
   whoEl.textContent = who;
   // Allowed to be cut at this width, so recoverable by pointing.
@@ -1698,7 +1736,7 @@ function paintCell(papers, skill, student) {
     // Not "no results": there is nothing to have a result about,
     // and the fix is a print job, not this panel.
     none.textContent = `${skill.slug} has never been printed for `
-      + `${displayName(student) || student.sid}, so there is nothing to `
+      + `${displayName(student, "progress") || student.sid}, so there is nothing to `
       + `record yet. Put it in a print job first.`;
     return;
   }
@@ -1781,7 +1819,8 @@ function paperShot(paper) {
 async function openCellSheet(paper) {
   const { student, skill } = cellOpen;
   await openSheet(
-    { name: displayName(student) || student.sid, skill: skill.slug },
+    { name: displayName(student, "progress") || student.sid,
+      skill: skill.slug },
     { file: paper.scan, page: paper.scanPage });
 }
 
@@ -1977,8 +2016,9 @@ function cellInput(student, field, column) {
   // The Name cell shows what the column is showing. It is editable in
   // either order: read-only was the first answer and the wrong one,
   // since the roster is the one place a name gets corrected.
-  const filed = field === "name" && filedNames();
-  input.value = filed ? displayName(student) : (student[field] || "");
+  const filed = field === "name" && filedNames("roster");
+  input.value = filed ? displayName(student, "roster")
+    : (student[field] || "");
   input.spellcheck = false;
   if (filed) input.title = "Surname, then given name, separated by one comma.";
   // An empty "Print as" is not missing data -- it means the roster name is
@@ -2251,7 +2291,6 @@ function sectionBand(run, span, redraw) {
   button.className = "bandtoggle";
   button.type = "button";
   button.setAttribute("aria-expanded", String(!shut));
-  button.appendChild(icon("chev"));
 
   const name = document.createElement("span");
   name.className = "secband-name";
@@ -2263,7 +2302,27 @@ function sectionBand(run, span, redraw) {
   // table whose other numbers are ids and seeds.
   count.textContent = `${run.count} student${run.count === 1 ? "" : "s"}`;
 
-  button.append(name, count);
+  /* **The label is what sticks, not the cell.**
+   *
+   * Scrolled sideways, this band used to carry its name off the left
+   * edge while the pinned Name column stayed put -- so on a wide grid
+   * you could see twenty-nine skill columns and have nothing saying
+   * which section you were reading.
+   *
+   * The obvious fix is `position: sticky` on the band's `<td>`, and
+   * the note in `style.css` records it being tried and reverted: a
+   * sticky cell breaks a `table-layout: fixed` row the same way a
+   * sticky `<th>` does, and this cell carries a `colSpan` across the
+   * whole table. So the cell stays where it is and an element *inside*
+   * it sticks. The button still spans the row, because the whole band
+   * is the control that opens and shuts the group, and only the words
+   * stand still.
+   */
+  const label = document.createElement("span");
+  label.className = "secband-label";
+  label.append(icon("chev"), name, count);
+
+  button.append(label);
   button.onclick = () => toggleBand(run.key, redraw);
   if (shut) tr.classList.add("shut");
   td.appendChild(button);
@@ -3349,6 +3408,34 @@ function pileCounts(data) {
   return { blank, unmatched: unmatchedCount(data.counts) };
 }
 
+/* Which rows claim a student for a skill somebody else already
+ * claims. Recomputed rather than remembered: a flag stored on the row
+ * would outlive the clash that earned it.
+ *
+ * **Keyed on the assessment as well as the student and the skill.**
+ * Without the run in the key this counted two legitimate attempts as
+ * a conflict: a student who sat N3 in October and again in November
+ * has two papers for one skill, and that is the whole point of a
+ * re-take. It only ever looked right because the table used to hold
+ * one job at a time. Put a re-scan through beside a fresh stack --
+ * the ordinary case -- and every student who had sat a skill twice
+ * lit up as a clash.
+ *
+ * What it is actually for is two papers *from the same job* matched
+ * to one student for one skill, which only a re-match can produce,
+ * by pointing a paper at somebody who already has one. */
+function markClashes(rows) {
+  const seen = {};
+  const keyOf = (row) => `${row.run}\u0000${row.sid}\u0000${row.skill}`;
+  for (const row of rows) {
+    if (!row.sid) continue;
+    seen[keyOf(row)] = (seen[keyOf(row)] || 0) + 1;
+  }
+  for (const row of rows) {
+    row.clash = Boolean(row.sid && seen[keyOf(row)] > 1);
+  }
+}
+
 /* --- end pure --- */
 
 /* The review grid.
@@ -3592,13 +3679,21 @@ const MATCHED_COLUMNS = [
   // it "Last name" produced "last last name", and would have lied
   // after a swap anyway.
   { key: "name", label: "Name", min: 180, grow: true,
-    value: r => displayName(r),
+    value: r => displayName(r, "matched"),
     sortKeys: [["sort_last", "last"], ["sort_first", "first"]],
-    headExtra: nameFormatSwitch,
+    headExtra: (th) => nameFormatSwitch(th, "matched"),
     cell: matchedNameCell },
   { key: "nameCrop", label: "Paper name", sortable: false, min: 150,
     cell: matchedNameCrop },
   { key: "section", label: "Sec", min: 62 },
+  /* Which assessment the paper came from. "Assessment", not "Run":
+     the run number is what the footer code carries and what the
+     record keys on, and it is not what this is called out loud.
+     Before the coarser grouping of the two, so the row reads as
+     where it came from and then what it was. */
+  { key: "assessment", label: "Assessment", min: 120,
+    value: r => r.assessment || `Job ${r.run}`,
+    cell: matchedAssessmentCell },
   { key: "skill", label: "Skill", min: 64 },
   { key: "sure", label: "Conf", min: 80, cls: "mid",
     // Padded, because the compare is textual: "9" beats "10" unsorted.
@@ -3630,23 +3725,31 @@ const matchedSort = makeSorter({
   resetTitle: "Back to least sure first, then section and surname.",
 });
 
-/* The Roster's name-order switch, in the heading that owns it.
+/* The name-order switch, in the heading that owns it.
  *
- * Lifted rather than copied, because it is the same preference: the
- * two tabs read one `filedNames()` and flipping it on either flips it
- * on both. Nothing else anywhere may wear `swapby` -- in a name
- * column it means the name order and only that, which is why
- * re-matching got a glyph of its own. */
-function nameFormatSwitch(th) {
+ * **The control is shared; the preference is not.** It was both --
+ * one `filedNames()` read by every table, so flipping it on one tab
+ * flipped it on the others. The button is still built in one place,
+ * because a second copy of it is a second thing to fix, and it now
+ * takes the table it belongs to and sets that table's own
+ * preference. See `NAME_TABLES`.
+ *
+ * Nothing else anywhere may wear `swapby` -- in a name column it
+ * means the name order and only that, which is why re-matching got a
+ * glyph of its own. */
+function nameFormatSwitch(th, table = "roster") {
   const swap = document.createElement("button");
   swap.className = "iconbtn tiny namefmt";
   swap.type = "button";
   swap.appendChild(icon("swapby"));
-  swap.title = filedNames()
+  swap.title = filedNames(table)
     ? "Showing surname first. Switch to First Last."
     : "Showing given name first. Switch to Last, First.";
   swap.setAttribute("aria-label", swap.title);
-  swap.onclick = (e) => { e.stopPropagation(); setFiledNames(!filedNames()); };
+  swap.onclick = (e) => {
+    e.stopPropagation();
+    setFiledNames(!filedNames(table), table);
+  };
   th.appendChild(swap);
 }
 
@@ -3720,8 +3823,9 @@ function matchedNameCell(row) {
     const flag = document.createElement("span");
     flag.className = "clashflag";
     flag.appendChild(icon("warn"));
-    flag.title = `Another paper is also matched to ${row.name} for `
-               + `${row.skill}. One of the two is somebody else's.`;
+    flag.title = `Another paper from ${row.assessment || "this assessment"} `
+               + `is also matched to ${row.name} for ${row.skill}. `
+               + `One of the two is somebody else's.`;
     flag.setAttribute("role", "img");
     flag.setAttribute("aria-label", flag.title);
     wrap.appendChild(flag);
@@ -3760,7 +3864,8 @@ function matchedNameCell(row) {
   const name = document.createElement("button");
   name.type = "button";
   name.className = "namebtn";
-  name.textContent = displayName(row) || row.sid || "(no name)";
+  name.textContent = displayName(row, "matched")
+    || row.sid || "(no name)";
   if (!row.scanned) name.classList.add("dim");
   name.title = "Click if this is not whose paper this is.";
   name.onclick = () => armRematch(row.id);
@@ -3922,21 +4027,6 @@ function rematchChoices(row, typed) {
 //: the papers the job printed.
 let rematchPool = {};
 
-/* Which rows claim a student for a skill somebody else already
- * claims. Recomputed rather than remembered: a flag stored on the row
- * would outlive the clash that earned it. */
-function markClashes(rows) {
-  const seen = {};
-  for (const row of rows) {
-    if (!row.sid) continue;
-    const key = `${row.sid}\u0000${row.skill}`;
-    seen[key] = (seen[key] || 0) + 1;
-  }
-  for (const row of rows) {
-    row.clash = Boolean(row.sid && seen[`${row.sid}\u0000${row.skill}`] > 1);
-  }
-}
-
 function buildRematchPool(rows) {
   const pool = {};
   for (const row of rows) {
@@ -3967,7 +4057,7 @@ function fillRematch(row, typed) {
     b.className = "rematch-pick";
     if (who.sid === row.sid) b.classList.add("current");
     const nm = document.createElement("span");
-    nm.textContent = filedNames() && who.sort_last && who.sort_first
+    nm.textContent = filedNames("matched") && who.sort_last && who.sort_first
       ? `${who.sort_last}, ${who.sort_first}` : who.name;
     const sec = document.createElement("span");
     sec.className = "muted";
@@ -4422,7 +4512,7 @@ function fillMatchTo(typed) {
     b.type = "button";
     b.className = "rematch-pick";
     const nm = document.createElement("span");
-    nm.textContent = filedNames() && who.sort_last && who.sort_first
+    nm.textContent = filedNames("matched") && who.sort_last && who.sort_first
       ? `${who.sort_last}, ${who.sort_first}` : who.name;
     const sec = document.createElement("span");
     sec.className = "muted";
@@ -4492,6 +4582,34 @@ function applyMatchTo(row, skill, who) {
 //: code of its own to say which job it belongs to.
 let scanRunNumbers = [];
 function data_runs() { return scanRunNumbers; }
+
+/* The assessment, and the re-scan mark when this paper has been
+ * graded before and has come back.
+ *
+ * The mark goes here rather than beside the name: it is a fact about
+ * which *job* this row belongs to and why it is in the table at all,
+ * and the name end of the row is already carrying the clash flag and
+ * the by-id ring. */
+function matchedAssessmentCell(row) {
+  const wrap = document.createElement("span");
+  wrap.className = "assesscell";
+  const text = document.createElement("span");
+  text.className = "assessname";
+  text.textContent = row.assessment || `Job ${row.run}`;
+  wrap.appendChild(text);
+  if (row.rescan) {
+    const mark = document.createElement("span");
+    mark.className = "rescanmark";
+    mark.appendChild(icon("record"));
+    mark.title = "This paper was graded before and has come back. "
+               + "Its recorded result is already in the Mark column; "
+               + "change it only if this reading is the better one.";
+    mark.setAttribute("role", "img");
+    mark.setAttribute("aria-label", mark.title);
+    wrap.appendChild(mark);
+  }
+  return wrap;
+}
 
 function renderMatched() {
   const table = document.getElementById("scan-matched");
@@ -4631,9 +4749,13 @@ function watchChipFit() {
   chipFitter.observe(jobs);
 }
 
-function scanChip(n, what, glyph) {
+/* `tone` is "work" by default -- the warning colour, because a chip is
+ * something that wants a person. A re-scan wants nobody: it is the
+ * explanation for the other numbers being small, so it gets the same
+ * shape and a quiet colour. Same badge, not the same alarm. */
+function scanChip(n, what, glyph, tone) {
   const chip = document.createElement("span");
-  chip.className = "jobchip";
+  chip.className = tone === "calm" ? "jobchip jobchip-calm" : "jobchip";
   chip.appendChild(icon(glyph));
   // Two spans, because the word goes and the number stays. A glyph
   // alone says which problem; it does not say how much of it.
@@ -4712,7 +4834,19 @@ function renderScan(data) {
     const count = jobCounts(data, run);
     const facts = [[`${count.matched} matched`, false]];
     if (alone && pile.blank) facts.push([`${pile.blank} blank`, true]);
+    /* Papers of this job already graded and settled, whose absentees
+       the server held back rather than listing. A plain fact, not a
+       chip: there is no work in it, and the reason it is here at all
+       is that a filter which silently drops rows is how a real
+       shortage would go unnoticed. */
+    if (run.settled)
+      facts.push([`${run.settled} already settled`, true]);
     const chips = [];
+    /* Re-scans first. It is the reason the other numbers on this card
+       are small, so reading it after them is reading them without
+       knowing why. */
+    if (run.rescanned)
+      chips.push(scanChip(run.rescanned, "re-scanned", "record", "calm"));
     if (count.missing)
       chips.push(scanChip(count.missing, "missing", "absent"));
     if (alone && pile.unmatched)
