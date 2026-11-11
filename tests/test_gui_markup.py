@@ -1088,3 +1088,80 @@ class TestTheOrderASkillColumnSortsIn:
             f"cellSortKey({cell(4, 0, absents=4)}, 1),"
             f"cellSortKey({cell(1, 0, absents=1)}, 1)]))")
         assert out[0] == out[1]
+
+
+# ------------------------------------------------- the clash flag --
+#
+# Two papers claiming one student for one skill. It is drawn at the
+# left of a row and it means "one of these two is somebody else's",
+# which only a re-match can produce.
+#
+# The key had no run in it, so it counted two legitimate attempts as a
+# conflict: a student who sat N3 in October and again in November has
+# two papers for one skill, which is what a re-take is. It only ever
+# looked right because the review table used to hold one job at a
+# time; put a re-scan through beside a fresh stack and every student
+# who had sat a skill twice lit up.
+
+
+def clash_flags(rows):
+    """`markClashes` over `rows`, as a list of booleans."""
+    return run_js(
+        f"const rows = {rows};" + "markClashes(rows);"
+        "console.log(JSON.stringify(rows.map(r => Boolean(r.clash))));")
+
+
+class TestTheClashFlag:
+    def test_two_papers_from_one_job_for_one_skill_clash(self):
+        """What the flag is actually for."""
+        flags = clash_flags(
+            '[{run: 3, sid: "s1", skill: "N3"},'
+            ' {run: 3, sid: "s1", skill: "N3"}]')
+        assert flags == [True, True]
+
+    def test_the_same_skill_in_two_jobs_is_not_a_clash(self):
+        """A re-take. Sat N3 in October, sat it again in November."""
+        flags = clash_flags(
+            '[{run: 1, sid: "s1", skill: "N3"},'
+            ' {run: 3, sid: "s1", skill: "N3"}]')
+        assert flags == [False, False]
+
+    def test_one_paper_each_is_not_a_clash(self):
+        flags = clash_flags(
+            '[{run: 3, sid: "s1", skill: "N3"},'
+            ' {run: 3, sid: "s2", skill: "N3"}]')
+        assert flags == [False, False]
+
+    def test_two_skills_for_one_student_is_not_a_clash(self):
+        flags = clash_flags(
+            '[{run: 3, sid: "s1", skill: "N3"},'
+            ' {run: 3, sid: "s1", skill: "N4"}]')
+        assert flags == [False, False]
+
+    def test_a_row_with_no_student_never_clashes(self):
+        """A paper printed blank, before he has said whose it is. Two
+        of them are not two claims on one person."""
+        flags = clash_flags(
+            '[{run: 3, sid: "", skill: "N3"},'
+            ' {run: 3, sid: "", skill: "N3"}]')
+        assert flags == [False, False]
+
+    def test_the_pair_is_flagged_at_both_ends(self):
+        """The mark follows a row through any sort, so both halves of
+        a pair carry it even when the sort puts them far apart."""
+        flags = clash_flags(
+            '[{run: 3, sid: "s1", skill: "N3"},'
+            ' {run: 3, sid: "s2", skill: "N3"},'
+            ' {run: 3, sid: "s1", skill: "N3"}]')
+        assert flags == [True, False, True]
+
+    def test_the_flag_does_not_outlive_the_clash(self):
+        """Recomputed, not remembered: a flag left on a row from a
+        previous draw would still be there after a re-match fixed
+        it."""
+        flags = run_js(
+            'const rows = [{run: 3, sid: "s1", skill: "N3", clash: true},'
+            ' {run: 3, sid: "s2", skill: "N3"}];'
+            "markClashes(rows);"
+            "console.log(JSON.stringify(rows.map(r => Boolean(r.clash))));")
+        assert flags == [False, False]

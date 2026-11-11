@@ -660,14 +660,28 @@ th {
    collision in stage 2, committed one stage after writing down the
    rule that prevents it.
 
-   No `position: sticky` either, however tempting it is to keep the
-   label in view while scrolling sideways: a sticky cell leaves a fixed
-   table layout the same way. */
+   No `position: sticky` on the cell either, however tempting: this
+   one carries a `colSpan` across the whole table, and a sticky cell
+   leaves a fixed table layout the same way a sticky `<th>` does. The
+   label inside it sticks instead -- see `.secband-label`. */
 tr.secband td {
   background: var(--surface-2);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   padding: 0;
+  /* **`th, td` sets `overflow: hidden`, and that stops the sticky
+     label dead.** A clipping ancestor between a sticky element and
+     the scrollport becomes the scrollport -- the same rule written
+     down above `table`, met again from the other side. This cell
+     never scrolls, so the label inside it was offset by nothing and
+     rode off the left edge while the Name column stayed put. It
+     computed `position: sticky; left: 0` the whole time, which is
+     why reading the styles said it was working.
+
+     Safe here, where it would not be on a data cell: this cell spans
+     the whole row and holds one short label, so there is nothing to
+     spill out of it. */
+  overflow: visible;
 }
 /* The whole band is the control that opens and shuts its group. */
 .bandtoggle {
@@ -693,16 +707,34 @@ tr.secband td {
   transition: transform .12s ease;
 }
 tr.secband.shut .bandtoggle .glyph { transform: rotate(180deg); }
+
+/* What actually stays put when the table is scrolled sideways.
+   `left: 0` against `.scroller`, which is the scrollport.
+
+   Nothing scrolls underneath it, so it needs no background of its
+   own: the band row holds this label and nothing else, and the rest
+   of the row is empty to the right. */
+.secband-label {
+  position: sticky;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  max-width: 100%;
+}
+
 .secband-name {
   font-size: var(--t-sm);
   font-weight: 600;
   letter-spacing: .04em;
   color: var(--ink-2);
 }
-/* `margin-left: auto`, not `float: right`. Floated out of the flow it
-   sat above the name's baseline, which read as misaligned. */
+/* Beside the name, not at the far right of the row.
+   `margin-left: auto` put it at the right-hand end, which on
+   Progress's twenty-nine columns is a long way off screen -- and once
+   the label is pinned, half of it staying behind defeats the pinning.
+   The pair reads as one label now: "820 - 22 students". */
 .secband-count {
-  margin-left: auto;
   font-size: var(--t-sm);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -2351,6 +2383,40 @@ table.unplaced td { white-space: normal; }
 }
 .jobchip + .jobchip { margin-left: calc(var(--s1) * -1); }
 
+/* The assessment cell: its name, and the re-scan mark after it. The
+   mark sits at the end of the name rather than at a fixed place in the
+   cell, so a row with no mark has no gap where one would be. */
+.assesscell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+.assessname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rescanmark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--muted);
+}
+.rescanmark .glyph {
+  --glyph-size: 15;
+  width: 15px;
+  height: 15px;
+}
+
+/* A re-scan is not a problem: it is why the other counts on this card
+   are small. It keeps the chip's shape, because it answers the same
+   "how much" question and sits in the same row of them, and loses the
+   warning colour, because there is nothing here to put right. */
+.jobchip-calm {
+  background: var(--surface-3);
+  color: var(--muted);
+}
+
 #scan-missing h3, #scan-dupes h3, #scan-sheets-head {
   margin: var(--s4) 0 var(--s1);
   font-size: var(--t-base);
@@ -2631,9 +2697,10 @@ button.act.chip:hover { border-color: var(--line-strong); }
 }
 #progress-grid thead th.seccol { z-index: 5; }
 
-/* A band spans the whole row, so it must not be pushed out by the two
-   sticky columns ahead of it -- and it is the one row here that scrolls
-   with the table rather than standing still. */
+/* A band spans the whole row, so its cell must not be pushed out by
+   the two sticky columns ahead of it. The *cell* scrolls with the
+   table; the label inside it is what stands still, which is why this
+   rule is still here and still `static`. See `.secband-label`. */
 #progress-grid tr.secband td { position: static; }
 
 /* A cell is a square, and square means square: the grid is read by

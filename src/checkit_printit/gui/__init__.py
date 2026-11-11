@@ -1809,6 +1809,106 @@ def _file_order(known, paths):
     return names
 
 
+class _Pile:
+    """What the record already knows about the papers in this stack.
+
+    One object, built once, because three separate things need the
+    same answer and a second copy of a rule is how the two halves of
+    this tab came to disagree before.
+
+    **The question it exists for.** Putting a few corrected papers
+    back through the copier used to bring up the whole job they came
+    from. `Batch.missing` walks every run any sheet touched and lists
+    every student page not in the pile, so one stray sheet from
+    October produced eighty-five "missing" rows for papers graded
+    weeks ago and sitting in a drawer.
+
+    So a run's absentees are only worth asking about when that run is
+    *being scanned for the first time* -- when something in this pile
+    is a paper the record has no result for. A run merely being
+    re-scanned contributes no absentees at all, and inside a
+    first-time run a paper that already has a result is not asked
+    about either: confirming "absent" for a paper already marked
+    absent is asking him to agree with something nobody doubts.
+    """
+
+    def __init__(self, batch, record_path):
+        self.batch = batch
+        #: run number -> that run's `run_id` in the record.
+        self.run_id = {}
+        for sheet in batch.placed:
+            if sheet.run_no not in self.run_id:
+                row = record_mod.run_by_no(record_path, sheet.run_no)
+                self.run_id[sheet.run_no] = (row or {}).get("run_id", "")
+        self._already = record_mod.recorded_in(record_path,
+                                               self.run_id.values())
+
+        #: Runs with at least one paper in this pile the record has no
+        #: result for. Those are the runs whose absentees mean
+        #: something.
+        self.first_time = set()
+        #: Papers in this pile that already had a result -- a
+        #: re-scan. Counted for the badge, and marked on the row, so a
+        #: corrected "?" is visible as a correction rather than
+        #: looking like a fresh read.
+        self.rescanned = set()
+        for sheet in batch.placed:
+            entry = sheet.entry
+            if entry is None or not entry.gradable:
+                continue
+            if self.recorded(sheet.run_no, entry.sid, entry.slug):
+                self.rescanned.add((sheet.run_no, sheet.run_page))
+            else:
+                self.first_time.add(sheet.run_no)
+
+    def recorded(self, run_no, sid, slug):
+        """What the record holds for this paper, or ''."""
+        return self._already.get(
+            (self.run_id.get(run_no, ""), sid, slug), "") or ""
+
+    def is_rescan(self, run_no, page):
+        return (run_no, page) in self.rescanned
+
+    def missing(self, resolve):
+        """`{run: [pages]}`, but only the ones worth asking about.
+
+        A filter, not a second opinion about what is absent:
+        `Batch.missing` still answers "what did not arrive", and this
+        drops the runs and the papers he has already answered for.
+        """
+        out = {}
+        for run_no, pages in self.batch.missing(resolve).items():
+            if run_no not in self.first_time:
+                continue
+            index = resolve(run_no)
+            if index is None:
+                continue
+            keep = [page for page in pages
+                    if (index.get(page) is not None
+                        and not self.recorded(run_no,
+                                              index.get(page).sid,
+                                              index.get(page).slug))]
+            if keep:
+                out[run_no] = keep
+        return out
+
+    def held_back(self, resolve):
+        """`{run: how many}` absentee rows the filter removed.
+
+        Reported rather than dropped silently: a run short of two
+        papers is worth knowing about even when its rows are not
+        worth answering, and a number that quietly became zero is how
+        a filter like this hides a real problem.
+        """
+        shown = self.missing(resolve)
+        out = {}
+        for run_no, pages in self.batch.missing(resolve).items():
+            held = len(pages) - len(shown.get(run_no, ()))
+            if held:
+                out[run_no] = held
+        return out
+
+
 def _batch_json(batch, record_path, sections=None, corrections=None):
     """The batch as the page wants it.
 
@@ -1819,6 +1919,8 @@ def _batch_json(batch, record_path, sections=None, corrections=None):
     """
     resolve = scans_mod.index_reader(record_path)
     names = record_mod.names_printed(record_path)
+    pile = _Pile(batch, record_path)
+    held = pile.held_back(resolve)
 
     counts = {}
     for sheet in batch.sheets:
@@ -1833,6 +1935,17 @@ def _batch_json(batch, record_path, sections=None, corrections=None):
             "title": (row or {}).get("title", ""),
             "date": (row or {}).get("date", ""),
             "pages": len(index.pages) if index else 0,
+            # Papers of this run that came back a second time, having
+            # already been graded. The badge on the job card.
+            "rescanned": sum(1 for (no, _) in pile.rescanned
+                             if no == run_no),
+            # Whether anything of this run is being read for the first
+            # time. A run with nothing new is being re-scanned, and
+            # the view says so instead of listing its absentees.
+            "firstTime": run_no in pile.first_time,
+            # Absentees the filter held back, so a run short of papers
+            # still says so without putting the rows in the table.
+            "settled": held.get(run_no, 0),
         })
 
     sheets = []
@@ -1852,8 +1965,13 @@ def _batch_json(batch, record_path, sections=None, corrections=None):
             "code": sheet.code,
         })
 
+    # `pile.missing`, not `batch.missing`: the absentees worth asking
+    # about, which is not every page that failed to arrive. See
+    # `_Pile`. The counts the job cards draw come from this list, so
+    # filtering here is what stops a re-scan reporting a job's whole
+    # class as absent.
     missing = []
-    for run_no, pages in batch.missing(resolve).items():
+    for run_no, pages in pile.missing(resolve).items():
         index = resolve(run_no)
         for page in pages:
             entry = index.get(page)
@@ -1894,7 +2012,9 @@ def _batch_json(batch, record_path, sections=None, corrections=None):
             "outcomes": OUTCOMES,
             "review": _review_rows(batch, record_path, names,
                                    sections or {},
-                                   corrections=corrections),
+                                   corrections=corrections,
+                                   pile=pile, titles={
+                                       r["no"]: r["title"] for r in runs}),
             "gradable": sum(1 for s in batch.sheets if s.gradable)}
 
 
@@ -2188,29 +2308,35 @@ def _tight(crop, read):
 
 
 def _review_rows(batch, record_path, names, sections=None,
-                 corrections=None):
+                 corrections=None, pile=None, titles=None):
     """One row per paper: what it is, what was read, what to crop.
 
-    Papers that never came back are rows too, with no crop. The
-    instructor asked for that and was right: a sheet that missed the
-    scanner is still a sheet he may be holding, and he should be able
-    to put the result in by hand rather than hunt for somewhere else
-    to do it.
+    Papers that never came back are rows too, with no crop -- but
+    only the ones worth asking about. A sheet that missed the scanner
+    is still a sheet he may be holding, and he should be able to put
+    the result in by hand; a sheet that missed the scanner three
+    weeks ago and was marked absent then is not a question, and
+    eighty-five of those is how one stray paper used to bury a
+    re-scan. `_Pile` draws that line.
+
+    `pile` and `titles` come from `_batch_json`, which has already
+    built them. Built here when absent so the function still stands
+    on its own, and so a test can call it directly.
     """
     resolve = scans_mod.index_reader(record_path)
+    if pile is None:
+        pile = _Pile(batch, record_path)
+    if not titles:
+        titles = {}
+        for run_no in pile.run_id:
+            row = record_mod.run_by_no(record_path, run_no)
+            titles[run_no] = (row or {}).get("title", "")
 
-    # What the record already holds for these runs, so a stack read
-    # a second time does not come up offering to save results that
-    # went in the first time.
-    runs = {}
-    for sheet in batch.placed:
-        if sheet.run_no not in runs:
-            row = record_mod.run_by_no(record_path, sheet.run_no)
-            runs[sheet.run_no] = (row or {}).get("run_id", "")
-    already = record_mod.recorded_in(record_path, runs.values())
-
+    # What the record already holds for a paper, so a stack read a
+    # second time does not come up offering to save results that went
+    # in the first time.
     def recorded(run_no, sid, slug):
-        return already.get((runs.get(run_no, ""), sid, slug), "") or ""
+        return pile.recorded(run_no, sid, slug)
 
     # By paper, not by sheet: the same sheet arrives twice often
     # enough that `duplicates` is one of the three questions the
@@ -2350,15 +2476,30 @@ def _review_rows(batch, record_path, names, sections=None,
             "unowned": not entry.owned,
             "outcome": SUGGESTS.get(agreed, ""),
             "recorded": recorded(run_no, sid, entry.slug),
+            # Which assessment this paper came from. The run number is
+            # what the footer code carries and what the record keys
+            # on, but it is not what the instructor calls the thing --
+            # he calls it by its title and date.
+            "assessment": titles.get(run_no, ""),
+            # This paper has been graded before and has come back. The
+            # ordinary reason is a '?' he has since turned into a
+            # tick, and that is a correction rather than a fresh read,
+            # so the row says so.
+            "rescan": pile.is_rescan(run_no, page),
         })
 
-    for run_no, pages in batch.missing(resolve).items():
+    # `pile.missing`, not `batch.missing`. See `_Pile`: a run being
+    # re-scanned contributes no absentee rows, and a paper already
+    # answered for is not asked about again.
+    for run_no, pages in pile.missing(resolve).items():
         index = resolve(run_no)
         for page in pages:
             entry = index.get(page)
             rows.append({
                 "id": f"{run_no}-{page}",
                 "run": run_no, "page": page,
+                "assessment": titles.get(run_no, ""),
+                "rescan": False,
                 "sid": entry.sid, "name": names.get(entry.sid, ""),
             # Sorting by surname wants the surname, and the browser
             # has no splitter on purpose -- see `_sort_names`. The
