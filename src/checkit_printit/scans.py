@@ -918,6 +918,44 @@ HEAVY_INK = 0.35
 #: ever reads as "empty", this is the number that did it.
 BESIDE_MAX = 0.60
 
+#: Where a question mark actually goes, in units of the found box:
+#: out to the right, and level with it.
+#:
+#: `around` -- a ring on all four sides, two box-widths deep to the
+#: right -- was what `beside` was decided on, and it is far too
+#: generous. On 2026-11-12 it called thirteen pages a `?` and four
+#: of them were not one: on three he had written a comment in pen
+#: above or to the left of the box, and on the fourth a single
+#: speck of blue sat in a corner. The ring cannot tell those from a
+#: question mark because it does not ask *where* the ink is, and
+#: where it is was the whole difference. Every real `?` on that
+#: stack sat to the right of the box and level with it; not one of
+#: the four false ones did.
+#:
+#: A quarter of a box-height above and a little under half below,
+#: because a question mark is about as tall as the box it is beside
+#: and its dot sits low.
+Q_BAND = (1.5, 0.25, 0.45)      #: (out to the right, above, below)
+
+#: How much of the pen near the box has to be inside that band.
+#:
+#: This is the test that does the work, and it separates by a long
+#: way. On 2026-11-12 the nine real question marks put 64% to 100%
+#: of their ink in the band; the four false ones put 0%, 0%, 0% and
+#: 12%. Half is nowhere near either group.
+BESIDE_SHARE = 0.5
+
+#: And how much ink has to be there at all, as a fraction of the
+#: box's middle -- the floor under `beside`, where `INK_MIN` used to
+#: be.
+#:
+#: `INK_MIN` is 0.012, which is a speck, and on 2026-11-12 a speck
+#: is exactly what it caught: one page scored 0.0145 and was
+#: offered as a query. The nine real question marks measured 0.120
+#: to 0.281 in the band. 0.06 is half the faintest of them and four
+#: times that speck.
+BESIDE_MIN = 0.06
+
 #: How dark a pixel has to be to count as ink, out of 255.
 #:
 #: 128 -- halfway -- was the obvious choice and the wrong one. Blur
@@ -1011,12 +1049,31 @@ RULE_PX = 2
 #: survives a check drawn across one side; the second is what keeps
 #: a solid blot from matching.
 #:
-#: 0.50 sits in a gap. Across the 62 pages of 2026-10-26 the worst
-#: real box scored 0.520 and nothing at all scored between 0.50 and
-#: 0.52, so the cut is not balanced on the edge of the evidence. It
-#: was 0.55, which lost seven boxes -- two with a check drawn
-#: through one side, the rest simply printed faint.
-EDGE_HIT = 0.50
+#: **Measured from both sides, because one side was not enough.**
+#: It was 0.55, then 0.50, and both were fitted to the boxes of a
+#: single stack: 2026-10-26's 62 pages, whose worst real box scored
+#: 0.520. 2026-11-12's 107 pages went lower. Six boxes scored 0.454
+#: to 0.489 and were thrown away, three of them with a plain blue
+#: tick drawn in them, and the instructor reported those pages as
+#: unreadable-for-no-reason. The gate was never in a gap; it was
+#: sitting inside the population it was sorting, and the next stack
+#: found out.
+#:
+#: So the other side is measured now as well -- the name crop, cut
+#: to the same size, which is a line of print and handwriting and
+#: certainly holds no box:
+#:
+#:   real boxes, 2026-11-12   0.454 .. 0.741  (107 of 107 found,
+#:                                             every one at 55-58px)
+#:   regions with no box      0.000 .. 0.264  (107 of them)
+#:
+#: 0.38 sits in the middle of that gap: 44% above the highest a
+#: page of writing reached, 16% below the faintest real box. A
+#: faint box is no longer discarded. It is found, and the quality
+#: it came back with docks the confidence of whatever was concluded
+#: from it -- which is what `_confidence` is for, and is a better
+#: answer than refusing to read the page.
+EDGE_HIT = 0.38
 MIDDLE_CLEAR = 0.30
 
 
@@ -1120,28 +1177,37 @@ def measure(crop, pad=None):
     `inside` is the fraction of the found box's middle that is
     coloured pen, with its printed outline inset out of the count.
     `around` is the same for the space surrounding it -- a box's
-    width to the left and above and below, two to the right, where
-    the `?` goes.
+    width to the left and above and below, two to the right.
+    `query` is the part of that which falls in `Q_BAND`: out to the
+    right and level with the box, which is where a question mark
+    goes and where the other things he writes near a box do not.
 
     `sure` is how far the call is from being a different call,
-    between 0 and 1 -- see `_confidence`. It is about the decision,
-    not about the ink: a box inked twelve times over the threshold
-    and one inked by a hair are both `ticked`, and only one of them
-    should be believed without looking.
+    between 0 and 1 -- see `_confidence` -- or None when nothing was
+    read. It is about the decision, not about the ink: a box inked
+    twelve times over the threshold and one inked by a hair are both
+    `ticked`, and only one of them should be believed without
+    looking.
 
     `call` is one of:
 
         ticked   pen in the box
-        beside   pen around it and none in it -- his `?`
+        beside   pen in the band to its right and none in it: his `?`
         heavy    the box is covered; scribbled out, probably
-        empty    no pen anywhere near
+        empty    no pen in the box, and nothing `?`-shaped beside it
         nobox    no rectangle could be found to measure
 
-    Unlike the darkness version this replaces, `beside` is claimed
-    rather than hedged. A coloured mark next to the box is a thing
-    somebody drew; the old reading could not distinguish one from a
-    smudge because it could not distinguish ink from print at all.
-    The instructor still sees every row, and he can still change it.
+    **`beside` is about position, not just quantity.** It used to be
+    "any pen at all in the ring around the box", which on 2026-11-12
+    offered four pages as queries that were not: three carried a
+    comment he had written above or to the left, and one carried a
+    speck. A `?` goes in one place. `Q_BAND` and `BESIDE_SHARE` are
+    that place and how much of the ink has to be in it.
+
+    `empty` therefore means the box has nothing in it and nothing
+    beside it *that looks like a query*. It does not mean the page
+    is clean, and `around` is still reported so a caller can tell
+    the difference.
     """
     import numpy
 
@@ -1152,8 +1218,14 @@ def measure(crop, pad=None):
     # crop it does not have.
     found = scored_box(rgb, hint=_window((rgb.height, rgb.width), pad))
     if found is None:
-        return {"inside": 0.0, "around": 0.0, "call": "nobox",
-                "box": None, "sure": 0.0}
+        # `sure` is None, not 0. Zero is a reading -- it says "I
+        # measured this and it is as close to the other call as a
+        # reading gets". Nothing was measured here, and a dial
+        # showing 0/10 claimed otherwise: it put the unread pages at
+        # the bottom of a confidence sort looking like the most
+        # doubtful readings in the stack, when they are not readings.
+        return {"inside": 0.0, "around": 0.0, "query": 0.0,
+                "call": "nobox", "box": None, "sure": None}
     box, quality = found
 
     pen = _pen(rgb)
@@ -1167,17 +1239,30 @@ def measure(crop, pad=None):
 
     inside = float(inner.sum()) / area
     around = (float(near.sum()) - float(inner.sum())) / area
+
+    # And the same pen counted again in the one place a question
+    # mark goes: out to the right of the box and level with it. It
+    # is a *part* of `around`, so `query / around` is the share of
+    # the nearby ink that is where a `?` would be.
+    out, up, down = Q_BAND
+    band = pen[max(0, y0 - int(tall * up)):y1 + int(tall * down),
+               x1:x1 + int(wide * out)]
+    query = float(band.sum()) / area
+
     if inside >= HEAVY_INK:
         call = "heavy"
     elif inside >= INK_MIN:
         call = "ticked"
-    elif INK_MIN <= around <= BESIDE_MAX:
+    elif (BESIDE_MIN <= query <= BESIDE_MAX
+            and query >= BESIDE_SHARE * around):
         call = "beside"
     else:
         call = "empty"
     return {"inside": round(inside, 4), "around": round(around, 4),
+            "query": round(query, 4),
             "call": call, "box": box,
-            "sure": _confidence(call, inside, around, quality)}
+            "sure": _confidence(call, inside, around, quality,
+                                query=query)}
 
 
 def _dark_fraction(image):
@@ -1435,19 +1520,27 @@ EDGE_GOOD = 0.70
 BESIDE_CEILING = 0.70
 
 
-def _confidence(call, inside, around, quality):
+def _confidence(call, inside, around, quality, query=None):
     """How sure the call is, 0 to 1.
 
     Two parts. How far the measurement sits from the boundary it
     was decided on, and how well the box was found -- every call
     rests on having the right rectangle, so a rectangle that only
     just matched drags down whatever was concluded from it.
+
+    **Each call is scored against the threshold it was actually
+    decided on.** `beside` is now decided on `query` against
+    `BESIDE_MIN`, not on `around` against `INK_MIN`, and measuring
+    its margin against the wrong, five-times-lower number made
+    every question mark come out at the ceiling. `query` defaults
+    to `around` so an old caller gets the old answer rather than a
+    crash.
     """
-    def past(value):
+    def past(value, floor=INK_MIN):
         """0 at the threshold, 1 at `SURE_AT` times it."""
-        if value <= INK_MIN:
+        if value <= floor:
             return 0.0
-        return min(1.0, (value / INK_MIN - 1.0) / (SURE_AT - 1.0))
+        return min(1.0, (value / floor - 1.0) / (SURE_AT - 1.0))
 
     if call == "ticked":
         margin = past(inside)
@@ -1464,7 +1557,8 @@ def _confidence(call, inside, around, quality):
             # number whose job is to say it.
             margin *= 0.55
     elif call == "beside":
-        margin = min(BESIDE_CEILING, past(around))
+        margin = min(BESIDE_CEILING,
+                     past(around if query is None else query, BESIDE_MIN))
     elif call == "heavy":
         # A box buried in ink is unmistakable as a *measurement*
         # and says nothing about what was meant by it.
