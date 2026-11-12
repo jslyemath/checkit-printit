@@ -252,6 +252,38 @@ class TestTheReviewTable:
         assert absent, "the fixture produced no absentee rows"
         assert {r["assessment"] for r in absent} == {"Job 2"}
 
+    def test_every_row_carries_the_date_it_was_sat(self, world):
+        """The title is only half of it. Two assessments can share a
+        name -- the same skill set reprinted a fortnight later is the
+        ordinary case -- so a row naming its title still cannot say
+        which sitting the paper is from. He asked for the date after
+        finding that out on his own stack."""
+        path, old, new, _ = world
+        rows = self.rows_for(path, [sheet_for(RUN_OLD, old.get(QUERIED)),
+                                    sheet_for(RUN_NEW, new.get(1), 2)])
+        by_run = {r["run"]: r["date"] for r in rows}
+        assert by_run[RUN_OLD] == "2026-10-26"
+        assert by_run[RUN_NEW] == "2026-11-02"
+
+    def test_the_date_is_iso_so_the_column_can_sort(self, world):
+        """Shown m/d and sorted on this. The two are not the same
+        string and only one of them orders: "11/9" sorts after
+        "11/12" as text, and the year the view drops is exactly what
+        makes the comparison work."""
+        path, old, new, _ = world
+        rows = self.rows_for(path, [sheet_for(RUN_OLD, old.get(QUERIED)),
+                                    sheet_for(RUN_NEW, new.get(1), 2)])
+        for row in rows:
+            assert len(row["date"]) == 10 and row["date"][4] == "-", \
+                f"{row['date']!r} is not an ISO date"
+
+    def test_an_absentee_row_carries_its_date_too(self, world):
+        path, _, new, _ = world
+        rows = self.rows_for(path, [sheet_for(RUN_NEW, new.get(1))])
+        absent = [r for r in rows if not r["scanned"]]
+        assert absent, "the fixture produced no absentee rows"
+        assert {r["date"] for r in absent} == {"2026-11-02"}
+
     def test_the_corrected_query_keeps_its_recorded_answer(self, world):
         """The '?' he came to fix. The row has to arrive carrying what
         the record holds, so the table shows it as a correction rather

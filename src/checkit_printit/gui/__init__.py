@@ -2016,8 +2016,11 @@ def _batch_json(batch, record_path, sections=None, corrections=None):
             "review": _review_rows(batch, record_path, names,
                                    sections or {},
                                    corrections=corrections,
-                                   pile=pile, titles={
-                                       r["no"]: r["title"] for r in runs}),
+                                   pile=pile,
+                                   titles={r["no"]: r["title"]
+                                           for r in runs},
+                                   dates={r["no"]: r["date"]
+                                          for r in runs}),
             "gradable": sum(1 for s in batch.sheets if s.gradable)}
 
 
@@ -2310,8 +2313,25 @@ def _tight(crop, read):
                       min(crop.height, round(y1 + unit * bottom))))
 
 
+def _least_sure(reads):
+    """The least confident of several readings of one paper, or None.
+
+    None whenever any copy of the sheet could not be read at all.
+    `min` over a list holding None is a TypeError in Python 3, and
+    the question it would be asking -- is "no reading" smaller than
+    0.8 -- has no numeric answer. It has an answer in words: a paper
+    one of whose scans gave up is a paper with no reading.
+    """
+    if not reads:
+        return 0.0
+    values = [r.get("sure", 0.0) for r in reads]
+    if any(v is None for v in values):
+        return None
+    return min(values)
+
+
 def _review_rows(batch, record_path, names, sections=None,
-                 corrections=None, pile=None, titles=None):
+                 corrections=None, pile=None, titles=None, dates=None):
     """One row per paper: what it is, what was read, what to crop.
 
     Papers that never came back are rows too, with no crop -- but
@@ -2331,9 +2351,12 @@ def _review_rows(batch, record_path, names, sections=None,
         pile = _Pile(batch, record_path)
     if not titles:
         titles = {}
+        dates = {}
         for run_no in pile.run_id:
             row = record_mod.run_by_no(record_path, run_no)
             titles[run_no] = (row or {}).get("title", "")
+            dates[run_no] = (row or {}).get("date", "")
+    dates = dates or {}
 
     # What the record already holds for a paper, so a stack read a
     # second time does not come up offering to save results that went
@@ -2467,11 +2490,14 @@ def _review_rows(batch, record_path, names, sections=None,
             "reads": sorted(calls) or ([agreed] if agreed else []),
             "ink": first.get("inside", 0),
             "beside": first.get("around", 0),
-            # How sure the reading is of its own call, 0 to 1. The
-            # lowest of several copies: two scans of one sheet that
-            # disagree are the least certain thing in the stack,
-            # whatever either one measured on its own.
-            "sure": min((r.get("sure", 0.0) for r in reads), default=0.0),
+            # How sure the reading is of its own call, 0 to 1, or
+            # None when no box could be found to read. The lowest of
+            # several copies: two scans of one sheet that disagree
+            # are the least certain thing in the stack, whatever
+            # either one measured on its own -- and a copy with no
+            # reading at all beats any number, because the row's
+            # honest answer is then "nothing was read", not a figure.
+            "sure": _least_sure(reads),
             # Nobody's name was printed on this one, so nobody knows
             # whose it is until he says. The row carries the id crop
             # and the name crop for him to read, and `save` refuses
@@ -2484,6 +2510,13 @@ def _review_rows(batch, record_path, names, sections=None,
             # on, but it is not what the instructor calls the thing --
             # he calls it by its title and date.
             "assessment": titles.get(run_no, ""),
+            # And the date, which the title does not carry. Two
+            # assessments can share a name -- the same skill set
+            # reprinted a fortnight later is the ordinary case -- so
+            # the title alone does not say which sitting a paper came
+            # from. ISO here and m/d in the view: the column has to
+            # sort by date, and "11/9" sorts after "11/12" as text.
+            "date": dates.get(run_no, ""),
             # This paper has been graded before and has come back. The
             # ordinary reason is a '?' he has since turned into a
             # tick, and that is a correction rather than a fresh read,
@@ -2502,6 +2535,7 @@ def _review_rows(batch, record_path, names, sections=None,
                 "id": f"{run_no}-{page}",
                 "run": run_no, "page": page,
                 "assessment": titles.get(run_no, ""),
+                "date": dates.get(run_no, ""),
                 "rescan": False,
                 "sid": entry.sid, "name": names.get(entry.sid, ""),
             # Sorting by surname wants the surname, and the browser

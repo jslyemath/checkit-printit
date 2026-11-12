@@ -304,11 +304,33 @@ class TestTheThreeQuestions:
 
 # ------------------------------------------------------ cutting it out --
 
-def box_crop(ink_in_box=0.0, ink_beside=0.0, size=None, pen=(230, 90, 20)):
+def box_crop(ink_in_box=0.0, ink_beside=0.0, size=None, pen=(230, 90, 20),
+             ink_above=0.0, ink_left=0.0, faint=None):
     """A crop shaped like a real one, with pen placed where asked.
 
     Built rather than scanned, so a test about thresholds is not
     also a test about pdfium.
+
+    `ink_above` and `ink_left` put the same amount of pen somewhere
+    a question mark does not go. They exist because `beside` used to
+    be decided on a ring around the box, which cannot tell the two
+    apart, and on 2026-11-12 three pages of his own written comments
+    came back offered as queries. A fixture with only one place to
+    put ink could not have caught that.
+
+    `faint` is how many short stretches of the printed outline are
+    missing. The box is found by matching that outline, and what the
+    November stack kept producing was an outline with pieces of it
+    not there: thin print, a photocopier's blur, and the instructor's
+    own coloured tick crossing a side -- which the matcher drops on
+    purpose, because it matches on *uncoloured* dark and a tick is
+    not part of the shape. Six boxes went unfound that way, three of
+    them with a plain tick in them.
+
+    Gaps rather than a lighter grey, which was tried first and tests
+    nothing: `RULE_DARK` is 140, so an outline drawn at 120 is every
+    bit as dark *as far as the mask is concerned* and scores
+    identically. The fixture has to break the shape, not dim it.
 
     **The box is printed black and the mark is coloured**, because
     that is the difference the reading is built on: the rule, the
@@ -333,13 +355,36 @@ def box_crop(ink_in_box=0.0, ink_beside=0.0, size=None, pen=(230, 90, 20)):
     bx, by = 60, (size[1] - side) // 2
     draw.rounded_rectangle([bx, by, bx + side, by + side], radius=7,
                            outline=(30, 30, 30), width=3)
+    # Paper painted back over the outline, in `faint` evenly spaced
+    # notches around it, each a twelfth of a side.
+    if faint:
+        bite = side // 12
+        for n in range(faint):
+            at = (n * 4 * side) // max(1, faint)
+            if at < side:
+                spot = (bx + at, by)
+            elif at < 2 * side:
+                spot = (bx + side, by + at - side)
+            elif at < 3 * side:
+                spot = (bx + 3 * side - at, by + side)
+            else:
+                spot = (bx, by + 4 * side - at)
+            draw.rectangle([spot[0] - bite, spot[1] - bite,
+                            spot[0] + bite, spot[1] + bite],
+                           fill=(243, 243, 240))
     # `measure` divides both numbers by the area of the box's inset
     # middle, so a fixture asking for "0.3" has to draw 0.3 of
     # *that*, not of the box. Getting this wrong made a 0.3 request
     # come out at 0.63 and read as a scribble.
     middle = side * (1 - 2 * scans.INSET)
-    for fraction, (ax, ay) in ((ink_in_box, (bx + 9, by + 9)),
-                               (ink_beside, (bx + side + 14, by + 9))):
+    # The `above` and `left` corners are placed clear of the band
+    # `Q_BAND` describes, which reaches a quarter of a box-height
+    # above the box and no further left than its own left edge.
+    places = ((ink_in_box, (bx + 9, by + 9)),
+              (ink_beside, (bx + side + 14, by + 9)),
+              (ink_above, (bx + 4, 2)),
+              (ink_left, (2, by + 4)))
+    for fraction, (ax, ay) in places:
         if not fraction:
             continue
         span = max(3, round(middle * fraction ** 0.5))
@@ -451,11 +496,18 @@ class TestReadingAMark:
         assert 0 < out["sure"] <= scans.BESIDE_CEILING
 
     def test_a_box_that_could_not_be_found_is_sure_of_nothing(self):
+        """None, not nought. Zero is a reading -- it says the
+        measurement sits exactly on the line between two calls.
+        Nothing was measured here, and the dial showing 0/10 put
+        these rows at the unsure end of the Scans table looking like
+        the most doubtful readings in the stack. They are not
+        readings. He asked what had happened to them, which is the
+        question a wrong number invites."""
         from PIL import Image
         blank = Image.new("RGB", (247, 177), (243, 243, 240))
         out = scans.measure(blank)
         assert out["call"] == "nobox"
-        assert out["sure"] == 0.0
+        assert out["sure"] is None
 
     def test_sure_never_leaves_nought_to_one(self):
         """It is shown as a dial out of ten, and a dial takes a
@@ -473,6 +525,110 @@ class TestReadingAMark:
         good = scans._confidence("ticked", 0.2, 0.0, scans.EDGE_GOOD)
         bare = scans._confidence("ticked", 0.2, 0.0, scans.EDGE_HIT)
         assert good > bare
+
+    def test_a_faint_query_is_less_sure_than_a_bold_one(self):
+        """Every call is scored against the threshold it was
+        actually decided on, and `beside` is decided on `BESIDE_MIN`
+        now. Left measuring against `INK_MIN` -- five times lower --
+        every question mark cleared the top of the scale by a mile
+        and they all came out at the ceiling, which is a dial that
+        has stopped saying anything."""
+        bold = scans.measure(box_crop(ink_beside=0.3))
+        faint = scans.measure(box_crop(ink_beside=0.08))
+        assert bold["call"] == faint["call"] == "beside"
+        assert bold["sure"] > faint["sure"]
+
+    def test_a_comment_written_above_the_box_is_not_a_question_mark(self):
+        """2026-11-12, three pages. He had written a note in pen
+        above or to the left of an empty box, and the reading
+        offered all three as queries -- because `beside` was decided
+        on a ring around the box, which asks how much ink is near it
+        and never asks where. A `?` goes in one place."""
+        out = scans.measure(box_crop(ink_above=0.3))
+        assert out["around"] > scans.BESIDE_MIN, \
+            "the fixture drew no ink in the ring; the test proves nothing"
+        assert out["query"] < scans.BESIDE_MIN
+        assert out["call"] == "empty"
+
+    def test_a_comment_written_left_of_the_box_is_not_one_either(self):
+        out = scans.measure(box_crop(ink_left=0.3))
+        assert out["around"] > scans.BESIDE_MIN, \
+            "the fixture drew no ink in the ring; the test proves nothing"
+        assert out["call"] == "empty"
+
+    def test_a_speck_beside_the_box_is_not_a_question_mark(self):
+        """One page of the same stack carried a single fleck of blue
+        in a corner, measured 0.0145 against a floor of 0.012, and
+        was offered as a query at 0 out of 10. The floor was
+        `INK_MIN`, which is the floor for a pen stroke *inside* the
+        box and far too low for a mark claimed to be a glyph."""
+        out = scans.measure(box_crop(ink_beside=0.02))
+        assert out["query"] > scans.INK_MIN, \
+            "the speck did not clear the old floor; the test proves nothing"
+        assert out["call"] == "empty"
+
+    def test_a_question_mark_beside_a_commented_box_still_reads(self):
+        """The share rule is a share, not a ban on other ink. A page
+        with a note above it *and* a query beside it is still a
+        query."""
+        out = scans.measure(box_crop(ink_beside=0.3, ink_above=0.1))
+        assert out["call"] == "beside"
+
+    def test_a_faintly_printed_box_is_still_found(self):
+        """Six boxes on 2026-11-12 scored 0.454 to 0.489 of their
+        outline against a gate of 0.50 and were discarded, three of
+        them with a plain tick drawn in them. The gate was fitted to
+        the boxes of one earlier stack and sat inside the next one's
+        range rather than below it."""
+        crop = box_crop(ink_in_box=0.2, faint=14)
+        # Pinned to the band the change is about, so the test cannot
+        # quietly stop exercising it: this outline scores below the
+        # 0.50 the gate used to be and above the 0.38 it is now.
+        # Without this the fixture could drift crisp and the test
+        # would pass while proving nothing.
+        quality = scans.scored_box(crop)[1]
+        assert scans.EDGE_HIT < quality < 0.50, quality
+        out = scans.measure(crop)
+        assert out["call"] == "ticked"
+        assert out["sure"] is not None
+
+    def test_a_broken_box_is_believed_less_than_a_whole_one(self):
+        """Finding it is not the same as trusting it. What a weak
+        outline costs is confidence in the call, which is the right
+        place for the doubt -- not a page thrown away.
+
+        Note how high the drawn box scores: 0.97, where the best of
+        107 real ones managed 0.741. A fixture box has no blur and
+        no photocopier behind it, so `faint` has to take a good deal
+        of outline away before it reaches the range a real scan
+        lives in."""
+        whole = scans.measure(box_crop(ink_in_box=0.2))
+        broken = scans.measure(box_crop(ink_in_box=0.2, faint=9))
+        assert whole["call"] == broken["call"] == "ticked"
+        assert whole["sure"] > broken["sure"]
+
+    def test_a_line_of_writing_is_not_mistaken_for_a_box(self):
+        """What lowering the gate has to not do.
+
+        Measured on the real thing rather than asserted: the name
+        crop of all 107 pages of 2026-11-12, cut to the size of a
+        box crop, scored 0.000 to 0.264 -- against 0.454 for the
+        faintest real box. 0.38 sits between them.
+
+        The limit of this, stated rather than hidden: a dense grid
+        of small printed rectangles *can* match, and an earlier
+        version of this test accidentally drew one. It is not a case
+        that arises, because the crop is always cut around the mark
+        the index recorded for the box, so there is always a real
+        box in the picture; and `_pinned`, which is the one place a
+        wrong match would do lasting damage, throws out any box
+        found somewhere the footer code disagrees with."""
+        from PIL import Image, ImageDraw
+        page = Image.new("RGB", (247, 177), (243, 243, 240))
+        draw = ImageDraw.Draw(page)
+        draw.text((12, 80), "Name: Bo Peep", fill=(20, 20, 20))
+        draw.line([12, 96, 230, 96], fill=(20, 20, 20), width=2)
+        assert scans.measure(page)["call"] == "nobox"
 
     def test_the_hint_follows_the_padding(self):
         """`_window` is derived from PAD rather than written down

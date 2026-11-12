@@ -3613,7 +3613,16 @@ function sureDial(row) {
   box.className = "suredial";
   if (row.sure === null || row.sure === undefined) {
     box.classList.add("nodial");
-    box.title = "nothing was scanned, so there is nothing to read";
+    // Two ways to have no reading, and they are not the same thing
+    // to do about. No paper means wait for it or mark it by hand;
+    // a paper whose box could not be found means look at the
+    // picture, because the box is probably sitting there plainly
+    // ticked. Both show no dial -- a dial at 0 said "I read this
+    // and it is as doubtful as a reading gets", which neither is.
+    box.title = row.scanned
+      ? "the paper is here, but no grading box could be found on it "
+        + "to read -- look at the Box column"
+      : "nothing was scanned, so there is nothing to read";
     return box;
   }
   const outOfTen = Math.round(row.sure * 10);
@@ -3837,6 +3846,17 @@ const MATCHED_COLUMNS = [
   { key: "assessment", label: "Assessment", min: 120,
     value: r => r.assessment || `Job ${r.run}`,
     cell: matchedAssessmentCell },
+  /* When it was sat. Its own column rather than a second line in
+     the one above, because he sorts on it: the same skill set
+     reprinted a fortnight later carries the same title, so the
+     title on its own cannot say which sitting a paper is from.
+
+     Shown m/d and sorted on the ISO date underneath. Sorting the
+     shown string would put 11/12 before 11/9; the year it drops is
+     the thing that makes a text sort work. */
+  { key: "date", label: "Date", min: 64,
+    value: r => r.date || "",
+    cell: r => document.createTextNode(shortDay(r.date)) },
   { key: "skill", label: "Skill", min: 64 },
   { key: "sure", label: "Conf", min: 80, cls: "mid",
     // Padded, because the compare is textual: "9" beats "10" unsorted.
