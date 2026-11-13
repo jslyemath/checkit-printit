@@ -898,8 +898,8 @@ class AuditReport:
             lines.append(f"{self.rows_skipped} row(s) skipped by an ignore "
                          "rule and checked for not having moved")
         if self.columns_dropped:
-            lines.append(f"{self.columns_dropped} column(s) the LMS computes "
-                         "for itself were removed so it will read the file")
+            lines.append(f"{self.columns_dropped} column(s) the LMS cannot "
+                         "read back were removed so it will take the file")
         if self.ok:
             lines.append("no findings")
             return "\n".join(lines)
@@ -951,7 +951,58 @@ def names_a_slug(header, slug):
 #: Matched on the header text rather than on a list of names, so this
 #: is a no-op on a gradebook that has none of them. A Canvas export
 #: goes through untouched.
-def _not_importable(header):
+#:
+#: **Two errors, not one, and the first was a different column.**
+#: Trimming those eleven was aimed at the wrong error. He got past
+#: "cannot be read" by deleting `OSW_ID` -- a column of his that is
+#: not a grade item at all -- and only then reached the second
+#: screen, where "one or more grade items have just been renamed,
+#: created and/or deleted by another user" is what the computed
+#: columns produce. So the eleven above answer the *second* error and
+#: `_not_a_grade_item` below answers the first.
+
+#: The columns a Brightspace export carries that are not grade items
+#: and are not meant to be. Anything else without a `<Type ...>`
+#: suffix is a column the importer has no grade item to match it to.
+#:
+#: `Calculated Final Grade` is here so that the no-suffix rule does
+#: not claim it: it is dropped, but for its own reason, which is the
+#: one worth reading.
+FIXED_COLUMNS = (
+    "OrgDefinedId", "Username", "Last Name", "First Name", "Email",
+    "End-of-Line Indicator",
+    "Adjusted Final Grade Numerator", "Adjusted Final Grade Denominator",
+    "Calculated Final Grade Numerator", "Calculated Final Grade Denominator",
+)
+
+
+def _not_a_grade_item(header, typed):
+    """Why the importer has nothing to match this column to, or None.
+
+    `typed` says whether this file labels its grade items at all --
+    whether any header carries a `<Type ...>` suffix. **The rule only
+    applies when it does**, and that gate is the whole of its safety:
+    a Brightspace export labels every grade item, so an unlabelled
+    column that is not one of `FIXED_COLUMNS` is not a grade item. A
+    Canvas export labels none of them, so the rule never engages and
+    its `Student`, `ID` and `SIS Login ID` columns are left alone.
+
+    Measured on his 2026-11-12 export: 48 of 61 columns carry a
+    suffix, and of the 13 that do not, twelve are in `FIXED_COLUMNS`
+    and the thirteenth is `OSW_ID` -- the one column he had to delete
+    by hand to get the file read at all.
+    """
+    text = header.strip()
+    if not typed or "<" in text or text in FIXED_COLUMNS:
+        return None
+    if text.endswith(" Subtotal Numerator") \
+            or text.endswith(" Subtotal Denominator"):
+        return None             # handled below, with its own reason
+    return ("not a grade item: the importer has nothing to match it to, "
+            "and refuses the file rather than ignoring it")
+
+
+def _not_importable(header, typed=False):
     """Why the LMS cannot read this column back, or None."""
     text = header.strip()
     if "<Formula " in text:
@@ -965,7 +1016,7 @@ def _not_importable(header):
     if text.endswith(" Subtotal Numerator") \
             or text.endswith(" Subtotal Denominator"):
         return "a category subtotal: Brightspace computes it"
-    return None
+    return _not_a_grade_item(text, typed)
 
 
 def importable_columns(head):
@@ -974,9 +1025,13 @@ def importable_columns(head):
     `keep` is the 0-based indices to carry into the import file, in
     order; `dropped` is `[(index, header, why)]`.
     """
+    # Does this file label its grade items at all? Everything the
+    # no-suffix rule does rests on the answer, so it is asked once, of
+    # the whole header, rather than inferred per column.
+    typed = any("<" in header and ">" in header for header in head)
     keep, dropped = [], []
     for index, header in enumerate(head):
-        why = _not_importable(header)
+        why = _not_importable(header, typed)
         if why is None:
             keep.append(index)
         else:
@@ -1173,10 +1228,14 @@ def audit_export(before, after, name, profile, students, progress, slugs,
             "the header row is neither the one that was exported nor that "
             "row with whole columns removed"))
         return report
+    # Asked of the exported header, and once: the no-suffix rule only
+    # applies to a file that labels its grade items, and a column
+    # judged without that context reads as importable when it is not.
+    typed = any("<" in header and ">" in header for header in before[0])
     for index, header in enumerate(before[0]):
         if index in aligned:
             continue
-        why = _not_importable(header)
+        why = _not_importable(header, typed)
         if why is None:
             # Taking out a column the LMS *can* read is a loss: that
             # grade item simply will not be imported, and nothing
@@ -1184,8 +1243,7 @@ def audit_export(before, after, name, profile, students, progress, slugs,
             report.findings.append(AuditFinding(
                 "stray", f"{name} column {index + 1}",
                 f"{header!r} was removed, and it is a column the LMS can "
-                "read back -- trimming only removes what it computes "
-                "for itself"))
+                "read back -- trimming only removes what it cannot"))
         else:
             report.columns_dropped += 1
 
@@ -1272,10 +1330,25 @@ def audit_export(before, after, name, profile, students, progress, slugs,
             where = aligned.get(column)
             return "" if where is None or where >= len(row) else row[where]
 
-        skipped = bool(ignored_by(new, profile.ignore_rows))
+        # From the exported row too, and for the same reason: whether
+        # a row is a retired enrolment is a fact about who it is, and
+        # the marker may sit in a column the trim removed.
+        skipped = bool(ignored_by(old, profile.ignore_rows))
         if skipped:
             report.rows_skipped += 1
-        student = None if skipped else whose(now(student_at))
+        # **From the exported row, not the written one.** The column
+        # the profile joins on may not survive the trim at all -- his
+        # is `OSW_ID`, which is not a grade item and is exactly the
+        # column he had to delete to get the file read. Reading it
+        # from `after` made every student unresolvable the moment the
+        # trim started removing it, and turned every written cell into
+        # an "unbacked" finding.
+        #
+        # Safe because this column is never written to, and the stray
+        # check below says so for as long as it is in the file: a
+        # changed id anywhere outside a skill column is a finding in
+        # its own right.
+        student = None if skipped else whose(was(student_at))
         if student is not None:
             for slug, column in columns.items():
                 reachable.setdefault((student.sid, slug), []).append(
