@@ -2091,6 +2091,120 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
                "LMS in between would be set back to the exported value.")
 
 
+@gradebook.command(name="audit")
+@click.argument("before", type=click.Path(exists=True))
+@click.argument("after", type=click.Path(exists=True))
+@click.option("-c", "--course", default="", help="Which course.")
+@click.option("--not-yet", "not_yet", default="", metavar="SLUGS",
+              help="The same list the export was run with. Without it, a "
+                   "non-pass in the file is reported as written for a "
+                   "skill nobody asked for -- the right answer when the "
+                   "flag genuinely was not passed, and a false alarm when "
+                   "it was.")
+@click.option("--header-row", default=None, type=int,
+              help="Which row holds the column names, 1-based.")
+def gradebook_audit(before, after, course, not_yet, header_row):
+    """Check a filled-in gradebook against the record, cell by cell.
+
+    BEFORE is the file as the LMS exported it; AFTER is the copy you
+    are about to upload. Reads both, writes nothing.
+
+    **A different question from the one `export` already answers.**
+    Every write is checked against the plan that produced it -- but a
+    plan that is wrong and a write that is faithful to it both pass
+    that check, because the plan is the question and the answer. This
+    asks instead whether every cell in the finished file agrees with
+    what the record says, and it takes a file from anywhere: this
+    tool, the old script, or one edited by hand.
+
+    What it reports, worst first:
+
+    \b
+      regression  a cell held a pass and no longer does
+      unbacked    a cell changed that the record does not account for
+      stray       a cell changed outside any skill's column
+      shape       a row, a row's width, or the header row moved
+      mismapped   a column mapped to a slug its header never names
+      missed      the record says passed and the file does not
+
+    The first four mean the file is not what it should be, and the
+    command exits non-zero. `missed` is the inverse check and the one
+    that matters most on a quiet run: a file that was never written to
+    at all passes every other test here.
+    """
+    if not course:
+        raise click.ClickException("say which course, with -c/--course.")
+    slugs = _bank_slugs(course)
+    try:
+        profile = gradebook_mod.load(gradebook_mod.path_for(course))
+    except gradebook_mod.GradebookError as exc:
+        raise click.ClickException(str(exc))
+
+    roster_path = course_mod.file_in(course, "roster")
+    if not os.path.isfile(roster_path):
+        raise click.ClickException(f"no roster at {roster_path}.")
+    try:
+        people = roster_mod.load(roster_path)
+    except roster_mod.RosterError as exc:
+        raise click.ClickException(f"{roster_path}: {exc}")
+
+    old_rows = mask_mod.read_rows(before)
+    new_rows = mask_mod.read_rows(after)
+    if not old_rows:
+        raise click.ClickException(f"{before} is empty.")
+    try:
+        index = mask_mod.find_header(old_rows, header_row)
+        profile.validate(old_rows[index])
+    except (mask_mod.MaskError, gradebook_mod.GradebookError) as exc:
+        raise click.ClickException(f"{before}: {exc}")
+
+    progress = record_mod.progress(course_mod.file_in(course, "record"))
+    if not progress:
+        raise click.ClickException(
+            "nothing has been graded in this course, so there is nothing "
+            "to check this file against.")
+    wanted = {s.strip() for s in not_yet.split(",") if s.strip()}
+
+    report = gradebook_mod.audit_export(
+        old_rows[index:], new_rows[index:], os.path.basename(after), profile,
+        people, progress, slugs, not_yet=wanted,
+        thresholds=course_mod.thresholds(course))
+
+    # And the bytes, which the rows cannot speak for: a cell whose
+    # value is unchanged and whose quoting is not reads as identical
+    # through a CSV parser and is a different file to the LMS.
+    with open(before, "rb") as handle:
+        old_bytes = handle.read()
+    with open(after, "rb") as handle:
+        new_bytes = handle.read()
+    moved, same = gradebook_mod.changed_lines(old_bytes, new_bytes)
+    report.lines_identical = same
+
+    click.echo(before)
+    click.echo(after)
+    click.echo("")
+    click.echo(report.describe())
+    click.echo("")
+    click.echo(f"{same} line(s) came through byte for byte; "
+               f"{len(moved)} differ")
+    if moved:
+        click.echo("  lines: " + ", ".join(str(n) for n in moved[:20])
+                   + (" ..." if len(moved) > 20 else ""))
+
+    stops = [f for f in report.findings
+             if f.kind in ("regression", "unbacked", "stray", "shape")]
+    click.echo("")
+    if stops:
+        raise click.ClickException(
+            f"{len(stops)} problem(s) mean this file should not be "
+            "uploaded as it stands.")
+    if report.findings:
+        click.echo("Nothing here says the file is wrong, but read the "
+                   "findings above before uploading.")
+    else:
+        click.echo("Every cell in this file agrees with the record.")
+
+
 @gradebook.command(name="show")
 @click.option("-c", "--course", default="", help="Which course.")
 def gradebook_show(course):

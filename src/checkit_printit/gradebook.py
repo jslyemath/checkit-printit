@@ -826,6 +826,390 @@ def apply_export(sheet, changes):
     return out
 
 
+# ------------------------------------------------- auditing the result --
+
+#: What an audit finding is about. Ordered worst first, which is the
+#: order they are reported in.
+FINDING_KINDS = (
+    # A cell that held a pass and does not any more. The one thing
+    # this tool promises never to do.
+    "regression",
+    # A cell changed that the record does not justify, or changed to a
+    # value that is neither the pass nor the non-pass string.
+    "unbacked",
+    # A cell changed outside any column a skill claims, or in a column
+    # the profile says to leave alone.
+    "stray",
+    # The row count, a row's width, or the header row moved.
+    "shape",
+    # A column mapped to a slug whose name is nowhere in its header.
+    "mismapped",
+    # The record says passed and the file does not, with a column and a
+    # row that both exist. The inverse check: an export that quietly
+    # did nothing passes every other test here.
+    "missed",
+)
+
+
+@dataclasses.dataclass
+class AuditFinding:
+    kind: str
+    #: File, row and column. **Never a student.** Same rule as
+    #: `ExportReport`: this is printed, and a report that can carry a
+    #: name is a report that cannot be shown to anybody.
+    where: str
+    says: str
+
+
+@dataclasses.dataclass
+class AuditReport:
+    findings: list = dataclasses.field(default_factory=list)
+    #: Cells compared, cells that differ, and cells that held a pass
+    #: before and still do -- the last being the number that answers
+    #: "nothing regressed" in the affirmative rather than by silence.
+    compared: int = 0
+    changed: int = 0
+    passes_held: int = 0
+    #: Changed cells the record positively accounts for.
+    backed: int = 0
+    rows_skipped: int = 0
+    #: Lines of the file that came through byte for byte. Filled by the
+    #: caller from `changed_lines`, because it is a fact about the
+    #: bytes and this function is given rows.
+    lines_identical: int = 0
+
+    @property
+    def ok(self):
+        return not self.findings
+
+    def of_kind(self, kind):
+        return [f for f in self.findings if f.kind == kind]
+
+    def describe(self):
+        lines = [
+            f"{self.compared} cell(s) compared, {self.changed} changed, "
+            f"{self.backed} of those backed by the record",
+            f"{self.passes_held} cell(s) already held a pass and still do",
+        ]
+        if self.rows_skipped:
+            lines.append(f"{self.rows_skipped} row(s) skipped by an ignore "
+                         "rule and checked for not having moved")
+        if self.ok:
+            lines.append("no findings")
+            return "\n".join(lines)
+        for kind in FINDING_KINDS:
+            for finding in self.of_kind(kind):
+                lines.append(f"  {kind.upper():11s} {finding.where}: "
+                             f"{finding.says}")
+        return "\n".join(lines)
+
+
+def names_a_slug(header, slug):
+    """Whether `header` plausibly belongs to `slug`, by a dumb rule.
+
+    Deliberately dumber than `match`. The audit's job is not to work
+    the mapping out a second time -- a second heuristic is a second
+    thing to be wrong -- but to check the one that was used against a
+    rule simple enough to read: the header starts with the slug, and
+    the next character is not a letter or a digit, so `N3` does not
+    claim `N30`.
+    """
+    if not header.startswith(slug):
+        return False
+    rest = header[len(slug):]
+    return not rest[:1].isalnum()
+
+
+def changed_lines(before, after):
+    """Which 1-based lines of two files' bytes differ, and how many.
+
+    `(numbers, same_count)`. Bytes, not parsed cells, because that is
+    the promise `splice` makes and the one a parsed comparison cannot
+    check: a cell whose value is unchanged and whose quoting is not
+    reads as identical through `csv.reader` and is a different file as
+    far as the LMS is concerned.
+
+    Line endings are kept, so a file that arrived CRLF and left LF
+    shows up as every line differing rather than as nothing.
+    """
+    old = before.decode("utf-8-sig").splitlines(keepends=True)
+    new = after.decode("utf-8-sig").splitlines(keepends=True)
+    numbers = [n for n, (a, b) in enumerate(zip(old, new), 1) if a != b]
+    numbers += list(range(min(len(old), len(new)) + 1,
+                          max(len(old), len(new)) + 1))
+    return numbers, sum(1 for a, b in zip(old, new) if a == b)
+
+
+def audit_export(before, after, name, profile, students, progress, slugs,
+                 not_yet=(), thresholds=None, columns=None, header_line=1):
+    """Check a written file against the record, not against the plan.
+
+    `before` and `after` are the file's rows, header first, as
+    `Sheet.rows` holds them. Returns an `AuditReport`.
+
+    **Why this exists when `verify_export` already does.**
+    `verify_export` checks that the write did what the plan said. A
+    plan that is wrong and a write that is faithful to it come back
+    clean, because the plan is both the question and the answer. This
+    asks a different question -- does every cell in the file agree
+    with what the record says about that student and that skill --
+    and it asks it of the bytes that are about to be uploaded.
+
+    **What is genuinely independent of `plan_export`, and what is
+    not.** Worth stating plainly, because an audit that quietly shares
+    the bug it is looking for is worse than none.
+
+    *Independent.* The headline check -- no cell that held a pass
+    holds anything else afterwards -- compares the two files and
+    nothing else. It needs no mapping, no roster, no record, and no
+    agreement with the planner about anything. So do the shape checks
+    and the check that nothing changed outside a skill's column.
+
+    *Shared.* Joining a row to a student uses the same `_core`
+    normalisation and the same `ignored_by` rule, and resolving a
+    column to a slug uses the mapping the planner arrived at. Writing
+    a second normaliser would invent disagreements rather than find
+    them. The mapping is *checked* instead of recomputed, by
+    `names_a_slug`, which is strict where `match` is clever.
+
+    So: a planner that writes to the wrong cell, overwrites a pass,
+    invents a result, or silently writes nothing is caught here. A
+    roster whose ids are wrong in the same way in both places is not.
+    """
+    report = AuditReport()
+    thresholds = thresholds or {}
+    not_yet = set(not_yet)
+    passed, not_passed = profile.passed, profile.not_passed
+
+    # ---- shape, before anything is read cell by cell -----------------
+    if header_line != 1:
+        # Everything below indexes rows from `before[0]` being the
+        # header, which is also what `Sheet.head` and `plan_export`
+        # assume. Rather than audit the wrong rows quietly, say so: a
+        # file with a preamble would otherwise come back clean having
+        # compared a student's row against a title line.
+        report.findings.append(AuditFinding(
+            "shape", name,
+            f"the header is on line {header_line} and this audit can only "
+            "read a file whose first line is the header"))
+        return report
+    if len(before) != len(after):
+        report.findings.append(AuditFinding(
+            "shape", name,
+            f"the row count changed, {len(before)} -> {len(after)}"))
+        return report
+    if not before:
+        return report
+    if before[0] != after[0]:
+        report.findings.append(AuditFinding(
+            "shape", f"{name} row 1", "the header row was written to"))
+        return report
+
+    head = after[0]
+
+    # ---- which column is which skill, and is that defensible ---------
+    if columns is None:
+        found = match(head, slugs, pairs=profile.pairs)
+        columns = dict(found.found)
+    slug_at = {column: slug for slug, column in columns.items()}
+    for slug, column in sorted(columns.items()):
+        if column >= len(head):
+            report.findings.append(AuditFinding(
+                "mismapped", f"{name} column {column + 1}",
+                f"mapped to {slug} and the header row has no such column"))
+            continue
+        header = head[column]
+        if names_a_slug(header, slug):
+            continue
+        if profile.pairs.get(slug) == header:
+            continue        # named by hand in the profile, which is the
+            #                 point of `pairs`: a column whose header
+            #                 does not carry its slug at all.
+        report.findings.append(AuditFinding(
+            "mismapped", f"{name} column {column + 1}",
+            f"mapped to {slug}, but its header does not begin with it "
+            f"and the profile does not pair them: {header!r}"))
+    for header in profile.ignore_columns:
+        if header in head and head.index(header) in slug_at:
+            report.findings.append(AuditFinding(
+                "mismapped", f"{name} column {head.index(header) + 1}",
+                f"the profile says to leave {header!r} alone and a skill "
+                f"claims it"))
+
+    # ---- the record, and who each row is -----------------------------
+    results = {(r["sid"], r["slug"]): r for r in progress}
+    by_key = {}
+    for student in students:
+        key = _core(getattr(student, profile.student_matches, "") or "")
+        if key:
+            by_key.setdefault(key, []).append(student)
+    student_at = (head.index(profile.student_column)
+                  if profile.student_column in head else None)
+    if student_at is None:
+        report.findings.append(AuditFinding(
+            "shape", name,
+            f"no column called {profile.student_column!r}"))
+        return report
+
+    def whose(row):
+        """The one student this row belongs to, or None."""
+        raw = row[student_at] if student_at < len(row) else ""
+        if not raw.strip():
+            return None
+        found = by_key.get(_core(raw)) or []
+        return found[0] if len(found) == 1 else None
+
+    #: (sid, slug) -> [(row number, column)], so the coverage pass can
+    #: tell "this skill has no column" from "this cell was left
+    #: behind". A list and not one entry because a student can hold two
+    #: rows -- a retired enrolment beside a live one -- and
+    #: `plan_export` deliberately writes to only one of them. The pass
+    #: being in *any* of their rows is what matters; demanding it in
+    #: the one this loop happened to see last would invent a finding.
+    reachable = {}
+
+    for index in range(1, len(after)):
+        old, new = before[index], after[index]
+        number = index + 1
+        if len(old) != len(new):
+            report.findings.append(AuditFinding(
+                "shape", f"{name} row {number}",
+                f"the row's width changed, {len(old)} -> {len(new)}"))
+            continue
+
+        skipped = bool(ignored_by(new, profile.ignore_rows))
+        if skipped:
+            report.rows_skipped += 1
+        student = None if skipped else whose(new)
+        if student is not None:
+            for slug, column in columns.items():
+                reachable.setdefault((student.sid, slug), []).append(
+                    (number, column))
+
+        for column, (a, b) in enumerate(zip(old, new)):
+            report.compared += 1
+            if a == b:
+                if a == passed:
+                    report.passes_held += 1
+                continue
+            report.changed += 1
+            at = f"{name} row {number}, column {column + 1}"
+
+            # 1. The promise. No mapping, no roster, no record: if it
+            #    said pass and no longer does, that is the finding, and
+            #    nothing about why it happened makes it not one.
+            if a == passed:
+                report.findings.append(AuditFinding(
+                    "regression", at,
+                    f"held {passed!r} and now holds {b!r} -- a pass is "
+                    "never replaced"))
+                continue
+
+            # 2. Changed where nothing should be written at all.
+            if skipped:
+                report.findings.append(AuditFinding(
+                    "stray", at,
+                    "this row is skipped by an ignore rule and was "
+                    f"written to anyway: {a!r} -> {b!r}"))
+                continue
+            slug = slug_at.get(column)
+            if slug is None:
+                # **No cell contents here.** Every other finding quotes
+                # a skill column, whose values are the two mark
+                # strings. This one is about a column no skill claims,
+                # and those are the id, the email and the name -- so
+                # the first version of this printed a student's
+                # OrgDefinedId into a report that goes on screen and
+                # into a log. The header says which column it was,
+                # which is the part that identifies the bug; who the
+                # row belongs to is in the course's own records.
+                which = (f"{head[column]!r}" if column < len(head)
+                         else "past the end of the header row")
+                report.findings.append(AuditFinding(
+                    "stray", at,
+                    f"no skill claims this column ({which}) and its value "
+                    "changed"))
+                continue
+            if b not in (passed, not_passed):
+                report.findings.append(AuditFinding(
+                    "unbacked", at,
+                    f"written as {b!r}, which is neither the pass nor the "
+                    "non-pass value"))
+                continue
+
+            # 3. Does the record say so.
+            if student is None:
+                report.findings.append(AuditFinding(
+                    "unbacked", at,
+                    "changed, and this row joins to no single student in "
+                    "the roster"))
+                continue
+            result = results.get((student.sid, slug))
+            if result is None:
+                report.findings.append(AuditFinding(
+                    "unbacked", at,
+                    f"written as {b!r} for {slug}, and the record holds no "
+                    "attempt at that skill for this row's student"))
+                continue
+            needed = thresholds.get(slug, 1)
+            got = result["passes"] or 0
+            if b == passed and got < needed:
+                report.findings.append(AuditFinding(
+                    "unbacked", at,
+                    f"written as a pass for {slug} on {got} pass(es), "
+                    f"where {needed} are needed"))
+                continue
+            if b == not_passed:
+                if got >= needed:
+                    report.findings.append(AuditFinding(
+                        "unbacked", at,
+                        f"written as a non-pass for {slug}, and the record "
+                        f"has {got} pass(es) of the {needed} needed"))
+                    continue
+                if not result["last_sat"]:
+                    report.findings.append(AuditFinding(
+                        "unbacked", at,
+                        f"written as a non-pass for {slug}, and the record "
+                        "has no sitting of it -- only absences"))
+                    continue
+                if slug not in not_yet:
+                    report.findings.append(AuditFinding(
+                        "unbacked", at,
+                        f"written as a non-pass for {slug}, which was not "
+                        "among the skills a non-pass was asked for"))
+                    continue
+            report.backed += 1
+
+    # ---- the inverse: a pass on the record that is not in the file ----
+    #
+    # Every other check here would pass a file that was never written
+    # to at all. This is the one that notices.
+    for (sid, slug), places in sorted(reachable.items()):
+        result = results.get((sid, slug))
+        if result is None:
+            continue
+        if (result["passes"] or 0) < thresholds.get(slug, 1):
+            continue
+        held = []
+        for number, column in places:
+            row = after[number - 1]
+            held.append((number, column,
+                         row[column] if column < len(row) else ""))
+        if any(now == passed for _, _, now in held):
+            continue
+        # A value the tool does not understand. `plan_export` refuses
+        # rather than overwriting one, so finding it here is the
+        # expected outcome and not a fault.
+        if any(now.strip() and now != not_passed for _, _, now in held):
+            continue
+        number, column, now = held[0]
+        report.findings.append(AuditFinding(
+            "missed", f"{name} row {number}, column {column + 1}",
+            f"the record has {slug} passed for this row's student and the "
+            f"file holds {now!r}"))
+    return report
+
+
 def verify_export(before, after, changes, sheet_name):
     """Check that exactly the planned cells of one sheet differ.
 
