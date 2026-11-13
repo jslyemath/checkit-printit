@@ -2039,7 +2039,7 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
         return
 
     os.makedirs(out_dir, exist_ok=True)
-    written = []
+    written, trims = [], {}
     try:
         for sheet in sheets:
             source = header_lines[sheet.name]
@@ -2052,7 +2052,13 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
                     + "\n  ".join(problems))
 
             stem, ext = os.path.splitext(os.path.basename(source))
-            target = os.path.join(out_dir, f"{stem}_UPDATED{ext or '.csv'}")
+            # `_IMPORT` when the file had to be narrowed for the LMS to
+            # read it, `_UPDATED` when it comes back the same shape.
+            # The name is the only thing on the file saying which of
+            # the two it is.
+            keep, dropped = gradebook_mod.importable_columns(sheet.head)
+            suffix = "_IMPORT" if dropped else "_UPDATED"
+            target = os.path.join(out_dir, f"{stem}{suffix}{ext or '.csv'}")
             if os.path.abspath(target) == os.path.abspath(source):
                 raise gradebook_mod.GradebookError(
                     f"{target} is the file you exported. Choose another -o.")
@@ -2071,6 +2077,37 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
                 raise gradebook_mod.GradebookError(
                     f"{target} did not match the plan:\n  "
                     + "\n  ".join(problems))
+
+            # And then make it a file the LMS will take. Brightspace
+            # refuses its own export over the columns it computes for
+            # itself; see `importable_columns`. Trimmed after the
+            # check above, which compares columns by index and should
+            # be looking at the file as it was handed over.
+            if dropped:
+                # Nothing this export wrote to may be dropped. The
+                # rule is written in terms of what the LMS computes,
+                # so a skill column cannot match it -- which is
+                # exactly the sort of thing to check rather than to
+                # rely on.
+                lost = sorted({c.slug for c in report.for_sheet(sheet.name)
+                               if c.column - 1 not in keep})
+                if lost:
+                    raise gradebook_mod.GradebookError(
+                        f"{target}: trimming for import would drop the "
+                        "column(s) holding " + ", ".join(lost))
+                with open(target, "wb") as f:
+                    f.write(gradebook_mod.drop_columns(data, keep))
+                # Read back again, for the same reason as above: what
+                # matters is the file on disk, not the bytes in hand.
+                problems = gradebook_mod.verify_dropped(
+                    back[sheet.header_line - 1:],
+                    mask_mod.read_rows(target)[sheet.header_line - 1:],
+                    keep, sheet.name)
+                if problems:
+                    raise gradebook_mod.GradebookError(
+                        f"{target} is not a faithful trim:\n  "
+                        + "\n  ".join(problems))
+                trims[sheet.name] = dropped
     except gradebook_mod.GradebookError as exc:
         for _, _, target in written:
             if os.path.isfile(target):
@@ -2086,6 +2123,21 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
         click.echo(f"wrote {mine} cell(s) into {target}")
     click.echo("  untouched lines are copied byte for byte")
     click.echo("  checked after writing: exactly the planned cells differ")
+
+    if trims:
+        click.echo("")
+        click.echo("Columns removed so the LMS can read the file back. "
+                   "Brightspace will not accept its own export: it carries "
+                   "columns it computes for itself, and the import refuses "
+                   "the whole file over them rather than skipping them.")
+        for name in sorted(trims):
+            click.echo(f"  {name}: {len(trims[name])} column(s)")
+            for index, header, why in trims[name]:
+                click.echo(f"    {index + 1:>3}  {header}")
+                click.echo(f"         {why}")
+        click.echo("  nothing is lost in the LMS: these are values it "
+                   "works out for itself, and it will do so again.")
+
     click.echo("")
     click.echo("Import these soon after exporting. A grade changed in the "
                "LMS in between would be set back to the exported value.")
@@ -2185,11 +2237,21 @@ def gradebook_audit(before, after, course, not_yet, header_row):
     click.echo("")
     click.echo(report.describe())
     click.echo("")
-    click.echo(f"{same} line(s) came through byte for byte; "
-               f"{len(moved)} differ")
-    if moved:
-        click.echo("  lines: " + ", ".join(str(n) for n in moved[:20])
-                   + (" ..." if len(moved) > 20 else ""))
+    if report.columns_dropped:
+        # Every line legitimately differs once whole columns have gone,
+        # so "21 of 21 lines differ" would be alarming and would mean
+        # nothing. The byte comparison catches a cell silently
+        # requoted, and a file narrowed for import is not the file to
+        # ask that of.
+        click.echo("Not comparing bytes: whole columns were removed for "
+                   "import, so every line differs by design. The cell by "
+                   "cell check above is the one that counts here.")
+    else:
+        click.echo(f"{same} line(s) came through byte for byte; "
+                   f"{len(moved)} differ")
+        if moved:
+            click.echo("  lines: " + ", ".join(str(n) for n in moved[:20])
+                       + (" ..." if len(moved) > 20 else ""))
 
     stops = [f for f in report.findings
              if f.kind in ("regression", "unbacked", "stray", "shape")]

@@ -7222,6 +7222,34 @@ async function gbWrite() {
    * about that leaves him to take it on trust, which is the position
    * he was in when he asked for outside validation. */
   const out = document.getElementById("gb-plan-out");
+
+  /* What was taken out so the LMS would read the file back.
+   *
+   * On screen rather than silent: what downloads is narrower than
+   * what was dropped in, and a file that quietly loses eleven columns
+   * is alarming to notice later. Brightspace will not accept its own
+   * export -- it carries columns it computes for itself and the
+   * import refuses the whole file over them. */
+  for (const file of got.trimmed || []) {
+    const line = document.createElement("p");
+    line.className = "lmstotal";
+    line.textContent = `${file.name} · ${file.dropped.length} column(s) `
+      + "removed so the LMS can read it back";
+    out.appendChild(line);
+    const fold = document.createElement("details");
+    const label = document.createElement("summary");
+    label.textContent = "Columns removed";
+    const list = document.createElement("ul");
+    list.className = "lmsskills";
+    for (const gone of file.dropped) {
+      const item = document.createElement("li");
+      item.textContent = `${gone.header} — ${gone.why}`;
+      list.appendChild(item);
+    }
+    fold.append(label, list);
+    out.appendChild(fold);
+  }
+
   for (const file of got.audit || []) {
     const line = document.createElement("p");
     line.className = "lmstotal";

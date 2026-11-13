@@ -1221,3 +1221,208 @@ class TestWhichLinesMoved:
     def test_a_line_added_at_the_end_is_counted(self):
         moved, _ = gb.changed_lines(b"a,b\r\n1,2\r\n", b"a,b\r\n1,2\r\n3,4\r\n")
         assert moved == [3]
+
+
+# ----------------------------- making it a file the LMS will read --
+
+#: A header row shaped like his real Brightspace export: the computed
+#: columns among the real ones, in the places the export puts them.
+TRIM_HEAD = [
+    "OrgDefinedId",
+    "\U0001f4cc Grading Scheme Reminder Text Grade <Text>",
+    "Total Core Skills Passed Formula Grade <Formula MaxPoints:22>",
+    "W1 Grade Symbol <Selectbox MaxPoints:1 Category:Core Skills Progress>",
+    "W2 Grade Symbol <Selectbox MaxPoints:1 Category:Core Skills Progress>",
+    "Core Skills Progress Subtotal Numerator",
+    "Core Skills Progress Subtotal Denominator",
+    "W3 Grade Symbol <Selectbox MaxPoints:1 Category:Core Skills Progress>",
+    "Calculated Final Grade Numerator",
+    "Calculated Final Grade Denominator",
+    "Adjusted Final Grade Numerator",
+    "Adjusted Final Grade Denominator",
+    "OSW_ID",
+    "End-of-Line Indicator",
+]
+
+
+class TestTrimmingForImport:
+    """Brightspace will not accept its own export.
+
+    The file it hands you carries columns it computes for itself --
+    formula items, each category's subtotal, the calculated final
+    grade -- and the import refuses the whole file over them rather
+    than skipping them: "The import file selected cannot be read."
+    His own export is otherwise a faultless CSV, 21 rows all 61
+    fields wide, no quoting, no embedded commas, so nothing
+    structural explains it.
+    """
+
+    def test_the_computed_columns_are_the_ones_dropped(self):
+        keep, dropped = gb.importable_columns(TRIM_HEAD)
+        assert [TRIM_HEAD[i] for i, _, _ in dropped] == [
+            "Total Core Skills Passed Formula Grade <Formula MaxPoints:22>",
+            "Core Skills Progress Subtotal Numerator",
+            "Core Skills Progress Subtotal Denominator",
+            "Calculated Final Grade Numerator",
+            "Calculated Final Grade Denominator",
+        ]
+        assert len(keep) == len(TRIM_HEAD) - 5
+
+    def test_every_skill_column_survives(self):
+        keep, _ = gb.importable_columns(TRIM_HEAD)
+        kept = [TRIM_HEAD[i] for i in keep]
+        for slug in ("W1", "W2", "W3"):
+            assert any(h.startswith(slug + " ") for h in kept), slug
+
+    def test_the_adjusted_final_grade_survives(self):
+        """Only the *calculated* final grade is computed. The adjusted
+        one is the column an instructor is meant to write in."""
+        keep, _ = gb.importable_columns(TRIM_HEAD)
+        kept = [TRIM_HEAD[i] for i in keep]
+        assert "Adjusted Final Grade Numerator" in kept
+        assert "Adjusted Final Grade Denominator" in kept
+
+    def test_the_identifier_and_the_end_marker_survive(self):
+        keep, _ = gb.importable_columns(TRIM_HEAD)
+        kept = [TRIM_HEAD[i] for i in keep]
+        assert kept[0] == "OrgDefinedId"
+        assert kept[-1] == "End-of-Line Indicator"
+        assert "OSW_ID" in kept
+
+    def test_a_gradebook_with_none_of_them_is_untouched(self):
+        """The rule is written in terms of what Brightspace computes,
+        so it is a no-op elsewhere -- a Canvas export goes through
+        whole. A trim that fired on another LMS would be silently
+        throwing columns away."""
+        head = ["Student", "ID", "SIS Login ID", "W1", "Current Score"]
+        keep, dropped = gb.importable_columns(head)
+        assert dropped == []
+        assert keep == list(range(len(head)))
+
+    def test_each_kept_field_keeps_its_own_text(self):
+        """Separators are rebuilt and fields are not. A cell the LMS
+        quoted has to stay quoted and one it left bare has to stay
+        bare, which is the same promise `splice` makes."""
+        data = (b'a,b,Core Skills Progress Subtotal Numerator,d\r\n'
+                b'1,"x, y",99,"4"\r\n')
+        out = gb.drop_columns(data, [0, 1, 3])
+        assert out == b'a,b,d\r\n1,"x, y","4"\r\n'
+
+    def test_the_line_endings_and_bom_are_carried_through(self):
+        data = (b"\xef\xbb\xbfa,Core Skills Progress Subtotal Numerator,c"
+                b"\r\n1,2,3\r\n")
+        out = gb.drop_columns(data, [0, 2])
+        assert out.startswith(b"\xef\xbb\xbf")
+        assert out.count(b"\r\n") == 2
+        assert out.count(b"\n") == out.count(b"\r\n")
+
+    def test_a_short_row_is_padded_rather_than_refused(self):
+        """A trailing empty cell produces one, and throwing the file
+        away over a cell that was never there would be worse than
+        writing the blank it stands for."""
+        out = gb.drop_columns(b"a,b,c\r\n1\r\n", [0, 2])
+        assert out == b"a,c\r\n1,\r\n"
+
+    def test_a_faithful_trim_has_nothing_to_report(self):
+        rows = [TRIM_HEAD, ["#1", "", "3", PASS, "", "1", "3", "", "5",
+                            "10", "", "", "806000111", "#"]]
+        keep, _ = gb.importable_columns(TRIM_HEAD)
+        trimmed = [[r[i] for i in keep] for r in rows]
+        assert gb.verify_dropped(rows, trimmed, keep, "f.csv") == []
+
+    def test_a_trim_that_moved_a_value_is_caught(self):
+        rows = [TRIM_HEAD, ["#1", "", "3", PASS, "", "1", "3", "", "5",
+                            "10", "", "", "806000111", "#"]]
+        keep, _ = gb.importable_columns(TRIM_HEAD)
+        trimmed = [[r[i] for i in keep] for r in rows]
+        trimmed[1][3] = "something else"
+        problems = gb.verify_dropped(rows, trimmed, keep, "f.csv")
+        assert problems and "did not survive" in problems[0]
+
+    def test_a_trim_that_lost_a_column_is_caught(self):
+        rows = [TRIM_HEAD, ["#1"] + [""] * 13]
+        keep, _ = gb.importable_columns(TRIM_HEAD)
+        trimmed = [[r[i] for i in keep][:-1] for r in rows]
+        problems = gb.verify_dropped(rows, trimmed, keep, "f.csv")
+        assert problems and "field(s) after trimming" in problems[0]
+
+
+class TestTheAuditFollowsTheTrim:
+    """The audit compares columns by number, and the file he uploads
+    has fewer of them than the file he downloaded. Without this it
+    would report the header as rewritten and stop -- on the only file
+    that matters."""
+
+    def rows_for(self, students):
+        return [TRIM_HEAD,
+                ["#1", "", "3", "", "", "1", "3", "", "5", "10", "", "",
+                 "806000111", "#"]]
+
+    def profile_for(self):
+        return Profile(name="t", student_column="OSW_ID",
+                       student_matches="sid", passed=PASS,
+                       not_passed=NOT_YET, blank_means="not attempted")
+
+    def test_a_trimmed_file_lines_up_by_header(self):
+        keep, _ = gb.importable_columns(TRIM_HEAD)
+        aligned = gb.align_columns(TRIM_HEAD, [TRIM_HEAD[i] for i in keep])
+        assert aligned is not None
+        assert len(aligned) == len(keep)
+        assert all(TRIM_HEAD[before] == TRIM_HEAD[keep[after]]
+                   for before, after in aligned.items())
+
+    def test_a_reordered_header_is_not_an_alignment(self):
+        """Same headers, different order. At that point nothing here
+        can say which column is which, so it refuses rather than
+        guessing."""
+        shuffled = list(reversed(TRIM_HEAD))
+        assert gb.align_columns(TRIM_HEAD, shuffled) is None
+
+    def test_a_renamed_header_is_not_an_alignment(self):
+        changed = list(TRIM_HEAD)
+        changed[3] = "W1 something else"
+        assert gb.align_columns(TRIM_HEAD, changed) is None
+
+    def test_the_written_cell_is_found_at_its_new_position(self, students):
+        """The whole point: a pass written into W1 is at column 4 in
+        the export and column 3 after the trim, and the audit has to
+        see one cell, not two."""
+        rows = self.rows_for(students)
+        keep, _ = gb.importable_columns(TRIM_HEAD)
+        after = [[r[i] for i in keep] for r in rows]
+        after[1][keep.index(3)] = PASS           # W1
+        report = gb.audit_export(
+            rows, after, "f.csv", self.profile_for(), students,
+            progress(("806000111", "W1", 1, "passed")), ["W1", "W2", "W3"],
+            columns={"W1": 3})
+        assert report.ok, report.describe()
+        assert report.changed == 1
+        assert report.columns_dropped == 5
+
+    def test_a_regression_is_still_caught_through_the_trim(self, students):
+        rows = self.rows_for(students)
+        rows[1][3] = PASS
+        keep, _ = gb.importable_columns(TRIM_HEAD)
+        after = [[r[i] for i in keep] for r in rows]
+        after[1][keep.index(3)] = NOT_YET
+        report = gb.audit_export(
+            rows, after, "f.csv", self.profile_for(), students,
+            progress(("806000111", "W1", 0, "failed")), ["W1", "W2", "W3"],
+            not_yet=("W1",), columns={"W1": 3})
+        assert "regression" in [f.kind for f in report.findings]
+
+    def test_dropping_a_column_the_lms_can_read_is_a_finding(self,
+                                                             students):
+        """Trimming only removes what Brightspace computes. Taking out
+        an importable column means that grade item silently will not
+        be imported, and nothing else here would say so."""
+        rows = self.rows_for(students)
+        keep, _ = gb.importable_columns(TRIM_HEAD)
+        keep = [i for i in keep if i != 4]       # W2, which is importable
+        after = [[r[i] for i in keep] for r in rows]
+        report = gb.audit_export(
+            rows, after, "f.csv", self.profile_for(), students,
+            progress(("806000111", "W1", 0, "failed")), ["W1", "W2", "W3"],
+            columns={"W1": 3})
+        assert "stray" in [f.kind for f in report.findings]
+        assert any("can read back" in f.says for f in report.findings)
