@@ -1265,8 +1265,10 @@ class TestTrimmingForImport:
             "Core Skills Progress Subtotal Denominator",
             "Calculated Final Grade Numerator",
             "Calculated Final Grade Denominator",
+            # Not computed -- not a grade item at all. See below.
+            "OSW_ID",
         ]
-        assert len(keep) == len(TRIM_HEAD) - 5
+        assert len(keep) == len(TRIM_HEAD) - 6
 
     def test_every_skill_column_survives(self):
         keep, _ = gb.importable_columns(TRIM_HEAD)
@@ -1287,7 +1289,35 @@ class TestTrimmingForImport:
         kept = [TRIM_HEAD[i] for i in keep]
         assert kept[0] == "OrgDefinedId"
         assert kept[-1] == "End-of-Line Indicator"
-        assert "OSW_ID" in kept
+
+    def test_a_column_that_is_not_a_grade_item_goes(self):
+        """`OSW_ID` is his own column and Brightspace has no grade
+        item to match it to. Deleting it by hand is what got him past
+        "the import file selected cannot be read" -- which was a
+        different error from the one the computed columns cause, and
+        the first version of this aimed at the wrong one.
+
+        A Brightspace export labels every grade item with a
+        `<Type ...>` suffix, so an unlabelled column that is not one
+        of `FIXED_COLUMNS` is not a grade item. 48 of his 61 carry a
+        suffix; of the 13 that do not, twelve are fixed columns and
+        the thirteenth is this."""
+        keep, dropped = gb.importable_columns(TRIM_HEAD)
+        assert "OSW_ID" not in [TRIM_HEAD[i] for i in keep]
+        why = next(w for i, h, w in dropped if h == "OSW_ID")
+        assert "not a grade item" in why
+
+    def test_the_fixed_columns_are_not_mistaken_for_grade_items(self):
+        """They carry no `<Type>` suffix either, and every one of them
+        belongs in the import file."""
+        head = ["OrgDefinedId", "Username", "Last Name", "First Name",
+                "Email", "W1 Points Grade <Numeric MaxPoints:1>",
+                "Adjusted Final Grade Numerator",
+                "Adjusted Final Grade Denominator",
+                "End-of-Line Indicator"]
+        keep, dropped = gb.importable_columns(head)
+        assert dropped == []
+        assert keep == list(range(len(head)))
 
     def test_a_gradebook_with_none_of_them_is_untouched(self):
         """The rule is written in terms of what Brightspace computes,
@@ -1397,7 +1427,28 @@ class TestTheAuditFollowsTheTrim:
             columns={"W1": 3})
         assert report.ok, report.describe()
         assert report.changed == 1
-        assert report.columns_dropped == 5
+        assert report.columns_dropped == 6
+
+    def test_the_student_is_resolved_without_the_column_joined_on(
+            self, students):
+        """His profile joins on `OSW_ID`, which the trim now removes
+        because it is not a grade item. Read out of the *written* file
+        that made every student unresolvable and turned every written
+        cell into an `unbacked` finding -- on the file he actually
+        uploads. The id is taken from the exported row, which is
+        where it has always been and which is never written to."""
+        rows = self.rows_for(students)
+        keep, _ = gb.importable_columns(TRIM_HEAD)
+        assert TRIM_HEAD.index("OSW_ID") not in keep, \
+            "the fixture no longer drops the column being tested"
+        after = [[r[i] for i in keep] for r in rows]
+        after[1][keep.index(3)] = PASS
+        report = gb.audit_export(
+            rows, after, "f.csv", self.profile_for(), students,
+            progress(("806000111", "W1", 1, "passed")), ["W1", "W2", "W3"],
+            columns={"W1": 3})
+        assert report.ok, report.describe()
+        assert report.backed == 1
 
     def test_a_regression_is_still_caught_through_the_trim(self, students):
         rows = self.rows_for(students)

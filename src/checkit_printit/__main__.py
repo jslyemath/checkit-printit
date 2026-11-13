@@ -2127,9 +2127,10 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
     if trims:
         click.echo("")
         click.echo("Columns removed so the LMS can read the file back. "
-                   "Brightspace will not accept its own export: it carries "
-                   "columns it computes for itself, and the import refuses "
-                   "the whole file over them rather than skipping them.")
+                   "Brightspace will not accept its own export: it holds "
+                   "columns it computes for itself, and columns that are "
+                   "not grade items at all, and the import refuses the "
+                   "whole file over them rather than skipping them.")
         for name in sorted(trims):
             click.echo(f"  {name}: {len(trims[name])} column(s)")
             for index, header, why in trims[name]:

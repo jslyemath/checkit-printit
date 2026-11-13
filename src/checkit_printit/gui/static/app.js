@@ -7226,10 +7226,11 @@ async function gbWrite() {
   /* What was taken out so the LMS would read the file back.
    *
    * On screen rather than silent: what downloads is narrower than
-   * what was dropped in, and a file that quietly loses eleven columns
-   * is alarming to notice later. Brightspace will not accept its own
-   * export -- it carries columns it computes for itself and the
-   * import refuses the whole file over them. */
+   * what was dropped in, and a file that quietly loses a dozen
+   * columns is alarming to notice later. Brightspace will not accept
+   * its own export -- it holds columns it computes for itself, and
+   * columns that are not grade items at all, and the import refuses
+   * the whole file over them rather than skipping them. */
   for (const file of got.trimmed || []) {
     const line = document.createElement("p");
     line.className = "lmstotal";
