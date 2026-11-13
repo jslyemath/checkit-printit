@@ -933,3 +933,291 @@ class TestThresholds:
             not_yet=("W1",), thresholds={"W1": 2})
         assert not changes
         assert report.kept_passes(), "the pass was not reported as kept"
+
+
+# ------------------------------------------------- auditing the result --
+
+class TestAuditingTheWrittenFile:
+    """`audit_export` checks the file against the *record*.
+
+    `verify_export` checks it against the plan, which cannot fail when
+    the plan is the thing that is wrong: it is both the question and
+    the answer. These tests damage the written file in ways a faithful
+    write of a wrong plan would produce, and every one of them has to
+    be noticed.
+
+    He asked for this before his first Brightspace upload, in those
+    words: outside validation.
+    """
+
+    def audit(self, one, out, students, prog, not_yet=(), thresholds=None,
+              **over):
+        return gb.audit_export(
+            one.rows, out, one.name, profile(**over), students, prog,
+            SKILLS, not_yet=not_yet, thresholds=thresholds)
+
+    def written(self, one, students, prog, **kw):
+        changes, _ = run(one, students, prog, **kw)
+        return gb.apply_export(one, changes)
+
+    def test_a_faithful_write_has_nothing_to_report(self, students):
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        report = self.audit(one, self.written(one, students, prog), students,
+                            prog)
+        assert report.ok, report.describe()
+        assert report.changed == 1
+        assert report.backed == 1
+
+    def test_a_pass_replaced_by_a_non_pass_is_a_regression(self, students):
+        """The one thing he named. No mapping, no roster and no record
+        are needed to see it: the cell said pass and does not now."""
+        one = sheet([("806000111", PASS, "", "")])
+        prog = progress(("806000111", "W1", 0, "failed"))
+        out = self.written(one, students, prog, not_yet=("W1",))
+        out[1][1] = NOT_YET                      # what must never happen
+        report = self.audit(one, out, students, prog, not_yet=("W1",))
+        assert [f.kind for f in report.findings] == ["regression"]
+
+    def test_a_pass_blanked_is_also_a_regression(self, students):
+        """The quieter half, and the one a "did anything become Not
+        Yet" check would miss. An emptied cell is a lost grade
+        wherever the subtotal counts filled cells."""
+        one = sheet([("806000111", PASS, "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        out = self.written(one, students, prog)
+        out[1][1] = ""
+        report = self.audit(one, out, students, prog)
+        # Both, and rightly so: the cell lost a pass, *and* the record
+        # still says that skill is passed, which the coverage pass has
+        # its own thing to say about.
+        assert [f.kind for f in report.findings] == ["regression", "missed"]
+
+    def test_a_pass_the_record_holds_and_the_file_does_not_is_missed(
+            self, students):
+        """The inverse check. A file that was never written to at all
+        passes every other test here -- nothing regressed, nothing
+        strayed, nothing is unbacked -- so this is the one that
+        notices an export that quietly did nothing."""
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        report = self.audit(one, [list(r) for r in one.rows], students, prog)
+        assert [f.kind for f in report.findings] == ["missed"]
+
+    def test_a_pass_with_no_result_behind_it_is_unbacked(self, students):
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        out = self.written(one, students, prog)
+        out[1][2] = PASS                         # W2, which has no record
+        report = self.audit(one, out, students, prog)
+        assert [f.kind for f in report.findings] == ["unbacked"]
+
+    def test_a_pass_short_of_its_threshold_is_unbacked(self, students):
+        """The bug that shipped once already, caught from the other
+        side: a skill needing two passes written as passed after one."""
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        out = [list(r) for r in one.rows]
+        out[1][1] = PASS
+        report = self.audit(one, out, students, prog, thresholds={"W1": 2})
+        assert [f.kind for f in report.findings] == ["unbacked"]
+        assert "2 are needed" in report.findings[0].says
+
+    def test_a_non_pass_for_a_skill_nobody_named_is_unbacked(self, students):
+        """Writing one raises the student's denominator, so it is a
+        deliberate act for the skills in play -- and a file holding one
+        that was never asked for is a file to look at."""
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 0, "failed"))
+        out = [list(r) for r in one.rows]
+        out[1][1] = NOT_YET
+        report = self.audit(one, out, students, prog)       # no not_yet
+        assert [f.kind for f in report.findings] == ["unbacked"]
+
+    def test_a_non_pass_over_a_passing_record_is_unbacked(self, students):
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        out = [list(r) for r in one.rows]
+        out[1][1] = NOT_YET
+        report = self.audit(one, out, students, prog, not_yet=("W1",))
+        kinds = [f.kind for f in report.findings]
+        assert "unbacked" in kinds
+
+    def test_a_non_pass_on_nothing_but_absences_is_unbacked(self, students):
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 0, None))
+        out = [list(r) for r in one.rows]
+        out[1][1] = NOT_YET
+        report = self.audit(one, out, students, prog, not_yet=("W1",))
+        assert [f.kind for f in report.findings] == ["unbacked"]
+        assert "only absences" in report.findings[0].says
+
+    def test_a_cell_outside_every_skill_column_is_stray(self, students):
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        out = self.written(one, students, prog)
+        out[1][5] = "9"                          # the Tokens column
+        report = self.audit(one, out, students, prog)
+        assert [f.kind for f in report.findings] == ["stray"]
+
+    def test_a_stray_finding_never_quotes_the_cell(self, students):
+        """Every other finding quotes a skill column, whose values are
+        the two mark strings. This one is about a column no skill
+        claims -- the id, the email, the name -- and the first version
+        printed a student's OrgDefinedId into a report that goes on
+        screen and into a log."""
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        out = self.written(one, students, prog)
+        out[1][0] = "806000111-changed"
+        report = self.audit(one, out, students, prog)
+        assert [f.kind for f in report.findings] == ["stray"]
+        said = report.findings[0].says + report.findings[0].where
+        assert "806000111" not in said, said
+
+    def test_a_write_into_an_ignored_row_is_stray(self, students):
+        """`-DoNotUse` marks a retired enrolment that has marks of its
+        own. Nothing may be written there at all."""
+        one = sheet([("806000111-DoNotUse", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        out = [list(r) for r in one.rows]
+        out[1][1] = PASS
+        report = self.audit(one, out, students, prog)
+        assert [f.kind for f in report.findings] == ["stray"]
+
+    def test_a_dropped_row_is_a_shape_finding(self, students):
+        one = sheet([("806000111", "", "", ""), ("806000222", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        out = self.written(one, students, prog)
+        out.pop()
+        report = self.audit(one, out, students, prog)
+        assert [f.kind for f in report.findings] == ["shape"]
+
+    def test_a_written_header_is_a_shape_finding(self, students):
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        out = self.written(one, students, prog)
+        out[0][1] = "something else"
+        report = self.audit(one, out, students, prog)
+        assert [f.kind for f in report.findings] == ["shape"]
+
+    def test_a_file_whose_header_is_not_the_first_line_is_refused(
+            self, students):
+        """Rather than audited wrongly. Everything here indexes from
+        `before[0]` being the header, which is what `Sheet.head` and
+        `plan_export` assume too; a file with a preamble would come
+        back clean having compared a student's row to a title line."""
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        report = gb.audit_export(
+            one.rows, [list(r) for r in one.rows], one.name, profile(),
+            students, prog, SKILLS, header_line=3)
+        assert [f.kind for f in report.findings] == ["shape"]
+        assert "first line is the header" in report.findings[0].says
+
+    def test_a_column_mapped_to_a_slug_its_header_never_names(self,
+                                                              students):
+        """The mapping is checked, not worked out a second time -- a
+        second heuristic is a second thing to be wrong. `names_a_slug`
+        is strict where `match` is clever."""
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        report = gb.audit_export(
+            one.rows, [list(r) for r in one.rows], one.name, profile(),
+            students, prog, SKILLS,
+            columns={"W1": 5})          # the Tokens column
+        assert "mismapped" in [f.kind for f in report.findings]
+
+    def test_a_hand_paired_column_is_not_mismapped(self, students):
+        """`pairs` exists precisely for a column whose header does not
+        carry its slug at all -- his `FCP` is one.
+
+        `ignore_columns` is cleared here, because the fixture's default
+        lists this very header and the first version of this test
+        therefore failed on the *other* check: a column the profile
+        says to leave alone that a skill also claims. Which is the
+        right answer to a different question, and is now asked below."""
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        report = gb.audit_export(
+            one.rows, [list(r) for r in one.rows], one.name,
+            profile(pairs={"W1": one.rows[0][5]}, ignore_columns=[]),
+            students, prog, SKILLS, columns={"W1": 5})
+        assert "mismapped" not in [f.kind for f in report.findings]
+
+    def test_a_column_the_profile_ignores_may_not_also_be_claimed(
+            self, students):
+        """Two statements that contradict each other: this column is
+        not to be written to, and this skill lives in it. Whichever is
+        wrong, writing to it is not safe."""
+        one = sheet([("806000111", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        report = gb.audit_export(
+            one.rows, [list(r) for r in one.rows], one.name,
+            profile(ignore_columns=[one.rows[0][5]]), students, prog,
+            SKILLS, columns={"W1": 5})
+        assert "mismapped" in [f.kind for f in report.findings]
+        assert any("leave" in f.says for f in report.findings)
+
+    def test_a_longer_slug_does_not_claim_a_shorter_ones_column(self):
+        """`N3` must not match `N30`'s header, which is the whole
+        reason the rule looks at the next character."""
+        assert gb.names_a_slug("W1 Grade Symbol <Selectbox>", "W1")
+        assert gb.names_a_slug("W1", "W1")
+        assert not gb.names_a_slug("W10 Grade Symbol", "W1")
+        assert not gb.names_a_slug("Tokens Text Grade", "W1")
+
+    def test_the_count_of_untouched_passes_is_reported(self, students):
+        """The number that answers "nothing regressed" in the
+        affirmative rather than by silence."""
+        one = sheet([("806000111", PASS, PASS, "")])
+        prog = progress(("806000111", "W3", 1, "passed"))
+        report = self.audit(one, self.written(one, students, prog), students,
+                            prog)
+        assert report.ok, report.describe()
+        assert report.passes_held == 2
+
+    def test_a_student_on_two_rows_is_covered_by_either(self, students):
+        """`plan_export` writes to the row with more grades and leaves
+        the other alone, so demanding the pass in both rows would
+        invent a finding. The first version of the coverage check kept
+        only the last row it saw and did exactly that."""
+        one = sheet([("806000111", PASS, "", ""),
+                     ("806000111-DoNotUse", "", "", "")])
+        prog = progress(("806000111", "W1", 1, "passed"))
+        report = self.audit(one, [list(r) for r in one.rows], students, prog)
+        assert report.ok, report.describe()
+
+
+class TestWhichLinesMoved:
+    """Bytes, which the parsed comparison cannot speak for.
+
+    A cell whose value is unchanged and whose quoting is not reads as
+    identical through `csv.reader`, and is a different file as far as
+    the LMS is concerned.
+    """
+
+    def test_an_identical_file_has_no_moved_lines(self):
+        data = b"a,b\r\n1,2\r\n"
+        assert gb.changed_lines(data, data) == ([], 2)
+
+    def test_the_line_that_changed_is_named(self):
+        moved, same = gb.changed_lines(b"a,b\r\n1,2\r\n3,4\r\n",
+                                       b"a,b\r\n1,9\r\n3,4\r\n")
+        assert (moved, same) == ([2], 2)
+
+    def test_requoting_a_cell_counts_as_a_change(self):
+        """The case the row comparison is blind to: both parse to the
+        same value."""
+        moved, _ = gb.changed_lines(b'a,b\r\n1,"2"\r\n', b"a,b\r\n1,2\r\n")
+        assert moved == [2]
+
+    def test_changed_line_endings_show_up(self):
+        """A file that arrived CRLF and left LF is not the file that
+        was downloaded."""
+        moved, _ = gb.changed_lines(b"a,b\r\n1,2\r\n", b"a,b\n1,2\n")
+        assert moved == [1, 2]
+
+    def test_a_line_added_at_the_end_is_counted(self):
+        moved, _ = gb.changed_lines(b"a,b\r\n1,2\r\n", b"a,b\r\n1,2\r\n3,4\r\n")
+        assert moved == [3]

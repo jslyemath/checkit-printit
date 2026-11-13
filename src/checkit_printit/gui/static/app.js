@@ -7212,6 +7212,61 @@ async function gbWrite() {
   }
   toast(got.cells === 1 ? "1 cell written into 1 file"
                         : `${got.cells} cells written`);
+
+  /* What the audit found, under the plan it came from.
+   *
+   * Said rather than assumed. The download is only handed over once
+   * every cell in it has been checked against the record -- not
+   * against the plan, which is the check that cannot fail when the
+   * plan is the thing that is wrong -- and a panel that says nothing
+   * about that leaves him to take it on trust, which is the position
+   * he was in when he asked for outside validation. */
+  const out = document.getElementById("gb-plan-out");
+  for (const file of got.audit || []) {
+    const line = document.createElement("p");
+    line.className = "lmstotal";
+    line.textContent = `${file.name} · checked: ${file.compared} cells, `
+      + `${file.changed} changed, ${file.backed} backed by the record, `
+      + `${file.passesHeld} passes untouched, `
+      + `${file.linesIdentical} lines byte-identical`;
+    out.appendChild(line);
+    for (const found of file.findings) {
+      const note = document.createElement("p");
+      note.className = "muted";
+      note.textContent = `${found.kind} · ${found.where}: ${found.says}`;
+      out.appendChild(note);
+    }
+  }
+  out.hidden = false;
+}
+
+/* Put the panel down: the carried file, what was read from it, the
+ * plan, and the file input.
+ *
+ * **The input is the part that is easy to miss.** A file input keeps
+ * its value after a choice, and choosing the same file again fires no
+ * `change` event -- so without clearing it, dropping the wrong
+ * gradebook and then re-picking the right one from the same dialog
+ * silently did nothing.
+ *
+ * The profile is not touched. It lives in `gradebook.toml` beside the
+ * course and is about the course, not about this file; throwing the
+ * mapping away because a file was dropped by mistake would be the
+ * expensive half of starting over. */
+async function gbClear() {
+  gbSay("");
+  try { await api("/api/gradebook/clear", {}); }
+  catch (err) { gbSay(err.message); return; }
+  gbRead = null;
+  const input = document.getElementById("gb-files");
+  if (input) input.value = "";
+  for (const id of ["gb-chosen", "gb-carrying"])
+    document.getElementById(id).textContent = "";
+  const plan = document.getElementById("gb-plan-out");
+  plan.textContent = "";
+  plan.hidden = true;
+  gbDrawRead();          // hides `gb-read`, `gbRead` being null
+  toast("Start again by dropping a gradebook");
 }
 
 function wireGradebook() {
@@ -7234,4 +7289,5 @@ function wireGradebook() {
 
   document.getElementById("gb-save").onclick = gbSaveProfile;
   document.getElementById("gb-plan").onclick = gbShowPlan;
+  document.getElementById("gb-clear").onclick = gbClear;
 }

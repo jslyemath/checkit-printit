@@ -3326,19 +3326,44 @@ def api_gradebook_plan(course, body):
     }
 
 
+#: Findings that stop the download rather than being reported beside
+#: it. The first three are "this file is not what it should be"; the
+#: rest are worth reading and do not mean the bytes are wrong.
+AUDIT_STOPS = ("regression", "unbacked", "stray", "shape")
+
+
 def api_gradebook_write(course, body):
-    """Splice the files and hand them back for download.
+    """Splice the files, audit them, and hand them back for download.
 
     Not written to disk here either. The browser saves them wherever
     he keeps downloads, which is where the originals came from.
+
+    **Nothing is handed over unaudited.** Each file goes through
+    `verify_export` -- did the write do what the plan said -- and then
+    `audit_export`, which asks the different and more useful question
+    of whether every cell agrees with the *record*. A plan that is
+    wrong and a write that is faithful to it pass the first and fail
+    the second.
+
+    A regression, a cell the record does not account for, or a write
+    outside a skill's column stops the download. The softer findings
+    come back beside the files. The CLI has verified its writes since
+    the first version and this path never did, which is the wrong way
+    round: this is the one he uses.
     """
-    sheets, changes, report, _ = _gradebook_plan(course, body)
+    sheets, changes, report, profile = _gradebook_plan(course, body)
     if report.refused:
         raise GuiError("; ".join(report.refused))
     if not changes:
         raise GuiError("there is nothing to write.")
 
-    out = []
+    slugs = _bank_slugs_for(course)
+    people = roster_mod.load(course.file("roster"))
+    progress = record_mod.progress(course.file("record"))
+    thresholds = course_mod.thresholds(course.name)
+    wanted = [s for s in (body.get("notYet") or []) if s in slugs]
+
+    out, audited, stoppers = [], [], []
     for sheet in sheets:
         if not report.for_sheet(sheet.name):
             continue
@@ -3362,13 +3387,80 @@ def api_gradebook_write(course, body):
         finally:
             shutil.rmtree(folder, ignore_errors=True)
 
+        # The written bytes, read back as rows. Read back rather than
+        # carried along: what is audited has to be the thing that will
+        # be uploaded, and `splice` returns bytes because quoting and
+        # line endings are part of what it promises to preserve. Going
+        # through the bytes is the only way the audit sees the same
+        # file Brightspace will.
+        written = _rows_of(data)
+        problems = gradebook_mod.verify_export(
+            sheet.rows, written, changes, sheet.name)
+
+        # And at the byte level, which the parsed comparison above
+        # cannot see: a cell whose value is unchanged and whose
+        # quoting is not reads as identical through `csv.reader`, and
+        # is a different file to Brightspace.
+        moved, same = gradebook_mod.changed_lines(
+            CARRIED.files[sheet.name], data)
+        planned_rows = {c.row + sheet.header_line - 1
+                        for c in report.for_sheet(sheet.name)}
+        unexpected = sorted(set(moved) - planned_rows)
+        if unexpected:
+            problems.append(
+                f"{sheet.name}: {len(unexpected)} line(s) differ that hold "
+                "no planned cell -- lines "
+                + ", ".join(str(n) for n in unexpected[:8])
+                + (" ..." if len(unexpected) > 8 else ""))
+        if problems:
+            raise GuiError(
+                "the written file does not match the plan, so nothing was "
+                "handed over: " + "; ".join(problems))
+
+        check = gradebook_mod.audit_export(
+            sheet.rows, written, sheet.name, profile, people, progress,
+            slugs, not_yet=wanted, thresholds=thresholds,
+            header_line=sheet.header_line,
+            columns=dict(gradebook_mod.match(
+                sheet.head, slugs, pairs=profile.pairs).found))
+        check.lines_identical = same
+        audited.append((sheet.name, check))
+        stoppers += [f for f in check.findings if f.kind in AUDIT_STOPS]
+
         stem, extension = os.path.splitext(sheet.name)
         out.append({
             "name": f"{stem}_UPDATED{extension}",
             "data": base64.b64encode(data).decode("ascii"),
             "cells": len(report.for_sheet(sheet.name)),
         })
-    return {"files": out, "cells": len(report.changes)}
+
+    if stoppers:
+        # Loudly, and with the file withheld. A gradebook is the one
+        # artefact here that is hard to take back once it is uploaded.
+        raise GuiError(
+            f"{len(stoppers)} problem(s) found auditing the written "
+            "file(s) against the record, so nothing was handed over: "
+            + "; ".join(f"{f.kind} at {f.where} -- {f.says}"
+                        for f in stoppers[:6])
+            + (f" (and {len(stoppers) - 6} more)" if len(stoppers) > 6
+               else ""))
+
+    return {
+        "files": out,
+        "cells": len(report.changes),
+        # What the audit found and let through, so the panel can say
+        # the file was checked rather than leaving it to be assumed.
+        "audit": [{
+            "name": name,
+            "compared": check.compared,
+            "changed": check.changed,
+            "backed": check.backed,
+            "passesHeld": check.passes_held,
+            "linesIdentical": check.lines_identical,
+            "findings": [{"kind": f.kind, "where": f.where, "says": f.says}
+                         for f in check.findings],
+        } for name, check in audited],
+    }
 
 
 def api_gradebook_clear(course, _body):

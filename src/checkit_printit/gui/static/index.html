@@ -979,9 +979,17 @@
                on the page. -->
           <div id="gb-profile" class="fields"></div>
           <p class="muted lmspath" id="gb-path"></p>
+          <!-- Start over beside the primary, the way Scans keeps the
+               same pair, and deliberately not next to the drop area:
+               a second button there is what this layout exists to be
+               rid of. It is the only way back from a file dropped by
+               mistake, and the only way to put a finished job down --
+               before it, the panel stayed filled in with the last
+               export until the whole page was reloaded. -->
           <div class="toolbar">
             <button id="gb-save">Save mapping</button>
             <span class="spacer"></span>
+            <button id="gb-clear">Start over</button>
             <button id="gb-plan" class="primary">Preview</button>
           </div>
         </div>
