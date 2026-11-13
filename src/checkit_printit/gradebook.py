@@ -877,6 +877,9 @@ class AuditReport:
     #: caller from `changed_lines`, because it is a fact about the
     #: bytes and this function is given rows.
     lines_identical: int = 0
+    #: Columns the LMS computes for itself, taken out so it will read
+    #: the file back. Not a finding: see `importable_columns`.
+    columns_dropped: int = 0
 
     @property
     def ok(self):
@@ -894,6 +897,9 @@ class AuditReport:
         if self.rows_skipped:
             lines.append(f"{self.rows_skipped} row(s) skipped by an ignore "
                          "rule and checked for not having moved")
+        if self.columns_dropped:
+            lines.append(f"{self.columns_dropped} column(s) the LMS computes "
+                         "for itself were removed so it will read the file")
         if self.ok:
             lines.append("no findings")
             return "\n".join(lines)
@@ -920,6 +926,138 @@ def names_a_slug(header, slug):
     return not rest[:1].isalnum()
 
 
+# ------------------------------------- what the LMS will read back in --
+
+#: Columns an export carries that the matching import cannot read, and
+#: what to say about each.
+#:
+#: **Brightspace will not accept its own export.** The file it hands
+#: you holds columns it computes for itself -- formula items, each
+#: category's subtotal, and the calculated final grade -- and the
+#: import refuses the whole file rather than skipping them, with
+#: "The import file selected cannot be read. Refer to the sample
+#: import file to see how the import file should appear." The sample
+#: it points at has none of those columns in it, which is the only
+#: hint given.
+#:
+#: Confirmed against his own 2026-11-12 export, which is otherwise a
+#: faultless CSV -- 21 rows all 61 fields wide, no quoting, no
+#: embedded commas, `End-of-Line Indicator` last and `#` all the way
+#: down -- so nothing structural explains the refusal. It carries
+#: three `<Formula>` items, three subtotal pairs and the calculated
+#: final grade pair: eleven columns, and the ones every institution's
+#: own guidance says to delete before importing.
+#:
+#: Matched on the header text rather than on a list of names, so this
+#: is a no-op on a gradebook that has none of them. A Canvas export
+#: goes through untouched.
+def _not_importable(header):
+    """Why the LMS cannot read this column back, or None."""
+    text = header.strip()
+    if "<Formula " in text:
+        return "a formula item: Brightspace calculates it"
+    if "<Calculated " in text:
+        return "a calculated item: Brightspace computes it"
+    if text in ("Calculated Final Grade Numerator",
+                "Calculated Final Grade Denominator"):
+        return ("the calculated final grade: only the *adjusted* final "
+                "grade can be imported")
+    if text.endswith(" Subtotal Numerator") \
+            or text.endswith(" Subtotal Denominator"):
+        return "a category subtotal: Brightspace computes it"
+    return None
+
+
+def importable_columns(head):
+    """`(keep, dropped)` for one header row.
+
+    `keep` is the 0-based indices to carry into the import file, in
+    order; `dropped` is `[(index, header, why)]`.
+    """
+    keep, dropped = [], []
+    for index, header in enumerate(head):
+        why = _not_importable(header)
+        if why is None:
+            keep.append(index)
+        else:
+            dropped.append((index, header, why))
+    return keep, dropped
+
+
+def drop_columns(data, keep):
+    """The same file with only `keep`'s columns, field text preserved.
+
+    Each kept field is copied as it stands -- its own quoting
+    included -- and only the separators are rebuilt, so a cell the LMS
+    quoted stays quoted and one it left bare stays bare. The same
+    promise `splice` makes, narrowed to a subset of columns instead of
+    the whole line.
+
+    Line endings and the BOM are carried through untouched, because
+    they are part of what the LMS handed over and there is no reason
+    for the file to come back different in either.
+    """
+    bom = data.startswith(b"\xef\xbb\xbf")
+    lines = data.decode("utf-8-sig").splitlines(keepends=True)
+    want = list(keep)
+    out = []
+    for number, line in enumerate(lines, 1):
+        body = line.rstrip("\r\n")
+        ending = line[len(body):]
+        if not body:
+            out.append(line)
+            continue
+        try:
+            spans = fields_of(body)
+        except GradebookError as exc:
+            raise GradebookError(f"line {number}: {exc}") from None
+        kept = []
+        for index in want:
+            if index >= len(spans):
+                # A short row -- a trailing empty cell produces one.
+                # An empty field is the honest stand-in; refusing
+                # would throw the file away over a cell that was not
+                # there in the first place.
+                kept.append("")
+                continue
+            _, start, end = spans[index]
+            kept.append(body[start:end])
+        out.append(",".join(kept) + ending)
+    text = "".join(out)
+    return (b"\xef\xbb\xbf" if bom else b"") + text.encode("utf-8")
+
+
+def verify_dropped(before, after, keep, name):
+    """Check a trimmed file kept every column it should, unchanged.
+
+    The post-condition for `drop_columns`, and a separate question
+    from whether the right columns were chosen: `importable_columns`
+    decides that, this checks the trim did what it was told.
+    """
+    problems = []
+    if len(before) != len(after):
+        return [f"{name}: the row count changed, {len(before)} -> "
+                f"{len(after)}"]
+    want = list(keep)
+    for index, (old, new) in enumerate(zip(before, after), 1):
+        if len(new) != len(want):
+            problems.append(
+                f"{name} row {index}: {len(new)} field(s) after trimming, "
+                f"expected {len(want)}")
+            continue
+        for position, column in enumerate(want):
+            was = old[column] if column < len(old) else ""
+            if new[position] != was:
+                # The header, so a mis-ordered trim is named by the
+                # column it landed on rather than by a value that
+                # might belong to somebody.
+                problems.append(
+                    f"{name} row {index}: column {column + 1} "
+                    f"({before[0][column]!r}) did not survive the trim "
+                    "unchanged")
+    return problems
+
+
 def changed_lines(before, after):
     """Which 1-based lines of two files' bytes differ, and how many.
 
@@ -938,6 +1076,28 @@ def changed_lines(before, after):
     numbers += list(range(min(len(old), len(new)) + 1,
                           max(len(old), len(new)) + 1))
     return numbers, sum(1 for a, b in zip(old, new) if a == b)
+
+
+def align_columns(before_head, after_head):
+    """`{before index: after index}`, or None if they do not line up.
+
+    The two header rows are equal in the ordinary case. They are not
+    when the file has been trimmed for import, which drops the columns
+    the LMS computes for itself -- so the audit has to follow the trim
+    rather than declare the header changed and stop. A dropped column
+    is simply absent from the map.
+
+    Only a *subsequence* counts: same headers, same order, some
+    missing. A reordered or renamed header is not an alignment and
+    comes back None, because at that point nothing here can say which
+    column is which.
+    """
+    found, at = {}, 0
+    for index, header in enumerate(before_head):
+        if at < len(after_head) and after_head[at] == header:
+            found[index] = at
+            at += 1
+    return found if at == len(after_head) else None
 
 
 def audit_export(before, after, name, profile, students, progress, slugs,
@@ -1000,12 +1160,36 @@ def audit_export(before, after, name, profile, students, progress, slugs,
         return report
     if not before:
         return report
-    if before[0] != after[0]:
-        report.findings.append(AuditFinding(
-            "shape", f"{name} row 1", "the header row was written to"))
-        return report
 
-    head = after[0]
+    # The two files line up column for column, unless the second has
+    # been trimmed for import -- which drops the columns the LMS
+    # computes for itself and leaves the rest in order. Follow the
+    # trim rather than calling it a changed header; a dropped column
+    # is simply not in the map.
+    aligned = align_columns(before[0], after[0])
+    if aligned is None:
+        report.findings.append(AuditFinding(
+            "shape", f"{name} row 1",
+            "the header row is neither the one that was exported nor that "
+            "row with whole columns removed"))
+        return report
+    for index, header in enumerate(before[0]):
+        if index in aligned:
+            continue
+        why = _not_importable(header)
+        if why is None:
+            # Taking out a column the LMS *can* read is a loss: that
+            # grade item simply will not be imported, and nothing
+            # downstream would say so.
+            report.findings.append(AuditFinding(
+                "stray", f"{name} column {index + 1}",
+                f"{header!r} was removed, and it is a column the LMS can "
+                "read back -- trimming only removes what it computes "
+                "for itself"))
+        else:
+            report.columns_dropped += 1
+
+    head = before[0]
 
     # ---- which column is which skill, and is that defensible ---------
     if columns is None:
@@ -1051,9 +1235,8 @@ def audit_export(before, after, name, profile, students, progress, slugs,
             f"no column called {profile.student_column!r}"))
         return report
 
-    def whose(row):
-        """The one student this row belongs to, or None."""
-        raw = row[student_at] if student_at < len(row) else ""
+    def whose(raw):
+        """The one student this row's id belongs to, or None."""
         if not raw.strip():
             return None
         found = by_key.get(_core(raw)) or []
@@ -1071,22 +1254,37 @@ def audit_export(before, after, name, profile, students, progress, slugs,
     for index in range(1, len(after)):
         old, new = before[index], after[index]
         number = index + 1
-        if len(old) != len(new):
+        if len(new) > len(aligned):
             report.findings.append(AuditFinding(
                 "shape", f"{name} row {number}",
-                f"the row's width changed, {len(old)} -> {len(new)}"))
+                f"the row holds {len(new)} field(s) where the header row "
+                f"holds {len(aligned)}"))
             continue
+
+        # Every column number in this function is a column of the file
+        # as it was **exported**. `now` goes through `aligned`, so a
+        # file trimmed for import is read at its own position and the
+        # two always name the same thing.
+        def was(column, row=old):
+            return row[column] if column < len(row) else ""
+
+        def now(column, row=new):
+            where = aligned.get(column)
+            return "" if where is None or where >= len(row) else row[where]
 
         skipped = bool(ignored_by(new, profile.ignore_rows))
         if skipped:
             report.rows_skipped += 1
-        student = None if skipped else whose(new)
+        student = None if skipped else whose(now(student_at))
         if student is not None:
             for slug, column in columns.items():
                 reachable.setdefault((student.sid, slug), []).append(
                     (number, column))
 
-        for column, (a, b) in enumerate(zip(old, new)):
+        for column in range(len(old)):
+            if column not in aligned:
+                continue            # dropped for import; nothing to compare
+            a, b = was(column), now(column)
             report.compared += 1
             if a == b:
                 if a == passed:
@@ -1192,21 +1390,25 @@ def audit_export(before, after, name, profile, students, progress, slugs,
             continue
         held = []
         for number, column in places:
+            # Through `aligned` again: `column` is the exported file's
+            # column, and in a trimmed file the cell sits elsewhere.
             row = after[number - 1]
+            where = aligned.get(column)
             held.append((number, column,
-                         row[column] if column < len(row) else ""))
-        if any(now == passed for _, _, now in held):
+                         "" if where is None or where >= len(row)
+                         else row[where]))
+        if any(cell == passed for _, _, cell in held):
             continue
         # A value the tool does not understand. `plan_export` refuses
         # rather than overwriting one, so finding it here is the
         # expected outcome and not a fault.
-        if any(now.strip() and now != not_passed for _, _, now in held):
+        if any(cell.strip() and cell != not_passed for _, _, cell in held):
             continue
-        number, column, now = held[0]
+        number, column, cell = held[0]
         report.findings.append(AuditFinding(
             "missed", f"{name} row {number}, column {column + 1}",
             f"the record has {slug} passed for this row's student and the "
-            f"file holds {now!r}"))
+            f"file holds {cell!r}"))
     return report
 
 
