@@ -7234,12 +7234,15 @@ async function gbWrite() {
   for (const file of got.trimmed || []) {
     const line = document.createElement("p");
     line.className = "lmstotal";
-    line.textContent = `${file.name} · ${file.dropped.length} column(s) `
-      + "removed so the LMS can read it back";
+    // The kept count, not the dropped one. With an allowlist the
+    // dropped list is most of the file and says nothing; what is in
+    // the upload is the short, checkable fact.
+    line.textContent = `${file.name} · ${file.kept} of `
+      + `${file.kept + file.dropped.length} columns kept for the import`;
     out.appendChild(line);
     const fold = document.createElement("details");
     const label = document.createElement("summary");
-    label.textContent = "Columns removed";
+    label.textContent = "Left out";
     const list = document.createElement("ul");
     list.className = "lmsskills";
     for (const gone of file.dropped) {

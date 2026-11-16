@@ -2056,7 +2056,9 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
             # read it, `_UPDATED` when it comes back the same shape.
             # The name is the only thing on the file saying which of
             # the two it is.
-            keep, dropped = gradebook_mod.importable_columns(sheet.head)
+            keep, dropped = gradebook_mod.import_columns(
+                sheet.head,
+                {c.column - 1 for c in report.for_sheet(sheet.name)})
             suffix = "_IMPORT" if dropped else "_UPDATED"
             target = os.path.join(out_dir, f"{stem}{suffix}{ext or '.csv'}")
             if os.path.abspath(target) == os.path.abspath(source):
@@ -2078,22 +2080,21 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
                     f"{target} did not match the plan:\n  "
                     + "\n  ".join(problems))
 
-            # And then make it a file the LMS will take. Brightspace
-            # refuses its own export over the columns it computes for
-            # itself; see `importable_columns`. Trimmed after the
+            # And then cut it down to what the import needs: the
+            # identifier, the skill columns this run wrote into, the
+            # end-of-line marker. See `import_columns`. Cut after the
             # check above, which compares columns by index and should
             # be looking at the file as it was handed over.
             if dropped:
-                # Nothing this export wrote to may be dropped. The
-                # rule is written in terms of what the LMS computes,
-                # so a skill column cannot match it -- which is
-                # exactly the sort of thing to check rather than to
-                # rely on.
+                # The allowlist is built *from* the written columns,
+                # so losing one is impossible by construction --
+                # exactly the sort of reasoning worth an assertion
+                # rather than a comment.
                 lost = sorted({c.slug for c in report.for_sheet(sheet.name)
                                if c.column - 1 not in keep})
                 if lost:
                     raise gradebook_mod.GradebookError(
-                        f"{target}: trimming for import would drop the "
+                        f"{target}: the import copy is missing the "
                         "column(s) holding " + ", ".join(lost))
                 with open(target, "wb") as f:
                     f.write(gradebook_mod.drop_columns(data, keep))
@@ -2107,7 +2108,7 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
                     raise gradebook_mod.GradebookError(
                         f"{target} is not a faithful trim:\n  "
                         + "\n  ".join(problems))
-                trims[sheet.name] = dropped
+                trims[sheet.name] = ([sheet.head[i] for i in keep], dropped)
     except gradebook_mod.GradebookError as exc:
         for _, _, target in written:
             if os.path.isfile(target):
@@ -2126,18 +2127,20 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
 
     if trims:
         click.echo("")
-        click.echo("Columns removed so the LMS can read the file back. "
-                   "Brightspace will not accept its own export: it holds "
-                   "columns it computes for itself, and columns that are "
-                   "not grade items at all, and the import refuses the "
-                   "whole file over them rather than skipping them.")
+        click.echo("Cut down to what the import needs: the column the LMS "
+                   "matches rows on, the skills written this run, and the "
+                   "end-of-line marker. Everything else is left out -- not "
+                   "because it would necessarily be refused, but because "
+                   "the import has no use for it and each extra column is "
+                   "another thing that can be refused.")
         for name in sorted(trims):
-            click.echo(f"  {name}: {len(trims[name])} column(s)")
-            for index, header, why in trims[name]:
-                click.echo(f"    {index + 1:>3}  {header}")
-                click.echo(f"         {why}")
-        click.echo("  nothing is lost in the LMS: these are values it "
-                   "works out for itself, and it will do so again.")
+            kept, dropped = trims[name]
+            click.echo(f"  {name}: {len(kept)} column(s) kept, "
+                       f"{len(dropped)} left out")
+            for header in kept:
+                click.echo(f"    {header}")
+        click.echo("  nothing is lost in the LMS: a column that is not in "
+                   "the file is a column the import does not touch.")
 
     click.echo("")
     click.echo("Import these soon after exporting. A grade changed in the "

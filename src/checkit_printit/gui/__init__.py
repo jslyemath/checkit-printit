@@ -3427,36 +3427,39 @@ def api_gradebook_write(course, body):
         audited.append((sheet.name, check))
         stoppers += [f for f in check.findings if f.kind in AUDIT_STOPS]
 
-        # ---- and now make it a file the LMS will actually take ----
+        # ---- and now cut it down to what the import actually needs ----
         #
         # Everything above is about the file being *right*. This is
-        # about it being *readable*: Brightspace refuses its own
-        # export, because the export carries columns it computes for
-        # itself and the import will not skip them. Trimmed after the
-        # audit on purpose -- the audit compares columns by index, and
-        # it should be looking at the file as the LMS handed it over.
-        keep, dropped = gradebook_mod.importable_columns(sheet.head)
+        # about it being *accepted*: the identifier, the skill columns
+        # this run wrote into, the end-of-line marker, nothing else.
+        # Cut after the audit on purpose -- the audit compares columns
+        # by index and should be looking at the file as the LMS handed
+        # it over.
+        mine = report.for_sheet(sheet.name)
+        try:
+            keep, dropped = gradebook_mod.import_columns(
+                sheet.head, {c.column - 1 for c in mine})
+        except gradebook_mod.GradebookError as exc:
+            raise GuiError(f"{sheet.name}: {exc}") from None
         if dropped:
             trimmed = gradebook_mod.drop_columns(data, keep)
             problems = gradebook_mod.verify_dropped(
                 written, _rows_of(trimmed), keep, sheet.name)
-            # Nothing the export writes to may be dropped. The rule is
-            # written in terms of what the LMS computes, so a skill
-            # column cannot match it -- which is exactly the sort of
-            # thing to check rather than to rely on.
-            lost = [c for c in report.for_sheet(sheet.name)
-                    if c.column - 1 not in keep]
+            # The allowlist is built *from* the written columns, so
+            # losing one is impossible by construction -- which is
+            # exactly the sort of reasoning worth an assertion rather
+            # than a comment.
+            lost = sorted({c.slug for c in mine if c.column - 1 not in keep})
             if lost:
                 problems.append(
-                    f"{sheet.name}: the trim would drop {len(lost)} "
-                    "column(s) this export wrote to -- "
-                    + ", ".join(sorted({c.slug for c in lost})))
+                    f"{sheet.name}: the import copy is missing the "
+                    "column(s) holding " + ", ".join(lost))
             if problems:
                 raise GuiError(
-                    "the import-ready copy is not a faithful trim, so "
+                    "the import-ready copy is not a faithful cut, so "
                     "nothing was handed over: " + "; ".join(problems))
             data = trimmed
-        trims.append((sheet.name, dropped))
+        trims.append((sheet.name, dropped, len(keep)))
 
         stem, extension = os.path.splitext(sheet.name)
         out.append({
@@ -3493,15 +3496,16 @@ def api_gradebook_write(course, body):
             "findings": [{"kind": f.kind, "where": f.where, "says": f.says}
                          for f in check.findings],
         } for name, check in audited],
-        # Which columns were taken out so the LMS would read the file,
-        # and why each one. Said rather than done quietly: the file
-        # that comes back is narrower than the one he dropped in, and
-        # that is a surprise unless it is on screen.
+        # What the import file was cut down to, and what came out.
+        # Said rather than done quietly: the file that comes back is a
+        # great deal narrower than the one he dropped in, and that is
+        # alarming unless it is on screen.
         "trimmed": [{
             "name": name,
+            "kept": kept,
             "dropped": [{"column": index + 1, "header": header, "why": why}
                         for index, header, why in dropped],
-        } for name, dropped in trims if dropped],
+        } for name, dropped, kept in trims if dropped],
     }
 
 

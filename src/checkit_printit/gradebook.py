@@ -877,8 +877,11 @@ class AuditReport:
     #: caller from `changed_lines`, because it is a fact about the
     #: bytes and this function is given rows.
     lines_identical: int = 0
-    #: Columns the LMS computes for itself, taken out so it will read
-    #: the file back. Not a finding: see `importable_columns`.
+    #: Columns of the export that the import file does not carry. Not
+    #: a finding: see `import_columns`. The import cannot touch a
+    #: column that is not in the file, which is also why the counts
+    #: above are so much smaller than the export -- they are over the
+    #: cells the import can actually change, and those are all of them.
     columns_dropped: int = 0
 
     @property
@@ -898,8 +901,12 @@ class AuditReport:
             lines.append(f"{self.rows_skipped} row(s) skipped by an ignore "
                          "rule and checked for not having moved")
         if self.columns_dropped:
-            lines.append(f"{self.columns_dropped} column(s) the LMS cannot "
-                         "read back were removed so it will take the file")
+            # Not "columns the LMS cannot read": most of them it can.
+            # They are absent because the import has no use for them,
+            # which is a different and better reason.
+            lines.append(f"{self.columns_dropped} column(s) of the export "
+                         "are not in this file, so the import leaves them "
+                         "alone")
         if self.ok:
             lines.append("no findings")
             return "\n".join(lines)
@@ -1019,24 +1026,86 @@ def _not_importable(header, typed=False):
     return _not_a_grade_item(text, typed)
 
 
-def importable_columns(head):
-    """`(keep, dropped)` for one header row.
+#: The columns an LMS matches a row to a student on, best first.
+#: Brightspace takes either; `OrgDefinedId` is the one its own export
+#: puts first and the one his rows are keyed by.
+#:
+#: Not the same question as `Profile.student_matches`, which is how
+#: *printit* joins a row to the roster. That may well be a column of
+#: the instructor's own -- his is `OSW_ID` -- which the LMS has never
+#: heard of. The two were conflated once and the import file came back
+#: carrying a column Brightspace refused the whole file over.
+ID_COLUMNS = ("OrgDefinedId", "Username")
 
-    `keep` is the 0-based indices to carry into the import file, in
-    order; `dropped` is `[(index, header, why)]`.
+#: The marker Brightspace puts at the end of every row of its own
+#: format. Kept when the file has one: it is part of the shape, not an
+#: extra.
+END_MARKER = "End-of-Line Indicator"
+
+
+def import_columns(head, writing):
+    """`(keep, dropped)` -- the identifier, the skills written, the end.
+
+    `writing` is the 0-based indices this export actually wrote a cell
+    into. `keep` is what to carry into the import file, in the
+    original order; `dropped` is `[(index, header, why)]`.
+
+    **An allowlist, and that is the point.** This was a blocklist: the
+    export minus the columns Brightspace was known to choke on. It
+    took three rounds to learn that list was not finite -- first the
+    formula and subtotal columns, then `OSW_ID` because it is not a
+    grade item, then the `\U0001f4cc` in a Text item's header. Each
+    round was a real diagnosis and each one shipped a file that failed
+    differently, because "what might offend the importer" is open and
+    unknowable while "what the importer needs" is three things:
+
+        the identifier it matches rows on
+        the grade columns there is something to say about
+        the end-of-line marker, where the format has one
+
+    His words for it: there is no need for extraneous columns, just
+    ship back the Brightspace ID and the skill columns.
+
+    Only the columns actually *written* are carried. A mapped skill
+    with nothing new to say is left out too -- re-importing a value
+    the LMS already holds is a no-op at best, and at worst sets back a
+    grade changed in the LMS since the export.
     """
-    # Does this file label its grade items at all? Everything the
-    # no-suffix rule does rests on the answer, so it is asked once, of
-    # the whole header, rather than inferred per column.
     typed = any("<" in header and ">" in header for header in head)
+    identifier = next((head.index(name) for name in ID_COLUMNS
+                       if name in head), None)
+    if identifier is None:
+        raise GradebookError(
+            "this file has no column the LMS can match a row on -- "
+            "expected one of " + ", ".join(repr(n) for n in ID_COLUMNS)
+            + ". Export the gradebook again with the identifier shown.")
+
+    wanted = {identifier} | set(writing)
+    if END_MARKER in head:
+        wanted.add(head.index(END_MARKER))
+
     keep, dropped = [], []
     for index, header in enumerate(head):
-        why = _not_importable(header, typed)
-        if why is None:
+        if index in wanted:
             keep.append(index)
-        else:
-            dropped.append((index, header, why))
+            continue
+        dropped.append((index, header, _why_not_needed(header, typed)))
     return keep, dropped
+
+
+def _why_not_needed(header, typed):
+    """What to say about a column left out of the import file.
+
+    The reason never decides anything -- `import_columns` has already
+    decided -- but "why is my file eleven columns narrower" is the
+    first question anybody asks, and "it was not needed" is not an
+    answer when the real one is "Brightspace would have refused the
+    file over it".
+    """
+    return (_not_importable(header, typed)
+            or ("a grade item this run had nothing to write into"
+                if typed and "<" in header else
+                "not needed: the import matches rows on the identifier"))
 
 
 def drop_columns(data, keep):
@@ -1228,24 +1297,31 @@ def audit_export(before, after, name, profile, students, progress, slugs,
             "the header row is neither the one that was exported nor that "
             "row with whole columns removed"))
         return report
-    # Asked of the exported header, and once: the no-suffix rule only
-    # applies to a file that labels its grade items, and a column
-    # judged without that context reads as importable when it is not.
-    typed = any("<" in header and ">" in header for header in before[0])
-    for index, header in enumerate(before[0]):
-        if index in aligned:
-            continue
-        why = _not_importable(header, typed)
-        if why is None:
-            # Taking out a column the LMS *can* read is a loss: that
-            # grade item simply will not be imported, and nothing
-            # downstream would say so.
-            report.findings.append(AuditFinding(
-                "stray", f"{name} column {index + 1}",
-                f"{header!r} was removed, and it is a column the LMS can "
-                "read back -- trimming only removes what it cannot"))
-        else:
-            report.columns_dropped += 1
+    # **A missing column is not a fault here.** The import file is
+    # built from an allowlist -- the identifier, the skills written,
+    # the end marker -- so nearly every column of the export is
+    # absent by design, including plenty the LMS could have read. What
+    # a missing column *can* still do is lose a result, and that is
+    # the coverage pass below, which now asks what the LMS will hold
+    # after the import rather than what this file says.
+    report.columns_dropped = sum(1 for index in range(len(before[0]))
+                                 if index not in aligned)
+
+    # The one column the import file cannot do without. Everything
+    # else here is about values; this is about the file reaching
+    # anybody at all.
+    #
+    # Only when the export *had* one. A gradebook that uses neither of
+    # D2L's names has a different problem, and an earlier one:
+    # `import_columns` refuses to build a file at all. Asserting it
+    # here as well made every audit of such a file fail on the
+    # identifier instead of reporting what it was asked about.
+    if any(column in before[0] for column in ID_COLUMNS) \
+            and not any(column in after[0] for column in ID_COLUMNS):
+        report.findings.append(AuditFinding(
+            "shape", name,
+            "no column the LMS matches rows on survived: expected one of "
+            + ", ".join(repr(n) for n in ID_COLUMNS)))
 
     head = before[0]
 
@@ -1461,15 +1537,27 @@ def audit_export(before, after, name, profile, students, progress, slugs,
             continue
         if (result["passes"] or 0) < thresholds.get(slug, 1):
             continue
+        # **What the LMS will hold once this file is imported** -- not
+        # what this file says. The two differ for a column the import
+        # file leaves out, and leaving columns out is now the normal
+        # case: the file carries the identifier, the skills written
+        # and the end marker, so a skill that was already right in the
+        # LMS is deliberately absent. Reading the absence as a blank
+        # would report every such skill as missed.
+        #
+        # So: a column that is in the file answers for itself, and one
+        # that is not keeps whatever the export showed, because the
+        # import will not touch it.
         held = []
         for number, column in places:
-            # Through `aligned` again: `column` is the exported file's
-            # column, and in a trimmed file the cell sits elsewhere.
-            row = after[number - 1]
             where = aligned.get(column)
-            held.append((number, column,
-                         "" if where is None or where >= len(row)
-                         else row[where]))
+            if where is None:
+                row = before[number - 1]
+                cell = row[column] if column < len(row) else ""
+            else:
+                row = after[number - 1]
+                cell = row[where] if where < len(row) else ""
+            held.append((number, column, cell))
         if any(cell == passed for _, _, cell in held):
             continue
         # A value the tool does not understand. `plan_export` refuses
@@ -1478,10 +1566,12 @@ def audit_export(before, after, name, profile, students, progress, slugs,
         if any(cell.strip() and cell != not_passed for _, _, cell in held):
             continue
         number, column, cell = held[0]
+        where = ("the file holds" if column in aligned
+                 else "the LMS will still hold")
         report.findings.append(AuditFinding(
             "missed", f"{name} row {number}, column {column + 1}",
-            f"the record has {slug} passed for this row's student and the "
-            f"file holds {cell!r}"))
+            f"the record has {slug} passed for this row's student and "
+            f"{where} {cell!r}"))
     return report
 
 
