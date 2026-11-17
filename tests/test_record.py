@@ -641,6 +641,79 @@ class TestDiscardingARunThatWasNeverHandedOut:
         assert len(left) == 3
 
 
+class TestRecordingARunAgainKeepsItsMarks:
+    """RV-1 of the 2026-11-16 review.
+
+    `write_run` used to record a run by deleting its row and inserting
+    a fresh one. `printed` cascading with it was intended; `attempt`
+    cascades too, so recording a graded run a second time deleted
+    every grade read back from it and set `graded` back to 0. The
+    Build button reached that path whenever the title and date still
+    named a checkpoint that had been scanned.
+    """
+
+    @staticmethod
+    def graded(db):
+        write(db, run_id="out-1")
+        record.save_attempts(db, [{
+            "run_id": "out-1", "sid": "806000001", "slug": "W1",
+            "outcome": "passed"}])
+        return db
+
+    def test_the_marks_survive_the_run_being_recorded_again(self, db):
+        self.graded(db)
+        write(db, run_id="out-1")
+        assert [a["outcome"] for a in record.attempts_for(db, "806000001")] \
+            == ["passed"]
+
+    def test_so_do_the_flags(self, db):
+        self.graded(db)
+        record.set_flags(db, "out-1", graded=True)
+        write(db, run_id="out-1")
+        row = record.runs(db)[0]
+        assert row["graded"] == 1
+
+    def test_a_delisted_run_stays_delisted(self, db):
+        write(db, run_id="out-1")
+        record.set_flags(db, "out-1", delisted=True)
+        write(db, run_id="out-1")
+        assert record.runs(db)[0]["delisted"] == 1
+
+    def test_the_printed_papers_are_still_replaced(self, db):
+        """What a re-record is for: the papers of the latest build."""
+        write(db, run_id="out-1")
+        write(db, run_id="out-1", handouts=[
+            handout("806000001", "Ada Lovelace", [("W1", 777)])])
+        assert [(r["slug"], r["seed"])
+                for r in record.for_student(db, "806000001")] == [("W1", 777)]
+        assert record.runs(db)[0]["papers"] == 1
+
+    def test_nothing_can_delete_a_run_that_holds_marks(self, db):
+        """Not even SQL written by hand. The cascade can only ever
+        fire by accident, since the one sanctioned delete refuses
+        first -- so the database refuses too."""
+        import sqlite3
+        self.graded(db)
+        conn = record.connect(db)
+        try:
+            with pytest.raises(sqlite3.DatabaseError, match="graded"):
+                conn.execute("DELETE FROM run WHERE run_id = 'out-1'")
+        finally:
+            conn.close()
+        assert len(record.attempts_for(db, "806000001")) == 1
+
+    def test_a_run_without_marks_can_still_be_discarded(self, db):
+        write(db, run_id="out-1")
+        assert record.discard_run(db, "out-1") == 3
+
+    def test_marks_in_counts_one_run_only(self, db):
+        self.graded(db)
+        write(db, run_id="out-2")
+        assert record.marks_in(db, "out-1") == 1
+        assert record.marks_in(db, "out-2") == 0
+        assert record.marks_in(db, "never-built") == 0
+
+
 class TestRememberingAScan:
     """A stack is known by its contents, not by what it was called."""
 

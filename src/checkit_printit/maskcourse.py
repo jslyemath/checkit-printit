@@ -187,9 +187,27 @@ def mask_database(source, destination, vault):
     `scan_page.sid` -- is a list that goes stale silently, which is the
     failure this codebase keeps meeting.
 
+    **A new file, never an edited copy.** It used to copy the database
+    and update the text cells in place. SQLite does not scrub the space
+    an update leaves behind, so real names and ids stayed in the file's
+    bytes -- readable with `strings` -- while the logical dump, which is
+    what the check read, held none (RV-4, 2026-11-16). So the source is
+    opened read-only, the destination is created empty, every table,
+    index and trigger is recreated from its own `CREATE` statement, and
+    rows are inserted already masked. Nothing real is ever written to it.
+
+    Every string value is masked, whatever its column is declared as:
+    SQLite stores a value as whatever type it was given, so a declared
+    INTEGER column can still hold text.
+
     Returns the substitution count.
     """
-    shutil.copy2(source, destination)
+    import urllib.request
+
+    if os.path.exists(destination):
+        raise CourseMaskError(
+            f"{destination} already exists. A database twin is built "
+            "into a new file, never over an old one.")
     hits = 0
     # Closed explicitly, in a finally. `with sqlite3.connect(...)`
     # commits or rolls back the transaction; it does **not** close the
@@ -197,56 +215,91 @@ def mask_database(source, destination, vault):
     # clean-up that is supposed to delete a twin that failed its checks
     # cannot remove it -- which is how a half-masked course folder was
     # left on disk while the tool reported it deleted.
+    src = sqlite3.connect(
+        "file:" + urllib.request.pathname2url(os.path.abspath(source))
+        + "?mode=ro", uri=True)
     db = sqlite3.connect(destination)
     try:
-        tables = [r[0] for r in db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-            if not r[0].startswith("sqlite_")]
-        for table in tables:
-            if not IDENTIFIER.match(table):
+        schema = src.execute(
+            "SELECT type, name, sql FROM sqlite_master"
+            " WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'"
+            " ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END, rowid"
+        ).fetchall()
+        tables = [name for kind, name, _ in schema if kind == "table"]
+        for kind, name, sql in schema:
+            if not IDENTIFIER.match(name):
                 raise CourseMaskError(
-                    f"{source}: table name {table!r} is not a plain "
+                    f"{source}: {kind} name {name!r} is not a plain "
                     "identifier, so it cannot be quoted safely. Nothing "
                     "was masked.")
+        for kind, name, sql in schema:
+            if kind == "table":
+                db.execute(sql)
+        for table in tables:
             columns = []
-            for row in db.execute(f'PRAGMA table_info("{table}")').fetchall():
-                name, kind = row[1], (row[2] or "").upper()
-                if not IDENTIFIER.match(name):
+            for row in src.execute(f'PRAGMA table_info("{table}")'):
+                if not IDENTIFIER.match(row[1]):
                     raise CourseMaskError(
-                        f"{source}: column {name!r} in {table!r} is not a "
-                        "plain identifier. Nothing was masked.")
-                if "CHAR" in kind or "TEXT" in kind or "CLOB" in kind \
-                        or kind == "":
-                    columns.append(name)
-            if not columns:
-                continue
+                        f"{source}: column {row[1]!r} in {table!r} is not "
+                        "a plain identifier. Nothing was masked.")
+                columns.append(row[1])
             picked = ", ".join(f'"{c}"' for c in columns)
-            rows = db.execute(
-                f'SELECT rowid, {picked} FROM "{table}"').fetchall()
-            for row in rows:
-                rowid, values = row[0], list(row[1:])
+            holes = ", ".join("?" * len(columns))
+            for row in src.execute(
+                    f'SELECT {picked} FROM "{table}" ORDER BY rowid'):
                 new = []
-                for value in values:
+                for value in row:
                     if isinstance(value, str) and value:
                         masked, n = vault.mask_text(value)
                         hits += n
                         new.append(masked)
                     else:
                         new.append(value)
-                if new != values:
-                    sets = ", ".join(f'"{c}" = ?' for c in columns)
-                    db.execute(
-                        f'UPDATE "{table}" SET {sets} WHERE rowid = ?',
-                        new + [rowid])
+                db.execute(f'INSERT INTO "{table}" ({picked}) VALUES ({holes})',
+                           new)
+        # Indexes and triggers last, so no trigger fires on the rows
+        # being copied in.
+        for kind, name, sql in schema:
+            if kind != "table":
+                db.execute(sql)
         db.commit()
     finally:
         db.close()
+        src.close()
     return hits
 
 
+def _stored_strings(path):
+    """Every string a database legitimately holds: each text value in
+    each table, and the text of its schema. See `_verify`."""
+    import urllib.request
+    db = sqlite3.connect(
+        "file:" + urllib.request.pathname2url(os.path.abspath(path))
+        + "?mode=ro", uri=True)
+    try:
+        out = set()
+        for name, sql in db.execute(
+                "SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL"):
+            out.update((name, sql))
+            if not IDENTIFIER.match(name):
+                continue
+            if sql.lstrip().upper().startswith("CREATE TABLE"):
+                for row in db.execute(f'SELECT * FROM "{name}"'):
+                    out.update(v for v in row if isinstance(v, str) and v)
+        return out
+    finally:
+        db.close()
+
+
 def database_text(path):
-    """The whole database as SQL text, for checking what was written."""
-    db = sqlite3.connect(path)
+    """The whole database as SQL text, for checking what was written.
+
+    Read-only, because it is also handed the real course's own database
+    as the original to compare against."""
+    import urllib.request
+    db = sqlite3.connect(
+        "file:" + urllib.request.pathname2url(os.path.abspath(path))
+        + "?mode=ro", uri=True)
     try:
         return "\n".join(db.iterdump())
     finally:
@@ -315,7 +368,7 @@ def mask_course(course_path, out_path, vault, allow_digits=False):
     os.makedirs(out_path, exist_ok=True)
     try:
         _walk(course_path, out_path, vault, report)
-        _verify(out_path, vault, report, allow_digits)
+        _verify(out_path, vault, report, allow_digits, course_path)
     except Exception as first:
         # **Not `ignore_errors=True`.** That is what this was, and it
         # turned "the twin was deleted" into something the tool said
@@ -366,20 +419,68 @@ def _walk(course_path, out_path, vault, report):
                         "masks"))
 
 
-def _verify(out_path, vault, report, allow_digits):
-    """The two checks, over everything written. Raises on any failure."""
+def _verify(out_path, vault, report, allow_digits, course_path=None):
+    """The two checks, over everything written. Raises on any failure.
+
+    `course_path` is where the originals are. Given, the leak scan lets
+    off a real value found only strictly inside a word the original
+    already held -- see `Vault.leaks`.
+    """
     problems = []
     for name, _ in report.written:
         path = os.path.join(out_path, name)
+        source = os.path.join(course_path, name) if course_path else None
+        original = None
         if os.path.splitext(name)[1].lower() in DB_EXT:
             text = database_text(path)
+            if source:
+                original = database_text(source)
         else:
             with open(path, encoding="utf-8", errors="replace") as f:
                 text = f.read()
+            if source:
+                with open(source, encoding="utf-8", errors="replace") as f:
+                    original = f.read()
 
-        leaked = vault.leaks(text)
+        leaked = vault.leaks(text, original=original)
         if leaked:
             problems.append(f"{name}: {len(leaked)} real value(s) survive")
+        if os.path.splitext(name)[1].lower() in DB_EXT:
+            # The file's bytes as well as its dump: what somebody handed
+            # it can read is the bytes, and the dump cannot see a value
+            # left in free space (RV-4).
+            #
+            # Asked as exactly that question: every value the database
+            # holds -- its text cells and its schema -- is blanked out of
+            # the bytes, and what is left is scanned. A real value there
+            # is one the contents do not account for.
+            #
+            # Not a scan of the raw bytes as they stand. The word-level
+            # judgement above cannot be made on bytes -- a length byte
+            # that happens to be a letter sits flush against the text and
+            # spells a short name, which refused one real twin in four at
+            # random (2026-11-17) -- and an index stores its column's
+            # values a second time, which this blanks as well.
+            #
+            # Blanking is not quite enough on its own: a long index key
+            # is split across an overflow page, so a *fragment* of a
+            # stored string survives it. A value left over that is part
+            # of a stored string has been judged already, by the check of
+            # the contents; one that is part of nothing stored -- an old
+            # real name in free space -- is the leak this is for.
+            with open(path, "rb") as f:
+                raw = f.read()
+            stored = _stored_strings(path)
+            for value in sorted(stored, key=len, reverse=True):
+                raw = raw.replace(value.encode("utf-8"), b"\0" * len(value))
+            stored_low = [s.lower() for s in stored]
+            in_bytes = {
+                v for v in vault.leaks(raw.decode("utf-8", errors="replace"))
+                if not any(v.lower() in s for s in stored_low)}
+            if in_bytes:
+                problems.append(
+                    f"{name}: {len(in_bytes)} real value(s) in the file's "
+                    "bytes that its contents do not show")
         addresses, digits = residual(text, vault)
         if addresses:
             problems.append(

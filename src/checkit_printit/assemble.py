@@ -16,7 +16,7 @@ from . import roster as roster_mod
 from . import seating as seating_mod
 from . import spatext
 from . import theme as theme_mod
-from .bank import Bank
+from .bank import Bank, BankError
 from .jinja import make_env
 
 # Re-exported from theme.py, so a caller writing the file into a
@@ -150,7 +150,7 @@ def check_variants_chosen(bank, publication, handouts, extras):
         f"[variants]\n" + table)
 
 
-def choose_seeds(bank, versions, publication, rng):
+def choose_seeds(bank, versions, publication, rng, needed=None):
     """One seed per (version, skill).
 
     A version letter means "everyone holding this letter gets the same paper",
@@ -167,38 +167,57 @@ def choose_seeds(bank, versions, publication, rng):
     fourteen handed two letters the same exercise -- and a report of "10
     versions" while two neighbours hold identical sheets is the one failure
     versioning exists to prevent.
+
+    **Every skill in the bank is drawn, in bank order, whatever this run
+    prints** -- that is what lets a run seed deal the same papers again.
+    `needed` is the skills this run actually prints; a skill outside it
+    that *cannot* be drawn (never generated, too few printable seeds, a
+    variant that no longer exists) is skipped rather than refusing the
+    run. It used to refuse, so a half-written outcome added to bank.xml
+    stopped all printing until it was generated (RV-13, 2026-11-16).
+    Nothing is drawn for a skipped skill, and every run that ever
+    succeeded had none, so no past run seed deals differently. `None`
+    means every skill is needed.
     """
     chosen = {}
     for slug in publication_skills(publication, bank):
-        wanted = variant_for(publication, slug)
-        available = bank.seeds_with_variant(slug, wanted)
-        pins = pins_for(publication, slug)
+        try:
+            wanted = variant_for(publication, slug)
+            available = bank.seeds_with_variant(slug, wanted)
+            pins = pins_for(publication, slug)
 
-        pinned = {}
-        for version in versions:
-            seed = pins.get(version)
-            if seed is None:
-                continue
-            if seed not in available:
+            pinned = {}
+            for version in versions:
+                seed = pins.get(version)
+                if seed is None:
+                    continue
+                if seed not in available:
+                    raise AssemblyError(
+                        f"version {version} is pinned to seed {seed}, but "
+                        f"{slug} has no printable version at that seed"
+                        + (f" with variant {wanted!r}" if wanted else "")
+                        + (f". Printable seeds start at {available[0]}."
+                           if available else "."))
+                pinned[version] = seed
+
+            free = [v for v in versions if v not in pinned]
+            # A pinned seed is out of the pool, so an unpinned letter
+            # cannot accidentally reproduce it.
+            pool = [s for s in available if s not in set(pinned.values())]
+            if len(pool) < len(free):
                 raise AssemblyError(
-                    f"version {version} is pinned to seed {seed}, but {slug} "
-                    f"has no printable version at that seed"
+                    f"{slug} has {len(pool)} printable version(s) left to "
+                    f"draw from"
                     + (f" with variant {wanted!r}" if wanted else "")
-                    + f". Printable seeds start at {available[0]}."
-                )
-            pinned[version] = seed
-
-        free = [v for v in versions if v not in pinned]
-        # A pinned seed is out of the pool, so an unpinned letter cannot
-        # accidentally reproduce it.
-        pool = [s for s in available if s not in set(pinned.values())]
-        if len(pool) < len(free):
-            raise AssemblyError(
-                f"{slug} has {len(pool)} printable version(s) left to draw from"
-                + (f" with variant {wanted!r}" if wanted else "")
-                + f", but {len(free)} version letter(s) need a distinct one. "
-                "Generate more seeds, or ask for fewer versions in seating.toml."
-            )
+                    + f", but {len(free)} version letter(s) need a distinct "
+                    "one. Generate more seeds, or ask for fewer versions in "
+                    "seating.toml.")
+        except (BankError, AssemblyError):
+            # Raised before anything is drawn, so skipping consumes
+            # nothing from `rng` and the skills after it draw as before.
+            if needed is None or slug in needed:
+                raise
+            continue
         drawn = rng.sample(pool, len(free))
 
         for version in versions:
@@ -297,6 +316,27 @@ def build_extras(publication, seeds, versions, rng):
     return extras
 
 
+#: Each LaTeX special character, and what prints it as itself. One pass,
+#: so the braces a replacement adds are not themselves replaced.
+_TEX_SPECIAL = {
+    "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$",
+    "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}",
+    "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+}
+
+
+def tex_escape(text):
+    """Plain text, made safe to put inside a LaTeX argument.
+
+    `main.tex` and `Skill Descriptions.tex` are built with f-strings, and
+    nothing escaped what went into them (RV-12, 2026-11-16): a `&` in a
+    course title was a compile error, and a `%` silently swallowed the
+    closing brace and the rest of its line. For text, not for LaTeX -- a
+    value meant to carry markup must not come through here.
+    """
+    return "".join(_TEX_SPECIAL.get(ch, ch) for ch in str(text))
+
+
 #: `Exercise.latex()` prefixes a block defining \stxKnowl and friends, and
 #: ending with a rule of percent signs. We define those ourselves in main.tex,
 #: pointed at the theme's answer machinery, so the per-file copy is dropped.
@@ -355,7 +395,7 @@ def descriptions_tex(bank, slugs):
     """
     lines = ["% Generated from bank.xml. Do not edit -- edit the bank.", ""]
     for slug in slugs:
-        desc = bank.description(slug).replace("\n", " ")
+        desc = tex_escape(bank.description(slug).replace("\n", " "))
         # The optional argument is the box color, from the bank's <color_map>.
         # Omitting it left every printed skill in the theme's default blue,
         # which is not what a bank declaring a color map is asking for.
@@ -411,12 +451,13 @@ def main_tex(publication, handouts, extras, keys, load_helpers=False,
         "% out than halfway through a print job.",
         r"\providecommand{\setkind}[1]{}",
         "",
-        f"\\acadclass{{{publication.course}}}",
-        f"\\date{{{publication.semester}}}",
-        f"\\author{{{publication.professor}}}",
+        # Escaped, all four, and the name and section below (RV-12).
+        f"\\acadclass{{{tex_escape(publication.course)}}}",
+        f"\\date{{{tex_escape(publication.semester)}}}",
+        f"\\author{{{tex_escape(publication.professor)}}}",
         # `printed_title`, not `full_title`: m/d on the page,
         # ISO in the folder name and the print record.
-        f"\\title{{{publication.printed_title}}}",
+        f"\\title{{{tex_escape(publication.printed_title)}}}",
         "",
         r"\begin{document}",
         "",
@@ -437,9 +478,13 @@ def main_tex(publication, handouts, extras, keys, load_helpers=False,
     ]
 
     def emit(handout, kind):
-        name = "Blank" if handout.blank_name or not handout.name else handout.name
+        name = ("Blank" if handout.blank_name or not handout.name
+                else tex_escape(handout.name))
         out.append(f"\\setname{{{name}}}")
-        out.append(f"\\setsect{{{handout.section or 'Blank'}}}")
+        section = tex_escape(handout.section) if handout.section else "Blank"
+        out.append(f"\\setsect{{{section}}}")
+        # The id is NOT escaped: the theme writes it verbatim into the
+        # page index, which Scans reads back, and it is digits.
         # Empty on a run that prints no names, and on a spare: the
         # header then draws empty boxes to write an id into, which is
         # the only thing that lets an unnamed paper be graded.
@@ -604,7 +649,11 @@ def assemble(publication, roster, chart, out_dir, theme, rng=None,
     env = make_env(missing=env_misses)
 
     versions = versions_for(chart, publication)
-    seeds = choose_seeds(bank, versions, publication, rng)
+    # What this run prints, so a skill it does not print cannot refuse it
+    # (RV-13). The draw itself still covers every skill -- see choose_seeds.
+    needed = {slug for student in roster for slug in student.skills}
+    needed |= {extra.skill for extra in publication.extras}
+    seeds = choose_seeds(bank, versions, publication, rng, needed=needed)
 
     handouts, unseated = build_handouts(roster, chart, publication, seeds)
     extras = build_extras(publication, seeds, versions, rng)

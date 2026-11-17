@@ -26,6 +26,8 @@ import tomllib
 import urllib.error
 import urllib.request
 
+from . import fileio
+
 #: The four things printit owns on the form. Everything else -- the banner,
 #: the title, the grade cutoffs, the syllabus links -- belongs to whoever made
 #: the form, and a push must not touch it.
@@ -147,17 +149,19 @@ def save(course_path, conn):
         if slot in conn.items:
             lines.append(f"{slot} = {_quote(conn.items[slot])}"
                          f"  # {SLOTS[slot]}")
-    with open(config, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    fileio.atomic_write(config, "\n".join(lines) + "\n")
 
     secrets_dir = os.path.join(course_path, "secrets")
     os.makedirs(secrets_dir, exist_ok=True)
     path = os.path.join(secrets_dir, SECRET_FILENAME)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("# Treat both of these as passwords. Anyone holding the URL\n"
-                "# and the secret can rewrite the form.\n"
-                f"url    = {_quote(conn.url)}\n"
-                f"secret = {_quote(conn.secret)}\n")
+    # Atomic for a reason beyond the rest: a half-written secret file
+    # loses the only copy of the secret the deployed script checks.
+    fileio.atomic_write(
+        path,
+        "# Treat both of these as passwords. Anyone holding the URL\n"
+        "# and the secret can rewrite the form.\n"
+        f"url    = {_quote(conn.url)}\n"
+        f"secret = {_quote(conn.secret)}\n")
     try:
         os.chmod(path, 0o600)
     except OSError:                                      # pragma: no cover

@@ -82,4 +82,10 @@ where = ["src"]
 # data/digits.npz is the handwritten-digit recogniser. Without it `digits`
 # raises on first use and says to run tools/train_digits.py, rather than
 # reading every id as somebody arbitrary.
-checkit_printit = ["theme/*.sty", "gui/static/**", "data/*.npz"]
+#
+# appsscript/ is the Google Apps Script that `form create` and `form attach`
+# deploy. It lived at the repository root until 2026-11-17, so only an
+# editable install could set a form up (RV-9). tests/test_packaging.py reads
+# this list and checks it reaches every file the code opens by path.
+checkit_printit = ["theme/*.sty", "gui/static/**", "data/*.npz",
+                   "appsscript/*"]

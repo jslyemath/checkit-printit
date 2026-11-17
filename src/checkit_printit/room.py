@@ -1045,7 +1045,9 @@ def load(path):
 
 
 def save(path, room):
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(room, f, indent=2, sort_keys=False)
-        f.write("\n")
+    # Serialised first, then replaced whole (RV-10): `json.dump` into an
+    # open file stops part way on a value it cannot encode, and left the
+    # room half written.
+    from . import fileio
+    fileio.atomic_write(path, json.dumps(room, indent=2, sort_keys=False)
+                        + "\n")

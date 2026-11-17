@@ -34,6 +34,8 @@ email addresses.
 import os
 import shutil
 
+from . import fileio
+
 COURSES = "courses"
 CONFIG = "course.toml"
 SECRETS = "secrets"
@@ -284,8 +286,7 @@ def save_identity(name, fields, root=None):
         for k in reversed(missing):
             out.insert(at, f'{k:<9} = "{_escape(wanted[k])}"')
 
-    with open(config, "w", encoding="utf-8") as f:
-        f.write("\n".join(out) + "\n")
+    fileio.atomic_write(config, "\n".join(out) + "\n")
     return identity(name, root)
 
 
@@ -308,9 +309,12 @@ def init(name, bank="", root=None, adopt=None):
     os.makedirs(os.path.join(path, SECRETS), exist_ok=True)
     notes = []
 
-    with open(os.path.join(path, CONFIG), "w", encoding="utf-8") as f:
-        f.write(CONFIG_TEMPLATE.format(
-            name=name, code=name, bank=bank.replace("\\", "/")))
+    # Escaped: a name with a double quote in it wrote a course.toml that
+    # could not be read back (QB12 of the 2026-11-16 review).
+    # `save_identity` already escaped; this was the second copy.
+    fileio.atomic_write(os.path.join(path, CONFIG), CONFIG_TEMPLATE.format(
+        name=_escape(name), code=_escape(name),
+        bank=_escape(bank.replace("\\", "/"))))
 
     for which, source_name in (("roster", "roster.toml"),
                                ("seating", "seating.toml")):

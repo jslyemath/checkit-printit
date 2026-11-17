@@ -139,3 +139,11 @@ class TestTheCommandNamesClaspActuallyHas:
         monkeypatch.setattr(clasp, "_deployment_id", lambda o: "AKfycb" + "x" * 30)
         clasp.deploy(str(tmp_path))
         assert seen[0][0] == "create-deployment"
+
+
+def test_the_version_is_pinned_exactly():
+    """`npx --yes` runs whatever it is handed, and this module depends on
+    clasp's command names and error text. `@latest` meant every setup ran
+    the newest release, tested or not (RV-14, 2026-11-16)."""
+    import re
+    assert re.fullmatch(r"@google/clasp@\d+\.\d+\.\d+", clasp.PACKAGE)

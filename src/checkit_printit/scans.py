@@ -370,7 +370,7 @@ def placement(anchor, scan_corners):
     # Measured across the diagonals rather than one edge: a corner
     # estimate is a pixel or two out either way, and a diagonal is the
     # longest baseline the symbol offers.
-    scale, angle, n = 0.0, 0.0, 0
+    scale, cos_sum, sin_sum, n = 0.0, 0.0, 0.0, 0
     for i in (0, 1):
         ax, ay = anchor.corners[i]
         bx, by = anchor.corners[i + 2]
@@ -381,19 +381,28 @@ def placement(anchor, scan_corners):
         if page_len <= 0:
             continue
         scale += scan_len / page_len
-        # Wrapped into (-pi, pi] before it is added in. The two
-        # diagonals of one turn can come out as +90 and -270
-        # degrees, which are the same angle and average to -90 -- a
-        # quarter turn the wrong way. A sheet off a feeder is never
-        # more than a few degrees out, so this never bit; it was
-        # waiting for the first page somebody fed in sideways.
+        # Averaged as directions, not as numbers. An angle is a point on
+        # a circle, and the mean of two numbers is wrong wherever the two
+        # sit either side of the place the numbers wrap:
+        #
+        # * unwrapped, +90 and -270 degrees -- one turn -- averaged to
+        #   -90, a quarter turn the wrong way;
+        # * wrapped into (-180, 180] to fix that, an upside-down sheet's
+        #   +179.9 and -179.9 averaged to about 0, "not turned at all",
+        #   and about a third of upside-down sheets were cut from the
+        #   wrong part of the page (RV-7, 2026-11-16).
+        #
+        # Summing the two as unit vectors and taking the angle of the sum
+        # has no such place.
         turn = (math.atan2(dy - cy, dx - cx)
                 - math.atan2(by - ay, bx - ax))
-        angle += (turn + math.pi) % (2 * math.pi) - math.pi
+        cos_sum += math.cos(turn)
+        sin_sum += math.sin(turn)
         n += 1
     if not n:
         return None
-    return _similarity((px, py), (sx, sy), scale / n, angle / n)
+    return _similarity((px, py), (sx, sy), scale / n,
+                       math.atan2(sin_sum, cos_sum))
 
 
 def _similarity(page_at, scan_at, scale, angle):
@@ -956,47 +965,11 @@ BESIDE_SHARE = 0.5
 #: times that speck.
 BESIDE_MIN = 0.06
 
-#: How dark a pixel has to be to count as ink, out of 255.
-#:
-#: 128 -- halfway -- was the obvious choice and the wrong one. Blur
-#: spreads the printed outline of the box inwards, and halfway counts
-#: the grey halo as writing: an empty box measured up to 0.08 of its
-#: own middle as ink, which is more than a faint tick manages.
-#:
-#: Swept against simulated scans. At 80 the faintest tick measures
-#: 0.016 and the most inked empty box 0.003, which is the first
-#: setting where the two do not overlap at all. Going darker still
-#: works and leaves less of the tick to find.
-#:
-#: Absolute rather than relative to each crop's own paper level,
-#: which was tried and is worse: the halo scales with the paper, so
-#: a relative cut keeps counting it however it is set.
-INK = 80
-
-#: Ink inside the box at or above this is a tick. Set between the
-#: two groups rather than at the edge of either -- three times the
-#: heaviest empty box, half the faintest tick.
-TICKED = 0.008
-
-#: Below this, with nothing beside it, the box is empty. The same
-#: number: with the groups cleanly apart there is no band in
-#: between worth reserving, and a gap here would only manufacture
-#: review for readings that are not ambiguous.
-EMPTY = 0.008
-
-#: Ink in the space to the right of the box at or above this is
-#: *something* -- most likely the instructor's `?`, possibly a
-#: smudge. Deliberately not called a question mark: see `measure`.
-#:
-#: Low, because an empty box measures exactly zero there and a
-#: question mark's faintest reading is 0.001. Anything above the
-#: floor is worth a look; the cost of being wrong is one glance.
-BESIDE = 0.002
-
-#: Ignored either side of the box's own outline when measuring, as a
-#: fraction of the box's width. The outline is printed, not written,
-#: and a measurement that counts it is measuring the form.
-EDGE = 0.22
+# INK, TICKED, EMPTY, BESIDE and EDGE stood here until 2026-11-17: the
+# thresholds of the reader before the coloured-pen one (`_pen`, INK_MIN,
+# INSET, BESIDE_MIN). Nothing used them, and each kept a careful comment
+# explaining a rule the reader no longer applied (RV-14). The reasoning
+# is in CODEBASE_NOTES.md, in the sections on the Scans tab.
 
 
 def _pen(rgb):

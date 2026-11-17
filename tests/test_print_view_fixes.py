@@ -263,6 +263,55 @@ class TestTheBuildReportNamesCollisions:
             "Ada Lovelace and Grace Hopper were both printed version B "
             "at table 2"]
 
+
+class TestAPreviewWritesNothing:
+    """RV-14 of the 2026-11-16 review. `api_print_preview` says "Draw and
+    report, writing nothing", and `_build` began by writing the job folder's
+    publication.toml whether or not it was a preview -- over the one a
+    real build had left there."""
+
+    @pytest.fixture
+    def course(self, tmp_path, monkeypatch, bank_dir):
+        monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(tmp_path))
+        course_mod.init("P", bank=str(bank_dir), adopt=None)
+        from checkit_printit import printjob
+        printjob.save_draft("P", {"title": "Checkpoint", "date": "2026-11-20"})
+        return gui_mod.Course("P")
+
+    def fake_run(self, seen):
+        class Result:
+            out = "out"
+            run_seed = 1
+            pdf = None
+            recorded = 0
+            record_error = ""
+            theme_installed = ""
+            unmatched_overrides = ()
+            anonymous = False
+            report = {"students": 0, "extras": 0, "skills": [], "versions": 0,
+                      "keys": 0, "seeds": {}, "unseated": [],
+                      "missing_fields": {}, "collisions": []}
+
+        def run(path, **kw):
+            seen.append((path, os.path.isfile(path)))
+            return Result()
+        return run
+
+    def test_no_job_folder_is_written(self, course, tmp_path, monkeypatch):
+        seen = []
+        monkeypatch.setattr(gui_mod.runner_mod, "run", self.fake_run(seen))
+        gui_mod._build(course, preview=True)
+        assert not (tmp_path / "jobs").exists()
+        [(path, existed)] = seen
+        assert existed, "the run was still handed a publication to read"
+
+    def test_a_build_still_writes_one(self, course, tmp_path, monkeypatch):
+        seen = []
+        monkeypatch.setattr(gui_mod.runner_mod, "run", self.fake_run(seen))
+        gui_mod._build(course, preview=False)
+        assert (tmp_path / "jobs").is_dir()
+
+
 class TestThePageShowsThePrintOrder:
     """The Print tab lists students in the order they will print.
 

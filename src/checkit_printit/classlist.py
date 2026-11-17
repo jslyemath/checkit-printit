@@ -349,6 +349,21 @@ def _spellings(student):
     return keys
 
 
+def _ids_conflict(a, b):
+    """Whether two students carry the same kind of id with different
+    values -- which makes them two people, whatever their names say.
+
+    Only like for like. A roster row holding a Global id and a class
+    list holding a Banner id are not in conflict; joining exactly those
+    is what the name rule is for.
+    """
+    for field in ("sid", "alt_id"):
+        mine, theirs = getattr(a, field), getattr(b, field)
+        if mine and theirs and mine != theirs:
+            return True
+    return False
+
+
 def merge(existing, incoming, scope=None):
     """Fold a freshly read class list into the roster we already have.
 
@@ -369,6 +384,18 @@ def merge(existing, incoming, scope=None):
     report = MergeReport([], [], [], [], [])
     seen = set()
 
+    # A name key two incoming rows share says nothing about which of
+    # them a roster row is -- the same reason `_index` drops a key two
+    # roster rows share. Counted on the incoming side as well.
+    incoming = list(incoming)
+    shared = {}
+    for fresh in incoming:
+        # A set: one row's name and first-plus-last are usually the same
+        # key, and counting it twice made every row look shared with
+        # itself.
+        for key in set(_spellings(fresh)):
+            shared[key] = shared.get(key, 0) + 1
+
     for fresh in incoming:
         match = None
         for kind, value in fresh.ids():
@@ -376,10 +403,20 @@ def merge(existing, incoming, scope=None):
                 match = index[(kind, value)]
                 break
         if match is None:
+            # Names are the weak keys, and three things disqualify a
+            # candidate (RV-2, 2026-11-16): the two carry different ids,
+            # the roster row was already claimed by an earlier row of
+            # this file, or the key is shared within the file. Without
+            # them a new Jordan Smith was folded into an existing Jamie
+            # Smith -- one entry, both their addresses, "1 updated".
             for key in _spellings(fresh):
-                if key in index:
-                    match = index[key]
-                    break
+                candidate = index.get(key)
+                if (candidate is None or id(candidate) in seen
+                        or shared.get(key, 0) > 1
+                        or _ids_conflict(fresh, candidate)):
+                    continue
+                match = candidate
+                break
 
         if match is None:
             students.append(fresh)

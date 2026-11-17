@@ -1042,9 +1042,9 @@ def api_seating_save(course, body):
                 f"imported or typed -- so it has been left alone, and the "
                 f"build still reads it rather than this room.")
     else:
-        with open(chart, "w", encoding="utf-8") as f:
-            f.write(seating_mod.to_toml(
-                incoming, lambda key: name_of.get(key, "")))
+        from .. import fileio
+        fileio.atomic_write(chart, seating_mod.to_toml(
+            incoming, lambda key: name_of.get(key, "")))
         note = f"Room saved, and {name} rewritten from it."
         # The one thing a saved room can be silently missing.
         #
@@ -1313,18 +1313,34 @@ def _check_chart_matches_room(course):
 
 
 def _build(course, preview, seed=None):
+    import tempfile
+
     _check_chart_matches_room(course)
     draft = printjob_mod.load_draft(course.name)
     identity = _course_identity(course)
+    # A preview writes its publication.toml somewhere temporary. It used to
+    # write the real job folder's, over the one the last real build had
+    # left -- from an endpoint documented as writing nothing (RV-14,
+    # 2026-11-16). The file names the course, not paths relative to
+    # itself, so where it sits does not change what it says.
+    scratch = tempfile.TemporaryDirectory() if preview else None
     try:
-        folder = printjob_mod.write_job(
-            course.name, draft,
-            course_name=identity.get("code") or identity.get("name", ""),
-            semester=identity.get("semester", ""),
-            professor=identity.get("professor", ""))
-    except printjob_mod.PrintJobError as exc:
-        raise GuiError(str(exc)) from None
+        try:
+            folder = printjob_mod.write_job(
+                course.name, draft,
+                course_name=identity.get("code") or identity.get("name", ""),
+                semester=identity.get("semester", ""),
+                professor=identity.get("professor", ""),
+                root=scratch.name if scratch else None)
+        except printjob_mod.PrintJobError as exc:
+            raise GuiError(str(exc)) from None
+        return _run_build(folder, preview, seed)
+    finally:
+        if scratch is not None:
+            scratch.cleanup()
 
+
+def _run_build(folder, preview, seed):
     try:
         result = runner_mod.run(
             os.path.join(folder, "publication.toml"),

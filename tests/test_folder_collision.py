@@ -16,8 +16,13 @@ four against the wrong student.
 
 What is refused is a build whose papers differ from the ones the
 record says that folder produced. Rebuilding the same run is not
-refused: it happens after a failed compile and after a theme change,
-and it destroys nothing.
+refused: it happens after a failed compile and after a theme change.
+
+It was believed to destroy nothing, and did not until the run had
+been graded: then `write_run`'s delete cascaded into `attempt` as
+well, and every grade read back from it went (RV-1, 2026-11-16). A
+graded run is now refused outright -- see TestAGradedRunIsNotRebuilt
+-- and the record keeps its marks even if something gets past that.
 """
 
 import os
@@ -218,10 +223,9 @@ class TestPapersIn:
 
 # ------------------------------------------------- through the runner ----
 
-class TestTheRunnerPassesItOn:
-    """The pieces above, wired. Driven through `runner.run`, because
-    the bug was not in any one of them -- it was that nothing asked
-    the question."""
+class _ACourse:
+    """A throwaway course with two students, and a way to build it.
+    No tests of its own, so a class inheriting it runs only its own."""
 
     @pytest.fixture
     def course(self, tmp_path, monkeypatch, bank_dir):
@@ -258,6 +262,12 @@ class TestTheRunnerPassesItOn:
                           do_compile=False, install_theme=False, seed=7,
                           **kw)
 
+
+class TestTheRunnerPassesItOn(_ACourse):
+    """The pieces above, wired. Driven through `runner.run`, because
+    the bug was not in any one of them -- it was that nothing asked
+    the question."""
+
     def test_the_second_job_is_refused(self, course):
         first = self.job(course, ["AD", "SU"])
         self.build(course, first)
@@ -290,6 +300,71 @@ class TestTheRunnerPassesItOn:
 
     def test_a_course_with_no_record_yet_builds(self, course):
         assert self.build(course, self.job(course, ["AD"])) is not None
+
+
+class TestAGradedRunIsNotRebuilt(_ACourse):
+    """The Build button with a title and date that still name a
+    checkpoint that has been scanned. The papers are the same, so the
+    collision check above passes -- and building would put a fresh
+    draw in the record over the papers that were actually sat."""
+
+    def grade(self, root):
+        path = os.path.join(root, "courses", "Test", "record.db")
+        record.save_attempts(path, [{
+            "run_id": "Checkpoint 2026-10-26", "sid": "001", "slug": "AD",
+            "outcome": "passed"}])
+        return path
+
+    def test_it_is_refused(self, course):
+        from checkit_printit import runner
+        self.build(course, self.job(course, ["AD"]))
+        self.grade(course)
+        with pytest.raises(runner.BuildError, match="graded"):
+            self.build(course, self.job(course, ["AD"]))
+
+    def test_replace_does_not_get_past_it(self, course):
+        from checkit_printit import runner
+        self.build(course, self.job(course, ["AD"]))
+        self.grade(course)
+        with pytest.raises(runner.BuildError, match="graded"):
+            self.build(course, self.job(course, ["AD"]), replace=True)
+
+    def test_nothing_in_the_folder_is_touched(self, course):
+        """The page index is how the scans were placed. Refusing after
+        `assemble` had rewritten it would refuse too late."""
+        from checkit_printit import runner
+        self.build(course, self.job(course, ["AD"]))
+        self.grade(course)
+        index = os.path.join(course, "Test", "Checkpoint 2026-10-26",
+                             "main.tex")
+        before = os.path.getmtime(index)
+        with pytest.raises(runner.BuildError):
+            self.build(course, self.job(course, ["AD"]))
+        assert os.path.getmtime(index) == before
+
+    def test_the_marks_are_still_there(self, course):
+        from checkit_printit import runner
+        self.build(course, self.job(course, ["AD"]))
+        path = self.grade(course)
+        with pytest.raises(runner.BuildError):
+            self.build(course, self.job(course, ["AD"]))
+        assert record.marks_in(path, "Checkpoint 2026-10-26") == 1
+
+    def test_recovering_a_lost_index_is_still_allowed(self, course):
+        """`--rebuilt` exists to bring an index back so the papers
+        can be placed. Who held what is unchanged, so the marks stay
+        true, and they stay put."""
+        self.build(course, self.job(course, ["AD"]))
+        path = self.grade(course)
+        self.build(course, self.job(course, ["AD"]), rebuilt=True)
+        assert record.marks_in(path, "Checkpoint 2026-10-26") == 1
+
+    def test_a_preview_is_not_refused(self, course):
+        """It writes nothing, so there is nothing to protect."""
+        self.build(course, self.job(course, ["AD"]))
+        self.grade(course)
+        assert self.build(course, self.job(course, ["AD"]),
+                          preview=True).preview
 
 
 class TestRecoveringALostIndex:

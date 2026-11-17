@@ -82,9 +82,16 @@ def clasp_dir(space):
 
 
 def script_sources():
-    here = os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))))
-    return os.path.join(here, "appsscript")
+    """The Apps Script printit deploys, inside the installed package.
+
+    It lived at the repository root and was found by walking three folders
+    up from here, which is the repository only in an editable install; a
+    wheel did not carry it at all (RV-9, 2026-11-16). `pyproject.toml`
+    lists it as package data, and tests/test_packaging.py holds the two
+    together.
+    """
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "appsscript")
 
 
 #: What printit stages, named the way Apps Script files it rather than

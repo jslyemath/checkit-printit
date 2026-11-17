@@ -230,6 +230,147 @@ def test_a_free_text_column_is_blanked(home, tmp_path):
     assert "free text" in why
 
 
+class TestASparseNameColumn:
+    """RV-3 of the 2026-11-16 review.
+
+    "Few distinct short values" was taken to mean a category. A
+    "Preferred Name" column where seven of thirty students have one is
+    exactly that shape: it was kept, written to the twin, and the leak
+    check passed, because the vault was never told those strings.
+    """
+
+    NICKS = {2: "Chichi", 5: "Fred", 9: "Jojo", 13: "Nadz", 17: "Rafa",
+             21: "Vik", 27: "Bo-Bo"}
+    FIRST = ["Aiko", "Bram", "Chidi", "Dara", "Elif", "Farid", "Greta",
+             "Hoang", "Imani", "Jonas", "Kirra", "Lucia", "Mateo", "Nadia",
+             "Oskar", "Priya", "Quinn", "Rafael", "Sanna", "Tomas", "Uma",
+             "Viktor", "Wren", "Xavier", "Yara", "Zoltan", "Anouk", "Bodhi",
+             "Cosima", "Dmitri"]
+
+    def rows(self, header="Preferred Name"):
+        out = [["OrgDefinedId", "Last Name", "First Name", header, "Email",
+                "Section"]]
+        for i, first in enumerate(self.FIRST):
+            out.append([f"#80{i:07d}", f"Surname{i:02d}x", first,
+                        self.NICKS.get(i, ""),
+                        f"{first.lower()}{i}@school.example", "820"])
+        return out
+
+    @pytest.mark.parametrize("header", ["Preferred Name", "Preferred First Name",
+                                        "Nickname", "Goes By"])
+    def test_a_preferred_name_header_is_masked(self, home, header):
+        plan = mask_mod.plan(self.rows(header))
+        col = [d for d in plan.decisions if d.header == header][0]
+        assert col.action == "mask", col.why
+
+    def test_an_unlabelled_column_of_names_is_blanked(self, home):
+        """A header nothing recognises, holding names that each occur
+        once. Categories repeat; names do not."""
+        plan = mask_mod.plan(self.rows("Misc"))
+        col = [d for d in plan.decisions if d.header == "Misc"][0]
+        assert col.action == "blank", col.why
+
+    def test_a_value_that_is_somebody_s_first_name_is_blanked(self, home):
+        """Repeating is not enough when the repeated value is a name
+        the file already holds in a name column."""
+        rows = self.rows("Misc")
+        for row in rows[1:]:
+            row[3] = ""               # nothing that occurs once
+        for row in rows[1:4]:
+            row[3] = "Greta"          # repeats, and is row 7's first name
+        plan = mask_mod.plan(rows)
+        col = [d for d in plan.decisions if d.header == "Misc"][0]
+        assert col.action == "blank", col.why
+
+    def test_no_nickname_reaches_the_twin(self, home, tmp_path):
+        src = str(tmp_path / "class.csv")
+        out = str(tmp_path / "class.masked.csv")
+        mask_mod.write_csv(src, self.rows())
+        vault = Vault(course="TEST 101")
+        mask_mod.mask_file(src, out, vault)
+        text = read(out)
+        assert [n for n in self.NICKS.values() if n in text] == []
+
+    def test_a_nickname_does_not_change_who_the_row_is(self, home, tmp_path):
+        """Masked, but not used to identify: the same student in a file
+        without the column must get the same pseudonym.
+
+        Names only, no id or address -- with either, the row is found by
+        that before any name is looked at, and this could not fail."""
+        vault = Vault(course="TEST 101")
+        with_nick = str(tmp_path / "a.csv")
+        without = str(tmp_path / "b.csv")
+        rows = [r[1:4] + r[5:] for r in self.rows()]     # last, first, nick
+        mask_mod.write_csv(with_nick, rows)
+        mask_mod.write_csv(without, [r[:2] + r[3:] for r in rows])
+        mask_mod.mask_file(with_nick, str(tmp_path / "a.out.csv"), vault)
+        before = len(vault.people)
+        mask_mod.mask_file(without, str(tmp_path / "b.out.csv"), vault)
+        assert len(vault.people) == before == 30
+
+    def test_the_grade_vocabulary_is_still_a_category(self, home, tmp_path):
+        """What the rule exists for. A grade value repeats across the
+        whole file even where one column holds it once."""
+        rows = mask_mod.read_rows(write(tmp_path / "grades.csv", GRADES))
+        actions = {d.header: d.action for d in mask_mod.plan(rows).decisions}
+        assert actions["Fundamentals Checkpoint Grade Symbol "
+                       "<Selectbox MaxPoints:1>"] == "keep"
+
+    def test_no_seed_makes_the_mask_refuse_itself(self, home, tmp_path):
+        """A fake email built from a fake name could spell a real first
+        name -- "b" + "ramanujan" contains "Bram" -- and the leak check
+        then refused the twin. About one seed in thirty on this file.
+        Swept, because a vault picks its seed at random."""
+        src = str(tmp_path / "class.csv")
+        mask_mod.write_csv(src, self.rows())
+        refused = []
+        for seed in range(80):
+            try:
+                mask_mod.mask_file(src, str(tmp_path / "o.csv"),
+                                   Vault(course="T", seed=seed))
+            except MaskError:
+                refused.append(seed)
+        assert refused == []
+
+    def test_no_seed_breaks_the_round_trip(self, home, tmp_path):
+        """A nickname masked as a shortening of one student's fake name
+        could equal another student's fake, and unmasking then gave one
+        student the other's name. About one seed in twenty."""
+        src = str(tmp_path / "class.csv")
+        mask_mod.write_csv(src, self.rows())
+        wrong = []
+        for seed in range(80):
+            vault = Vault(course="T", seed=seed)
+            out, back = str(tmp_path / "o.csv"), str(tmp_path / "b.csv")
+            mask_mod.mask_file(src, out, vault)
+            mask_mod.unmask_file(out, back, vault)
+            if not mask_mod.unmask_bytes_identical(src, back):
+                wrong.append(seed)
+        assert wrong == []
+
+    def test_a_selectbox_grade_is_kept_however_rare_its_values(self, home):
+        """A letter grade can occur once in a section. A selectbox can
+        only hold values the LMS scheme defines, so it is a category by
+        construction; on his real exports the repeat rule alone blanked
+        every midterm estimate."""
+        header = "Midterm Grade Estimate Grade Symbol <Selectbox MaxPoints:100>"
+        rows = [r[:3] + [g] + r[4:] for r, g in zip(
+            self.rows(header), [header, "A", "B+", "C-"] + [""] * 30)]
+        col = [d for d in mask_mod.plan(rows).decisions
+               if d.header == header][0]
+        assert col.action == "keep", col.why
+
+    def test_the_nickname_unmasks_back(self, home, tmp_path):
+        src = str(tmp_path / "class.csv")
+        out = str(tmp_path / "class.masked.csv")
+        back = str(tmp_path / "class.back.csv")
+        mask_mod.write_csv(src, self.rows())
+        vault = Vault(course="TEST 101")
+        mask_mod.mask_file(src, out, vault)
+        mask_mod.unmask_file(out, back, vault)
+        assert mask_mod.unmask_bytes_identical(src, back)
+
+
 def test_keep_promotes_a_column(home, tmp_path):
     src = write(tmp_path / "class.csv", CLASSLIST.replace(
         "Section", "Advising Notes"))
@@ -579,10 +720,13 @@ def test_a_leak_deletes_the_output_and_fails(home, tmp_path):
 
 
 def test_the_failure_never_prints_the_values_that_leaked(home, tmp_path):
+    # Each surname twice: since RV-3 a value occurring once is blanked by
+    # the classifier, and this test needs it to miss so the scan fires.
     text = ("Student ID,Email,Advisor\n"
             "806000111,a@institute.edu,Okonkwo\n"
             "806000222,b@institute.edu,Okonkwo\n"
-            "806000333,c@institute.edu,Fairweather\n")
+            "806000333,c@institute.edu,Fairweather\n"
+            "806000444,d@institute.edu,Fairweather\n")
     src = write(tmp_path / "class.csv", text)
     vault = Vault(course="TEST 100")
     vault.resolve({"last": "Okonkwo", "first": "Chidi"})
@@ -692,10 +836,15 @@ class TestOnePassSubstitution:
     """
 
     def _collided(self):
-        """A vault where one person's fake name is another's real one."""
-        vault = Vault(course="TEST 100")
+        """A vault where one person's fake name is another's real one.
+
+        A fixed seed. With a random one, about one run in fifty gave b
+        the fake first name "Rosalind" as well, the premise collapsed,
+        and the test failed for no reason (found 2026-11-17)."""
+        vault = Vault(course="TEST 100", seed=0)
         a, _ = vault.resolve({"first": "Thaddeus", "last": "Thorneycroft"})
         b, _ = vault.resolve({"first": "Rosalind", "last": "Netherfield"})
+        assert b.fake["first"] != "Rosalind", "the premise needs another seed"
         # Force the collision rather than wait for the name pool to
         # produce it: the bug is about what happens when it does.
         a.fake["first"] = "Rosalind"
@@ -768,6 +917,71 @@ def test_the_scan_does_not_cry_wolf_over_a_pseudonym(home):
     # The longer values are still looked for.
     assert "Thorneycroft" in vault.real_values()
     assert "Netherfield" in vault.real_values()
+
+
+class TestTheScanReadsWordsNotLetters:
+    """Found masking his real course folder, 2026-11-17: `vault
+    mask-course` refused every attempt, and every value it complained of
+    was a false alarm. The masker replaces whole words; the scan matched
+    letters, so it refused two things the masker can never write:
+
+    * a real surname in the middle of an ordinary word the original
+      file already held -- the course's own wording, not a student
+    * a real first name at the start of a pseudonym the vault invented
+
+    The exemptions are narrow on purpose. A real name at either *end*
+    of a word still counts, because that is how a username leaks.
+    """
+
+    def vault(self):
+        v = Vault(course="TEST 100", seed=3)
+        v.resolve({"first": "Kat", "last": "Ness"})
+        return v
+
+    def test_inside_an_ordinary_word_of_the_original_is_not_a_leak(self, home):
+        text = "Businesses due Friday."
+        assert self.vault().leaks(text, original=text) == []
+
+    def test_without_the_original_it_still_counts(self, home):
+        """`vault check` has no original to compare with, so it stays
+        as strict as it was."""
+        assert self.vault().leaks("Businesses due Friday.") == ["Ness"]
+
+    def test_at_the_end_of_a_word_it_still_counts(self, home):
+        """`jness` is a username, whatever the original held."""
+        text = "login: jness"
+        assert self.vault().leaks(text, original=text) == ["Ness"]
+
+    def test_at_the_start_of_a_word_it_still_counts(self, home):
+        text = "login: ness42"
+        assert self.vault().leaks(text, original=text) == ["Ness"]
+
+    def test_a_word_the_original_did_not_have_still_counts(self, home):
+        assert self.vault().leaks("Unessential", original="nothing") \
+            == ["Ness"]
+
+    def test_inside_a_pseudonym_is_not_a_leak(self, home):
+        vault = self.vault()
+        person = vault.people[0]
+        person.fake["first"] = "Katherine"
+        assert vault.leaks("Katherine Byron") == []
+
+    def test_a_whole_word_always_counts(self, home):
+        text = "Kat sat here"
+        assert self.vault().leaks(text, original=text) == ["Kat"]
+
+    def test_no_pseudonym_is_picked_that_contains_a_real_name(self, home):
+        """The cause of the second class, fixed where it starts."""
+        from checkit_printit.vault import FIRST_NAMES
+        vault = Vault(course="TEST 100", seed=1)
+        vault.avoid(["Kat", "Ada", "Mar", "Ann", "Eli", "Car", "Jul"])
+        for n in range(40):
+            vault.resolve({"first": f"Q{n}", "last": f"Zz{n}"})
+        for person in vault.people:
+            low = person.fake["first"].lower()
+            assert not any(name in low for name in
+                           ("kat", "ada", "mar", "ann", "eli", "car", "jul")), \
+                person.fake["first"]
 
 
 def test_a_vault_round_trips_through_disk(home, tmp_path):

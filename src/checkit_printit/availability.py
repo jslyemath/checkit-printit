@@ -15,6 +15,8 @@ import dataclasses
 import datetime
 import re
 
+from . import fileio
+
 #: 0 to 40, where 0 means "any". Straight from the Control Center script, so
 #: the sentence students read is the one they have been reading all along.
 NUMBER_WORDS = [
@@ -314,8 +316,10 @@ def set_open(path, slugs, add=False, known=None):
 
     with open(path, encoding="utf-8") as f:
         text = f.read()
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(set_values(text, {"skills": wanted}))
+    # Worked out in full before anything is written. `set_values` raises
+    # when a key has no line, and used to do so after `open(path, "w")`
+    # had already emptied the file (RV-10).
+    fileio.atomic_write(path, set_values(text, {"skills": wanted}))
     return wanted
 
 
@@ -349,6 +353,5 @@ def set_assessment(path, name=None, date=None, due=None, choose=None,
 
     with open(path, encoding="utf-8") as f:
         text = f.read()
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(set_values(text, values))
+    fileio.atomic_write(path, set_values(text, values))   # see set_open
     return load(path)

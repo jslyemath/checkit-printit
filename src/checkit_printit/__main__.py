@@ -11,6 +11,7 @@ from . import __version__, publication as pub_mod, roster as roster_mod, seating
 from . import availability as availability_mod
 from . import clasp as clasp_mod
 from . import classlist as classlist_mod
+from . import fileio
 from . import form as form_mod
 from . import record as record_mod
 from . import responses as responses_mod
@@ -320,8 +321,10 @@ def form_setup(space):
         conn.secret = form_mod.new_secret()
     _, secret_file = form_mod.save(path, conn)
 
-    script = os.path.join(os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__)))), "appsscript")
+    # The one place that knows where it is. This was a second copy of the
+    # same three-folders-up arithmetic, and would have gone on pointing at
+    # the repository after the first was fixed.
+    script = provision_mod.script_sources()
     click.echo("")
     click.echo("1. Open the form, then the three-dot menu > Apps Script.")
     click.echo(f"2. Paste in the script from {script}")
@@ -880,8 +883,8 @@ def roster_import(class_list, out, section, covers, seating_path, dry_run):
     if dry_run:
         click.echo("\ndry run -- nothing was written.")
         return
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(roster_mod.to_toml(merged, "checkit-printit roster import"))
+    fileio.atomic_write(out, roster_mod.to_toml(
+        merged, "checkit-printit roster import"))
     click.echo(f"\nwrote {out}")
 
     # Dropping empties the seat, whoever initiated it. Leaving that to the
@@ -891,7 +894,8 @@ def roster_import(class_list, out, section, covers, seating_path, dry_run):
         seating_path = os.path.join(os.path.dirname(os.path.abspath(out)),
                                     "seating.toml")
     if report.dropped and os.path.isfile(seating_path):
-        text = open(seating_path, encoding="utf-8").read()
+        with open(seating_path, encoding="utf-8") as f:
+            text = f.read()
         emptied = 0
         by_name = {s.name: s for s in merged}
         for name in report.dropped:
@@ -901,8 +905,7 @@ def roster_import(class_list, out, section, covers, seating_path, dry_run):
                     text, count = seating.blank_seat(text, spelling)
                     emptied += count
         if emptied:
-            with open(seating_path, "w", encoding="utf-8") as f:
-                f.write(text)
+            fileio.atomic_write(seating_path, text)
             click.echo(f"emptied {emptied} seat(s) in {seating_path}")
         else:
             click.echo("none of the dropped students held a seat")
@@ -983,8 +986,9 @@ def import_csv(csv_path, out):
         roster = roster_mod.from_spreadsheet_export(csv_path)
     except roster_mod.RosterError as exc:
         raise click.ClickException(str(exc))
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(roster_mod.to_toml(roster, "checkit-printit roster restore"))
+    # "import", not "roster restore", which it said: the header names the
+    # command to blame for the file.
+    fileio.atomic_write(out, roster_mod.to_toml(roster, "checkit-printit import"))
     click.echo(f"wrote {out}: {len(roster)} students, "
                f"{len(roster.skills_used())} distinct skills")
     click.echo("Read it before printing from it.")
@@ -1451,7 +1455,9 @@ def vault_mask_text(source, course, out, vault_path):
 
     with open(out, encoding="utf-8", errors="replace") as f:
         written = f.read()
-    leaked = store.leaks(written)
+    with open(source, encoding="utf-8", errors="replace") as f:
+        original = f.read()
+    leaked = store.leaks(written, original=original)
     addresses, digits = maskcourse_mod.residual(written, store)
 
     click.echo(f"{hits} substitution(s) from {len(store.people)} students")

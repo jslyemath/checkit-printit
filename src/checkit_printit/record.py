@@ -160,6 +160,24 @@ CREATE INDEX IF NOT EXISTS scan_page_by_run ON scan_page(run_id);
 CREATE INDEX IF NOT EXISTS printed_by_student ON printed(sid, slug);
 CREATE INDEX IF NOT EXISTS printed_by_run ON printed(run_id);
 CREATE INDEX IF NOT EXISTS attempt_by_student ON attempt(sid, slug);
+
+-- A run holding marks cannot be deleted, by any path.
+--
+-- `attempt.run_id` cascades, and the one sanctioned delete
+-- (`discard_run`) refuses a run with marks before it gets that far --
+-- so the cascade could only ever fire by accident. It did: until
+-- 2026-11-16 `write_run` recorded a run by deleting its row and
+-- inserting a new one, and building a graded run again deleted every
+-- grade read back from it (RV-1). A trigger rather than changing the
+-- foreign key to RESTRICT, because SQLite cannot alter a constraint
+-- without rebuilding the table, and this file holds the only copy of
+-- those grades.
+CREATE TRIGGER IF NOT EXISTS run_with_marks_is_kept
+BEFORE DELETE ON run
+WHEN EXISTS (SELECT 1 FROM attempt WHERE run_id = OLD.run_id)
+BEGIN
+    SELECT RAISE(ABORT, 'this run has been graded; its marks cannot be deleted with it');
+END;
 """
 
 #: What an attempt may be. Defined here, with the storage, because
@@ -362,18 +380,29 @@ def write_run(path, run_id, title, date, built, seed, output, handouts,
     db = connect(path)
     try:
         with db:
-            # The papers go with it: `printed.run_id` cascades, and
-            # `PRAGMA foreign_keys` is set in connect(), which is the only way
-            # in. Deleting them separately as well would be a second guard
-            # that no test can tell from the first.
-            db.execute("DELETE FROM run WHERE run_id = ?", (run_id,))
+            # The row is updated in place, never deleted and inserted.
+            #
+            # It used to be deleted, so that `printed` went with it by
+            # cascade. `attempt` cascades the same way, and a graded run
+            # recorded a second time lost every grade read back from it,
+            # with `graded` and `delisted` reset because the fresh row did
+            # not carry them (RV-1, 2026-11-16). Those two flags are left
+            # out of the update on purpose: they describe what happened to
+            # the run afterwards, which a build cannot know.
             db.execute(
                 "INSERT INTO run (run_id, run_no, title, date, built,"
                 " seed, output, extras, unnamed, rebuilt)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(run_id) DO UPDATE SET"
+                "   run_no = excluded.run_no, title = excluded.title,"
+                "   date = excluded.date, built = excluded.built,"
+                "   seed = excluded.seed, output = excluded.output,"
+                "   extras = excluded.extras, unnamed = excluded.unnamed,"
+                "   rebuilt = excluded.rebuilt",
                 (run_id, run_no and int(run_no), title, date, built,
                  int(seed), _shorten(output), int(extras), unnamed,
                  int(bool(rebuilt))))
+            db.execute("DELETE FROM printed WHERE run_id = ?", (run_id,))
             db.executemany(
                 "INSERT INTO printed (run_id, sid, name, section, slug, seed,"
                 " version) VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
@@ -928,6 +957,23 @@ def papers_in(path, run_id):
             return None
         return {(r["sid"], r["slug"]) for r in db.execute(
             "SELECT sid, slug FROM printed WHERE run_id = ?", (run_id,))}
+    finally:
+        db.close()
+
+
+def marks_in(path, run_id):
+    """How many papers of one run have had a decision saved. 0 if none.
+
+    What a build asks before writing into a run's folder: a run with
+    marks has been sat and read back, and nothing about it may be
+    redrawn (RV-1).
+    """
+    if not os.path.isfile(path):
+        return 0
+    db = connect(path)
+    try:
+        return db.execute("SELECT COUNT(*) FROM attempt WHERE run_id = ?",
+                          (run_id,)).fetchone()[0]
     finally:
         db.close()
 

@@ -101,6 +101,14 @@ class MaskError(Exception):
 EXTRA_SYNONYMS = {
     "handle": ["username", "user name", "login", "login id", "logon",
                "net id", "netid", "user", "account", "account name"],
+    # A name the student goes by. Its own group, and its own vault kind,
+    # because it is masked like a first name but must never be used to
+    # work out *who* a row is: as kind "first" it would replace the legal
+    # first name in `apply`'s fields and the row would match nobody
+    # (RV-3, 2026-11-16). `Vault.resolve` reads no "preferred" field.
+    "preferred": ["preferred name", "preferred first name", "preferred",
+                  "nickname", "nick name", "goes by", "known as",
+                  "chosen name", "chosen first name"],
 }
 
 #: Every synonym group this module looks for. Order decides who claims a
@@ -111,7 +119,10 @@ ALL_SYNONYMS = dict(SYNONYMS, **EXTRA_SYNONYMS)
 #: Which synonym groups name a person, and the vault kind for each.
 PII = {"sid": "sid", "alt_id": "alt_id", "handle": "handle", "last": "last",
        "first": "first", "middle": "middle", "full": "full",
-       "email": "email"}
+       "email": "email", "preferred": "preferred"}
+
+#: The kinds whose words make a value "somebody's name" for `classify`.
+NAME_KINDS = ("full", "last", "first", "middle", "preferred")
 
 #: Which synonym groups are about enrolment rather than identity, and are
 #: therefore kept. A section number and a role are shared by many
@@ -297,11 +308,22 @@ def _labelled(header_cells):
     return columns
 
 
-def classify(values):
+def classify(values, seen=None, name_words=()):
     """(action, why) for a column, from its contents alone.
 
     Called only for a column no label claimed. See the module docstring
     for the order of the tests and why rule 3 comes before rule 4.
+
+    `seen` counts every value in the whole file's body, and `name_words`
+    is every word of every cell in a column already known to hold names.
+    Both serve the last rule: "a few distinct short values" is a category
+    only if each value **repeats** somewhere in the file and none is
+    somebody's name. Without that a sparse "Preferred Name" column --
+    seven nicknames in thirty rows -- was kept and written to the twin,
+    and the leak check passed because the vault had never been told
+    them (RV-3, 2026-11-16). A grade value repeats across columns even
+    where one column holds it once, which is why `seen` is the file's.
+    With no `seen`, the column's own values are counted.
     """
     filled = [v for v in values if v.strip()]
     if not filled:
@@ -315,10 +337,29 @@ def classify(values):
     distinct = {v.strip() for v in filled}
     if (len(distinct) <= MAX_DISTINCT
             and max(len(v.strip()) for v in filled) <= MAX_LENGTH):
+        if seen is None:
+            seen = {}
+            for v in filled:
+                seen[v.strip()] = seen.get(v.strip(), 0) + 1
+        words = {w.lower() for w in name_words}
+        if words and any(w.lower() in words
+                         for v in distinct for w in _words(v)):
+            return "blank", "a value is also somebody's name in this file"
+        once = [v for v in distinct if seen.get(v, 0) < 2]
+        if once:
+            return "blank", (f"{len(once)} of {len(distinct)} value(s) occur "
+                             "once in the file: reads as names, not a "
+                             "category")
         return "keep", (f"{len(distinct)} distinct short value"
-                        + ("" if len(distinct) == 1 else "s"))
+                        + ("" if len(distinct) == 1 else "s")
+                        + ", each repeated")
     return "blank", (f"{len(distinct)} distinct values in {len(filled)} rows: "
                      "reads as free text")
+
+
+def _words(value):
+    """The words of a cell, as a name column would hold them."""
+    return [w for w in re.split(r"[\s,]+", value.strip()) if w]
 
 
 def common_prefix(values, min_rows=5):
@@ -363,6 +404,21 @@ def plan(rows, header_row=None, keep=(), mask_as=None, vault=None):
     labelled = _labelled(header)
     owner = {col: field for field, col in labelled.items()}
 
+    # For `classify`'s last rule: how often each value occurs anywhere
+    # in the body, and every word of every cell in a column known to
+    # hold names. Worked out first, because a name column can sit to
+    # the right of the column being judged.
+    seen = {}
+    for row in body:
+        for cell in row:
+            if cell.strip():
+                seen[cell.strip()] = seen.get(cell.strip(), 0) + 1
+    name_cols = {c for c, k in forced.items() if k in NAME_KINDS}
+    name_cols |= {c for c, f in owner.items()
+                  if PII.get(f) in NAME_KINDS and c not in forced}
+    name_words = {w for row in body for c in name_cols if c < len(row)
+                  for w in _words(row[c])}
+
     decisions, prefixes, warnings = [], {}, []
     for col in range(width):
         label = header[col] if col < len(header) else ""
@@ -399,7 +455,18 @@ def plan(rows, header_row=None, keep=(), mask_as=None, vault=None):
                                       why=f"header reads as {field}"))
             continue
 
-        action, why = classify(values)
+        # A Brightspace selectbox can only hold values from a scheme the
+        # LMS defines -- A, B+, Pass -- so it is a category by
+        # construction, however rarely one of its values turns up. Without
+        # this the repeat rule below blanked every midterm letter grade on
+        # his real exports, for no privacy gain (2026-11-17).
+        if "<selectbox" in label.lower():
+            decisions.append(Decision(col, label, "keep",
+                                      why="a selectbox: the LMS fixes its "
+                                          "values"))
+            continue
+
+        action, why = classify(values, seen=seen, name_words=name_words)
         kind = "email" if action == "mask" else ""
         decisions.append(Decision(col, label, action, kind, why))
 
@@ -616,7 +683,11 @@ def mask_file(path, out_path, vault, header_row=None, keep=(), mask_as=None,
 
     with open(out_path, encoding="utf-8-sig") as f:
         written = f.read()
-    leaked = vault.leaks(written, min_length=min_length)
+    # The original's cells, so a real value found only strictly inside a
+    # word the source already held is not taken for a leak. From `rows`
+    # rather than the file, because the source may be a workbook.
+    original = "\n".join(",".join(row) for row in rows)
+    leaked = vault.leaks(written, min_length=min_length, original=original)
     if leaked:
         where = _locate(out_rows, leaked)
         os.remove(out_path)

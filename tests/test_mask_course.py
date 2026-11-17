@@ -197,6 +197,73 @@ def test_the_record_database_is_masked(home, folder, tmp_path):
         assert section in ("820", "830"), "a section was masked away"
 
 
+def test_nothing_real_is_in_the_database_file_s_bytes(home, folder, tmp_path):
+    """RV-4 of the 2026-11-16 review.
+
+    The twin was a copy of `record.db` with its text cells updated in
+    place. SQLite does not scrub the space an update leaves behind, so
+    real names and ids were still in the file -- readable by anybody
+    running `strings` on it -- while the logical dump, which is what the
+    check read, held none of them.
+
+    Thirty papers a student, because slack only appears when an updated
+    row no longer fits where it was and moves; two rows rarely do.
+    """
+    skills = [(f"S{n:02d}", 400 + n) for n in range(30)]
+    record.write_run(
+        os.path.join(folder, "record.db"), run_id="second",
+        title="Checkpoint", date="2026-10-08", built="2026-10-08T09:00:00",
+        seed=2, output="/out/2", run_no=2,
+        handouts=[{"sid": "806000111", "name": "Marguerite Vanterpool Reyes",
+                   "section": "820", "version": "A", "papers": skills},
+                  {"sid": "806000222", "name": "Chidi Okonkwo",
+                   "section": "830", "version": "B", "papers": skills},
+                  {"sid": "806000333", "name": "Benedict Fairweather",
+                   "section": "820", "version": "A", "papers": skills}])
+    out = str(tmp_path / "twin")
+    maskcourse.mask_course(folder, out, Vault(course="Test", seed=1))
+    raw = open(os.path.join(out, "record.db"), "rb").read()
+    found = [value for value in REAL if value.encode("utf-8") in raw]
+    assert found == []
+
+
+def test_the_check_reads_the_bytes_too(home, folder, tmp_path, monkeypatch):
+    """The second half: if a database twin ever does carry a real value
+    in its bytes, the check must refuse it, not read past it."""
+    real_mask = maskcourse.mask_database
+
+    def leaky(source, destination, vault):
+        # A properly masked twin, and then a real surname in its bytes
+        # where no stored value accounts for it -- which is what free
+        # space left by an in-place update looked like.
+        hits = real_mask(source, destination, vault)
+        with open(destination, "ab") as f:
+            f.write(b"\0" * 64 + "Okonkwo".encode("utf-8") + b"\0" * 64)
+        return hits
+    monkeypatch.setattr(maskcourse, "mask_database", leaky)
+    with pytest.raises(CourseMaskError, match="record.db"):
+        maskcourse.mask_course(folder, str(tmp_path / "twin"),
+                               Vault(course="Test"))
+
+
+def test_the_database_twin_keeps_its_schema(home, folder, tmp_path):
+    """Built fresh rather than copied, so the shape has to be carried
+    across on purpose: every table, index and trigger."""
+    out = str(tmp_path / "twin")
+    maskcourse.mask_course(folder, out, Vault(course="Test"))
+
+    def shape(path):
+        with sqlite3.connect(path) as db:
+            return sorted(db.execute(
+                "SELECT type, name, sql FROM sqlite_master "
+                "WHERE name NOT LIKE 'sqlite_%'").fetchall())
+    assert shape(os.path.join(out, "record.db")) == shape(
+        os.path.join(folder, "record.db"))
+    with sqlite3.connect(os.path.join(out, "record.db")) as db:
+        assert db.execute("SELECT COUNT(*) FROM printed").fetchone()[0] == 2
+        assert db.execute("SELECT run_no FROM run").fetchone()[0] == 1
+
+
 def test_the_database_masking_is_schema_agnostic(home, folder, tmp_path):
     """A table nobody listed still gets masked.
 

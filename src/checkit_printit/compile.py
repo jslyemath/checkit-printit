@@ -39,9 +39,16 @@ def find_pdflatex():
 def compile_pdf(out_dir, log_path=None):
     """Compile `main.tex`. Returns the path to the PDF.
 
-    pdflatex exits non-zero on recoverable errors while still producing a valid
-    PDF, so success is judged by whether the file appeared, not by the exit
-    code. The log is kept either way: it is the only place the real error
+    Success is the exit code **and** a PDF this run wrote. It used to be
+    the PDF alone, on the reasoning that pdflatex can recover from an
+    error and still write a good one. Under `-halt-on-error` it does not
+    recover -- and judging by the file alone meant that a second build
+    whose error was in the preamble, where pdflatex stops before opening
+    its output, handed back the *first* build's PDF as its own (RV-5,
+    2026-11-16). So an existing `main.pdf` is removed before the first
+    pass, and a pass that exits non-zero stops the compile.
+
+    The log is kept either way: it is the only place the real error
     message lives, and it is far too long for a terminal.
     """
     pdflatex = find_pdflatex()
@@ -49,7 +56,19 @@ def compile_pdf(out_dir, log_path=None):
     if not os.path.isfile(main):
         raise CompileError(f"no main.tex in {out_dir!r}; assemble first.")
 
+    pdf = os.path.join(out_dir, "main.pdf")
+    if os.path.exists(pdf):
+        try:
+            os.remove(pdf)
+        except OSError as exc:
+            # Open in a viewer, on Windows. Compiling anyway would leave
+            # the old file there to be mistaken for this build's.
+            raise CompileError(
+                f"{pdf} could not be replaced ({exc}). Close it wherever "
+                f"it is open and build again.") from None
+
     output = []
+    failed = None
     for _ in range(PASSES):
         result = subprocess.run(
             [pdflatex, "-interaction=nonstopmode", "-halt-on-error", "main.tex"],
@@ -62,12 +81,21 @@ def compile_pdf(out_dir, log_path=None):
             **DECODING,
         )
         output.append(result.stdout + result.stderr)
+        if result.returncode != 0:
+            failed = result.returncode
+            break
 
     log_path = log_path or os.path.join(out_dir, "compile.log")
     with open(log_path, "w", encoding="utf-8") as f:
         f.write("\n\n".join(output))
 
-    pdf = os.path.join(out_dir, "main.pdf")
+    if failed is not None:
+        # Whatever pdflatex left behind is not this build's PDF.
+        if os.path.exists(pdf):
+            os.remove(pdf)
+        raise CompileError(
+            f"pdflatex stopped with an error (exit {failed}). The full log "
+            f"is at {log_path}.\n" + _first_error(output[-1]))
     if not os.path.isfile(pdf):
         raise CompileError(
             f"pdflatex produced no PDF. The full log is at {log_path}.\n"

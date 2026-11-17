@@ -20,6 +20,8 @@ here, and the Assessment tab falls back to CheckIt's plain template.
 import os
 import shutil
 
+from . import fileio
+
 from lxml import etree
 
 #: Folder inside the bank. Namespaced so it is obvious which tool owns it, and
@@ -114,8 +116,14 @@ def declare(bank_path):
     hand-maintained and full of comments that a round-trip would move or drop.
     """
     manifest = os.path.join(bank_path, "bank.xml")
-    with open(manifest, encoding="utf-8") as f:
-        xml = f.read()
+    # Read with its own line endings and written back with them. It was
+    # read in text mode and written with newline="", which turned a CRLF
+    # bank.xml into LF from top to bottom: a whole-file diff in the bank's
+    # repository for a two-line change (QB11 of the 2026-11-16 review).
+    with open(manifest, encoding="utf-8", newline="") as f:
+        raw = f.read()
+    eol = "\r\n" if "\r\n" in raw else "\n"
+    xml = raw.replace("\r\n", "\n")
 
     # Parsed rather than searched as text. A substring check for the path
     # matched the path written in a *comment* elsewhere in the file, decided
@@ -135,8 +143,7 @@ def declare(bank_path):
     opening = "    <latex-support>\n"
     if opening in xml:
         xml = xml.replace(opening, opening + files + "\n", 1)
-        with open(manifest, "w", encoding="utf-8", newline="") as f:
-            f.write(xml)
+        fileio.atomic_write(manifest, xml.replace("\n", eol), newline="")
         return True
 
     entry = (f'    <latex-support>\n'
@@ -156,8 +163,7 @@ def declare(bank_path):
             f"inside <bank>:\n{entry}"
         )
     xml = xml.replace(marker, marker + entry, 1)
-    with open(manifest, "w", encoding="utf-8", newline="") as f:
-        f.write(xml)
+    fileio.atomic_write(manifest, xml.replace("\n", eol), newline="")
     return True
 
 

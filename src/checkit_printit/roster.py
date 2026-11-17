@@ -12,6 +12,8 @@ import os
 import dataclasses
 import tomllib
 
+from . import fileio
+
 
 class RosterError(Exception):
     pass
@@ -407,8 +409,8 @@ def set_dropped(roster_path, who, dropped, seating_path=None, room_path=None):
 
     student.dropped = dropped
     student.dropped_by = "instructor" if dropped else ""
-    with open(roster_path, "w", encoding="utf-8") as f:
-        f.write(to_toml(people, "checkit-printit roster drop"))
+    # Serialised before the file is touched (RV-10).
+    fileio.atomic_write(roster_path, to_toml(people, "checkit-printit roster drop"))
 
     result = DropResult(student=student, changed=True, dropped=dropped)
 
@@ -424,8 +426,7 @@ def set_dropped(roster_path, who, dropped, seating_path=None, room_path=None):
         new = text
         result.seats_emptied = count
         if count:
-            with open(seating_path, "w", encoding="utf-8") as f:
-                f.write(new)
+            fileio.atomic_write(seating_path, new)
 
     if dropped and room_path and os.path.isfile(room_path):
         try:

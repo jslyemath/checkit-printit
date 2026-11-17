@@ -21,6 +21,32 @@ where checkit's own tests run. mat-106's venv has only checkit.
 
 Every one of these has happened, most more than once. None are hypothetical.
 
+### What the 2026-11-16 review changed -- read before touching these paths
+
+A different model read both repos; everything it confirmed was fixed
+on 2026-11-17. The review is "The whole codebase, read by a different
+model (2026-11-16)" in `../checkit/CODEBASE_NOTES.md`, the fixes
+"Fixing what the review found (2026-11-17)" after it. True now:
+
+- **A run with marks is never rebuilt or deleted.** `build` refuses
+  it (only `--rebuilt` and a replay get past), `write_run` updates in
+  place, and a trigger in every `record.db` refuses the delete.
+- **State is written whole**, through `fileio.atomic_write`. Never
+  `open(path, "w")` for a course file.
+- **Text into LaTeX goes through `assemble.tex_escape`** -- except the
+  student id, which the page index records verbatim.
+- **`compile_pdf` believes the exit code**, and removes an old PDF first.
+- **`classlist.merge` never joins two students with different ids.**
+- **Masking:** nickname columns are kind `preferred`; a "category"
+  column must repeat; `<Selectbox>` columns are kept; a masked
+  `record.db` is built fresh. `Vault.leaks` judges words, not letters,
+  when given the original -- read its docstring before touching it.
+- `appsscript/` lives in the package; clasp is pinned to 3.4.1.
+
+Still open: the review's "from reading" list, and its table of logic
+kept in several places (nine TOML quoters, the gradebook export written
+once for the CLI and once for the app).
+
 ### Write patch scripts with the Write tool. Never a heredoc.
 
 A bash heredoc mangles backslashes, so `\n` inside a Python string arrives as

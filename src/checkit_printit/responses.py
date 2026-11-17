@@ -23,6 +23,7 @@ import os
 import re
 
 from . import availability as availability_mod
+from . import fileio
 from . import roster as roster_mod
 
 
@@ -338,8 +339,7 @@ def pull_for_course(space, *, write=True, force=False):
                 student, skills=[], chose_for=None))
         else:
             updated.append(student)
-    with open(roster_path, "w", encoding="utf-8") as f:
-        f.write(roster_mod.to_toml(roster_mod.Roster(updated),
-                                   "checkit-printit form pull"))
+    fileio.atomic_write(roster_path, roster_mod.to_toml(
+        roster_mod.Roster(updated), "checkit-printit form pull"))
     out.written = True
     return out

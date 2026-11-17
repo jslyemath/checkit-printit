@@ -145,8 +145,11 @@ FAKE_DOMAINS = (
 #: a column that is blanked for want of a kind is a column that can no
 #: longer be reasoned about -- the LMS class list carries `OrgDefinedId`
 #: and `Username` side by side.
+#:
+#: `preferred` is a name the student goes by. Rendered like `first`, and
+#: never used to work out who a row is: `resolve` reads no such field.
 KINDS = ("full", "last", "first", "middle", "sid", "alt_id", "handle",
-         "email")
+         "email", "preferred")
 
 #: The kinds that are opaque identifiers, matched and rendered alike.
 ID_KINDS = ("sid", "alt_id", "handle")
@@ -617,7 +620,12 @@ class Vault:
         -- and must not be silent, because a repeat would give two real
         students one fake identity. Numbering is ugly on purpose.
         """
-        used = set(used) | {w for w in pool if w.lower() in self._avoid}
+        # Nor a name with a real one inside it: "Katherine" for somebody
+        # when a real student is Kat. Not a leak, but the scan read it as
+        # one and refused the twin (2026-11-17).
+        names = self._real_names()
+        used = set(used) | {w for w in pool if w.lower() in self._avoid
+                            or self._spells_a_real_name(w, names)}
         free = [w for w in pool if w not in used]
         if free:
             return self._rng.choice(free)
@@ -653,7 +661,35 @@ class Vault:
         while len(made) < want:
             made += str(counter % 10)
             counter += 1
+        # A stem can spell a real student's name by accident -- "b" +
+        # "ramanujan" is "braman...", and somebody in the class is Bram.
+        # The leak check reads the twin for real strings, so it refused
+        # about one mask in thirty, at random, on an ordinary class list
+        # (2026-11-17). Scramble the letters after the first until it
+        # spells nobody; the relationship to the name is lost for that
+        # one student, which is cheaper than a refusal nobody can explain.
+        for _ in range(200):
+            if not self._spells_a_real_name(made):
+                return made
+            made = _like(made, self._rng, keep=1)
         return made
+
+    def _real_names(self):
+        """Every real name word this vault knows or was told to avoid,
+        three letters and up, as `leaks` reads them."""
+        names = set(self._avoid)
+        for person in self.people:
+            for field in ("first", "last", "middle"):
+                names.update(w.lower() for w in
+                             (person.real.get(field) or "").split())
+        return {n for n in names if len(n) >= 3}
+
+    def _spells_a_real_name(self, text, names=None):
+        """Whether `text` contains a real name. Pass `names` (from
+        `_real_names`) when asking about many texts at once."""
+        low = text.lower()
+        return any(n in low for n in (self._real_names()
+                                      if names is None else names))
 
     def _fake_id(self, field, core, person=None):
         """A fake *core* for an identifier: same length, same classes.
@@ -745,16 +781,35 @@ class Vault:
         # roster spelling where the file said the preferred one. So
         # candidates are offered best-first and the first unused one
         # wins.
-        taken = set(person.strings.values())
+        #
+        # **And across people.** A shortening of one student's fake name
+        # can equal another student's fake -- Quinn masked as "Mar", and
+        # a nickname of somebody else's masked as "Mar" too. Unmasking
+        # then had one string and two real values, and gave one student
+        # the other's name. Rare while every cell was a full name; about
+        # one mask in twenty once nicknames were masked (2026-11-17).
+        # Compared without case, because unmasking matches without case.
+        # One-character fakes are exempt across people: every middle
+        # initial is "X" on purpose, and `pairs` never substitutes a
+        # string that short, so nothing can be unmasked wrongly by it.
+        mine = {v.lower() for v in person.strings.values()}
+        theirs = set()
+        for other in self.people:
+            if other is person:
+                continue
+            theirs |= {v.lower() for v in other.strings.values() if v}
+            theirs |= {other.fake[f].lower() for f in ("first", "last")
+                       if other.fake.get(f)}
         for candidate in self._candidates(kind, value, person):
-            if candidate not in taken:
+            low = candidate.lower()
+            if low not in mine and (len(low.strip()) < 2
+                                    or low not in theirs):
                 person.strings[value] = candidate
                 return candidate
         raise VaultError(
             f"could not find a pseudonym for a {kind} that is not already "
-            f"standing in for something else of this student's. Masking it "
-            "anyway would make unmasking guess, which is the bug this check "
-            "exists to stop.")
+            f"standing in for something else. Masking it anyway would make "
+            "unmasking guess, which is the bug this check exists to stop.")
 
     def _candidates(self, kind, value, person):
         """Possible fakes for one cell, best first.
@@ -767,7 +822,7 @@ class Vault:
             yield self._render(kind, value, person)
             return
 
-        if kind == "first":
+        if kind in ("first", "preferred"):
             yield from self._given_names(person, len(value))
             return
         if kind == "last":
@@ -1051,8 +1106,56 @@ class Vault:
         out |= {d for d in self.domains.values() if d}
         return out
 
-    def leaks(self, text, min_length=3):
-        """Which real values survive in this text. Empty is the good case."""
+    def leaks(self, text, min_length=3, original=None):
+        """Which real values survive in this text. Empty is the good case.
+
+        Matched as letters, and then each occurrence is asked whether it
+        is really a value or only letters inside some other word. Two
+        kinds of other word are let off, and nothing else:
+
+        * a word of a pseudonym this vault issued -- "Kat" inside the
+          fake "Katherine" says nothing about anybody;
+        * a word that `original` (the file before masking) already held,
+          when the value sits strictly **inside** it -- a surname in the
+          middle of the course's own wording.
+
+        A value at either end of a word always counts, original or not:
+        `jsmith` and `smith42` are how usernames leak. A value that is
+        not one plain word -- an address, a full name -- always counts.
+        Without `original`, only the first exemption applies.
+
+        Both were found when `vault mask-course` refused every attempt
+        at his real course folder, and every value it named was one of
+        the two (2026-11-17).
+        """
         low = text.lower()
-        return sorted(v for v in self.real_values(min_length)
-                      if v.lower() in low)
+        reals = self.real_values(min_length)
+        real_low = {v.lower() for v in reals}
+        fake_words = {w for f in self.fake_values()
+                      for w in re.findall(r"\w+", f.lower())}
+        orig_words = (set(re.findall(r"\w+", original.lower()))
+                      if original is not None else set())
+
+        def counts(value, start, end):
+            if not re.fullmatch(r"\w+", value):
+                return True
+            a, b = start, end
+            while a > 0 and (low[a - 1].isalnum() or low[a - 1] == "_"):
+                a -= 1
+            while b < len(low) and (low[b].isalnum() or low[b] == "_"):
+                b += 1
+            host = low[a:b]
+            if host == value or host in real_low:
+                return True
+            if host in fake_words:
+                return False
+            inside = a < start and end < b
+            return not (inside and host in orig_words)
+
+        found = []
+        for v in reals:
+            lv = v.lower()
+            if lv in low and any(counts(lv, m.start(), m.end())
+                                 for m in re.finditer(re.escape(lv), low)):
+                found.append(v)
+        return sorted(found)

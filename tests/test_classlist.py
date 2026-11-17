@@ -247,3 +247,97 @@ class TestMerging:
         assert gus.preferred == "Gus"
         assert gus.skills == ["W1"]
         assert gus.first == "Augusta", "the legal name is still recorded"
+
+
+def person(first, last, sid="", email="", section="820"):
+    return Student(name=f"{first} {last}", skills=[], first=first, last=last,
+                   sid=sid, email=email, section=section)
+
+
+class TestTwoPeopleWhoShareASurnameAndAnInitial:
+    """RV-2 of the 2026-11-16 review.
+
+    The surname-plus-initial rule joins "Matt Marrowby" to "Marrowby,
+    Matthew C." when the roster row has no id. It also joined a new
+    student to an existing one whenever exactly one roster student held
+    the key -- Jordan Smith into Jamie Smith -- without asking whether
+    the two carried different ids. One roster entry came out holding
+    one student's id and the other's address, reported as "1 updated".
+    """
+
+    JAMIE = ("Jamie", "Smith", "900000001", "jamie@example.edu")
+    JORDAN = ("Jordan", "Smith", "900000002", "jordan@example.edu")
+
+    def merged(self, *incoming):
+        roster = Roster([person(*self.JAMIE)])
+        return classlist.merge(roster, [person(*p) for p in incoming])
+
+    @pytest.mark.parametrize("order", ["existing first", "new one first"])
+    def test_the_new_student_is_added(self, order):
+        rows = ((self.JAMIE, self.JORDAN) if order == "existing first"
+                else (self.JORDAN, self.JAMIE))
+        roster, report = self.merged(*rows)
+        assert report.added == ["Jordan Smith"]
+        assert sorted(s.sid for s in roster) == ["900000001", "900000002"]
+
+    @pytest.mark.parametrize("order", ["existing first", "new one first"])
+    def test_nobody_ends_up_with_the_other_s_address(self, order):
+        rows = ((self.JAMIE, self.JORDAN) if order == "existing first"
+                else (self.JORDAN, self.JAMIE))
+        roster, _ = self.merged(*rows)
+        jamie = next(s for s in roster if s.sid == "900000001")
+        assert jamie.all_emails() == ["jamie@example.edu"]
+
+    def test_a_different_id_is_never_joined_on_the_name_alone(self):
+        """Even an identical name. Two people can share one."""
+        roster, report = self.merged(("Jamie", "Smith", "900000003", ""))
+        assert report.added == ["Jamie Smith"]
+        assert len(roster) == 2
+
+    def test_one_roster_student_is_matched_at_most_once(self):
+        """The existing row has no id, so the id rule cannot help; two
+        incoming people who both reduce to (smith, j) must not both
+        land on it."""
+        roster = Roster([Student(name="J Smith", skills=["W1"])])
+        roster, report = classlist.merge(
+            roster, [person(*self.JAMIE), person(*self.JORDAN)])
+        holders = [s for s in roster if s.sid]
+        assert sorted(s.sid for s in holders) == ["900000001", "900000002"]
+        assert len({id(s) for s in holders}) == 2
+
+    def test_two_spellings_in_one_file_do_not_share_a_roster_row(self):
+        """The case only the claimed-once rule catches: different name
+        keys, no conflicting id, one roster row reachable by both. The
+        second is added, so it shows up in the report as a question
+        rather than being merged into somebody silently."""
+        roster = Roster([Student(name="Matt Marrowby", skills=["W1"],
+                                 first="Matthew", last="Marrowby")])
+        roster, report = classlist.merge(roster, [
+            person("Matthew", "Marrowby", "900000009"),
+            Student(name="Matt Marrowby", skills=[], section="820",
+                    email="other@example.edu")])
+        matt = next(s for s in roster if s.sid == "900000009")
+        assert "other@example.edu" not in matt.all_emails()
+        assert report.added == ["Matt Marrowby"]
+
+    def test_an_exact_name_still_matches_by_name(self):
+        """Not by the weaker initial rule it would fall through to.
+        A row's name and its first-plus-last are the same key, and an
+        early version of the shared-key count saw that as two rows."""
+        roster = Roster([Student(name="Jamie Smith", skills=["W1"]),
+                         Student(name="Jo Smith", skills=["D2"])])
+        roster, report = classlist.merge(
+            roster, [person("Jamie", "Smith", "900000001")])
+        jamie = next(s for s in roster if s.sid == "900000001")
+        assert jamie.skills == ["W1"]
+        assert report.added == []
+
+    def test_the_rule_still_does_its_job(self):
+        """What it is for: a roster adopted from a print job, no id,
+        and the class list's legal name."""
+        roster = Roster([Student(name="Matt Marrowby", skills=["W1"])])
+        roster, report = classlist.merge(
+            roster, [person("Matthew", "Marrowby", "900000009")])
+        assert report.added == []
+        assert roster.students[0].sid == "900000009"
+        assert roster.students[0].skills == ["W1"]

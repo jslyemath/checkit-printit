@@ -41,6 +41,8 @@ import os
 import re
 import tomllib
 
+from . import fileio
+
 FILENAME = "gradebook.toml"
 
 #: What a blank cell may mean, and why the difference matters.
@@ -233,9 +235,7 @@ def load(path):
 
 
 def save(path, profile):
-    os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write(profile.to_toml())
+    fileio.atomic_write(path, profile.to_toml(), newline="\n")
 
 
 # ---------------------------------------------------------- the matching --

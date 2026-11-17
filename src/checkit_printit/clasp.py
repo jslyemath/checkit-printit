@@ -16,7 +16,15 @@ import os
 import shutil
 import subprocess
 
-PACKAGE = "@google/clasp@latest"
+#: An exact version, never `@latest` (RV-14, 2026-11-16). `npx --yes` runs
+#: whatever it is given without asking, and this module depends on clasp's
+#: command names (create-script, clone-script, list-scripts), on fragments
+#: of its error text (REFUSALS, NEEDS_LOGIN) and on finding a deployment id
+#: in its prose -- any of which a new release can change. 3.4.1 is the
+#: version that ran against a real Google account in Stage 7a (2026-09-20).
+#: Move it on purpose, and run `form create` against a throwaway course
+#: when you do.
+PACKAGE = "@google/clasp@3.4.1"
 
 #: The file clasp overwrites on create-script. Ours declares the
 #: webapp block; clasp's default does not.

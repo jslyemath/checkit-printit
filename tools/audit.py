@@ -48,7 +48,7 @@ def sources(root, *globs):
     return out
 
 py_files = sources(PRINTIT, "src/**/*.py", "tests/**/*.py", "tools/**/*.py")
-gs_files = sources(PRINTIT, "appsscript/*.gs")
+gs_files = sources(PRINTIT, "src/checkit_printit/appsscript/*.gs")
 docs = sources(PRINTIT, "*.md") + sources(CHECKIT, "CLAUDE.md", "PRINT_TOOL_DESIGN.md")
 
 # ---------------------------------------------------------------- A: rename

@@ -669,6 +669,44 @@ class TestCarryingThePageOntoTheScan:
         got = carry(200, 0)
         assert abs(got[0] - 400) < 1e-6 and abs(got[1] - 0) < 1e-6
 
+    @pytest.mark.parametrize("base", [0.0, 180.0, -179.8, 90.0])
+    def test_a_sheet_fed_upside_down_is_placed(self, base):
+        """RV-7 of the 2026-11-16 review.
+
+        The turn is averaged over the code's two diagonals. Each was
+        folded into -180..180 degrees first, so for a sheet fed upside
+        down the two sat either side of the fold -- +179.9 and -179.9 --
+        and averaged to about nought: "not turned at all". In a
+        simulation, 139 of 400 upside-down sheets were cut more than a
+        box's width from where they should have been, the worst by
+        3,588px. A well-fed sheet's skew and a little noise on each
+        corner, as a real read has; seeded, so it means the same every
+        time.
+        """
+        import math
+        import random
+        rng = random.Random(7)
+        corners = ((1400.0, 2000.0), (1470.0, 2000.0),
+                   (1470.0, 2070.0), (1400.0, 2070.0))
+        anchor = scans.Anchor(corners=corners, dpi=200, page_height=792.0)
+        pivot, probe = (850.0, 1100.0), (1000.0, 300.0)
+
+        def turned(point, degrees):
+            a = math.radians(degrees)
+            dx, dy = point[0] - pivot[0], point[1] - pivot[1]
+            return (pivot[0] + dx * math.cos(a) - dy * math.sin(a),
+                    pivot[1] + dx * math.sin(a) + dy * math.cos(a))
+
+        worst = 0.0
+        for _ in range(200):
+            angle = base + rng.uniform(-0.3, 0.3)
+            seen = tuple(tuple(c + rng.uniform(-0.4, 0.4)
+                               for c in turned(p, angle)) for p in corners)
+            got = scans.placement(anchor, seen)(*probe)
+            want = turned(probe, angle)
+            worst = max(worst, math.hypot(got[0] - want[0], got[1] - want[1]))
+        assert worst < 40, f"cut {worst:.0f}px from where it should be"
+
 
 @pytest.mark.skipif(not pdflatex, reason="no pdflatex")
 class TestCuttingItOutOfARealPage:

@@ -98,8 +98,8 @@ def write(out_dir, publication, run_seed, seeds, bank, slugs):
         ]
 
     path = os.path.join(out_dir, FILENAME)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    from . import fileio
+    fileio.atomic_write(path, "\n".join(lines) + "\n")
     return path
 
 

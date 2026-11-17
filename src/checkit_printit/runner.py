@@ -306,6 +306,32 @@ def run(pub_path, out=None, do_compile=True, seed=None, preview=False,
     # is the whole point, and the manifest has already been checked
     # against the bank.
     already = None
+
+    # A run that has been graded is not built again, whatever the
+    # papers -- and before `assemble`, because the folder's page index
+    # is how its scans were placed and assemble rewrites it.
+    #
+    # The collision check below cannot see this: a rebuild of the same
+    # job holds the same papers, so it passes, and until 2026-11-16 the
+    # record then deleted every grade read back from the run (RV-1).
+    # `--replace` does not get past it. Two things do, because neither
+    # changes what was printed: `--rebuilt`, which recovers a lost index
+    # (who held what is unchanged, so the marks stay true), and a replay,
+    # which reprints the recorded seeds exactly.
+    if (publication.course_folder and not preview and not rebuilt
+            and record is None):
+        run_name = os.path.basename(os.path.normpath(out))
+        marked = record_mod.marks_in(
+            course_mod.file_in(publication.course_folder, "record"),
+            run_name)
+        if marked:
+            raise BuildError(
+                f"{run_name} has been graded -- {marked} paper(s) read "
+                f"back -- so it is not built again: a new draw would "
+                f"replace, in the record, the papers that were actually "
+                f"sat. Change the title or the date to give this run its "
+                f"own folder.")
+
     # Recovering an index is replacing a run on purpose, so it does
     # not also need `--replace`: asking for both would be asking the
     # same question twice and getting the answer wrong once.

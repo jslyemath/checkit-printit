@@ -37,7 +37,19 @@ FULL = {
     "variants": {"W4": "multiplication"},
     "overrides": {"806001": ["W3"]},
     "extras": [{"skill": "W1", "copies": 4}],
+    # Every key of DEFAULTS, at a value that is not its default. These
+    # five were missing, and `save_draft` never wrote `ids` or `codes`:
+    # unticking either in the app reached nothing, because the build
+    # reads the draft back from disk (2026-11-17).
+    "ids": False, "codes": False,
+    "who": "these", "only": ["806001"],
+    "versions": {"806001": "B"},
 }
+
+
+def test_the_round_trip_covers_every_key():
+    """So a key added to DEFAULTS cannot be left out of the test above."""
+    assert set(FULL) | {"mode"} == set(printjob.DEFAULTS)
 
 
 #: Which `[selection]` key each mode ignores. `save_draft` drops

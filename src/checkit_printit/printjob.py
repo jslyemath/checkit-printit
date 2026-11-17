@@ -20,6 +20,7 @@ import os
 import tomllib
 
 from . import course as course_mod
+from . import fileio
 
 DRAFT = "job.toml"
 
@@ -157,6 +158,11 @@ def save_draft(space, draft):
         f"keys       = {'true' if merged['keys'] else 'false'}",
         f"key_copies = {int(merged['key_copies'])}",
         f"names      = {'true' if merged['names'] else 'false'}",
+        # Never written until 2026-11-17, though `load_draft` read them
+        # and `publication_text` wrote them -- so the app's two boxes
+        # reached nothing, because a build reads the draft back from here.
+        f"ids        = {'true' if merged['ids'] else 'false'}",
+        f"codes      = {'true' if merged['codes'] else 'false'}",
         "",
     ]
 
@@ -220,8 +226,7 @@ def save_draft(space, draft):
                   f"copies = {int(extra['copies'])}", ""]
 
     path = draft_path(space)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+    fileio.atomic_write(path, "\n".join(lines))
     return path
 
 
@@ -328,8 +333,7 @@ def write_job(space, draft, course_name, semester="", professor="",
             "and is how a response is matched to an assessment.")
     folder = folder_for(draft, root)
     os.makedirs(folder, exist_ok=True)
-    with open(os.path.join(folder, "publication.toml"), "w",
-              encoding="utf-8") as f:
-        f.write(publication_text(space, draft, course_name, semester,
-                                 professor))
+    fileio.atomic_write(
+        os.path.join(folder, "publication.toml"),
+        publication_text(space, draft, course_name, semester, professor))
     return folder
