@@ -28,6 +28,12 @@ from checkit.static import read_resource
 #: characters that are perfectly good LaTeX. A field WITH a tag is already
 #: XML-safe, because `template.xml` pastes it in raw and the web build would
 #: have failed otherwise.
+#:
+#: A field WITH a tag is SpaTeXt, so its text outside the tags is prose and
+#: latex.xsl escapes it (2026-11-17): `50%` prints as 50%, not as a comment.
+#: Raw LaTeX belongs inside `<m>`, or in a field with no tags at all. When
+#: this was introduced, no field in mat-106 -- across all 1000 seeds of all
+#: 29 skills -- changed in print.
 _TAG_RE = re.compile(r"<\s*/?\s*[a-zA-Z][a-zA-Z0-9-]*(\s[^<>]*)?/?>")
 
 #: The transform needs a document, and the smallest one that reaches the inline

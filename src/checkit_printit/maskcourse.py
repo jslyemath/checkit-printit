@@ -92,6 +92,17 @@ def learn(vault, roster_path):
     only replace literals the vault has been asked for.
     """
     people = roster_mod.load(roster_path)
+    learn_students(vault, people)
+    return len(people.students)
+
+
+def learn_students(vault, people):
+    """`learn`, for students already in hand. Returns how many are new.
+
+    Split out so that `privacy` can teach a course's vault everybody a
+    roster names the moment it is read, before anything prints them.
+    """
+    before = len(vault.people)
 
     # **Before inventing anything.** The fake pool is historical
     # scientists, a real roster contains Grace and Thomas and Julia, and
@@ -123,7 +134,7 @@ def learn(vault, roster_path):
                 vault.mask(field, value, person)
         for address in student.all_emails():
             vault.mask("email", address, person)
-    return len(people.students)
+    return len(vault.people) - before
 
 
 # ------------------------------------------------------- the sniffer --

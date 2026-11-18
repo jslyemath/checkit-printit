@@ -136,16 +136,7 @@ def _course_bank(name):
     """The bank a course prints from, when the job does not say."""
     if not name:
         return ""
-    config = os.path.join(course_mod.path_for(name), course_mod.CONFIG)
-    if not os.path.isfile(config):
-        return ""
-    with open(config, "rb") as f:
-        raw = tomllib.load(f)
-    declared = str(raw.get("bank", {}).get("path", "")).strip()
-    if not declared:
-        return ""
-    return os.path.normpath(
-        os.path.join(course_mod.path_for(name), declared))
+    return course_mod.bank_path(name)
 
 
 def load(path):

@@ -128,8 +128,7 @@ def load_draft(space):
     return out
 
 
-def _quote(s):
-    return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
+_quote = fileio.toml_string
 
 
 def _list(values):

@@ -177,6 +177,11 @@ def load(path, versions=("A", "B")):
     # rule an unplaced group and an unspotted seat already follow.
     if any(at is not None for at, _ in found):
         found.sort(key=lambda pair: (pair[0] is None, pair[0] or 0))
+    # A seat holds a typed name, which need not match the roster -- the
+    # unmatched ones are exactly what `build` reports. Each gets a
+    # pseudonym when names are being masked. See privacy.py.
+    from . import privacy
+    privacy.saw_names([seat.name for _, seat in found], path)
     return Chart([seat for _, seat in found], versions)
 
 
@@ -282,12 +287,6 @@ class Chart:
     def __len__(self):
         return len(self.seats)
 
-    def version_of(self, name):
-        for seat in self.seats:
-            if seat.name == name:
-                return seat.version
-        return None
-
     def neighbours(self):
         """Pairs of seats that sit next to each other at a table.
 
@@ -391,7 +390,8 @@ seats = ["Ada Lovelace", "Alan Turing", "Grace Hopper", "Katherine Johnson"]
 
 
 def _quote(s):
-    return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
+    from .fileio import toml_string
+    return toml_string(s)
 
 
 #: The line `to_toml` stamps on a chart it wrote, and the line

@@ -222,7 +222,12 @@ def load(path):
             dropped_by=str(entry.get("dropped_by", "")).strip(),
             chose_for=_as_date(entry.get("chose_for"), name, path),
         ))
-    return Roster(students)
+    roster = Roster(students)
+    # Everybody read is given a pseudonym now, before anything can print
+    # them, when names are being masked. A no-op otherwise. See privacy.py.
+    from . import privacy
+    privacy.saw(roster, path)
+    return roster
 
 
 def _as_date(value, name, path):
@@ -254,11 +259,16 @@ class Ambiguous(RosterError):
     pass
 
 
-def find(roster, who):
+def find(roster, who, partial=True):
     """One student, by id, address or name. Refuses to guess.
 
     Identifiers are tried strongest first, so a name that happens to look like
     somebody else's cannot beat an exact id.
+
+    `partial` allows the last resort, a unique piece of a name -- fine
+    for looking somebody up, and wrong for changing the roster:
+    `roster drop ann` dropped Joanna when she was the only match
+    (review, 2026-11-16). `set_dropped` passes False.
     """
     needle = who.strip().lower()
     if not needle:
@@ -281,6 +291,13 @@ def find(roster, who):
                         f"id or an email address instead.")
 
     hits = [s for s in roster if needle in s.name.strip().lower()]
+    if hits and not partial:
+        # Without the name: it is not the one asked for, and this goes
+        # to a terminal.
+        raise NotFound(
+            f"no student is called exactly {who!r}, though it is part of "
+            f"{len(hits)} name(s). Give the whole name, an id or an "
+            f"address -- a change to the roster does not go on part of one.")
     if len(hits) == 1:
         return hits[0]
     if len(hits) > 1:
@@ -402,7 +419,7 @@ def set_dropped(roster_path, who, dropped, seating_path=None, room_path=None):
     from . import seating as seating_mod
 
     people = load(roster_path)
-    student = find(people, who)
+    student = find(people, who, partial=False)
 
     if student.dropped == dropped:
         return DropResult(student=student, changed=False, dropped=dropped)
@@ -524,8 +541,7 @@ def to_toml(roster, written_by="checkit-printit"):
     did, and must not claim that nothing will do it again. It used to say
     exactly that, while `form pull` rewrote it.
     """
-    def quote(s):
-        return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
+    quote = fileio.toml_string
 
     lines = [f"# Written by `{written_by}`. This is the tool's own format, and",
              "# it is safe to edit -- but `roster import`, `roster drop`,",

@@ -26,6 +26,33 @@ import os
 import tempfile
 import time
 
+#: What a TOML basic string cannot hold as itself, and how to write it.
+_TOML_ESCAPES = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r",
+                 "\t": "\\t", "\b": "\\b", "\f": "\\f"}
+
+
+def toml_string(value):
+    """`value` as a TOML basic string, quotes included.
+
+    The one copy. There were nine (`_quote` in manifest, printjob, form
+    and seating; `quote` in gradebook and roster; `course._escape`; two
+    in `availability`), and none escaped a newline -- so a title pasted
+    with a line break in it wrote a file that could not be read back,
+    and one of them did not escape a backslash either (review,
+    2026-11-16). Any other control character is written as \\uXXXX,
+    which is the only form TOML accepts for it.
+    """
+    out = []
+    for ch in str(value):
+        if ch in _TOML_ESCAPES:
+            out.append(_TOML_ESCAPES[ch])
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append(f"\\u{ord(ch):04X}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
+
 #: How long to keep retrying a rename that Windows refuses because
 #: something -- a virus scanner, the search indexer, an editor -- has the
 #: target open for a moment.

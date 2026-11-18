@@ -64,7 +64,11 @@ BLANK_MEANINGS = ("not attempted", "zero")
 #: `Profile.validate`, and the `click.Choice` built from the first --
 #: and a fourth was about to be written for the web app. A list of
 #: what the tool accepts belongs with the thing that accepts it.
-ID_FIELDS = ("alt_id", "handle", "sid", "email")
+#: Fields of `roster.Student`. `handle` was listed too and a Student has
+#: no such field, so a profile saying `matches = "handle"` passed
+#: validation and then matched nobody (review, 2026-11-16).
+#: `test_gradebook` checks every name here is a real field.
+ID_FIELDS = ("alt_id", "sid", "email")
 
 
 class GradebookError(Exception):
@@ -82,8 +86,8 @@ class Profile:
     #: The header of the column holding the student's LMS id.
     student_column: str = ""
 
-    #: Which roster field that column joins to: `alt_id`, `sid`,
-    #: `handle` or `email`. Named rather than guessed, because the
+    #: Which roster field that column joins to: `alt_id`, `sid` or
+    #: `email`. Named rather than guessed, because the
     #: overlap between a 10-digit LMS id and a 9-digit student number
     #: is zero and a wrong guess silently matches nobody.
     student_matches: str = "alt_id"
@@ -150,9 +154,7 @@ class Profile:
                 + "\n  ".join(problems))
 
     def to_toml(self):
-        def quote(value):
-            return ('"' + str(value).replace("\\", "\\\\").replace('"', '\\"')
-                    + '"')
+        quote = fileio.toml_string
 
         lines = [
             "# How this course's gradebook is laid out.",
@@ -1266,16 +1268,25 @@ def audit_export(before, after, name, profile, students, progress, slugs,
     passed, not_passed = profile.passed, profile.not_passed
 
     # ---- shape, before anything is read cell by cell -----------------
-    if header_line != 1:
+    if before and profile.student_column \
+            and profile.student_column not in before[0]:
         # Everything below indexes rows from `before[0]` being the
         # header, which is also what `Sheet.head` and `plan_export`
         # assume. Rather than audit the wrong rows quietly, say so: a
         # file with a preamble would otherwise come back clean having
         # compared a student's row against a title line.
+        #
+        # This used to refuse any `header_line` but 1, which guarded
+        # the mistake by forbidding the case: the app passed a file's
+        # every row, and a file whose header is not on line 1 could not
+        # be exported from it at all. Callers now pass the rows from the
+        # header down (`produce`), so the check is on the rows given:
+        # does the first one hold the student column (2026-11-17).
         report.findings.append(AuditFinding(
             "shape", name,
-            f"the header is on line {header_line} and this audit can only "
-            "read a file whose first line is the header"))
+            f"the rows given do not start at the header -- the first has "
+            f"no {profile.student_column!r} column. The file's header is "
+            f"on line {header_line}; pass the rows from there down."))
         return report
     if len(before) != len(after):
         report.findings.append(AuditFinding(
@@ -1697,6 +1708,16 @@ def splice(path, changes, sheet_name, header_line=1):
     """
     with open(path, "rb") as f:
         raw = f.read()
+    return splice_bytes(raw, changes, sheet_name, header_line, where=path)
+
+
+def splice_bytes(raw, changes, sheet_name, header_line=1, where=None):
+    """`splice`, for a file already in memory. `where` names it in errors.
+
+    The web app never writes an upload to disk, and wrote one to a
+    temporary folder only so that `splice` could read it back.
+    """
+    path = where or sheet_name
     bom = raw.startswith(b"\xef\xbb\xbf")
     lines = raw.decode("utf-8-sig").splitlines(keepends=True)
 
@@ -1743,6 +1764,122 @@ def splice(path, changes, sheet_name, header_line=1):
 
     text = "".join(out)
     return (b"\xef\xbb\xbf" if bom else b"") + text.encode("utf-8")
+
+
+def rows_of(blob):
+    """A file's bytes as rows, the way `mask.read_rows` reads a CSV path:
+    same encoding, same BOM handling, no temporary file."""
+    import csv
+    import io
+    return list(csv.reader(io.StringIO(blob.decode("utf-8-sig"), newline="")))
+
+
+#: Audit findings that stop an export rather than being reported beside
+#: it. The first three are "this file is not what it should be"; the
+#: rest are worth reading and do not mean the bytes are wrong.
+AUDIT_STOPS = ("regression", "unbacked", "stray", "shape")
+
+
+@dataclasses.dataclass
+class Produced:
+    """One file of an export, built and checked, ready to hand over."""
+    #: What to upload.
+    data: bytes
+    #: The headers carried into it, in order.
+    kept: list
+    #: `[(index, header, why)]`, the columns cut out. Empty when the
+    #: file comes back the shape it went in.
+    dropped: list
+    #: The `AuditReport`, for what it found and let through.
+    check: object
+
+    @property
+    def suffix(self):
+        """`_IMPORT` when narrowed for the LMS to read, `_UPDATED` when
+        the same shape. The name is the only thing on the file saying
+        which of the two it is."""
+        return "_IMPORT" if self.dropped else "_UPDATED"
+
+
+def produce(sheet, raw, changes, report, profile, students, progress, slugs,
+            not_yet=(), thresholds=None):
+    """One exported file, filled in and checked every way there is.
+
+    `raw` is the file as the LMS exported it; `sheet` was read from it,
+    rows from the header down. Raises `GradebookError` -- and nothing is
+    to be handed over -- if any check fails:
+
+    1. `verify_export`: the write did what the plan said.
+    2. `changed_lines`: no line differs in its bytes that holds no
+       planned cell. A re-quoted cell is invisible to a parsed check.
+    3. `audit_export`: every cell agrees with the record. A wrong plan
+       faithfully written passes 1 and 2 and fails this.
+    4. The cut to `import_columns`, read back by `verify_dropped`.
+
+    **One copy.** This was written twice, in `__main__.gradebook_export`
+    and `gui.api_gradebook_write`, and every change had to be made to
+    both (review, 2026-11-16). They had drifted: the CLI never ran 2
+    or 3, and the app passed every row of the file where the rows from
+    the header down were meant, which on a file whose header is not on
+    line 1 reads the wrong line as the column names.
+    """
+    name = sheet.name
+    data = splice_bytes(raw, changes, name, header_line=sheet.header_line)
+    written = rows_of(data)[sheet.header_line - 1:]
+
+    problems = verify_export(sheet.rows, written, changes, name)
+    moved, same = changed_lines(raw, data)
+    mine = report.for_sheet(name)
+    planned = {c.row + sheet.header_line - 1 for c in mine}
+    unexpected = sorted(set(moved) - planned)
+    if unexpected:
+        problems.append(
+            f"{name}: {len(unexpected)} line(s) differ that hold no "
+            "planned cell -- lines "
+            + ", ".join(str(n) for n in unexpected[:8])
+            + (" ..." if len(unexpected) > 8 else ""))
+    if problems:
+        raise GradebookError(
+            "the written file does not match the plan: " + "; ".join(problems))
+
+    check = audit_export(
+        sheet.rows, written, name, profile, students, progress, slugs,
+        not_yet=not_yet, thresholds=thresholds, header_line=sheet.header_line,
+        columns=dict(match(sheet.head, slugs, pairs=profile.pairs).found))
+    check.lines_identical = same
+    stoppers = [f for f in check.findings if f.kind in AUDIT_STOPS]
+    if stoppers:
+        raise GradebookError(
+            f"{len(stoppers)} problem(s) found auditing {name} against the "
+            "record: "
+            + "; ".join(f"{f.kind} at {f.where} -- {f.says}"
+                        for f in stoppers[:6])
+            + (f" (and {len(stoppers) - 6} more)" if len(stoppers) > 6
+               else ""))
+
+    try:
+        keep, dropped = import_columns(sheet.head, {c.column - 1 for c in mine})
+    except GradebookError as exc:
+        raise GradebookError(f"{name}: {exc}") from None
+    if dropped:
+        # The allowlist is built *from* the written columns, so losing
+        # one is impossible by construction -- exactly the sort of
+        # reasoning worth an assertion rather than a comment.
+        lost = sorted({c.slug for c in mine if c.column - 1 not in keep})
+        if lost:
+            raise GradebookError(
+                f"{name}: the import copy is missing the column(s) "
+                "holding " + ", ".join(lost))
+        trimmed = drop_columns(data, keep)
+        problems = verify_dropped(
+            written, rows_of(trimmed)[sheet.header_line - 1:], keep, name)
+        if problems:
+            raise GradebookError(
+                "the import-ready copy is not a faithful cut: "
+                + "; ".join(problems))
+        data = trimmed
+    return Produced(data=data, kept=[sheet.head[i] for i in keep],
+                    dropped=dropped, check=check)
 
 
 # --------------------------------------------- does a blank cell count? --

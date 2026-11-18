@@ -87,9 +87,6 @@ DECLARED_PATHS = (
     (f"{BANK_DIR}/{THEME_FILENAME}", "theme"),
 )
 
-#: Kept for the message shown when a manifest has nowhere obvious to write to.
-DECLARED_PATH = f"{BANK_DIR}/{THEME_FILENAME}"
-
 
 def _declared_paths(manifest):
     """The support paths this manifest already lists.

@@ -217,12 +217,11 @@ def _render(value):
     if isinstance(value, int):
         return str(value)
     if isinstance(value, (list, tuple)):
-        return "[" + ", ".join('"' + str(v).replace('"', '\\"') + '"'
-                               for v in value) + "]"
+        return "[" + ", ".join(fileio.toml_string(v) for v in value) + "]"
     text = str(value)
     if not text:
         return '""'
-    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return fileio.toml_string(text)
 
 
 def set_values(text, values):

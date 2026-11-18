@@ -7,7 +7,7 @@
  * and Up Next are to become an application of their own. If every
  * control already lives in here, that move is deleting the host's
  * header rather than rebuilding a UI. Specified in
- * ../../../../../checkit/PRINT_TOOL_DESIGN.md, section 12.12.
+ * ../../../../../DESIGN.md, section 12.12.
  *
  * Loaded after app.js and leans on exactly two of its globals, `api`
  * and `toast`. Keep it that way.

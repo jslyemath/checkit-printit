@@ -19,7 +19,7 @@
  *     reading is how it was arrived at, and belongs where a
  *     disagreement is being looked into, not in every row forever.
  *
- * See PRINT_TOOL_DESIGN.md 17. Run it the way tools/mockups/README.md
+ * See DESIGN.md 17. Run it the way tools/mockups/README.md
  * says.
  */
 (function () {

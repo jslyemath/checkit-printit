@@ -155,7 +155,7 @@ class TestSeating:
             [[group]]
             seats = [{name = "A1", version = "B"}, "A2"]
         """))
-        assert chart.version_of("A1") == "B"
+        assert next(s.version for s in chart.seats if s.name == "A1") == "B"
 
     def test_a_pin_that_collides_is_reported_not_refused(self, tmp_path):
         """Pinning is deliberate; the operator may have a reason. Say so and

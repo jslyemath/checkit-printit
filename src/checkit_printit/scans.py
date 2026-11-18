@@ -85,6 +85,9 @@ class Sheet:
     #: What was decoded, whatever it was. Kept for the foreign case,
     #: where the instructor is the only one who can say what it is.
     code: str = ""
+    #: For `unknown-run`: why the job could not be found -- not in the
+    #: record, or its page index would not load, and then why not.
+    reason: str = ""
     #: `{label: image}` for whatever was asked for, straightened and
     #: cut out of this page. Small on purpose: the whole page is
     #: thrown away once these are taken, because a few hundred full
@@ -1300,6 +1303,7 @@ def read_page(image, resolve, anchors_for=None, want=(), candidates=()):
     if index is None:
         return {"status": "unknown-run", "run_no": run_no,
                 "run_page": page,
+                "reason": getattr(resolve, "why", {}).get(run_no, ""),
                 "code": f"C1-{run_no}-{page}", **look}
     entry = index.get(page)
     if entry is None:
@@ -1554,21 +1558,32 @@ def index_reader(record_path):
     folder has been moved or deleted -- both are "this page cannot be
     placed", and the difference is not worth two statuses when the
     instructor's next move is the same either way.
+
+    It is worth a sentence, though. `resolve.why[run_no]` says which it
+    was. A `PageIndexError` carries the instructions for fixing it, and
+    it used to be swallowed here, so the page became "unknown run"
+    with nothing to go on (review, 2026-11-16).
     """
     cache = {}
+    why = {}
 
     def resolve(run_no):
         if run_no in cache:
             return cache[run_no]
         cache[run_no] = None
         row = record_mod.run_by_no(record_path, run_no)
-        if row and row.get("output"):
+        if not row:
+            why[run_no] = "this course's record has no job with that number"
+        elif not row.get("output"):
+            why[run_no] = "the record does not say which folder it was built in"
+        else:
             try:
                 cache[run_no] = pageindex.load(row["output"])
-            except pageindex.PageIndexError:
-                pass
+            except pageindex.PageIndexError as exc:
+                why[run_no] = str(exc)
         return cache[run_no]
 
+    resolve.why = why
     return resolve
 
 

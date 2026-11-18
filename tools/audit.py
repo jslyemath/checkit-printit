@@ -49,7 +49,7 @@ def sources(root, *globs):
 
 py_files = sources(PRINTIT, "src/**/*.py", "tests/**/*.py", "tools/**/*.py")
 gs_files = sources(PRINTIT, "src/checkit_printit/appsscript/*.gs")
-docs = sources(PRINTIT, "*.md") + sources(CHECKIT, "CLAUDE.md", "PRINT_TOOL_DESIGN.md")
+docs = sources(PRINTIT, "*.md") + sources(CHECKIT, "CLAUDE.md", "WORKING_RULES.md", "ROADMAP.md")
 
 # ---------------------------------------------------------------- A: rename
 GOOGLE_OK = ("Internal apps in a Workspace", "A Workspace admin")

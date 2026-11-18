@@ -940,7 +940,7 @@ def state(cell_js, threshold=1, lit=LIT):
 
 
 class TestWhatACellShows:
-    r"""One mark per cell, from `PRINT_TOOL_DESIGN.md` 17.
+    r"""One mark per cell, from `DESIGN.md` 17.
 
     Never run by the suite before these existed: `cellState` lives
     outside the block the markup tests lift, and `node --check` parses

@@ -979,7 +979,7 @@ class Vault:
         out.sort(key=lambda pair: len(pair[0]), reverse=True)
         return out
 
-    def _apply(self, text, pairs):
+    def _apply(self, text, pairs, exact=()):
         """Replace any of `pairs`' keys. **One pass over the text.**
 
         One pass, not one pass per pair, and that is a correctness
@@ -1006,6 +1006,8 @@ class Vault:
         in another. The replacement is the stored spelling -- matching
         the original's case would mean inventing a case for a name that
         never had one.
+
+        `exact` keys are the exception, matched in their own case only.
         """
         mapping = {}
         for key, value in pairs:
@@ -1014,8 +1016,15 @@ class Vault:
         if not mapping:
             return text, 0
         keys = sorted(mapping, key=len, reverse=True)
+        exact = {k.lower() for k in exact}
+
+        def alternative(key):
+            # A scoped flag: this one alternative is case-sensitive
+            # inside a pattern that is not.
+            return f"(?-i:{re.escape(key)})" if key in exact else re.escape(key)
+
         pattern = re.compile(
-            r"(?<![\w.@+-])(?:" + "|".join(re.escape(k) for k in keys)
+            r"(?<![\w.@+-])(?:" + "|".join(alternative(k) for k in keys)
             + r")(?![\w.@+-])", re.IGNORECASE)
         # A function as the replacement, so the pseudonym is inserted
         # literally: a backslash in it is not an escape.
@@ -1047,14 +1056,40 @@ class Vault:
         One pass, for the reason in `_apply`. The person tags go in the
         same pass rather than a second one, so that a tag cannot be
         rewritten by a name substitution or the other way round.
+
+        **Tags are matched in lower case only**, as they are issued.
+        Matched like names, a `P01` column header or a "p01" in an
+        LMS's own text became a student's real name -- inserting a real
+        name where none was asked for (review, 2026-11-16).
         """
         pairs = list(self.pairs())
+        tags = []
         for person in self.people:
             name = " ".join(w for w in (person.real.get("first"),
                                         person.real.get("last")) if w)
             if name:
                 pairs.append((person.tag, name))
-        return self._apply(text, pairs)
+                tags.append(person.tag)
+        return self._apply(text, pairs, exact=tags)
+
+    def short_cell_leaks(self, rows):
+        """Real values of two characters that are a whole cell. Sorted.
+
+        `leaks` never looks for a value this short -- Li, Ng, Wu, Vo --
+        because inside running text two letters are in every other word
+        and the check would cry wolf (`real_values`, `min_length`). The
+        review counted that as a blind spot (2026-11-16), and it is one.
+
+        A *cell* holding exactly `Wu` is a different thing: no ordinary
+        word fills a cell by itself by accident, so for a table this
+        closes the hole where it can be closed. Running text, which
+        `vault mask-course` produces, still has it.
+        """
+        shorts = {v.strip().lower(): v for v in self.real_values(min_length=2)
+                  if len(v.strip()) == 2}
+        found = {shorts[cell.strip().lower()] for row in rows for cell in row
+                 if cell.strip().lower() in shorts}
+        return sorted(found)
 
     # ------------------------------------------------------- the check --
 

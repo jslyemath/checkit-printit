@@ -340,7 +340,8 @@ def tex_escape(text):
 #: `Exercise.latex()` prefixes a block defining \stxKnowl and friends, and
 #: ending with a rule of percent signs. We define those ourselves in main.tex,
 #: pointed at the theme's answer machinery, so the per-file copy is dropped.
-_SPATEXT_PREAMBLE_END = "%" * 28
+#: spatext's constant, not a second spelling of it (review, 2026-11-16).
+_SPATEXT_PREAMBLE_END = spatext._PREAMBLE_END
 
 
 def render_skill(bank, slug, seed, env):

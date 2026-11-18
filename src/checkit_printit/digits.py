@@ -88,6 +88,18 @@ FIELD = 28
 #: hard id ever comes back unread, this is the number that did it.
 ACCEPT = -4.5
 
+#: How far, as a log, the best id must lead the next before it is
+#: believed. 2.3 is ten to one.
+#:
+#: Not instead of ACCEPT -- `test_the_margin_would_not_have_caught_that`
+#: is why: with the writer missing from the pool the least bad
+#: candidate still leads by a mile. This catches the other failure,
+#: two ids in the pool that differ in one position, where that one
+#: cell decides and was not clear (review, 2026-11-16). On the real
+#: pages, whose ids differ in one digit on purpose, the right id led
+#: by 7.96 to 9.21, so this costs them nothing.
+MARGIN = 2.3
+
 #: Floor under any one digit's probability.
 #:
 #: What this guards against is not a cell being *unlikely* -- a cell
@@ -236,6 +248,8 @@ def pick(pictures, candidates):
         return None
     score, sid = scored[0]
     if score < ACCEPT:
+        return None
+    if len(scored) > 1 and score - scored[1][0] < MARGIN:
         return None
     return sid, score
 

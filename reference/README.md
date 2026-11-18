@@ -8,7 +8,7 @@ The Apps Script bound to the Google Sheet that ran MAT 106 before this tool
 existed, copied here verbatim on 2026-09-20. **It is being retired**, and it is
 kept because it is the only written record of how several things behaved.
 
-Read it as a specification, not as code to port. `PRINT_TOOL_DESIGN.md` section
+Read it as a specification, not as code to port. `../DESIGN.md` section
 12.10 in the `checkit` repo says what each function did and where that
 responsibility goes; the parts worth knowing before touching the Google half:
 

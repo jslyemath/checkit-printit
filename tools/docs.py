@@ -76,18 +76,36 @@ def main():
     pyproject = read(PRINTIT / "pyproject.toml")
 
     platform_map = read(CHECKIT / "CLAUDE.md") if CHECKIT.is_dir() else ""
-    design = (read(CHECKIT / "PRINT_TOOL_DESIGN.md")
-              if CHECKIT.is_dir() else "")
+    design = read(PRINTIT / "DESIGN.md")
+    rules = (read(CHECKIT / "WORKING_RULES.md")
+             if (CHECKIT / "WORKING_RULES.md").is_file() else "")
+
+    # --- the documents themselves (reorganised 2026-11-17). A map that
+    # --- grows back into a history costs every session its length.
+    BUDGET = {PRINTIT / "CLAUDE.md": 450, CHECKIT / "CLAUDE.md": 250,
+              PRINTIT.parent / "mat-106-checkit" / "CLAUDE.md": 80}
+    for path, lines in BUDGET.items():
+        if path.is_file():
+            n = read(path).count("\n")
+            check(f"{path.parent.name}/CLAUDE.md is a map ({n} <= {lines} lines)",
+                  n <= lines, "move the story into CODEBASE_NOTES.md")
+            check(f"{path.parent.name}/CLAUDE.md loads the house rules",
+                  "WORKING_RULES.md" in read(path).split("\n\n", 2)[1])
+    if rules:
+        first = rules.split("\n## ", 2)[1]
+        check("the house rules open with the masking check",
+              first.startswith("First") and "CHECKIT_PRINTIT_MASK_NAMES" in first)
+    check("the to-do list exists, and only once",
+          (CHECKIT / "ROADMAP.md").is_file()
+          and "### What is left" not in design)
 
     # --- the CLI surface
     commands = set(re.findall(r"^  ([a-z]+)\s", cli("--help"), re.M))
     check("there are commands to check", bool(commands))
-    if platform_map and "has grown a lot" in platform_map:
-        named = set(re.findall(
-            r"`([a-z]+)`",
-            platform_map.split("has grown a lot")[1].split("\n\n")[0]))
-        check("every CLI command is named in checkit/CLAUDE.md",
-              commands <= named, f"missing {sorted(commands - named)}")
+    table = printit_map.split("## The CLI", 1)[-1].split("\n## ", 1)[0]
+    named = set(re.findall(r"^\| `([a-z]+)", table, re.M))
+    check("every CLI command is named in printit/CLAUDE.md",
+          commands <= named, f"missing {sorted(commands - named)}")
 
     # Aliases of the same option are one thing to document; `-o` is
     # listed in the README and `--out` is the same flag.

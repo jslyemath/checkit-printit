@@ -531,9 +531,13 @@ class TestARunFolderSurvivesTheHomeMoving:
         inside.mkdir(parents=True)
         monkeypatch.setenv("CHECKIT_PRINTIT_HOME", str(home))
         self.make(home, inside)
-        # Put it back the old way, behind record's back.
+        # Put it back the old way, behind record's back. An old record
+        # also has no schema version -- the live one had none -- and
+        # migration now runs only for a record whose version is not
+        # current (2026-11-17), so that is put back too.
         raw = sqlite3.connect(home / "record.db")
         raw.execute("UPDATE run SET output = ?", (str(inside),))
+        raw.execute("PRAGMA user_version = 0")
         raw.commit()
         raw.close()
 

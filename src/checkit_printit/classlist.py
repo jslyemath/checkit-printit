@@ -262,6 +262,19 @@ def parse(path, section=""):
         )
     if not any(s.section for s in students):
         notes.append("no section column; pass --section to set one.")
+    # A paper printed without a name is matched back by the id the
+    # student writes into the header's grid, and the reader only ever
+    # considers ids of the grid's shape. Any other id was silently never
+    # a candidate (review, 2026-11-16), so say so here, where it can
+    # still be fixed. A count, not the ids: this goes to a terminal.
+    from .scans import ID_COUNT
+    off = sum(1 for s in students
+              if s.sid and not (len(s.sid) == ID_COUNT and s.sid.isdigit()))
+    if off:
+        notes.append(
+            f"{off} student id(s) are not {ID_COUNT} digits. A paper printed "
+            f"without names cannot be matched to those students from the id "
+            f"they write; match them by hand when scanning.")
     return students, mapping, notes
 
 

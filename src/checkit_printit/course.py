@@ -152,6 +152,39 @@ skills = []
 '''
 
 
+def config(name, root=None):
+    """`course.toml`, parsed. `{}` when the course has none.
+
+    The one reader. There were five -- `thresholds`, `bank_for`,
+    `identity`, `publication._course_bank` and the web app's
+    `_course_identity` each opened and parsed the file themselves
+    (review, 2026-11-16) -- and a TOML error came out of whichever ran
+    first as the parser's own message, with no file name.
+    """
+    return config_at(path_for(name, root))
+
+
+def config_at(folder):
+    """`config`, for a course folder already in hand."""
+    import tomllib
+    path = os.path.join(folder, CONFIG)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        raise CourseError(f"{path} is not valid TOML: {exc}") from None
+
+
+def bank_path(name, root=None):
+    """Where the course's bank is, as an absolute path, or "" if unset."""
+    declared = str((config(name, root).get("bank") or {}).get("path", "")).strip()
+    if not declared:
+        return ""
+    return os.path.normpath(os.path.join(path_for(name, root), declared))
+
+
 #: What a skill needs when nothing says otherwise.
 DEFAULT_THRESHOLD = 1
 
@@ -170,18 +203,13 @@ def thresholds(name, root=None):
     to pass, and silently reading it as 1 would hide a typo in the
     one file a human edits by hand.
     """
-    import tomllib
-    config = os.path.join(path_for(name, root), CONFIG)
-    if not os.path.isfile(config):
-        return {}
-    with open(config, "rb") as f:
-        raw = tomllib.load(f)
     out = {}
-    for slug, value in (raw.get("passing") or {}).items():
+    for slug, value in (config(name, root).get("passing") or {}).items():
         if not isinstance(value, int) or isinstance(value, bool) \
                 or value < 1:
             raise CourseError(
-                f"{config}: [passing] {slug} = {value!r}. A skill needs "
+                f"{os.path.join(path_for(name, root), CONFIG)}: [passing] "
+                f"{slug} = {value!r}. A skill needs "
                 f"a whole number of passes, at least one.")
         out[str(slug)] = value
     return out
@@ -197,18 +225,12 @@ def bank_for(name, root=None):
     app's `Course.bank` -- which is the shape of bug this codebase keeps
     finding late.
     """
-    import tomllib
     from .bank import Bank, BankError
-    here = path_for(name, root)
-    config = os.path.join(here, CONFIG)
-    if not os.path.isfile(config):
-        return None
-    with open(config, "rb") as f:
-        declared = str(tomllib.load(f).get("bank", {}).get("path", "")).strip()
-    if not declared:
+    path = bank_path(name, root)
+    if not path:
         return None
     try:
-        return Bank(os.path.normpath(os.path.join(here, declared)))
+        return Bank(path)
     except BankError:
         return None
 
@@ -224,12 +246,7 @@ def identity(name, root=None):
     paper, via `\\date` and `\\author`, and the template creates them
     empty.
     """
-    import tomllib
-    config = os.path.join(path_for(name, root), CONFIG)
-    if not os.path.isfile(config):
-        return {k: "" for k in IDENTITY}
-    with open(config, "rb") as f:
-        raw = tomllib.load(f)
+    raw = config(name, root)
     return {k: str(raw.get(k, "") or "") for k in IDENTITY}
 
 
@@ -291,7 +308,9 @@ def save_identity(name, fields, root=None):
 
 
 def _escape(value):
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    """The inside of a TOML string: `fileio.toml_string` without its
+    quotes, for the places that write the quotes themselves."""
+    return fileio.toml_string(value)[1:-1]
 
 
 def init(name, bank="", root=None, adopt=None):

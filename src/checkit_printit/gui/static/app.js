@@ -1166,7 +1166,7 @@ async function loadProgress() {
 
    `mark` is the glyph's name or "" for a number or nothing; `count`
    is the fraction, and only ever a fraction. `tone` is the
-   background. See PRINT_TOOL_DESIGN.md 17 for why each is what it is.
+   background. See DESIGN.md 17 for why each is what it is.
 
    **A sitting is an attempt that was not an absence.** Did-not-sit is
    recorded, and shown in the drill-in and the tooltip, and reaches
@@ -4287,7 +4287,10 @@ const UNPLACED_COLUMNS = [
     // Padded so 9 sorts before 10 rather than after it.
     value: r => String(r.at).padStart(4, "0") },
   { key: "status", label: "Description", value: r => scanSaid(r.status),
-    cell: r => document.createTextNode(scanSaid(r.status)) },
+    // The reason, when there is one, is why a job could not be found --
+    // most often a folder that was moved, which the instructor can fix.
+    cell: r => document.createTextNode(
+      scanSaid(r.status) + (r.reason ? ` — ${r.reason}` : "")) },
   { key: "_match", label: "Match", sortable: false, cell: unplacedMatch },
 ];
 

@@ -19,6 +19,7 @@ from . import course as course_mod
 from . import gradebook as gradebook_mod
 from . import mask as mask_mod
 from . import maskcourse as maskcourse_mod
+from . import privacy as privacy_mod
 from . import vault as vault_mod
 from . import manifest as manifest_mod
 from . import provision as provision_mod
@@ -59,6 +60,9 @@ def _survive_a_narrow_console():
 def main():
     """Print a class set of CheckIt exercises."""
     _survive_a_narrow_console()
+    # With CHECKIT_PRINTIT_MASK_NAMES set, everything this process prints
+    # goes through the course vaults first. See privacy.py.
+    privacy_mod.install()
 
 
 @main.command()
@@ -852,6 +856,10 @@ def roster_import(class_list, out, section, covers, seating_path, dry_run):
         students, mapping, notes = classlist_mod.parse(class_list, section=section)
     except classlist_mod.ClassListError as exc:
         raise click.ClickException(str(exc))
+    # The class list may name people the roster has never held. They go
+    # into the vault of the course being written to, before the report
+    # below names them.
+    privacy_mod.saw(students, out)
 
     click.echo(mapping.describe())
     click.echo(f"  read {len(students)} students")
@@ -1066,9 +1074,7 @@ def build(pub_path, out, do_compile, seed, preview, replay, ids, codes,
         click.echo("\npreview only -- nothing was written.")
         return
 
-    if result.record_error:
-        click.echo(f"\ncould not write the print record: {result.record_error}")
-    elif result.record_path:
+    if result.record_path and not result.record_error:
         click.echo(f"\nrecorded {result.recorded} paper(s) in "
                    f"{result.record_path}")
         if result.unnamed:
@@ -1078,8 +1084,21 @@ def build(pub_path, out, do_compile, seed, preview, replay, ids, codes,
     if not result.compiled:
         click.echo(f"\nnot compiled. To build it yourself:\n  "
                    f"cd {result.out} && pdflatex main.tex")
-        return
-    click.echo(f"\nPDF: {result.pdf}")
+    else:
+        click.echo(f"\nPDF: {result.pdf}")
+    if result.record_error:
+        # Last, and an error, not a line among the others. The record is
+        # the only account of who was handed which paper; a build that
+        # could not write it used to print one quiet line and exit 0, so
+        # a script -- or a reader skimming -- took it for a success
+        # (review, 2026-11-16). The PDF is kept: it is not wrong, only
+        # unrecorded.
+        raise click.ClickException(
+            f"the PDF was built, but the print record was NOT written: "
+            f"{result.record_error}\n"
+            "Nothing records who holds which version of this run. Fix the "
+            "cause and build it again, and hand out the PDF from that "
+            "build rather than this one.")
 
 
 
@@ -1952,9 +1971,19 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
     except roster_mod.RosterError as exc:
         raise click.ClickException(f"{roster_path}: {exc}")
 
-    sheets, header_lines = [], {}
+    sheets, header_lines, raws = [], {}, {}
     for path in sources:
-        rows = mask_mod.read_rows(path)
+        if os.path.splitext(path)[1].lower() != ".csv":
+            raise click.ClickException(
+                f"{path}: export works on the .csv the LMS exported. It "
+                "edits the file's own bytes, which a workbook does not have.")
+        with open(path, "rb") as f:
+            raw = f.read()
+        # Read exactly as `gradebook.produce` reads back what it wrote,
+        # and as the web app reads an upload: cells as they are, not
+        # stripped. `read_rows` strips them, so a check comparing the
+        # two readings would report every padded cell as changed.
+        rows = gradebook_mod.rows_of(raw)
         if not rows:
             raise click.ClickException(f"{path} is empty.")
         try:
@@ -1970,6 +1999,7 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
                 "told apart by name, so rename one.")
         sheets.append(sheet)
         header_lines[sheet.name] = path
+        raws[sheet.name] = raw
 
     record_path = course_mod.file_in(course, "record")
     progress = record_mod.progress(record_path)
@@ -2049,72 +2079,30 @@ def gradebook_export(sources, course, out_dir, not_yet, header_row):
     try:
         for sheet in sheets:
             source = header_lines[sheet.name]
-            filled = gradebook_mod.apply_export(sheet, changes)
-            problems = gradebook_mod.verify_export(
-                sheet.rows, filled, changes, sheet.name)
-            if problems:
-                raise gradebook_mod.GradebookError(
-                    "the filled-in rows did not match the plan:\n  "
-                    + "\n  ".join(problems))
-
+            # Built and checked by the one function the web app uses
+            # too: the plan, the bytes, the record, the trim. See
+            # `gradebook.produce`. This path used to check the plan
+            # only, never the record.
+            made = gradebook_mod.produce(
+                sheet, raws[sheet.name], changes, report, profile, people,
+                progress, slugs, not_yet=wanted, thresholds=needs)
             stem, ext = os.path.splitext(os.path.basename(source))
-            # `_IMPORT` when the file had to be narrowed for the LMS to
-            # read it, `_UPDATED` when it comes back the same shape.
-            # The name is the only thing on the file saying which of
-            # the two it is.
-            keep, dropped = gradebook_mod.import_columns(
-                sheet.head,
-                {c.column - 1 for c in report.for_sheet(sheet.name)})
-            suffix = "_IMPORT" if dropped else "_UPDATED"
-            target = os.path.join(out_dir, f"{stem}{suffix}{ext or '.csv'}")
+            target = os.path.join(out_dir,
+                                  f"{stem}{made.suffix}{ext or '.csv'}")
             if os.path.abspath(target) == os.path.abspath(source):
                 raise gradebook_mod.GradebookError(
                     f"{target} is the file you exported. Choose another -o.")
-            data = gradebook_mod.splice(source, changes, sheet.name,
-                                        header_line=sheet.header_line)
             with open(target, "wb") as f:
-                f.write(data)
+                f.write(made.data)
             written.append((sheet, source, target))
-
-            # And read it back, because what was checked above was the
-            # rows in memory and not the file that will be uploaded.
-            back = mask_mod.read_rows(target)
-            problems = gradebook_mod.verify_export(
-                sheet.rows, back[sheet.header_line - 1:], changes, sheet.name)
-            if problems:
-                raise gradebook_mod.GradebookError(
-                    f"{target} did not match the plan:\n  "
-                    + "\n  ".join(problems))
-
-            # And then cut it down to what the import needs: the
-            # identifier, the skill columns this run wrote into, the
-            # end-of-line marker. See `import_columns`. Cut after the
-            # check above, which compares columns by index and should
-            # be looking at the file as it was handed over.
-            if dropped:
-                # The allowlist is built *from* the written columns,
-                # so losing one is impossible by construction --
-                # exactly the sort of reasoning worth an assertion
-                # rather than a comment.
-                lost = sorted({c.slug for c in report.for_sheet(sheet.name)
-                               if c.column - 1 not in keep})
-                if lost:
+            # And read back, because what was checked is the bytes in
+            # hand and what will be uploaded is the file on disk.
+            with open(target, "rb") as f:
+                if f.read() != made.data:
                     raise gradebook_mod.GradebookError(
-                        f"{target}: the import copy is missing the "
-                        "column(s) holding " + ", ".join(lost))
-                with open(target, "wb") as f:
-                    f.write(gradebook_mod.drop_columns(data, keep))
-                # Read back again, for the same reason as above: what
-                # matters is the file on disk, not the bytes in hand.
-                problems = gradebook_mod.verify_dropped(
-                    back[sheet.header_line - 1:],
-                    mask_mod.read_rows(target)[sheet.header_line - 1:],
-                    keep, sheet.name)
-                if problems:
-                    raise gradebook_mod.GradebookError(
-                        f"{target} is not a faithful trim:\n  "
-                        + "\n  ".join(problems))
-                trims[sheet.name] = ([sheet.head[i] for i in keep], dropped)
+                        f"{target} did not read back as it was written.")
+            if made.dropped:
+                trims[sheet.name] = (made.kept, made.dropped)
     except gradebook_mod.GradebookError as exc:
         for _, _, target in written:
             if os.path.isfile(target):

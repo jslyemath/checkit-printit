@@ -266,11 +266,65 @@ def _as_row(row):
     return out
 
 
+def _schema_version():
+    """A number that changes whenever SCHEMA, ADDED or RENAMED does.
+
+    Derived rather than kept by hand, so nobody has to remember to bump
+    it: a version that was not bumped would leave a new column missing
+    from every existing record, silently. 28 bits of a hash, which fits
+    SQLite's signed 32-bit `user_version`.
+    """
+    import hashlib
+    text = repr((SCHEMA, sorted(ADDED.items()), RENAMED))
+    return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:7], 16)
+
+
+SCHEMA_VERSION = _schema_version()
+
+
+def _when(alias=""):
+    """SQL for the day a run happened: its date if that is ISO, else
+    the day it was built.
+
+    `date` is whatever the publication said -- "2026-10-26" from the
+    app, but the CLI takes free text, and "Week 4" sorts after every
+    year there is. Ordering on it directly made "last", "last sat" and
+    "passed in" wrong with no error (review, 2026-11-16). `built` is
+    always ISO, written by the code. Every date in the real record is
+    ISO today, so this changes no answer it gives now.
+    """
+    p = f"{alias}." if alias else ""
+    return (f"(CASE WHEN {p}date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'"
+            f" THEN substr({p}date, 1, 10) ELSE substr({p}built, 1, 10) END)")
+
+
+WHEN_R, WHEN_BR, WHEN = _when("r"), _when("br"), _when()
+
+
 def connect(path):
+    """The record at `path`, created or brought up to date first.
+
+    Bringing it up to date -- the schema, four column probes, a sweep of
+    every run's folder and a commit -- used to happen on **every** call,
+    and about twenty-five functions here each open their own
+    connection, so one page load migrated the database half a dozen
+    times (review, 2026-11-16). Now it happens when the file's
+    `user_version` is not this code's SCHEMA_VERSION: once per schema
+    change, not once per question. Kept in the file rather than in a
+    set in memory, so a record deleted and made again in the same
+    process is still built.
+    """
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
+    if db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION:
+        return db
+    _migrate(db)
+    return db
+
+
+def _migrate(db):
     db.executescript(SCHEMA)
     have = {r["name"] for r in db.execute("PRAGMA table_info(run)")}
     for column, decl in ADDED.items():
@@ -291,8 +345,9 @@ def connect(path):
         if short != row["output"]:
             db.execute("UPDATE run SET output = ? WHERE run_id = ?",
                        (short, row["run_id"]))
+    # A pragma cannot take a parameter; the value is our own integer.
+    db.execute(f"PRAGMA user_version = {int(SCHEMA_VERSION)}")
     db.commit()
-    return db
 
 
 def _high_water(db):
@@ -428,7 +483,7 @@ def runs(path):
             "SELECT r.*, COUNT(p.printed_id) AS papers,"
             " COUNT(DISTINCT p.sid) AS students"
             " FROM run r LEFT JOIN printed p ON p.run_id = r.run_id"
-            " GROUP BY r.run_id ORDER BY r.date, r.built")]
+            " GROUP BY r.run_id ORDER BY " + WHEN_R + ", r.built")]
     finally:
         db.close()
 
@@ -670,7 +725,7 @@ def scans(path):
                 "  FROM scan_page p"
                 "  LEFT JOIN run r ON r.run_id = p.run_id"
                 " WHERE p.scan_id = ? AND p.run_id IS NOT NULL"
-                " GROUP BY p.run_id ORDER BY r.date, r.built",
+                " GROUP BY p.run_id ORDER BY " + WHEN_R + ", r.built",
                 (item["scan_id"],))]
             item["placed"] = sum(r["pages"] for r in item["runs"])
             out.append(item)
@@ -826,7 +881,7 @@ def attempts_for(path, sid):
             "   ON p.run_id = a.run_id AND p.sid = a.sid"
             "  AND p.slug = a.slug"
             " WHERE a.sid = ?"
-            " ORDER BY r.date, r.built, a.slug", (str(sid),))]
+            " ORDER BY " + WHEN_R + ", r.built, a.slug", (str(sid),))]
     finally:
         db.close()
 
@@ -848,7 +903,7 @@ def progress(path):
         return []
     db = connect(path)
     try:
-        return [dict(r) for r in db.execute("""
+        return [dict(r) for r in db.execute(f"""
             SELECT a.sid, a.slug,
                    COUNT(*) AS attempts,
                    SUM(a.outcome = 'passed') AS passes,
@@ -857,12 +912,12 @@ def progress(path):
                    (SELECT b.outcome FROM attempt b
                      JOIN run br ON br.run_id = b.run_id
                      WHERE b.sid = a.sid AND b.slug = a.slug
-                     ORDER BY br.date DESC, br.built DESC LIMIT 1) AS last,
+                     ORDER BY {WHEN_BR} DESC, br.built DESC LIMIT 1) AS last,
                    (SELECT b.run_id FROM attempt b
                      JOIN run br ON br.run_id = b.run_id
                      WHERE b.sid = a.sid AND b.slug = a.slug
                        AND b.outcome = 'passed'
-                     ORDER BY br.date DESC, br.built DESC
+                     ORDER BY {WHEN_BR} DESC, br.built DESC
                      LIMIT 1) AS passed_in,
                    -- The most recent outcome that was not an absence.
                    -- `last` answers "what happened last"; this answers
@@ -874,9 +929,9 @@ def progress(path):
                      JOIN run br ON br.run_id = b.run_id
                      WHERE b.sid = a.sid AND b.slug = a.slug
                        AND b.outcome <> 'absent'
-                     ORDER BY br.date DESC, br.built DESC
+                     ORDER BY {WHEN_BR} DESC, br.built DESC
                      LIMIT 1) AS last_sat,
-                   MAX(r.date) AS last_date
+                   MAX({WHEN_R}) AS last_date
               FROM attempt a
               JOIN run r ON r.run_id = a.run_id
              GROUP BY a.sid, a.slug
@@ -935,7 +990,7 @@ def history(path, sid, slug):
             "    ON a.run_id = p.run_id AND a.sid = p.sid"
             "   AND a.slug = p.slug"
             " WHERE p.sid = ? AND p.slug = ?"
-            " ORDER BY r.date, r.built", (str(sid), str(slug)))]
+            " ORDER BY " + WHEN_R + ", r.built", (str(sid), str(slug)))]
     finally:
         db.close()
 
@@ -1018,7 +1073,7 @@ def graded_runs(path, keep=None):
     try:
         rows = db.execute(
             "SELECT run_id FROM run WHERE graded = 1"
-            " ORDER BY date DESC, built DESC")
+            " ORDER BY " + WHEN + " DESC, built DESC")
         out = [r["run_id"] for r in rows]
         return out if keep is None else out[:int(keep)]
     finally:
@@ -1034,7 +1089,7 @@ def for_student(path, sid):
         return [dict(r) for r in db.execute(
             "SELECT p.slug, p.seed, p.version, r.title, r.date, r.run_id"
             " FROM printed p JOIN run r ON r.run_id = p.run_id"
-            " WHERE p.sid = ? ORDER BY r.date, p.slug", (sid,))]
+            " WHERE p.sid = ? ORDER BY " + WHEN_R + ", p.slug", (sid,))]
     finally:
         db.close()
 

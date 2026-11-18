@@ -1,7 +1,7 @@
 """A local web front end for one course.
 
 Stage 8a (the shell) and 8b (the roster table). The rest of the views are
-planned in `../checkit/PRINT_TOOL_DESIGN.md` section 12.6.
+planned in `DESIGN.md` section 12.6.
 
 **Every handler calls the same function the CLI calls.** Nothing here
 reimplements a rule -- dropping a student goes through `roster.set_dropped`,
@@ -597,12 +597,7 @@ def _variants_in(bank, slugs):
 
 
 def _course_identity(course):
-    import tomllib
-    config = os.path.join(course.path, course_mod.CONFIG)
-    if not os.path.isfile(config):
-        return {}
-    with open(config, "rb") as f:
-        return tomllib.load(f)
+    return course_mod.config_at(course.path)
 
 
 def api_course_identity(course, body):
@@ -1461,7 +1456,7 @@ def api_print_reveal(_course, body):
     import subprocess
     path = str(body.get("path", ""))
     root = runner_mod.default_output_root()
-    if not path or not os.path.abspath(path).startswith(os.path.abspath(root)):
+    if not path or not _within(os.path.abspath(path), os.path.abspath(root)):
         # Only ever somewhere printit wrote. This opens a window on the
         # instructor's machine, so it does not take an arbitrary path.
         raise GuiError("that is not a printit output folder.")
@@ -2009,6 +2004,7 @@ def _batch_json(batch, record_path, sections=None, corrections=None):
         "at": sheet.scan_page,
         "status": sheet.status,
         "code": sheet.code,
+        "reason": sheet.reason,
         # The run and page its code claimed, when it had a readable
         # one -- `unknown-run` and `unknown-page` both do, and that is
         # the only clue to what the sheet was meant to be.
@@ -3285,7 +3281,10 @@ def _gradebook_plan(course, body):
             index = mask_mod.find_header(rows, header_row)
         except mask_mod.MaskError as exc:
             raise GuiError(f"{name}: {exc}") from None
-        sheets.append(gradebook_mod.sheet_from(name, rows,
+        # From the header down, as `Sheet.rows` is defined and the CLI
+        # has always passed. Every row was passed here, so `Sheet.head`
+        # was line 1 of the file whatever the header row said.
+        sheets.append(gradebook_mod.sheet_from(name, rows[index:],
                                                header_line=index + 1))
 
     changes, report = gradebook_mod.plan_export(
@@ -3342,10 +3341,7 @@ def api_gradebook_plan(course, body):
     }
 
 
-#: Findings that stop the download rather than being reported beside
-#: it. The first three are "this file is not what it should be"; the
-#: rest are worth reading and do not mean the bytes are wrong.
-AUDIT_STOPS = ("regression", "unbacked", "stray", "shape")
+AUDIT_STOPS = gradebook_mod.AUDIT_STOPS
 
 
 def api_gradebook_write(course, body):
@@ -3379,123 +3375,32 @@ def api_gradebook_write(course, body):
     thresholds = course_mod.thresholds(course.name)
     wanted = [s for s in (body.get("notYet") or []) if s in slugs]
 
-    out, audited, stoppers, trims = [], [], [], []
+    out, audited, trims = [], [], []
     for sheet in sheets:
         if not report.for_sheet(sheet.name):
             continue
-        # `splice` reads the file by path, and the file only exists in
-        # memory -- so it is handed a temporary copy, written and
-        # removed inside this call. The point of not storing the
-        # upload is that it does not outlive the request; a scratch
-        # file that does not either keeps that true.
-        import tempfile
-        folder = tempfile.mkdtemp(prefix="printit-gb-")
-        path = os.path.join(folder, sheet.name)
+        # Built and checked by the one function the CLI uses too. Any
+        # failure stops the whole download, with the file withheld: a
+        # gradebook is the one artefact here that is hard to take back
+        # once it is uploaded.
         try:
-            with open(path, "wb") as handle:
-                handle.write(CARRIED.files[sheet.name])
-            try:
-                data = gradebook_mod.splice(
-                    path, changes, sheet.name,
-                    header_line=sheet.header_line)
-            except gradebook_mod.GradebookError as exc:
-                raise GuiError(str(exc)) from None
-        finally:
-            shutil.rmtree(folder, ignore_errors=True)
-
-        # The written bytes, read back as rows. Read back rather than
-        # carried along: what is audited has to be the thing that will
-        # be uploaded, and `splice` returns bytes because quoting and
-        # line endings are part of what it promises to preserve. Going
-        # through the bytes is the only way the audit sees the same
-        # file Brightspace will.
-        written = _rows_of(data)
-        problems = gradebook_mod.verify_export(
-            sheet.rows, written, changes, sheet.name)
-
-        # And at the byte level, which the parsed comparison above
-        # cannot see: a cell whose value is unchanged and whose
-        # quoting is not reads as identical through `csv.reader`, and
-        # is a different file to Brightspace.
-        moved, same = gradebook_mod.changed_lines(
-            CARRIED.files[sheet.name], data)
-        planned_rows = {c.row + sheet.header_line - 1
-                        for c in report.for_sheet(sheet.name)}
-        unexpected = sorted(set(moved) - planned_rows)
-        if unexpected:
-            problems.append(
-                f"{sheet.name}: {len(unexpected)} line(s) differ that hold "
-                "no planned cell -- lines "
-                + ", ".join(str(n) for n in unexpected[:8])
-                + (" ..." if len(unexpected) > 8 else ""))
-        if problems:
-            raise GuiError(
-                "the written file does not match the plan, so nothing was "
-                "handed over: " + "; ".join(problems))
-
-        check = gradebook_mod.audit_export(
-            sheet.rows, written, sheet.name, profile, people, progress,
-            slugs, not_yet=wanted, thresholds=thresholds,
-            header_line=sheet.header_line,
-            columns=dict(gradebook_mod.match(
-                sheet.head, slugs, pairs=profile.pairs).found))
-        check.lines_identical = same
-        audited.append((sheet.name, check))
-        stoppers += [f for f in check.findings if f.kind in AUDIT_STOPS]
-
-        # ---- and now cut it down to what the import actually needs ----
-        #
-        # Everything above is about the file being *right*. This is
-        # about it being *accepted*: the identifier, the skill columns
-        # this run wrote into, the end-of-line marker, nothing else.
-        # Cut after the audit on purpose -- the audit compares columns
-        # by index and should be looking at the file as the LMS handed
-        # it over.
-        mine = report.for_sheet(sheet.name)
-        try:
-            keep, dropped = gradebook_mod.import_columns(
-                sheet.head, {c.column - 1 for c in mine})
+            made = gradebook_mod.produce(
+                sheet, CARRIED.files[sheet.name], changes, report, profile,
+                people, progress, slugs, not_yet=wanted,
+                thresholds=thresholds)
         except gradebook_mod.GradebookError as exc:
-            raise GuiError(f"{sheet.name}: {exc}") from None
-        if dropped:
-            trimmed = gradebook_mod.drop_columns(data, keep)
-            problems = gradebook_mod.verify_dropped(
-                written, _rows_of(trimmed), keep, sheet.name)
-            # The allowlist is built *from* the written columns, so
-            # losing one is impossible by construction -- which is
-            # exactly the sort of reasoning worth an assertion rather
-            # than a comment.
-            lost = sorted({c.slug for c in mine if c.column - 1 not in keep})
-            if lost:
-                problems.append(
-                    f"{sheet.name}: the import copy is missing the "
-                    "column(s) holding " + ", ".join(lost))
-            if problems:
-                raise GuiError(
-                    "the import-ready copy is not a faithful cut, so "
-                    "nothing was handed over: " + "; ".join(problems))
-            data = trimmed
-        trims.append((sheet.name, dropped, len(keep)))
+            raise GuiError(f"{exc} -- so nothing was handed over.") from None
+        audited.append((sheet.name, made.check))
+        trims.append((sheet.name, made.dropped, len(made.kept)))
 
         stem, extension = os.path.splitext(sheet.name)
         out.append({
             # `_IMPORT`, not `_UPDATED`: what comes back is the file to
             # upload, and the name should say which of the two it is.
             "name": f"{stem}_IMPORT{extension}",
-            "data": base64.b64encode(data).decode("ascii"),
+            "data": base64.b64encode(made.data).decode("ascii"),
             "cells": len(report.for_sheet(sheet.name)),
         })
-
-    if stoppers:
-        # Loudly, and with the file withheld. A gradebook is the one
-        # artefact here that is hard to take back once it is uploaded.
-        raise GuiError(
-            f"{len(stoppers)} problem(s) found auditing the written "
-            "file(s) against the record, so nothing was handed over: "
-            + "; ".join(f"{f.kind} at {f.where} -- {f.says}"
-                        for f in stoppers[:6])
-            + (f" (and {len(stoppers) - 6} more)" if len(stoppers) > 6
-               else ""))
 
     return {
         "files": out,
@@ -3531,14 +3436,7 @@ def api_gradebook_clear(course, _body):
     return {"carrying": []}
 
 
-def _rows_of(blob):
-    """A carried file's bytes as rows, the way `mask.read_rows` reads a
-    path -- same encoding handling, same BOM handling, no temporary
-    file."""
-    import csv
-    import io
-    text = blob.decode("utf-8-sig")
-    return [row for row in csv.reader(io.StringIO(text, newline=""))]
+_rows_of = gradebook_mod.rows_of
 
 
 def _bank_slugs_for(course):
@@ -3622,6 +3520,20 @@ ROUTES = {
 
 # ---------------------------------------------------------------- serving --
 
+def _within(path, folder):
+    """Whether `path` is `folder` or inside it.
+
+    Not `startswith(folder)`: that also accepts a sibling whose name
+    begins the same way -- `CheckItPrintIt-old` is not inside
+    `CheckItPrintIt` (review, 2026-11-16).
+    """
+    path, folder = os.path.normcase(path), os.path.normcase(folder)
+    try:
+        return os.path.commonpath([path, folder]) == folder
+    except ValueError:            # different drives
+        return False
+
+
 def make_handler(course, token):
     class Handler(http.server.BaseHTTPRequestHandler):
         server_version = "checkit-printit"
@@ -3653,6 +3565,28 @@ def make_handler(course, token):
             return secrets.compare_digest(
                 self.headers.get(TOKEN_HEADER, ""), token)
 
+        def _host_ok(self):
+            """Addressed to this server by its own name, or refused.
+
+            The token keeps other pages out only while they cannot read
+            index.html, which carries it. A hostile page that points its
+            own domain at 127.0.0.1 ("DNS rebinding") is same-origin with
+            us as far as the browser knows, can fetch the page, read the
+            token, and drive the API. Its requests still say its own
+            domain in `Host`, so they are refused here (review,
+            2026-11-16).
+            """
+            # With or without the port: a hand-made request may leave it
+            # off, and a rebinding page always sends its own name.
+            port = self.server.server_address[1]
+            host = (self.headers.get("Host") or "").strip().lower()
+            if host in ("127.0.0.1", "localhost",
+                        f"127.0.0.1:{port}", f"localhost:{port}"):
+                return True
+            self._send(403, b"this app only answers to 127.0.0.1",
+                       "text/plain; charset=utf-8")
+            return False
+
         def _static(self, path):
             name = os.path.normpath(path.lstrip("/")).replace("\\", "/")
             if name in ("", "."):
@@ -3660,7 +3594,7 @@ def make_handler(course, token):
             full = os.path.normpath(os.path.join(STATIC, name))
             # A traversal check, not a formality: this process can read the
             # instructor's whole home directory.
-            if not full.startswith(STATIC) or not os.path.isfile(full):
+            if not _within(full, STATIC) or not os.path.isfile(full):
                 self._send(404, b"not found", "text/plain; charset=utf-8")
                 return
             with open(full, "rb") as f:
@@ -3672,6 +3606,8 @@ def make_handler(course, token):
 
         # -- routes --
         def do_GET(self):
+            if not self._host_ok():
+                return
             path = urllib.parse.urlparse(self.path).path
             if path.startswith("/api/"):
                 self._api(path, {})
@@ -3679,6 +3615,8 @@ def make_handler(course, token):
                 self._static(path)
 
         def do_POST(self):
+            if not self._host_ok():
+                return
             path = urllib.parse.urlparse(self.path).path
             length = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(length) if length else b"{}"

@@ -34,8 +34,8 @@ class ManifestError(Exception):
 
 
 def _quote(value):
-    out = str(value).replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{out}"'
+    from .fileio import toml_string
+    return toml_string(value)
 
 
 def file_digest(path):

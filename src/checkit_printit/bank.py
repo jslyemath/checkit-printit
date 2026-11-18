@@ -8,8 +8,6 @@ generator environment.
 import json
 import os
 
-from lxml import etree
-
 from checkit import PUBLIC_SEEDS, BUNDLE_UNTIL
 from checkit.bank import Bank as CheckItBank
 
@@ -37,7 +35,6 @@ class Bank:
             raise BankError(f"no bank.xml in {self.path!r}; is that a CheckIt bank?")
         self._checkit = CheckItBank(self.path)
         self._seeds = {}
-        self._colors = None
 
     @property
     def title(self):
@@ -85,19 +82,13 @@ class Bank:
         entry for "FCP" ahead of the one for "F". mat-106's older pdfgenerator.py
         matched the first letter only, which left no way to say that.
 
-        Read from the XML here rather than from the outcome: CheckIt's own Bank
-        does not model the color map at all. It is a print-side convention the
-        platform carries without interpreting.
+        The platform's answer. This re-parsed bank.xml itself, written when
+        CheckIt's Bank did not model the color map; it has since 0.2.9.1, as
+        "resolved here, once" so a print handout and a browser export cannot
+        disagree -- which a second copy here made possible again (review,
+        2026-11-16).
         """
-        if self._colors is None:
-            self._colors = {}
-            tree = etree.parse(os.path.join(self.path, "bank.xml"))
-            for category in tree.iter("{*}category"):
-                prefix, color = category.get("prefix"), category.get("color")
-                if prefix and color:
-                    self._colors[prefix] = color
-        matches = [p for p in self._colors if slug.startswith(p)]
-        return self._colors[max(matches, key=len)] if matches else None
+        return self._checkit.color(slug)
 
     # -- versions ---------------------------------------------------------
 

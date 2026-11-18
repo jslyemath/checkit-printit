@@ -1101,19 +1101,30 @@ class TestAuditingTheWrittenFile:
         report = self.audit(one, out, students, prog)
         assert [f.kind for f in report.findings] == ["shape"]
 
-    def test_a_file_whose_header_is_not_the_first_line_is_refused(
+    def test_rows_that_do_not_start_at_the_header_are_refused(
             self, students):
         """Rather than audited wrongly. Everything here indexes from
         `before[0]` being the header, which is what `Sheet.head` and
         `plan_export` assume too; a file with a preamble would come
         back clean having compared a student's row to a title line."""
         one = sheet([("806000111", "", "", "")])
+        whole = [["Exported 2026-11-17"], [""]] + one.rows
+        prog = progress(("806000111", "W1", 1, "passed"))
+        report = gb.audit_export(
+            whole, [list(r) for r in whole], one.name, profile(),
+            students, prog, SKILLS, header_line=3)
+        assert [f.kind for f in report.findings] == ["shape"]
+        assert "do not start at the header" in report.findings[0].says
+
+    def test_a_header_below_line_one_is_audited_from_there(self, students):
+        """It used to refuse any header_line but 1, so the app could not
+        export such a file at all (2026-11-17)."""
+        one = sheet([("806000111", "", "", "")])
         prog = progress(("806000111", "W1", 1, "passed"))
         report = gb.audit_export(
             one.rows, [list(r) for r in one.rows], one.name, profile(),
             students, prog, SKILLS, header_line=3)
-        assert [f.kind for f in report.findings] == ["shape"]
-        assert "first line is the header" in report.findings[0].says
+        assert "shape" not in [f.kind for f in report.findings]
 
     def test_a_column_mapped_to_a_slug_its_header_never_names(self,
                                                               students):

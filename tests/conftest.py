@@ -15,6 +15,23 @@ import pytest
 
 from checkit import BUNDLE_UNTIL
 
+
+# The suite runs with CHECKIT_PRINTIT_MASK_NAMES unset.
+#
+# The variable is set for every command an assistant runs in this project
+# (`.claude/settings.json`), which includes this suite. A test asserting on
+# what a command prints would then see pseudonyms and pass or fail by who
+# ran it -- and worse, a fixture with no CHECKIT_PRINTIT_HOME of its own
+# would write pseudonyms into the instructor's real vault folder.
+#
+# Here, when conftest is imported, and not in an autouse fixture: that was
+# tried first, and a module-scoped fixture in test_scans.py is set up
+# before any function-scoped one, read a seating chart with masking on, and
+# wrote `unfiled.json` into ~/CheckItPrintIt/vaults (2026-11-17; it held
+# two of the suite's invented names). test_privacy.py turns it on with
+# monkeypatch, per test, where it means to.
+os.environ.pop("CHECKIT_PRINTIT_MASK_NAMES", None)
+
 BANK_XML = """<?xml version='1.0' encoding='UTF-8'?>
 <bank xmlns="https://checkit.clontz.org" version="0.2">
     <title>Print Test Bank</title>

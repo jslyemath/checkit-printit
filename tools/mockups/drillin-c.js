@@ -25,7 +25,7 @@
  * of its own -- the mockup copies it, which is the second copy this
  * file is allowed and the built version is not.
  *
- * See PRINT_TOOL_DESIGN.md 17. Run it the way tools/mockups/README.md
+ * See DESIGN.md 17. Run it the way tools/mockups/README.md
  * says.
  */
 (function () {

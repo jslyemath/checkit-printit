@@ -119,8 +119,7 @@ def load(course_path):
     return conn
 
 
-def _quote(value):
-    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+_quote = fileio.toml_string
 
 
 def save(course_path, conn):
@@ -171,6 +170,13 @@ def save(course_path, conn):
 
 # ----------------------------------------------------------------- talking --
 
+def _timed_out(timeout, attempt):
+    return FormError(
+        f"the web app did not answer within {timeout}s, "
+        f"{attempt + 1} time(s). The first call after a deployment is "
+        f"the slow one.")
+
+
 def call(conn, op, payload=None, timeout=60, opener=None, retries=2):
     """One request to the web app. Raises FormError with what went wrong.
 
@@ -217,12 +223,21 @@ def call(conn, op, payload=None, timeout=60, opener=None, retries=2):
             if not last:
                 time.sleep(RETRY_WAIT * (attempt + 1))
                 continue
-            raise FormError(
-                f"the web app did not answer within {timeout}s, "
-                f"{attempt + 1} time(s). The first call after a deployment is "
-                f"the slow one."
-            ) from None
+            raise _timed_out(timeout, attempt) from None
         except urllib.error.URLError as exc:
+            # The same timeout, met while connecting rather than reading,
+            # arrives wrapped in a URLError, and was reported as "could
+            # not reach" on the first try instead of being retried
+            # (review, 2026-11-16).
+            # Still "could not reach" in the end: no connection was made,
+            # which is a different thing from a slow answer.
+            if isinstance(exc.reason, TimeoutError):
+                if not last:
+                    time.sleep(RETRY_WAIT * (attempt + 1))
+                    continue
+                raise FormError(
+                    f"could not reach the web app: no connection within "
+                    f"{timeout}s, {attempt + 1} time(s).") from None
             raise FormError(
                 f"could not reach the web app: {exc.reason}") from None
 

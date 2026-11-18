@@ -414,7 +414,7 @@ Early, but the whole path works: bank and roster in, compiled PDF out, with
 seating, keys, extras, selection modes, variants, and pinned seeds.
 
 Still to come: Google Forms, print tracking, and a seating GUI. Design notes live
-in `PRINT_TOOL_DESIGN.md` in the checkit repo.
+in `DESIGN.md`.
 
 ## Development
 

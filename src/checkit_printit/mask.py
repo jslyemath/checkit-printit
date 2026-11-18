@@ -688,6 +688,9 @@ def mask_file(path, out_path, vault, header_row=None, keep=(), mask_as=None,
     # rather than the file, because the source may be a workbook.
     original = "\n".join(",".join(row) for row in rows)
     leaked = vault.leaks(written, min_length=min_length, original=original)
+    # And a two-letter surname that is a whole cell, which `leaks` is
+    # too coarse to look for. Read back from the file, like the above.
+    leaked += vault.short_cell_leaks(read_rows(out_path))
     if leaked:
         where = _locate(out_rows, leaked)
         os.remove(out_path)
@@ -711,7 +714,10 @@ def _locate(rows, leaked):
     for row in rows:
         for col, cell in enumerate(row, 1):
             cell_low = cell.lower()
-            if any(v in cell_low for v in low):
+            # A two-letter value counts only as a whole cell, as it was
+            # found; inside a cell it is in half the words there are.
+            if any(v == cell_low.strip() if len(v) < 3 else v in cell_low
+                   for v in low):
                 found.add(col)
     return sorted(found)
 
