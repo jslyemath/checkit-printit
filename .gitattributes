@@ -1,0 +1,4 @@
+# The git hooks are shell scripts, run from the working tree through
+# core.hooksPath. With autocrlf a checkout would give them CRLF endings, and
+# "#!/bin/sh\r" breaks every commit in all three repos. Always LF.
+githooks/* text eol=lf
