@@ -1,0 +1,10 @@
+#!/bin/sh
+# Refuse a commit whose staged lines add a real student's name, id or
+# address. checkit-printit/DESIGN.md section 20. Every repo that points
+# core.hooksPath here runs it: the platform, printit, the mat-106 bank.
+PY="C:/Users/slye/Projects/checkit-printit/.venv/Scripts/python.exe"
+if [ ! -x "$PY" ]; then
+  echo "name guard: $PY is missing, so nothing can be checked. Refused." >&2
+  exit 1
+fi
+exec "$PY" -I -m checkit_printit names check --staged

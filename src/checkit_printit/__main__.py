@@ -19,6 +19,7 @@ from . import course as course_mod
 from . import gradebook as gradebook_mod
 from . import mask as mask_mod
 from . import maskcourse as maskcourse_mod
+from . import nameguard as nameguard_mod
 from . import privacy as privacy_mod
 from . import vault as vault_mod
 from . import manifest as manifest_mod
@@ -2301,6 +2302,75 @@ def gradebook_show(course):
     click.echo(f"  {len(profile.ignore_columns)} column(s) are never "
                "written to")
 
+
+
+@main.group()
+def names():
+    """Keep real students out of the repositories (DESIGN.md section 20)."""
+
+
+@names.command(name="check")
+@click.option("--staged", "mode", flag_value="staged",
+              help="The lines staged for commit (the pre-commit hook).")
+@click.option("--message", "message_file", default=None, type=click.Path(),
+              help="A commit message file (the commit-msg hook).")
+@click.option("--push", "mode", flag_value="push",
+              help="Every commit being pushed; refs on stdin (the pre-push hook).")
+@click.option("--all", "mode", flag_value="all",
+              help="Every commit on every branch and tag.")
+@click.option("--tree", "mode", flag_value="tree",
+              help="Every tracked file as it is now.")
+@click.option("--repo", default=".", type=click.Path(file_okay=False),
+              help="The repository; the current folder by default.")
+def names_check(mode, message_file, repo):
+    """Refuse if a real student's name, id or address is in what is checked.
+
+    A value is shown as its vault pseudonym, or ####, never as itself; open
+    the file at the line and column given to see it. A word that is fine
+    goes in name-guard.toml in the print home.
+    """
+    if bool(mode) == bool(message_file):
+        raise click.UsageError("give exactly one of --staged, --message, "
+                               "--push, --all or --tree")
+    home = nameguard_mod.home_root()
+    try:
+        allow = nameguard_mod.load_allow(home)
+        real = nameguard_mod.load_real(home, allow)
+        repo_name = nameguard_mod.repo_name(repo)
+        if message_file:
+            with open(message_file, encoding="utf-8", errors="replace") as f:
+                lines = [ln for ln in f.read().splitlines()
+                         if not ln.startswith("#")]
+            hits = [h for n, ln in enumerate(lines, 1) for h in
+                    nameguard_mod.scan_line(ln, f"{repo_name} (commit message)",
+                                            n, real, allow)]
+            what = "the commit message"
+        elif mode == "staged":
+            hits, what = nameguard_mod.staged(repo, real, allow), "the staged lines"
+        elif mode == "push":
+            refs = click.get_text_stream("stdin").read()
+            hits, what = nameguard_mod.pushed(repo, refs, real, allow), "the commits being pushed"
+        elif mode == "all":
+            hits = nameguard_mod.history(repo, ["--branches", "--tags", "--remotes=origin"],
+                                         real, allow)
+            what = "every file version and commit message on every branch and tag"
+        else:
+            hits, what = nameguard_mod.tree(repo, real, allow), "every tracked file"
+    except nameguard_mod.GuardError as exc:
+        raise click.ClickException(
+            f"name guard: {exc}. Refused, because a guard that cannot check "
+            "must not pass.") from None
+    if not hits:
+        click.echo(f"name guard: no real student in {what} of {repo_name} "
+                   f"(checked against {len(real)} real values).")
+        return
+    for hit in hits:
+        click.echo(f"  {hit}", err=True)
+    raise click.ClickException(
+        f"name guard: {len(hits)} real value(s) in {what} of {repo_name}. "
+        "Nothing was committed or pushed. Replace each with an invented one; "
+        f"if a word is not a student at all, add it to fine_words in "
+        f"{allow.path}.")
 
 
 if __name__ == "__main__":

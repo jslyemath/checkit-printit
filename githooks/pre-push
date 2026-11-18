@@ -1,0 +1,11 @@
+#!/bin/sh
+# The last gate before GitHub: every commit being pushed, message and
+# diff, so a value added and removed again inside the push is still caught.
+# git gives the refs on stdin, which passes straight through.
+# checkit-printit/DESIGN.md section 20.
+PY="C:/Users/slye/Projects/checkit-printit/.venv/Scripts/python.exe"
+if [ ! -x "$PY" ]; then
+  echo "name guard: $PY is missing, so nothing can be checked. Refused." >&2
+  exit 1
+fi
+exec "$PY" -I -m checkit_printit names check --push

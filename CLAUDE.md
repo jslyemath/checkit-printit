@@ -45,6 +45,7 @@ Everything with a name in it is outside every repo, under
 | `jobs/<title> <date>/` | a **job**: `publication.toml` and little else |
 | `<course>/<title> <date>/` | a **run**: `main.pdf main.tex manifest.toml main.pages compile.log`, a folder per skill |
 | `vaults/<course>.json` | the pseudonym table. A **sibling** of `courses/`, so masking a course folder cannot reach it. No recovery key, on purpose |
+| `name-guard.toml` | what the name guard lets through: invented courses, words cleared by him, files of common names. Real words, so never committed |
 
 "Open the folder" means the run, not the job; opening the job looks like a
 failed build. One course folder may be one course or two sections; nothing
@@ -115,6 +116,7 @@ refused. **A theme change reaches an existing bank only through
 | `gui` | `-c`, `--port`, `--open/--no-open`. The web app |
 | `vault columns` / `mask` / `unmask` / `check` / `show` / `learn` / `mask-course` / `mask-text` | `-c`. Masked twins; see below |
 | `gradebook map` / `export` / `audit` / `show` | `-c`. The LMS round-trip |
+| `names check` | `--staged`, `--message F`, `--push`, `--all`, `--tree`, `--repo`. The name guard; the git hooks run it |
 
 `tools/audit.py` derives the real CLI from `--help` and checks every name
 the code and docs use against it; `tools/docs.py` checks this table.
@@ -239,6 +241,15 @@ the code and docs use against it; `tools/docs.py` checks this table.
   must be read and written with `newline=""`. Old map › "Student names
   never reach chat or a commit".
 - `mask-course` never copies `secrets/` or `scans/`.
+- **The name guard** (`nameguard.py`, DESIGN 20) refuses a commit, a
+  commit message, a merge or a push that adds a real student's name
+  word, id or address, in all three repos: `githooks/`, which each repo
+  names in `core.hooksPath` (local config). Real is every roster,
+  seating chart and vault under the home except `invented_courses`.
+  Whole words only; names as written or in capitals. It fails closed.
+  A seat is a `Seat`, not a string -- the first version read no chart
+  at all. A vault is read per person, not by `real_values()`, whose
+  address domains made `edu` a name.
 
 ### Google
 

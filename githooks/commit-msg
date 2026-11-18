@@ -1,0 +1,9 @@
+#!/bin/sh
+# Refuse a commit message that names a real student: a message is as public
+# as a file. checkit-printit/DESIGN.md section 20.
+PY="C:/Users/slye/Projects/checkit-printit/.venv/Scripts/python.exe"
+if [ ! -x "$PY" ]; then
+  echo "name guard: $PY is missing, so nothing can be checked. Refused." >&2
+  exit 1
+fi
+exec "$PY" -I -m checkit_printit names check --message "$1"

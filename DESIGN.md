@@ -4633,3 +4633,73 @@ profile as the single truth rather than something a screen holds.
   strings, whether blank means "not attempted", and which rows and
   columns are untouchable -- written as data per course.
 * **What a seeded mark looks like** where Progress expects a paper.
+
+## 20. No real student in a commit (2026-11-17)
+
+On 2026-11-17 a check of what was about to be pushed found real students
+in all three public repos -- names, a student id, an address -- written
+into docstrings, comments, test fixtures and the notes as worked
+examples, over two months. The house rules said "never commit them";
+nothing enforced it (principle 3). The history was rewritten that day;
+this section is what stops it happening again.
+
+### The rule
+
+A commit or push that **adds** a real student's name word, id or address
+to any of the three repos is refused, before it lands. "Real" means: in
+any roster, seating chart or vault under `~/CheckItPrintIt` that does not
+belong to an invented course.
+
+### Where it runs
+
+* **git hooks**, `pre-commit` (the staged lines) and `pre-push` (every
+  commit being pushed, so a value added and then removed inside the push
+  is still caught). git runs them whoever commits -- the instructor, an
+  agent, a script. They live in `checkit-printit/githooks/`, and each
+  repo points at them with `core.hooksPath` (local config, not
+  committed). mat-206 is frozen and is not touched.
+* **The agent's shell hook** refuses `--no-verify` and any change to
+  `core.hooksPath`, which are the two ways past a git hook.
+* `checkit-printit names check --all` reads the whole history, and
+  `--tree` the current files, for an audit.
+
+### What counts, and what does not
+
+Matching is on whole words, a set lookup per word -- never a substring,
+so a four-letter name inside a longer word is not a hit.
+
+* **Ids and addresses always count.** Nothing makes them fine.
+* **A name word counts** when it is 3+ letters, written as the roster
+  writes it or in capitals. Lower case is ordinary English.
+* **The allowlist** is `~/CheckItPrintIt/name-guard.toml`, next to the
+  data and never committed, since its entries are real roster words:
+  * `invented_courses` -- courses whose rosters are made up (`Demo`).
+    Every other course counts, so a new real course is guarded the day
+    it appears; forgetting to list a *real* one cannot happen.
+  * `fine_words` -- words a student happens to share that are fine
+    anywhere: a month, an algorithm's name, a common nickname. Which
+    words they are is itself about real students, which is one more
+    reason the file stays out of every repo.
+  * `names_fine_in` -- files where a name word is fine because the file
+    is a list of common names (the word problems' name list and the
+    exercises drawn from it). Ids and addresses still count there.
+
+### What a refusal says
+
+The file, line and column, the kind (name, id, address), and the value
+as its vault pseudonym, or `####` when the vault has none -- never the
+value. The person at the keyboard opens the line to see it. The output
+is read by agents, whose transcripts leave the machine.
+
+### Fails closed
+
+No roster found, a roster or vault that cannot be read, or a guard that
+cannot start (the hook's Python missing) all refuse the commit. A guard
+that quietly passes because it had nothing to check against is the
+failure this section exists to prevent.
+
+### Not covered
+
+Images and PDFs are not read. Real data can only enter them through a
+scan or a printed paper, and none is tracked; if one ever is, this
+section needs a rule for binary files.
