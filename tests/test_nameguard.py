@@ -92,6 +92,20 @@ def test_a_surname_an_id_and_an_address_are_each_refused(home, repo):
     assert [(h.line, h.column) for h in hits if h.kind == "name"] == [(1, 14)]
 
 
+def test_a_preferred_first_and_last_name_are_each_refused(home, repo):
+    """The names a student goes by are real too (DESIGN 22). The guard
+    reads them through `Student.name_fields`, the one list every privacy
+    path shares; a field missing from it would pass a commit."""
+    (home / "courses" / "Real 101" / "roster.toml").write_text(
+        ROSTER + f'first = "{FIRST}"\nlast = "{SURNAME}"\n'
+                 'pref_first = "Tobiah"\npref_last = "Fenwright"\n',
+        encoding="utf-8")
+    real, allow = loaded(home)
+    stage(repo, "notes.md", "Tobiah said so.\nAsk Fenwright.\n")
+    hits = ng.staged(repo, real, allow)
+    assert [(h.kind, h.line) for h in hits] == [("name", 1), ("name", 2)]
+
+
 def test_a_refusal_never_shows_the_value(home, repo):
     real, allow = loaded(home)
     stage(repo, "notes.md", f"{FIRST} {SURNAME}, {SID}, {EMAIL}\n")

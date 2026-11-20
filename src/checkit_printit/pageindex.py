@@ -152,6 +152,45 @@ class Index:
     def get(self, page):
         return self.pages.get(int(page))
 
+    def first_page_of(self, page):
+        """The page a paper starts on, given any page of it; None if unknown.
+
+        A skill can run to two pages, and only the first carries the
+        box, so a decision is recorded against the first page alone. A
+        later page finds its paper by stepping back while the sheet
+        number falls, through pages of the same kind, student and
+        skill. A gap or a change of any of those means the chain is
+        broken, and that is None rather than a guess. `sheet` 0 is an
+        index written before sheets were counted, and is a first page.
+        """
+        at = self.get(page)
+        if at is None:
+            return None
+        number = int(page)
+        while at.sheet > 1:
+            before = self.get(number - 1)
+            if (before is None or before.sheet != at.sheet - 1
+                    or (before.kind, before.sid, before.slug)
+                    != (at.kind, at.sid, at.slug)):
+                return None
+            number, at = number - 1, before
+        return number
+
+    def pages_of_paper(self, first):
+        """Every page of the paper starting at `first`, in order."""
+        at = self.get(first)
+        if at is None:
+            return []
+        out, number = [int(first)], int(first)
+        while True:
+            after = self.get(number + 1)
+            if (after is None or after.sheet != at.sheet + 1
+                    or (after.kind, after.sid, after.slug)
+                    != (at.kind, at.sid, at.slug)):
+                return out
+            number, at = number + 1, after
+            out.append(number)
+
     def blanks(self, total=None):
         """Page numbers the document skipped: the padding sheets.
 

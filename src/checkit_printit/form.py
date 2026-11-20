@@ -170,8 +170,18 @@ def save(course_path, conn):
 
 # ----------------------------------------------------------------- talking --
 
+class FormTimeout(FormError):
+    """The request reached the script and no answer came back in time.
+
+    Its own type because the script may have done the work: for `mail`
+    that is an email that may or may not have gone, and the caller must
+    neither retry it nor record it (DESIGN 21). Failing to connect at
+    all is a plain FormError -- nothing was sent.
+    """
+
+
 def _timed_out(timeout, attempt):
-    return FormError(
+    return FormTimeout(
         f"the web app did not answer within {timeout}s, "
         f"{attempt + 1} time(s). The first call after a deployment is "
         f"the slow one.")

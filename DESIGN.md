@@ -4703,3 +4703,376 @@ failure this section exists to prevent.
 Images and PDFs are not read. Real data can only enter them through a
 scan or a printed paper, and none is tracked; if one ever is, this
 section needs a rule for binary files.
+
+## 21. Emailing students their papers (2026-11-19)
+
+**His request, in his words where possible:** a button in Prior
+assessments "for any entry that has been graded. It sends an email to
+any student that actually sat for that assessment, containing the
+results of how they did for each skill, as well as attaching PDF pages
+from that assessment that belong to them. The email comes from the
+Google email account logged into the app." A template "editable from the
+settings", and after pressing the button "the option to modify the
+template for this particular instance". Later it should be offered from
+Scans and elsewhere too; for now, Prior assessments only.
+
+**Status (paused 2026-11-19, mid-build).** His answers of 2026-11-19
+settle every *open* item below and override the proposals where they
+differ:
+
+* **"?" is a toggle per send**: either reported like any mark (as "?"
+  until the gradebook matching has a phrase for it), or the skill left
+  out of the results *and* its pages out of the PDF, as if never sat.
+* **The words are his gradebook matching's** (`gradebook.toml`
+  `[marks] passed / not_passed`, emoji included). With no matching,
+  printit's "Pass" / "Not yet", and the page says which it is using.
+* **A second press sends only to those not yet told**, per skill: a
+  mark changed since (a "?" settled, a correction) makes the student
+  due again; "send again" is a box per student.
+* **One template for every course**, `~/CheckItPrintIt/email.toml`.
+* Decided while building: the template takes Mustache *field* tags
+  only (`{{first}}`), read by `mailing.render`, not pystache -- which
+  renders an unclosed section as text even in strict mode. `{{name}}`
+  is first name first.
+
+**Update 2026-11-19, later: built and checked, uncommitted.** The
+`_note_pages` test is written and break-checked; `tools/check.py` all
+clear (1821 + 220); the page was driven in the browser on an invented
+course in a scratch home, including a whole send to a local imitation
+of the script (notes, "Emailing students their papers"). The map and
+notes are written. **What is left is his:** the live send on `Demo`
+(see "Testing without emailing anyone") with his own address, which is
+also the first run of
+`update-deployment`, the new permission and a real attachment against
+Google; and his eye on the mail glyph.
+
+**Built, uncommitted, in `checkit-printit`:** `mailing.py`; `record.py`
+(`mailed` table; `scan_page.run_page`; `ADDED` is now per table);
+`pageindex.Index.first_page_of` / `pages_of_paper`; the Scans save
+(`gui._note_pages`) now gives a paper's later pages to its student;
+`form.FormTimeout`; `clasp.update_deployment`;
+`provision.update_script`; `Code.gs` v2 (`mail`, `quota`, `version`);
+the GUI routes `/api/email/*` and `/api/setup/update-script`; the
+Prior assessments mail button and email page; the Settings card and
+"Update the script". `tests/test_mailing.py`: 46 pass, ten rules
+break-checked. Full suite passed (1774) before the front end.
+
+**Still to do, in order:** a test of `_note_pages` giving a second
+sheet to its student (needs a run folder with a real `main.pages`);
+the full suite and `tools/check.py`; drive the page in the browser on
+`Demo` / `Scratch 48` (Prior assessments -> mail button -> page;
+Settings card and save bar), never a real course; the map
+(`CLAUDE.md`), the notes section, the roadmap; then a live send only
+on `Demo` to his own address, after he says so. **Not yet
+run against Google at all**: `update-deployment`, MailApp's new
+permission, and the size a web app accepts in one POST.
+
+### What one email is
+
+* **To** the student's primary address in the roster (`Student.email`).
+  Not the other addresses in `emails`: those accumulate (email is a
+  weak key) and some are from other institutions. A student with no
+  primary address is listed as not getting one and is not guessed at.
+* **From** the Google account that owns the form's script -- the one
+  signed in on Settings. Nothing else in printit is a Google identity.
+* **Subject and body** from the template, filled per student.
+* **One PDF attached**: that student's scanned pages from this run.
+  The pages are the `scan_page` rows with this `run_id` and `sid` --
+  what he confirmed on Scans, not what the reader guessed -- cut out of
+  the stored stacks in `scans/` and put in printed order (`run_page`
+  from `main.pages`). Named after the assessment and date, never the
+  student, since the name is on the page already.
+
+**Who "sat"**: the definition already decided in 17 -- an attempt
+that is not an absence. A student whose every attempt in the run is
+`absent` gets nothing. A skill marked absent is left out of an
+email.
+
+### The results
+
+One line per skill sat, in the skill order of the run: the skill's
+code and title (`Bank.skill_title`), then a word for the mark.
+
+| outcome | the word |
+|---|---|
+| `passed` | *open* -- "passed" proposed |
+| `failed` | *open* -- "not yet" proposed, his gradebook word |
+| `queried` | *open* -- see below |
+
+**A query is undecided.** It is his "?" beside the box: not a pass and
+not a refusal. Mailing a student a result he has not reached yet is
+the kind of wrong guess that rule 1 is about. *Open:* hold those
+students back and say so in the dialog (proposed), or send them with
+the skill shown as "still being looked at", or refuse the whole send
+until no query is left.
+
+### The template
+
+* **Per course**, in `email.toml` in the course folder. He writes it,
+  so TOML (rule 6), edited by line like every other course file. A
+  course with no file uses the default that ships with printit, so
+  nothing has to be set up before the first send.
+* **Mustache**, the syntax his bank templates already use (pystache is
+  installed), so there is no fourth templating system. The fields:
+  `{{first}}`, `{{name}}`, `{{assessment}}`, `{{date}}`, `{{results}}`
+  (the lines above, already formatted), `{{instructor}}`.
+* **An unknown field refuses the send**, naming the field -- a typo
+  must not quietly send forty emails with a hole in them. The list of
+  fields lives behind the card's `?`, never inside the default
+  template: a template that documents its own syntax has the
+  documentation parsed as syntax (it broke both kinds here once).
+* **Plain text.** No HTML to get wrong in a mail client.
+* **On Settings**: a card "Emails to students" with Subject and Body,
+  joining the tab's existing save bar -- one save bar per tab.
+
+### The press
+
+The button is a mail glyph in the row's action cell, shown on graded
+runs only (that cell is empty on a graded row today, since a graded run
+cannot be delisted). Pressing it opens a panel, never a native dialog:
+
+1. **Subject and body**, filled from the course template and editable
+   for this send only. Nothing typed here is saved to Settings.
+2. **A preview** of one student's email as it will arrive, rendered
+   from what is in the boxes now, with the previous and next student.
+3. **Who gets it**: everyone who sat, each with the reason when they do
+   not -- no address, no scanned pages, a query, already sent.
+4. **Send to N**, the count in the button. Then progress, one student
+   at a time, and a list of anyone it failed for, with the reason.
+
+### Sending
+
+* **One request per student**, to a new `mail` operation on the form's
+  web app, carrying the address, the subject, the body and the PDF as
+  base64. The script calls `MailApp.sendEmail` with the PDF as an
+  attachment. One student at a time keeps a failure to one student,
+  and keeps every request well under the 25 MB a message may carry.
+* **`MailApp`, not `GmailApp`**: it asks only to send mail as him.
+  `GmailApp` asks to read, change and delete all of it.
+* **Google's daily limit** (100 recipients on a personal account, 1,500
+  on a school one). The script reports what is left
+  (`MailApp.getRemainingDailyQuota`), and a send that would run past it
+  is refused before the first email, rather than stopping half way
+  through a class.
+* **The record**: a new `mailed` table in `record.db` -- run, student,
+  address, when -- written as each email goes. It is the tool's, so
+  SQLite. *Open:* pressing the button a second time sends only to the
+  students not yet emailed (proposed: so a failure or a late grade can
+  be finished without emailing the class twice), or to everyone again.
+
+### The permission, once
+
+Sending mail is a new permission for the script. Every course's script
+has to be pushed again and its existing deployment updated -- updated
+rather than replaced, so its URL, which is in `secrets/`, stays the
+same -- and then authorized once, signed in as the form's owner. The
+authorize panel on Settings already exists for exactly this. The script
+reports a version from `ping`; until it reports the version that can
+mail, the button explains that one step is left and the link goes to
+Settings, rather than failing on the first student.
+
+### Testing without emailing anyone
+
+No test sends mail: `form.call` is replaced. The live check is on
+`Demo`, the one invented course (2026-11-20: `Scratch` was retired on
+purpose, so that there is one test course, not two). Demo has no form,
+and the sender is a form's script, so the check borrows one and gives
+it back:
+
+1. Back up Demo's `record.db` and `roster.toml`.
+2. Settings, Create: a throwaway form and script in his Drive.
+3. Point one student's address at his own. The other seven stay at
+   `example.invalid`, which cannot deliver.
+4. Send from Prior assessments, after he says so.
+5. Put both files back, remove Demo's connection to the form, and he
+   trashes the form in Drive.
+
+Nothing about the borrowed form is written into the map. Demo's
+students all have `example.invalid` addresses, so a send that went
+wider than meant would reach no one.
+
+### Not covered
+
+* **Writing on the blank back of a sheet.** Blank padding carries no
+  footer code, so a back with working on it reads as blank or
+  unreadable and is never placed -- and so it is not attached. Fixing
+  that means printing a code on every back.
+* **Scans and other places.** The send takes a run and a list of
+  students, so a second button elsewhere calls the same function.
+
+## 22. Preferred first and last names (2026-11-20)
+
+**Status: built and checked 2026-11-20, uncommitted.**
+- Tests: 1851 passing, 13 break-checks caught, `tools/check.py` all clear.
+- The Roster was operated in the browser on Demo.
+- MAT 106's roster was read with counts only.
+
+**Settled the same day: no re-import.** He chose a one-time split of the
+names already there: First is the first word, Last the rest. All 45
+rebuild exactly, so no printed name changed. The eight nicknames are now
+their First, as he accepted. The section's last part records the
+question and the counts. This is his Sheets
+proof of concept, which is the specification (principle 7). There, a
+nickname was stored apart from the surname, and the printed name was
+made from the two.
+
+### What was there
+
+- `Student.preferred` is one string holding the whole printed name
+  ("Print as" on the Roster). It was made a whole name on 2026-10-01,
+  so that a lone "Matt" could not replace a printed name. With the
+  printed name now worked out from parts, that risk is gone.
+- `first` and `last` (the registrar's) exist and are kept by the import.
+  The importer fills them from separate columns, or by splitting a
+  "Last, First" full name, and a re-import fills them on students
+  already on the roster (`classlist.merge`).
+- **On MAT 106 (counted 2026-11-20): `name` is filled for all 45, and
+  `first`, `last` and `preferred` for none.** The roster has not been
+  through an import since those fields existed. The class lists in his
+  Downloads carry the columns: two have separate Last/First, and two
+  have a full name the importer splits.
+- The email's `{{first}}` (DESIGN 21) took `first` ahead of the
+  preferred name. That is backwards, and this section fixes it.
+
+### The decisions
+
+1. **Two stored fields, `pref_first` and `pref_last`**, both optional.
+   They replace `preferred` (his naming, 2026-11-20).
+2. **The printed name is worked out, never stored:**
+   (`pref_first` or `first`) + " " + (`pref_last` or `last`). Where
+   `first` and `last` are both empty, it is `name`, as today. So
+   setting `pref_first = "Matt"` alone prints "Matt Clifford".
+   `Student.display` is the one place this rule lives.
+3. **Each falls back to the registrar's**: `pref_first` to `first`,
+   `pref_last` to `last`. That is how printing behaves, and so is
+   everything else that shows a name (his answer, 2026-11-20).
+4. **The Roster tab**:
+   - "Print as" becomes two columns, preferred first and preferred
+     last. A blank shows the registrar's name greyed, as a placeholder.
+   - **The name-order switch orders them too.** With Last, First on,
+     preferred last comes before preferred first, so the two pairs read
+     the same way round (his request, 2026-11-20). One switch, one
+     preference per table, as now (`nameFormatSwitch`, `NAME_TABLES`).
+5. **Email template fields**:
+   - `{{first}}` and `{{last}}` are the registrar's, with the same
+     fallbacks `first_name` uses today when they are empty.
+   - `{{pref_first}}` and `{{pref_last}}` are the preferred ones, each
+     with the fallback in 3.
+   - `{{name}}` is the printed name, first name first.
+   - The default greeting becomes `Hi {{pref_first}},`.
+6. **Every copy of the name list learns both fields.** That covers
+   matching (`classlist._index`), and the four privacy paths:
+   - pseudonyms (`privacy`, `vault`);
+   - masking a file (`mask`);
+   - masking a course (`maskcourse`);
+   - the commit guard (`nameguard`).
+
+   A field one of them misses is a real name leaking past it, so a test
+   puts a preferred name through each.
+7. **Migration: none, and an old key is refused.** None of the 14
+   roster files under the home (counted 2026-11-20, `jobs/` copies
+   included) holds a `preferred` value. A roster that does is refused,
+   with a sentence naming the student and the two keys to use instead.
+   A conversion path for files that do not exist would be code nobody
+   runs (principle 1).
+8. **Filling `first` / `last` on MAT 106** is a re-import of his class
+   lists. Until he does it, the printed name and the email's names fall
+   back to `name` and its split, as today. It is his data and his step.
+9. **The registrar's name splits too** (his decision, 2026-11-20).
+   - The Roster's one Name column becomes **First** and **Last**,
+     editable.
+   - The switch orders both pairs: Last, First, Pref last, Pref first,
+     or the reverse of each.
+   - Every name column now sorts like any other column, ascending then
+     descending. The Name column's four-state cycle (`sortKeys`: last
+     each way, then first each way) goes from the Roster.
+   - The order is the column order and not a reformatted string, so
+     `unfileName` and the comma rule go too.
+   - A blank First or Last shows the split guess greyed, as a
+     placeholder, never as a value.
+   - **Both registrar columns are frozen**, whichever way round, and the
+     switch sits on the far right of the second, clear of the heading's
+     text and sort arrows by `--s3` (his corrections, 2026-11-20). The
+     second sticks at `--pin2`, the first's width, which `sizeColumns`
+     sets.
+
+### What stays, and why
+
+- **`name` is still stored, and is still the weakest key.**
+  - `seating.toml` matches a seat by sid, else by `name` or the printed
+    name (`index_by_name`).
+  - `roster.find` and `keys_of` try it last.
+  - A class-list re-import matches on it.
+
+  So it is not dropped. An edit to First or Last on the Roster rewrites
+  `name` as "First Last", exactly as an edit to Name does today, so the
+  stored identity and the shown one never disagree.
+- **An edit that would leave half a name is refused.** That covers
+  First without Last, Last without First, and a preferred name on a row
+  with neither. Each is refused with a sentence; the remedy is typing
+  the other part or re-importing the class list. A guessed half is never
+  saved (principle 1).
+- **The printed name is unchanged until parts exist.** `display` is
+  composed only when `first` and `last` are both stored. Otherwise it
+  is `name`, as now. MAT 106 prints exactly what it prints today until
+  the re-import.
+
+### Every other surface
+
+- **Progress**: one name column, its own switch, the four-state cycle.
+  It sorts on the shown parts, the preferred else the registrar's,
+  instead of splitting `display`. That is no guess once parts exist.
+  Its layout is not split; ask him before changing it.
+- **Scans' review**: shows the name the record says was printed on that
+  paper, which is history and must not follow a later edit.
+  Unchanged.
+- **Print's "who gets what"**, **Seating**, **the email**: all read
+  `display`, which carries the new rule with no change of their own.
+- **The privacy paths** (decision 6):
+  - `maskcourse.learn_students` masks `pref_first` as a given name,
+    `pref_last` as a surname, and the shown name in both orders;
+  - `nameguard` collects both fields' words;
+  - `privacy.saw` goes through `learn_students`, so it follows;
+  - `mask` (spreadsheet columns) is about files, not the roster, and is
+    unchanged.
+- **The vault and a second surname.** A person has one fake surname, and
+  `_candidates("last")` offered only that. A `pref_last` that differs
+  from `last` (a hyphenated or married name) would find every candidate
+  taken and stop masking with a `VaultError`. That is safe, but it
+  blocks the work. So a different surname for the same person is
+  offered fresh draws from the surname pool, kept injective like every
+  other spelling. Existing vaults are unaffected: the new path only runs
+  for a second spelling.
+- **The column sizer** measured a heading as its bare label. That was
+  harmless under the old Name column's 150px floor. A 90px Last column
+  put "LAST ↑ 2" on top of the switch, and a click on the switch sorted
+  the column; the browser run found it. The column carrying the switch
+  is now measured with its arrow, rank and switch; others are unchanged.
+
+### The re-import and the eight (counted 2026-11-20, not decided)
+
+A re-import was run against his roster in memory, never written, using
+the two class lists in Downloads (`class-list.csv`, `class-list2.csv`).
+It gives all 45 students First and Last. **Eight printed names would
+then change**:
+
+- In every one of the eight, only the given name differs. The roster
+  name is "X Surname", where X is not the registrar's first name and the
+  surname matches exactly: names he typed as the student goes by.
+- Composing from the parts would print the registrar's given name
+  instead.
+- The older of the two files would also add two students the roster
+  does not have. They are likely stale; his current exports are the ones
+  to import.
+
+The options, his to choose:
+
+1. **The import keeps today's printed name.** A student getting First
+   and Last for the first time, whose `name` is exactly "X Last" with X
+   other than `first`, gets `pref_first = X`. That is string arithmetic
+   on two known strings, not a guess. Anything that does not line up
+   that way is listed (by row, not by name) for him to set by hand.
+   Recommended: principle 9, absence means the old behaviour, so a paper
+   prints tomorrow what it printed yesterday.
+2. **He sets the eight by hand** on the Roster after importing. Until he
+   does, those papers print the registrar's given name.

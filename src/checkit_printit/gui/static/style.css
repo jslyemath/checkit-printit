@@ -613,6 +613,10 @@ button.iconbtn.danger:hover {
 th .namefmt,
 th .undo { float: right; margin-top: -1px; }
 th .undo { margin-left: var(--s1); }
+/* Clear of the heading's text, arrow and rank. A float's margin keeps
+   inline text off it; with none, the arrows sat against "LAST ↑ 2",
+   "too tight" (2026-11-20). `sizeColumns` reserves the same room. */
+th .namefmt { margin-left: var(--s3); }
 
 /* Restoring is the undo, so it is not the colour of a thing to do. */
 button.iconbtn.undo:hover {
@@ -931,12 +935,17 @@ body.tall #roster thead th {
 /* Pinned columns. Name is what tells you which row you are on, and the
    actions are what you came to press -- neither may be the thing that
    scrolls out of sight, so they are the two that stay. */
-#roster td.pinleft, #roster th.pinleft {
+#roster td.pinleft, #roster th.pinleft,
+#roster td.pinleft2, #roster th.pinleft2 {
   position: sticky;
   left: 0;
   z-index: 2;
   background: var(--panel);
 }
+/* The second frozen name column sticks where the first ends. `--pin2`
+   is the first's width, set by `sizeColumns` (DESIGN 22: First and Last
+   are frozen together, whichever way round). */
+#roster td.pinleft2, #roster th.pinleft2 { left: var(--pin2, 0px); }
 #roster td.pinright, #roster th.pinright {
   position: sticky;
   right: 0;
@@ -944,11 +953,30 @@ body.tall #roster thead th {
   background: var(--panel);
 }
 body.tall #roster thead th.pinleft,
+body.tall #roster thead th.pinleft2,
 body.tall #roster thead th.pinright { z-index: 4; background: var(--surface-2); }
 tr.secband td { z-index: 1; }
 
-/* A hairline so a pinned column reads as held rather than overlapping. */
-#roster .pinleft { box-shadow: 1px 0 0 var(--line); }
+/* A hairline so a pinned column reads as held rather than overlapping --
+   on the outer edge of the frozen pair only, so the two names read as
+   one block. */
+#roster .pinleft2 { box-shadow: 1px 0 0 var(--line); }
+
+/* The resize handle on a frozen name heading (DESIGN 22). Quiet until
+   pointed at: a strip of the heading's right padding, which the switch
+   never reaches, showing a hairline on hover. The heading is sticky, so
+   it is already the handle's containing block. */
+#roster th .colgrip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+#roster th .colgrip:hover,
+#roster th .colgrip:active { box-shadow: inset -2px 0 0 var(--accent); }
 #roster .pinright { box-shadow: -1px 0 0 var(--line); }
 
 /* Columns are capped, so a long email is clipped rather than allowed to take
@@ -1557,6 +1585,40 @@ table.seeds td {
   border: 1px solid transparent;
 }
 .fields input[type="checkbox"] { width: 15px; height: 15px; margin: 0; }
+
+/* An email's subject and body (DESIGN 21): the same field look, the
+   body a full-width box in a monospace face, because what is typed is
+   plain text and its line breaks are what the student gets. */
+.mailfields { flex-direction: column; }
+.mailfields textarea {
+  font: var(--t-md) / 1.45 var(--font-mono);
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--s2);
+  resize: vertical;
+}
+.mailfields textarea:focus { outline: none; border-color: var(--accent); }
+/* The preview is the email as it arrives: its own text, wrapped, in
+   the same face as the box it came from. */
+.mailpreview {
+  font: var(--t-md) / 1.45 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  padding: var(--s2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+}
+.fieldlist {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--s1) var(--s3);
+  margin: 0;
+}
+.fieldlist dd { margin: 0; }
 
 /* The pickers inside Print job are the same control as the Update form's
    list, just shorter. */

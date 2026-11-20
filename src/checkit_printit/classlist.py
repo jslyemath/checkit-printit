@@ -236,10 +236,9 @@ def parse(path, section=""):
             skills=[],
             last=last,
             first=first,
-            # Deliberately not `first`. `preferred` is the whole name to
-            # print, and the registrar never supplies one -- only the
-            # instructor does, by typing it.
-            preferred="",
+            # No `pref_first` / `pref_last`: the registrar never supplies
+            # the name a student goes by -- only the instructor does, by
+            # typing it (DESIGN 22).
             sid=cell(row, "sid"),
             alt_id=cell(row, "alt_id"),
             email=cell(row, "email").lower(),
@@ -335,7 +334,9 @@ def _index(students):
         for kind, value in s.ids():
             if value:
                 out[(kind, value)] = s
-        for spelling in (s.name, f"{s.first} {s.last}", s.preferred):
+        # `display` is the printed name, preferred parts included -- the
+        # spelling an old print job's roster would have carried.
+        for spelling in (s.name, f"{s.first} {s.last}", s.display):
             key = _norm(spelling)
             if key:
                 out.setdefault(("name", key), s)
@@ -382,9 +383,10 @@ def merge(existing, incoming, scope=None):
 
     Absence is not deletion: a student the import does not mention is marked
     dropped and kept, because the print record refers to them. And nothing the
-    instructor authored is overwritten -- `preferred`, `name` and `skills`
-    survive every re-import, which is what stops a class list renaming the
-    person on the printed page.
+    instructor authored is overwritten -- `pref_first`, `pref_last`, `name`
+    and `skills` survive every re-import, which is what stops a class list
+    renaming the person on the printed page. `first` and `last` are the
+    registrar's and do follow the file (DESIGN 22).
 
     **Absence only counts inside the sections the file covers.** A class list
     is usually one section, and a course may hold several; without this,

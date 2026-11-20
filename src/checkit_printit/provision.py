@@ -332,6 +332,50 @@ def attach_form(space, script_id, reach=reach):
             + ["nothing on the form itself was changed"])
 
 
+def update_script(space, reach=reach):
+    """Push printit's current script over this course's, keeping its URL.
+
+    For a script deployed by an older printit -- one that cannot send
+    email (DESIGN 21). The existing deployment is updated rather than a
+    new one made, so the URL in `secrets/` stays right. Touches nothing
+    on the form.
+
+    **A new permission stops every call until it is granted**, push and
+    pull included: Google will not run any of the script for a caller
+    until its owner has allowed what it now asks for. So this ends in
+    `reach`, which raises `NeedsAuthorization` with the link.
+    """
+    conn = _course_conn(space)
+    if not conn.ready:
+        raise ProvisionError("this course has no form script connected yet.")
+    deployment = clasp_mod.deployment_of(conn.url)
+    if not deployment:
+        raise ProvisionError(
+            f"the web app URL in secrets/ does not name a deployment: "
+            f"{conn.url!r}.")
+    directory = clasp_dir(space)
+    try:
+        if not os.path.isfile(os.path.join(directory, ".clasp.json")):
+            if not conn.script_id:
+                raise ProvisionError(
+                    "this course's script was set up by hand, so printit "
+                    "does not know its project. In the form's Apps Script "
+                    "editor, replace Code.gs with the one in "
+                    f"{script_sources()}, then Deploy > Manage deployments "
+                    "> edit > New version.")
+            stage_script(space, conn.secret)
+            clasp_mod.clone(conn.script_id, directory)
+            _drop_our_twins(directory)
+        stage_script(space, conn.secret)
+        clasp_mod.push(directory)
+        clasp_mod.update_deployment(directory, deployment)
+    except clasp_mod.ClaspError as exc:
+        raise ProvisionError(str(exc)) from None
+    answer = reach(conn)
+    return [f"updated: {conn.url}",
+            f"the script reports version {answer.get('version', 1)}"]
+
+
 def what_the_clone_would_replace(space, script_id):
     """The existing script's files that attaching would overwrite.
 

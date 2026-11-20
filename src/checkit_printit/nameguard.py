@@ -156,7 +156,8 @@ def load_real(home, allow):
                                  "checked against it") from None
             files += 1
             for s in people:
-                for field in (s.name, s.last, s.first, s.preferred):
+                # `name_fields`, the one list every privacy path reads.
+                for field in s.name_fields():
                     names |= _name_words(field)
                 ids |= {v.strip() for v in (s.sid, s.alt_id) if v and v.strip()}
                 addresses |= set(s.all_emails())

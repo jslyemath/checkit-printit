@@ -204,6 +204,25 @@ def deploy(directory, description="checkit-printit"):
     return _deployment_id(output)
 
 
+def update_deployment(directory, deployment_id, description="checkit-printit"):
+    """Point an existing deployment at the code just pushed. Same URL.
+
+    `create-deployment` would make a second web app with a new URL, and
+    the course's `secrets/` would go on naming the old one, still
+    running the old code.
+    """
+    run(["update-deployment", deployment_id, "--description", description],
+        cwd=directory)
+
+
+def deployment_of(url):
+    """The deployment id inside a web app URL, or "" if it has none."""
+    marker = "/macros/s/"
+    if marker not in url:
+        return ""
+    return url.split(marker, 1)[1].split("/", 1)[0]
+
+
 def _deployment_id(output):
     """Pull the deployment id out of clasp's chatter.
 

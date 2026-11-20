@@ -31,7 +31,7 @@ _TOML_ESCAPES = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r",
                  "\t": "\\t", "\b": "\\b", "\f": "\\f"}
 
 
-def toml_string(value):
+def toml_string(value, multiline=False):
     """`value` as a TOML basic string, quotes included.
 
     The one copy. There were nine (`_quote` in manifest, printjob, form
@@ -41,15 +41,25 @@ def toml_string(value):
     and one of them did not escape a backslash either (review,
     2026-11-16). Any other control character is written as \\uXXXX,
     which is the only form TOML accepts for it.
+
+    `multiline` writes a `\"\"\"` string with its line breaks kept as
+    line breaks, for text a person will read in the file -- an email
+    template (DESIGN 21). Every quote is still escaped, so no run of
+    them can close the string early, and the line break straight after
+    the opening quotes is one TOML drops.
     """
     out = []
     for ch in str(value):
-        if ch in _TOML_ESCAPES:
+        if multiline and ch == "\n":
+            out.append(ch)
+        elif ch in _TOML_ESCAPES:
             out.append(_TOML_ESCAPES[ch])
         elif ord(ch) < 0x20 or ord(ch) == 0x7F:
             out.append(f"\\u{ord(ch):04X}")
         else:
             out.append(ch)
+    if multiline:
+        return '"""\n' + "".join(out) + '"""'
     return '"' + "".join(out) + '"'
 
 

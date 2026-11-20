@@ -1,5 +1,6 @@
 /**
- * checkit-printit's half of the Google Form.
+ * checkit-printit's half of the Google Form -- and, since it runs as the
+ * form's owner, the one way printit sends email as him (`mail`).
  *
  * Deployed as a web app that executes as the form's owner, so it needs no
  * Cloud project, no OAuth client and no token. printit posts JSON to it.
@@ -48,6 +49,16 @@
 
 var SECRET_PROPERTY = 'PRINTIT_SECRET';
 
+/**
+ * What this script can do, reported by `ping`. printit refuses to email
+ * through a script older than the version that has `mail`, rather than
+ * failing on the first student (DESIGN 21). Raise it with any new op.
+ *
+ *   1  the form ops
+ *   2  mail, quota
+ */
+var VERSION = 2;
+
 function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents);
@@ -73,6 +84,12 @@ function doPost(e) {
         return json_({ok: true, changed: push_(body.payload)});
       case 'addItems':
         return json_({ok: true, items: addItems_(body.payload || {})});
+      case 'quota':
+        return json_({ok: true,
+                      remaining: MailApp.getRemainingDailyQuota()});
+      case 'mail':
+        mail_(body.payload || {});
+        return json_({ok: true});
       default:
         return json_({ok: false, error: 'unknown op: ' + body.op});
     }
@@ -125,6 +142,7 @@ function identity_() {
   var form = FormApp.getActiveForm();
   return {
     ok: true,
+    version: VERSION,
     form: form.getTitle(),
     formId: form.getId(),
     editUrl: form.getEditUrl(),
@@ -386,6 +404,32 @@ function addItems_(payload) {
   }
 
   return made;
+}
+
+/**
+ * One email to one student, sent as the script's owner (DESIGN 21).
+ *
+ * Everything is composed by printit -- the address, the subject, the
+ * body, the attachment -- for the same reason the form's wording is:
+ * one copy of a rule, in the place with tests. This only sends.
+ *
+ * MailApp, not GmailApp: it asks only to send mail as the owner, where
+ * GmailApp asks to read and delete all of it.
+ */
+function mail_(payload) {
+  if (!payload.to || !payload.subject) {
+    throw new Error('an email needs an address and a subject');
+  }
+  var attachments = (payload.attachments || []).map(function (a) {
+    return Utilities.newBlob(Utilities.base64Decode(a.data),
+                             a.type || 'application/pdf', a.name);
+  });
+  MailApp.sendEmail({
+    to: String(payload.to),
+    subject: String(payload.subject),
+    body: String(payload.body || ''),
+    attachments: attachments
+  });
 }
 
 function json_(value) {

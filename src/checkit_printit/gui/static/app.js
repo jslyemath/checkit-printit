@@ -278,35 +278,77 @@ function makeSorter({ columns, defaults, redraw, resetTitle }) {
  * wider than the table needs. A fixed-width Section stretched to 300px
  * is a worse table, not a bigger one.
  */
+/* **The four name columns** (DESIGN 22): the registrar's First and Last,
+ * then the name the student goes by, Pref first and Pref last.
+ *
+ * Each is an ordinary column -- it sorts ascending then descending like
+ * Section does. The single Name column cycled through four states
+ * (surname each way, then given name each way) because one column held
+ * both parts; with the parts in columns of their own the cycle has
+ * nothing left to do.
+ *
+ * A blank box is not missing data. A blank First or Last means the
+ * roster only has a whole name so far -- the greyed placeholder is the
+ * split guess, which is never saved. A blank Pref means the registrar's
+ * name is used, and the placeholder shows which. Each column sorts by
+ * what it shows, placeholder included, so a blank does not sink to the
+ * end of the table. */
+const NAME_COLUMNS = {
+  first: { key: "first", label: "First", edit: true, min: 110, max: 220,
+           floor: 90, rank: 1, grow: true,
+           value: s => s.first || s.sort_first,
+           placeholder: s => s.sort_first },
+  last: { key: "last", label: "Last", edit: true, min: 110, max: 220,
+          floor: 90, rank: 1, grow: true,
+          value: s => s.last || s.sort_last,
+          placeholder: s => s.sort_last },
+  pref_first: { key: "pref_first", label: "Pref first", edit: true,
+                min: 110, max: 220, floor: 96, rank: 3, grow: true,
+                value: s => s.pref_first || s.first || s.sort_first,
+                placeholder: s => s.first || s.sort_first },
+  pref_last: { key: "pref_last", label: "Pref last", edit: true,
+               min: 110, max: 220, floor: 96, rank: 3, grow: true,
+               value: s => s.pref_last || s.last || s.sort_last,
+               placeholder: s => s.last || s.sort_last },
+};
+
+/* Put the name columns in the order the switch says, **in place**.
+ *
+ * In place because `COLUMNS` is one array read by the sorter, the
+ * renderer and `sizeColumns` alike; a fresh array would leave the
+ * sorter holding the old one. Both pairs turn round together -- Last,
+ * First, Pref last, Pref first -- so the two pairs read the same way
+ * (his request, 2026-11-20).
+ *
+ * **Both registrar columns are frozen**, whichever way round: together
+ * they say which row you are on, as Name alone did. The first sticks at
+ * the left edge (`pinleft`); the second sticks just past it
+ * (`pinleft2`, at `--pin2`, the first's width, which `sizeColumns`
+ * sets). The switch goes on the far right of the second -- the right
+ * edge of the frozen pair -- which is his placement (2026-11-20). */
+function orderRosterColumns() {
+  const filed = filedNames("roster");
+  const names = filed
+    ? ["last", "first", "pref_last", "pref_first"]
+    : ["first", "last", "pref_first", "pref_last"];
+  for (const key of Object.keys(NAME_COLUMNS)) {
+    delete NAME_COLUMNS[key].pin;
+    delete NAME_COLUMNS[key].headExtra;
+  }
+  NAME_COLUMNS[names[0]].pin = "left";
+  const second = NAME_COLUMNS[names[1]];
+  second.pin = "left2";
+  // Seating's "two ways round" arrows, because that is exactly what it
+  // does. Nothing else in a name heading may wear `swapby`.
+  second.headExtra = (th) => nameFormatSwitch(th, "roster");
+  const rest = COLUMNS.filter(c => !(c.key in NAME_COLUMNS));
+  COLUMNS.splice(0, COLUMNS.length,
+                 ...names.map(k => NAME_COLUMNS[k]), ...rest);
+}
+
 const COLUMNS = [
-  { key: "name",      label: "Name",     edit: true, min: 200, max: 360,
-    floor: 150, rank: 1, pin: "left", grow: true,
-    // Measured as it is shown, or the column is sized for a string the
-    // table is not displaying.
-    value: s => displayName(s, "roster"),
-    sortKeys: [["sort_last", "last"], ["sort_first", "first"]],
-    /* The name format lives in the Name heading, not in a box above
-       the table. It is a property of this column, so it belongs on it
-       -- and a segmented pair floating in a toolbar was, in the
-       instructor's words, butt ugly.
-
-       Seating's "two ways round" arrows, because that is exactly what
-       it does and the glyph already means that elsewhere. It is also
-       why nothing else in a name column may wear `swapby`: there, it
-       means the name order and nothing else.
-
-       The button was built inline here and again in
-       `nameFormatSwitch`, two copies of one control, and when the
-       preference was split per table only one of them would have
-       been fixed. One function now, told which table it is on. */
-    headExtra: (th) => nameFormatSwitch(th, "roster") },
-  // Not "Nickname": that invites "Matt", and this replaces the whole
-  // printed name. Same widths as Name, because it holds the same thing
-  // -- when it holds anything; its floor is the heading, because on a
-  // roster where nobody has one it was 200px of blank boxes.
-  { key: "preferred", label: "Print as", edit: true, min: 200, max: 330,
-    floor: 96, rank: 3, grow: true,
-    placeholder: s => s.name },
+  NAME_COLUMNS.first, NAME_COLUMNS.last,
+  NAME_COLUMNS.pref_first, NAME_COLUMNS.pref_last,
   { key: "section",   label: "Section",  edit: true, min: 74,  max: 110,
     floor: 74, rank: 4 },
   { key: "email",     label: "Email",    edit: true, min: 215, max: 360,
@@ -344,7 +386,7 @@ function pendingCount() { return edits.size + pendingDrops.size; }
 // surname within each. That is the order an instructor reads one in.
 const DEFAULT_SORT = [
   { key: "section", desc: false },
-  { key: "sort_last", desc: false },
+  { key: "last", desc: false },
 ];
 
 const rosterSort = makeSorter({
@@ -808,6 +850,11 @@ const GLYPH = {
             { d: "M11.4 12H1.6M4.6 9L1.6 12L4.6 15" }],
   /* An arrow coming back round to where it started. */
   reset: "M19.4 12a7.4 7.4 0 1 1-2.2-5.3M19.6 4.4v4.2h-4.2",
+  /* An envelope: the body, and the flap meeting at its middle. For
+     emailing a graded run's students (DESIGN 21). Drawn at 13 on the
+     Runs row beside nothing else; not yet looked at by his eye. */
+  mail: [{ r: [3, 5.5, 18, 13, 2] },
+         { d: "M3.9 7.4L12 13.2L20.1 7.4" }],
   back: "M14.5 5.5 8 12l6.5 6.5",
   forward: "M9.5 5.5 16 12l-6.5 6.5",
 };
@@ -2122,49 +2169,21 @@ function refreshDirty() {
           n === 1 ? "1 unsaved change" : `${n} unsaved changes`);
 }
 
-/* "Crane, Tamsin" back into "Tamsin Crane".
- *
- * The comma is the whole specification, and it has to be exactly one:
- * without it there is no way to know where the surname stops, and with
- * two there is no way to know which half is which. A name is not
- * guessable -- that is the lesson of the one compound surname on this
- * roster -- so the rule is stated to the typist rather than inferred
- * from what they typed.
- *
- * Returns null when the text is not a filed name, which the caller
- * shows as an invalid cell rather than saving a wrong name.
- */
-function unfileName(text) {
-  const parts = String(text).split(",");
-  if (parts.length !== 2) return null;
-  const last = parts[0].trim();
-  const first = parts[1].trim();
-  if (!last || !first) return null;
-  return `${first} ${last}`;
-}
-
 function cellInput(student, field, column) {
   const input = document.createElement("input");
-  // The Name cell shows what the column is showing. It is editable in
-  // either order: read-only was the first answer and the wrong one,
-  // since the roster is the one place a name gets corrected.
-  const filed = field === "name" && filedNames("roster");
-  input.value = filed ? displayName(student, "roster")
-    : (student[field] || "");
+  // Every cell holds one stored field as it is. The Name cell used to
+  // show and accept "Surname, Given" and turn it round on the way in
+  // (it was `unfileName`); with the parts in columns of their own, the order
+  // is the column order and no text is ever reformatted (DESIGN 22).
+  input.value = student[field] || "";
   input.spellcheck = false;
-  if (filed) input.title = "Surname, then given name, separated by one comma.";
-  // An empty "Print as" is not missing data -- it means the roster name is
-  // used -- so the box shows that name greyed rather than sitting blank.
+  // A blank name box is not missing data -- see `NAME_COLUMNS` -- so it
+  // shows what stands in for it, greyed, rather than sitting blank.
   if (column && column.placeholder) input.placeholder = column.placeholder(student);
   input.oninput = () => {
     const k = key(student.index, field);
-    const stored = filed ? unfileName(input.value) : input.value;
-    input.classList.toggle("invalid", filed && stored === null);
-    if (stored === null) {
-      // Half-typed is not an edit to save. The cell says so and the
-      // save bar does not offer to write it.
-      edits.delete(k);
-    } else if (stored === (student[field] || "")) {
+    const stored = input.value;
+    if (stored === (student[field] || "")) {
       edits.delete(k);
     } else {
       edits.set(k, stored);
@@ -2213,7 +2232,32 @@ function sizeColumns(rows) {
   // So `min` is the comfortable width for a column *with* content, and
   // `floor` is what it may be squeezed to; an empty column starts at its
   // floor rather than being padded up to a width it has no use for.
-  const heads = COLUMNS.map(c => textWidth(c.label.toUpperCase(), headFont) + 18);
+  //
+  // **A heading is measured as it is drawn at its widest**: bold (the
+  // primary sort), letter-spaced, upper-cased, with its arrow and rank
+  // ("LAST ↓ 2"), the cell's own padding, and the name switch where the
+  // column carries one. Measuring the bare label in the heading's normal
+  // weight under-counted every column. Section came out at 74px for a
+  // heading that needs 96; the browser took the difference from the
+  // name columns, so a frozen column ended 2px short of where the next
+  // one stuck (a see-through strip) and "LAST ↓ 1" lost its end to "..."
+  // beside the switch (2026-11-20).
+  const sortProbe = table.querySelector("thead button.sort");
+  const sortStyle = sortProbe ? getComputedStyle(sortProbe) : headStyle;
+  const spacing = parseFloat(sortStyle.letterSpacing) || 0;
+  const boldHead = `700 ${sortStyle.fontSize} ${sortStyle.fontFamily}`;
+  const headPad = (parseFloat(headStyle.paddingLeft) || 0)
+                + (parseFloat(headStyle.paddingRight) || 0);
+  // The 20px switch and the --s3 gap that keeps it off the heading text
+  // (style.css, `th .namefmt`). "Too tight against the text" (2026-11-20).
+  const SWITCH_ROOM = 20 + 12;
+  const headWidth = (c) => {
+    if (!c.label) return textWidth("", headFont) + 18;     // the actions strip
+    const text = (c.label + " ↓ 2").toUpperCase();
+    return Math.ceil(textWidth(text, boldHead) + spacing * text.length)
+      + headPad + (c.headExtra ? SWITCH_ROOM : 0) + 4;
+  };
+  const heads = COLUMNS.map(headWidth);
   const floors = COLUMNS.map((c, i) => Math.max(heads[i], c.floor ?? c.min));
 
   const want = COLUMNS.map((column, i) => {
@@ -2230,6 +2274,15 @@ function sizeColumns(rows) {
     return Math.round(Math.min(column.max, Math.max(low, widest)));
   });
 
+  // A width he dragged is his, and nothing below moves it: not the
+  // growing, not the shrinking. Never narrower than its heading needs.
+  const held = COLUMNS.map((c, i) => {
+    const px = rosterWidths[c.key];
+    if (!px) return false;
+    want[i] = Math.max(floors[i], Math.round(px));
+    return true;
+  });
+
   // A hidden view measures zero, and zero is not a narrow window. Sized
   // at boot while the tab was still hidden, every column came out at its
   // floor and stayed there once the tab was shown -- 594px of table in a
@@ -2243,7 +2296,8 @@ function sizeColumns(rows) {
     // with an 867px table under it looked like the table had failed to
     // load. Only `grow` columns take it: stretching Section to 300px
     // makes a worse table, not a bigger one.
-    const growers = COLUMNS.map((c, i) => i).filter(i => COLUMNS[i].grow);
+    const growers = COLUMNS.map((c, i) => i)
+      .filter(i => COLUMNS[i].grow && !held[i]);
     for (let pass = 0; pass < 3 && gap > 0; pass += 1) {
       const room_left = growers.filter(i => want[i] < COLUMNS[i].max);
       if (!room_left.length) break;
@@ -2270,8 +2324,13 @@ function sizeColumns(rows) {
     // further; past that the table genuinely does not fit and scrolls,
     // which is survivable now that Name and the actions are pinned.
     let excess = -gap;
+    // Nor the frozen names: they are the columns that stay on screen while
+    // the rest scroll, so a narrow window scrolls the others rather than
+    // cutting a name short (2026-11-20).
+    const frozen = (c) => c.pin === "left" || c.pin === "left2";
     const order = want
-      .map((px, i) => ({ i, slack: px - floors[i] }))
+      .map((px, i) => ({ i, slack: held[i] || frozen(COLUMNS[i]) ? 0
+                                   : px - floors[i] }))
       .filter(c => c.slack > 0)
       .sort((a, b) => b.slack - a.slack);
     for (const c of order) {
@@ -2297,6 +2356,86 @@ function sizeColumns(rows) {
   // overflows. Setting the sum as a floor is what makes it overflow, and
   // therefore what makes the scrollbar appear.
   table.style.minWidth = total + "px";
+  // **And as the width.** `table-layout: fixed` applies only to a table
+  // whose width is not `auto`; with `auto` the browser laid the columns
+  // out by their content and quietly moved width between them, so no
+  // `<col>` was the width it said (2026-11-20).
+  table.style.width = total + "px";
+
+  // Where the second frozen column sticks: where the first one *ends*,
+  // read off the page rather than taken from the plan, so the two can
+  // never drift apart and leave a strip between them. The plan stands
+  // in only while the view is hidden and measures nothing.
+  const leadTh = table.querySelector("thead th.pinleft");
+  const drawn = leadTh ? leadTh.getBoundingClientRect().width : 0;
+  const lead = COLUMNS.findIndex(c => c.pin === "left");
+  table.style.setProperty("--pin2",
+    (drawn > 0 ? drawn : (lead >= 0 ? want[lead] : 0)) + "px");
+  lastSized = rows;
+}
+
+/* Widths he has dragged the frozen name columns to, by column key.
+ * Per viewer and per browser, like the name order: how wide a column
+ * reads is a property of this screen, not of the course. */
+const WIDTHS_KEY = "rosterWidths";
+let rosterWidths = (() => {
+  try { return JSON.parse(localStorage.getItem(WIDTHS_KEY) || "{}") || {}; }
+  catch (err) { return {}; }
+})();
+/* The rows `sizeColumns` last measured, so a drag can re-size live. */
+let lastSized = [];
+
+function saveRosterWidths() {
+  try { localStorage.setItem(WIDTHS_KEY, JSON.stringify(rosterWidths)); }
+  catch (err) { /* a private window still gets a working roster */ }
+}
+
+/* A handle on the right edge of a frozen name heading. Drag to widen a
+ * column whose long names are cut off; double-click to give the column
+ * back to the sizer. The live resize goes through `sizeColumns` itself,
+ * so the second frozen column's sticking point follows the drag. */
+function addColumnGrip(th, column) {
+  const grip = document.createElement("span");
+  grip.className = "colgrip";
+  grip.title = "Drag to resize. Double-click to fit it again.";
+  grip.addEventListener("click", e => e.stopPropagation());
+  grip.addEventListener("dblclick", (e) => {
+    e.stopPropagation();
+    delete rosterWidths[column.key];
+    saveRosterWidths();
+    renderRoster();
+  });
+  grip.addEventListener("pointerdown", (down) => {
+    down.preventDefault();
+    down.stopPropagation();
+    grip.setPointerCapture(down.pointerId);
+    const start = th.getBoundingClientRect().width;
+    let moved = false;
+    const move = (e) => {
+      if (Math.abs(e.clientX - down.clientX) < 2 && !moved) return;
+      moved = true;
+      rosterWidths[column.key] = Math.max(40, start + e.clientX - down.clientX);
+      sizeColumns(lastSized);
+    };
+    const up = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up);
+      grip.removeEventListener("pointercancel", up);
+      // **A press that never moved is not a resize.** It used to keep the
+      // current width as his and redraw the heading row, which pinned a
+      // column he had only clicked -- and replaced the handle between
+      // the two clicks of a double-click, so "fit it again" never fired.
+      if (!moved) return;
+      // What the sizer actually gave it, floor included, is what is kept.
+      rosterWidths[column.key] = Math.round(th.getBoundingClientRect().width);
+      saveRosterWidths();
+      renderRoster();
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up);
+    grip.addEventListener("pointercancel", up);
+  });
+  th.appendChild(grip);
 }
 
 
@@ -2474,7 +2613,17 @@ function sectionBand(run, span, redraw) {
 }
 
 function renderRoster() {
-  rosterSort.header(document.querySelector("#roster thead tr"));
+  // First, because the header, the rows and `sizeColumns` all read
+  // `COLUMNS`, and the name switch redraws through here.
+  orderRosterColumns();
+  const headRow = document.querySelector("#roster thead tr");
+  rosterSort.header(headRow);
+  // The frozen pair can be dragged wider: long names were cut off, and
+  // frozen columns are the ones that cannot be scrolled to see the rest.
+  COLUMNS.forEach((column, i) => {
+    if (column.pin === "left" || column.pin === "left2")
+      addColumnGrip(headRow.children[i], column);
+  });
   const body = document.querySelector("#roster tbody");
   body.textContent = "";
 
@@ -3079,10 +3228,12 @@ async function pushForm() {
  */
 let runsState = null;
 let openRun = null;        // the run id being shown, or null for the list
+let mailState = null;      // the email page's run and plan, or null (21)
 
 function loadRuns() {
   api("/api/runs").then(out => {
     runsState = out;
+    if (mailState) return;          // the email page keeps its place
     if (openRun) showRun(openRun);
     else renderRuns();
   }).catch(err => toast(err.message, true));
@@ -3124,6 +3275,17 @@ function runRow(run, tbody) {
   const actions = document.createElement("td");
   actions.className = "stretch";
   actions.className = "pinright";
+  // Graded is the only state with marks to send, so it is the only one
+  // that offers to send them (DESIGN 21).
+  if (run.graded) {
+    const mail = document.createElement("button");
+    mail.className = "iconbtn tiny";
+    mail.appendChild(icon("mail"));
+    mail.title = "Email each student who sat this their results and pages.";
+    mail.setAttribute("aria-label", mail.title);
+    mail.onclick = () => showMail(run.id);
+    actions.appendChild(mail);
+  }
   // A graded run offers no delist at all, rather than offering one
   // and refusing it. The record refuses it too; this is the half that
   // keeps the instructor from meeting a wall.
@@ -5051,8 +5213,10 @@ function renderScan(data) {
 
 function renderRuns() {
   openRun = null;
+  mailState = null;
   document.getElementById("runs-list").hidden = false;
   document.getElementById("runs-detail").hidden = true;
+  document.getElementById("runs-mail").hidden = true;
   const live = runsState.runs;
   const gone = runsState.delisted;
 
@@ -5093,8 +5257,10 @@ async function showRun(id) {
   } catch (err) { toast(err.message, true); return; }
   const run = out.run;
   openRun = id;
+  mailState = null;
   document.getElementById("runs-list").hidden = true;
   document.getElementById("runs-detail").hidden = false;
+  document.getElementById("runs-mail").hidden = true;
 
   for (const [id, name] of [["run-back", "back"], ["run-prev", "back"],
                             ["run-next", "forward"]]) {
@@ -5246,6 +5412,293 @@ async function setRunFlag(id, fields) {
   renderRuns();
 }
 
+// ------------------------------------------------- emailing a run (21) --
+
+/* Every rule is the server's (`mailing.py`): who sat, who is due, what
+   each email says. This page sends the subject and body as they stand
+   and draws what comes back, so the preview is the email -- the same
+   function composes both. */
+
+function mailBody() {
+  const s = mailState;
+  return {
+    id: s.id,
+    subject: document.getElementById("mail-subject").value,
+    body: document.getElementById("mail-body").value,
+    queried: document.getElementById("mail-queried").checked
+      ? "send" : "leave out",
+    resend: [...s.resend],
+  };
+}
+
+async function showMail(id) {
+  const run = allRuns().find(r => r.id === id);
+  if (!run) return;
+  openRun = null;
+  mailState = { id, run, plan: null, ready: null, at: 0, seq: 0,
+                resend: new Set(), sending: false };
+  document.getElementById("runs-list").hidden = true;
+  document.getElementById("runs-detail").hidden = true;
+  document.getElementById("runs-mail").hidden = false;
+  document.getElementById("mail-title").textContent = run.title;
+  document.getElementById("mail-sub").textContent = "";
+  document.getElementById("mail-out").textContent = "";
+  document.getElementById("mail-progress").textContent = "";
+  document.getElementById("mail-queried").checked = false;
+
+  let template;
+  try {
+    template = await api("/api/email/template", {});
+  } catch (err) { toast(err.message, true); return; }
+  document.getElementById("mail-subject").value = template.subject;
+  document.getElementById("mail-body").value = template.body;
+  refreshMailPlan();
+
+  const ready = document.getElementById("mail-ready");
+  ready.className = "muted";
+  ready.textContent = "Checking this course's form script…";
+  const state = mailState;
+  try {
+    state.ready = await api("/api/email/ready", {});
+  } catch (err) {
+    state.ready = { ready: false, reason: err.message };
+  }
+  if (mailState === state) renderMail();
+}
+
+let mailTyping = 0;
+
+function refreshMailPlanSoon() {
+  clearTimeout(mailTyping);
+  mailTyping = setTimeout(refreshMailPlan, 300);
+}
+
+async function refreshMailPlan() {
+  const state = mailState;
+  if (!state) return;
+  const seq = ++state.seq;
+  let plan;
+  try {
+    plan = await api("/api/email/plan", mailBody());
+  } catch (err) { toast(err.message, true); return; }
+  // An older answer arriving after a newer one would draw the email as
+  // it was two keystrokes ago.
+  if (mailState !== state || seq !== state.seq) return;
+  state.plan = plan;
+  renderMail();
+}
+
+function renderMail() {
+  const s = mailState;
+  if (!s || !s.plan) return;
+  const plan = s.plan;
+  const w = plan.words;
+
+  document.getElementById("mail-sub").textContent = w.source === "gradebook"
+    ? `Marks read as your gradebook matching has them: ${w.passed} and `
+      + `${w.failed}.`
+    : `This course has no gradebook matching, so marks read `
+      + `${w.passed} and ${w.failed}.`;
+
+  const ready = document.getElementById("mail-ready");
+  if (!s.ready) {
+    ready.className = "muted";
+  } else if (s.ready.ready) {
+    ready.className = "muted";
+    ready.textContent = `Google allows ${s.ready.remaining} more email`
+      + `${s.ready.remaining === 1 ? "" : "s"} from this account today.`;
+  } else {
+    ready.className = "warnline";
+    ready.textContent = s.ready.reason;
+  }
+
+  const error = document.getElementById("mail-error");
+  error.textContent = plan.error || "";
+  error.hidden = !plan.error;
+
+  renderMailWho(plan);
+  renderMailPreview(plan);
+
+  const send = document.getElementById("mail-send");
+  send.textContent = plan.due
+    ? `Send to ${plan.due}` : "Nobody to send to";
+  send.disabled = s.sending || !plan.due || Boolean(plan.error)
+    || !(s.ready && s.ready.ready);
+}
+
+/* The class list: everyone who sat, and for each one who will not get
+   an email now, why not. A student already told everything has a box to
+   send again -- the one way past "only those not yet told". */
+function renderMailWho(plan) {
+  const s = mailState;
+  const body = document.querySelector("#mail-who tbody");
+  body.textContent = "";
+  const shown = plan.letters.filter(l => l.subject !== undefined);
+  for (const letter of plan.letters) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    const link = document.createElement("button");
+    link.className = "rowlink";
+    link.textContent = letter.name || letter.sid;
+    link.disabled = letter.subject === undefined;
+    link.onclick = () => {
+      s.at = shown.indexOf(letter);
+      renderMailPreview(plan);
+    };
+    name.appendChild(link);
+    tr.appendChild(name);
+
+    const results = document.createElement("td");
+    results.className = "ro";
+    results.textContent = letter.skills
+      .map(k => `${k.slug} ${k.word}`).join(", ");
+    tr.appendChild(results);
+
+    const pages = document.createElement("td");
+    pages.className = letter.warning ? "warnline" : "ro";
+    pages.textContent = letter.warning || String(letter.pages);
+    tr.appendChild(pages);
+
+    const state = document.createElement("td");
+    state.className = "pinright";
+    if (letter.status === "sent" || s.resend.has(letter.sid)) {
+      const label = document.createElement("label");
+      label.className = "muted";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = s.resend.has(letter.sid);
+      box.onchange = () => {
+        if (box.checked) s.resend.add(letter.sid);
+        else s.resend.delete(letter.sid);
+        refreshMailPlan();
+      };
+      label.append(box, document.createTextNode(" send again"));
+      state.appendChild(label);
+    } else if (letter.status === "no address") {
+      state.className = "pinright warnline";
+      state.textContent = letter.reason;
+    } else if (letter.status !== "due") {
+      state.className = "pinright muted";
+      state.textContent = letter.reason;
+    }
+    tr.appendChild(state);
+    body.appendChild(tr);
+  }
+  const others = plan.letters.length - plan.due;
+  document.getElementById("mail-count").textContent =
+    `${plan.due} of ${plan.letters.length}`
+    + (others ? `, ${others} not now` : "");
+}
+
+function renderMailPreview(plan) {
+  const s = mailState;
+  const shown = plan.letters.filter(l => l.subject !== undefined);
+  const to = document.getElementById("mail-to");
+  const pre = document.getElementById("mail-preview");
+  const attach = document.getElementById("mail-attach");
+  const which = document.getElementById("mail-which");
+  const prev = document.getElementById("mail-prev");
+  const next = document.getElementById("mail-next");
+  if (!shown.length) {
+    to.textContent = plan.error
+      ? "Fix the template to see the email."
+      : "Nobody who sat this has anything to be told.";
+    pre.textContent = "";
+    attach.textContent = "";
+    which.textContent = "";
+    prev.disabled = next.disabled = true;
+    return;
+  }
+  s.at = Math.max(0, Math.min(s.at, shown.length - 1));
+  const letter = shown[s.at];
+  which.textContent = `${s.at + 1} of ${shown.length}`;
+  prev.disabled = s.at === 0;
+  next.disabled = s.at === shown.length - 1;
+  to.textContent = `To ${letter.name} <${letter.address || "no address"}>`
+    + (letter.status === "due" ? "" : ` — not sending: ${letter.reason}`);
+  pre.textContent = `${letter.subject}\n\n${letter.body}`;
+  attach.textContent = letter.pages
+    ? `Attached: ${plan.attachment}, ${letter.pages} page`
+      + `${letter.pages === 1 ? "" : "s"}.`
+    : "Nothing attached: no scanned pages.";
+}
+
+async function sendMail() {
+  const s = mailState;
+  if (!s || !s.plan || !s.plan.due) return;
+  const n = s.plan.due;
+  const go = await ask({
+    title: `Email ${n} student${n === 1 ? "" : "s"}?`,
+    body: ["From the Google account that owns this course's form. "
+           + "An email cannot be taken back."],
+    yes: `Send ${n}`,
+  });
+  if (!go || mailState !== s) return;
+  try {
+    await api("/api/email/send", mailBody());
+  } catch (err) { toast(err.message, true); return; }
+  s.sending = true;
+  renderMail();
+  watchMail(s);
+}
+
+function watchMail(s) {
+  setTimeout(async () => {
+    let st;
+    try {
+      st = await api("/api/email/status", {});
+    } catch (err) {
+      toast(err.message, true);
+      return;
+    }
+    if (mailState !== s) return;
+    const progress = document.getElementById("mail-progress");
+    progress.textContent = `${st.done} of ${st.total}`;
+    if (st.running) { watchMail(s); return; }
+    s.sending = false;
+    s.resend.clear();
+    progress.textContent = "";
+    const out = document.getElementById("mail-out");
+    out.textContent = "";
+    const line = (text, cls) => {
+      const p = document.createElement("p");
+      p.className = cls;
+      p.textContent = text;
+      out.appendChild(p);
+    };
+    if (st.error) line(st.error, "warnline");
+    line(`Sent ${st.sent}.`, "muted");
+    for (const f of st.failed) line(`${f.name || f.sid}: ${f.reason}`,
+                                    "warnline");
+    if (st.skipped)
+      line(`${st.skipped} not tried, because the send stopped first.`,
+           "warnline");
+    toast(st.failed.length || st.error ? "Some emails did not go"
+          : `Sent ${st.sent}`, Boolean(st.failed.length || st.error));
+    refreshMailPlan();
+  }, 700);
+}
+
+function wireMail() {
+  const back = document.getElementById("mail-back");
+  back.appendChild(icon("back"));
+  back.onclick = () => renderRuns();
+  document.getElementById("mail-prev").appendChild(icon("back"));
+  document.getElementById("mail-next").appendChild(icon("forward"));
+  document.getElementById("mail-prev").onclick = () => {
+    mailState.at -= 1;
+    renderMailPreview(mailState.plan);
+  };
+  document.getElementById("mail-next").onclick = () => {
+    mailState.at += 1;
+    renderMailPreview(mailState.plan);
+  };
+  document.getElementById("mail-subject").oninput = refreshMailPlanSoon;
+  document.getElementById("mail-body").oninput = refreshMailPlanSoon;
+  document.getElementById("mail-queried").onchange = refreshMailPlan;
+  document.getElementById("mail-send").onclick = sendMail;
+}
+
 // --------------------------------------------------------------- google --
 
 /* ---- what actually stops a push or a pull ---------------------------
@@ -5321,6 +5774,40 @@ async function signInToGoogle() {
   } catch (err) { toast(err.message, true); }
 }
 
+/* Asks again, while clasp waits for the browser, until it says how the
+ * sign-in ended.
+ *
+ * This used to be `setTimeout(() => loadSetup(), 4000)` inside
+ * `renderSetup`, which went wrong twice over (2026-11-19, notes,
+ * "Failed to fetch on Settings"):
+ *
+ * - `loadSetup` renders more than once, so every round scheduled two
+ *   more rounds. After a minute the tab had tens of thousands of
+ *   requests open and every one failed: "Failed to fetch".
+ * - `loadSetup` asks through `fetchGoogle()`, which hands back the answer
+ *   it already has. So it never heard that the sign-in had finished, and
+ *   the loop never ended.
+ *
+ * Now there is at most one timer, and it asks the server again. Not with
+ * `force`: the server reports `signingIn` live and checks clasp afresh
+ * once the sign-in ends, so only this page's copy of the answer is out
+ * of date. */
+let signInPoll = null;
+
+function pollSignIn() {
+  if (signInPoll) return;
+  signInPoll = setTimeout(async () => {
+    googleRequest = null;
+    try {
+      googleState = await fetchGoogle();
+    } catch (err) {
+      googleState = { error: err.message };
+    }
+    signInPoll = null;
+    renderSetup();
+  }, 4000);
+}
+
 function renderSetup() {
   const s = setupState;
   const g = googleState;
@@ -5334,7 +5821,7 @@ function renderSetup() {
   } else if (g.signingIn) {
     google.textContent = "Waiting for the Google sign-in in your browser…";
     signin.disabled = true;
-    setTimeout(() => loadSetup(), 4000);
+    pollSignIn();
   } else if (g.loggedIn) {
     google.textContent = "Signed in. printit uses clasp's own sign-in and "
       + "never sees your password. Google expires these after a week or "
@@ -5375,6 +5862,8 @@ function renderSetup() {
     "setup-authorize": need,
     "setup-authed": need,
     "setup-copy": need,
+    // clasp pushes and redeploys, so this one does need the sign-in.
+    "setup-update": ready && s.connected,
   };
   for (const [id, on] of Object.entries(live))
     document.getElementById(id).disabled = !on;
@@ -5531,32 +6020,96 @@ function fillIdentity(identity) {
   for (const [key, input] of identityInputs()) {
     input.value = (identity || {})[key] || "";
     input.dataset.saved = input.value;
-    input.oninput = refreshIdentityDirty;
+    input.oninput = refreshSetupDirty;
   }
-  refreshIdentityDirty();
+  refreshSetupDirty();
 }
 
-function refreshIdentityDirty() {
-  const dirty = identityInputs().some(
-    ([, i]) => i.value !== (i.dataset.saved || ""));
-  saveBar("setup", dirty, "unsaved changes to this course");
+/* The email template (DESIGN 21): one for every course, in the home, so
+   it is the one thing on this tab that is not this course's. It shares
+   the tab's save bar -- one bar per tab -- and the bar says which of the
+   two is unsaved. */
+function templateInputs() {
+  return [document.getElementById("tpl-subject"),
+          document.getElementById("tpl-body")];
+}
+
+function fillTemplate(t) {
+  const [subject, body] = templateInputs();
+  subject.value = t.subject;
+  body.value = t.body;
+  for (const input of templateInputs()) {
+    input.dataset.saved = input.value;
+    input.oninput = refreshSetupDirty;
+  }
+  // The fields go behind the `?`, never into the template: a template
+  // that documents its own syntax has the documentation read as syntax.
+  const list = document.getElementById("tpl-fields");
+  list.textContent = "";
+  for (const [name, what] of Object.entries(t.fields || {})) {
+    const dt = document.createElement("dt");
+    const code = document.createElement("code");
+    code.textContent = `{{${name}}}`;
+    dt.appendChild(code);
+    const dd = document.createElement("dd");
+    dd.textContent = what;
+    list.append(dt, dd);
+  }
+  document.getElementById("tpl-error").hidden = true;
+  refreshSetupDirty();
+}
+
+async function loadTemplate() {
+  try {
+    fillTemplate(await api("/api/email/template", {}));
+  } catch (err) { toast(err.message, true); }
+}
+
+const isDirty = (input) => input.value !== (input.dataset.saved || "");
+
+function refreshSetupDirty() {
+  const course = identityInputs().some(([, i]) => isDirty(i));
+  const email = templateInputs().some(isDirty);
+  const what = course && email ? "unsaved changes"
+    : course ? "unsaved changes to this course"
+    : "unsaved changes to the email template";
+  saveBar("setup", course || email, what);
 }
 
 /* Put the fields back to what is on disk. Setup had Save alone, so the
    only way out of a half-typed change was to remember what was there. */
-function revertIdentity() {
+function revertSetup() {
   for (const [, input] of identityInputs()) input.value = input.dataset.saved || "";
-  refreshIdentityDirty();
+  for (const input of templateInputs()) input.value = input.dataset.saved || "";
+  document.getElementById("tpl-error").hidden = true;
+  refreshSetupDirty();
 }
 
-async function saveIdentity() {
-  const body = {};
-  for (const [key, input] of identityInputs()) body[key] = input.value.trim();
-  try {
-    const out = await api("/api/course/identity", body);
-    fillIdentity(out.identity);
-    toast("Saved");
-  } catch (err) { toast(err.message, true); }
+async function saveSetup() {
+  if (identityInputs().some(([, i]) => isDirty(i))) {
+    const body = {};
+    for (const [key, input] of identityInputs()) body[key] = input.value.trim();
+    try {
+      const out = await api("/api/course/identity", body);
+      fillIdentity(out.identity);
+    } catch (err) { toast(err.message, true); return; }
+  }
+  if (templateInputs().some(isDirty)) {
+    const [subject, body] = templateInputs();
+    const error = document.getElementById("tpl-error");
+    try {
+      fillTemplate(await api("/api/email/template/save",
+                             { subject: subject.value, body: body.value }));
+    } catch (err) {
+      // Said beside the boxes as well as in a toast: the toast goes, and
+      // the field it names is still wrong.
+      error.textContent = err.message;
+      error.hidden = false;
+      toast(err.message, true);
+      return;
+    }
+  }
+  toast("Saved");
 }
 
 async function loadSetup() {
@@ -5564,6 +6117,7 @@ async function loadSetup() {
     setupState = await api("/api/setup", {});
   } catch (err) { toast(err.message, true); return; }
   fillIdentity(setupState.identity);
+  loadTemplate();
   setupState.said = setupState.said || [];
   // Drawn at once, from a file read: whether this course already has a
   // form is the thing that decides which buttons exist.
@@ -6700,8 +7254,11 @@ async function boot() {
   preset.appendChild(icon("reset"));
   preset.onclick = resetPrint;
   document.getElementById("setup-signin").onclick = signInToGoogle;
-  document.getElementById("course-save").onclick = saveIdentity;
-  document.getElementById("course-revert").onclick = revertIdentity;
+  document.getElementById("course-save").onclick = saveSetup;
+  document.getElementById("course-revert").onclick = revertSetup;
+  document.getElementById("setup-update").onclick = () =>
+    runSetup("/api/setup/update-script", {});
+  wireMail();
   document.getElementById("setup-create").onclick = () =>
     runSetup("/api/setup/create", {
       title: document.getElementById("setup-title").value,

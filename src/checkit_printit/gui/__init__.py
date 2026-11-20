@@ -56,6 +56,8 @@ from .. import roster as roster_mod
 from .. import seating as seating_mod
 from .. import gradebook as gradebook_mod
 from .. import mask as mask_mod
+from .. import mailing as mailing_mod
+from .. import pageindex as pageindex_mod
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 TOKEN_HEADER = "X-Printit-Token"
@@ -90,6 +92,21 @@ def _sort_names(student):
     return last, first
 
 
+def _shown_sort(student):
+    """`sort_last` / `sort_first` for the name a student is *shown* by.
+
+    The parts themselves once the registrar's are stored -- each the
+    preferred one, else the registrar's, the same rule as `display`
+    (DESIGN 22) -- so nothing is guessed. Before that, `display` is the
+    roster name, and it is split exactly as `_split_for_sort` always
+    split it.
+    """
+    if student.first and student.last:
+        return {"sort_last": student.shown_last,
+                "sort_first": student.shown_first}
+    return _split_for_sort(student.display)
+
+
 def _split_for_sort(full):
     """`sort_last` / `sort_first` for a name the record printed.
 
@@ -120,9 +137,15 @@ def _student_json(student, index):
         # Derived for sorting only; see _sort_names. Not editable, not saved.
         "sort_last": sort_last,
         "sort_first": sort_first,
+        # The registrar's parts as stored -- blank when the roster only
+        # has a whole name. The table shows the split guess (`sort_*`)
+        # greyed in a blank box, as a placeholder and never as a value.
         "last": student.last,
         "first": student.first,
-        "preferred": student.preferred,
+        "pref_first": student.pref_first,
+        "pref_last": student.pref_last,
+        # The printed name, by the one rule (`Student.display`).
+        "display": student.display,
         "section": student.section,
         "email": student.email,
         "emails": [e for e in student.all_emails() if e != student.email.strip().lower()],
@@ -140,7 +163,38 @@ def _student_json(student, index):
 #: What the table may change. Everything else -- ids, the dropped flag, the
 #: accumulated addresses -- is set by an import, a drop or a pull, each of
 #: which has rules of its own that a text box would quietly bypass.
-EDITABLE = ("name", "preferred", "section", "email")
+#:
+#: `name` is not here any more: the table edits the registrar's name as
+#: First and Last, and `name` follows them (DESIGN 22).
+EDITABLE = ("first", "last", "pref_first", "pref_last", "section", "email")
+
+#: The names of the parts, as a refusal says them.
+_PART_LABELS = {"first": "First", "last": "Last",
+                "pref_first": "Pref first", "pref_last": "Pref last"}
+
+
+def _check_name_parts(student, after):
+    """Refuse an edit that would leave half a name. Returns nothing.
+
+    `after` is the row's parts as they would be once the batch is applied.
+    Half a registrar name -- First without Last -- has nowhere to come
+    from but a guess, and a preferred name stands in for a registrar one
+    that must therefore exist (DESIGN 22). Said with the remedy, because
+    the remedy is easy: type the other half, or import the class list.
+    """
+    who = student.display
+    first, last = after["first"], after["last"]
+    if bool(first) != bool(last):
+        missing = "Last" if first else "First"
+        raise GuiError(
+            f"{who} would have a {'First' if first else 'Last'} name and no "
+            f"{missing}. Fill in {missing} as well -- or import the class "
+            f"list, which fills both.")
+    if (after["pref_first"] or after["pref_last"]) and not (first and last):
+        raise GuiError(
+            f"{who} has no First and Last yet, so a preferred name has "
+            f"nothing to stand in for. Fill in First and Last, or import "
+            f"the class list, then set the preferred name.")
 
 
 class Course:
@@ -248,15 +302,32 @@ def api_roster_save(course, body):
                 f"{', '.join(EDITABLE)}; everything else is set by an import, "
                 f"a drop or a pull, which have rules a text box would bypass.")
         value = str(edit.get("value", "")).strip()
-        if field == "name" and not value:
-            raise GuiError(
-                "a student needs a name: it is what the seating chart matches "
-                "on and what prints on the paper.")
         staged.append((student, field, value))
+
+    # Each touched row as it would be once the whole batch lands, checked
+    # as a whole: First and Last typed into one save are one edit, and
+    # checking them one at a time would refuse the first half.
+    after = {}
+    for student, field, value in staged:
+        row = after.setdefault(id(student), (student, {
+            part: getattr(student, part) for part in _PART_LABELS}))
+        if field in _PART_LABELS:
+            row[1][field] = value
+    for student, parts in after.values():
+        _check_name_parts(student, parts)
 
     if staged:
         for student, field, value in staged:
             setattr(student, field, value)
+        # `name` follows First and Last, as it followed the Name box
+        # before the split: the stored identity and the shown one must
+        # not disagree. The seating chart matches by sid first, and by
+        # `name` or the printed name only where a seat has no sid --
+        # which is how renaming in the Name box always behaved.
+        renamed = {id(s) for s, field, _ in staged if field in ("first", "last")}
+        for student, _ in after.values():
+            if id(student) in renamed:
+                student.name = f"{student.first} {student.last}"
         course.save_roster(people)
     # An empty batch writes nothing at all. It used to rewrite the whole file
     # anyway, which changed its timestamp and reformatted it for no reason --
@@ -759,13 +830,17 @@ def _seating_json(course):
                 # back on the paper.
                 continue
             shown = student.display
-            cut = shown.find(" ")
             key = roster_mod.key_of(student)
-            names[key] = {
-                "full": shown,
-                "top": shown[:cut] if cut > 0 else shown,
-                "bottom": shown[cut + 1:] if cut > 0 else "",
-            }
+            if student.first and student.last:
+                # The parts themselves, once stored (DESIGN 22): a given
+                # name of two words -- "Mary Ann" -- stays on the top line,
+                # where cutting at the first space put half of it below.
+                top, bottom = student.shown_first, student.shown_last
+            else:
+                cut = shown.find(" ")
+                top = shown[:cut] if cut > 0 else shown
+                bottom = shown[cut + 1:] if cut > 0 else ""
+            names[key] = {"full": shown, "top": top, "bottom": bottom}
             sections[key] = student.section or ""
     room = room_mod.load(course.file("room"))
     chart = course.file("seating")
@@ -2831,13 +2906,26 @@ def _note_pages(course, result, rows):
             found = record_mod.run_by_no(path, sheet.run_no)
             run_ids[sheet.run_no] = (found or {}).get("run_id", "")
 
+    # A paper's later pages carry no box, so no decision names them.
+    # They belong to whoever the paper's first page was decided to be
+    # -- found through the run's own index, not by assuming the page
+    # before it (21). Until 2026-11-19 they were stored with nobody on
+    # them, and an email would have left them out.
+    indexes = scans_mod.index_reader(path)
+
     per_scan = {}
     for sheet in SCANNING.sheets:
         scan_id = os.path.basename(sheet.source)
         run_id = run_ids.get(sheet.run_no, "")
         sid, slug = by_paper.get((run_id, sheet.run_page), ("", ""))
+        if not sid and run_id and sheet.run_page is not None:
+            index = indexes(sheet.run_no)
+            first = index.first_page_of(sheet.run_page) if index else None
+            if first is not None and first != sheet.run_page:
+                sid, slug = by_paper.get((run_id, first), ("", ""))
         per_scan.setdefault(scan_id, []).append(
-            (sheet.scan_page, run_id if sid else "", sid, slug))
+            (sheet.scan_page, run_id if sid else "", sid, slug,
+             sheet.run_page if sid else None))
 
     for scan_id, pages in per_scan.items():
         record_mod.note_scan_pages(path, scan_id, pages)
@@ -2896,8 +2984,12 @@ def api_progress(course, _body):
     # the browser has no splitter on purpose; without this the grid
     # could not offer the Roster's name order at all, and the two tabs
     # could show one student two ways at once.
+    #
+    # And `_shown_sort` once the parts are stored (DESIGN 22): the shown
+    # surname itself, so a compound or preferred surname sorts as it is
+    # rather than as the splitter's last word of it.
     students = [{"sid": roster_mod.key_of(s), "name": s.display,
-                 "section": s.section, **_split_for_sort(s.display)}
+                 "section": s.section, **_shown_sort(s)}
                 for s in people.live()]
 
     return {
@@ -3459,6 +3551,223 @@ def _bank_slugs_for(course):
         raise GuiError(f"cannot read this course's bank: {exc}") from None
 
 
+# ------------------------------------------------------- emailing (21) --
+#
+# Every rule is in `mailing.py`; these only gather what it needs from the
+# course and hand back what it says. The template is the home's, shared
+# by every course (his choice, 2026-11-19), so the two template routes
+# ignore which course is open.
+
+def api_email_template(_course, _body):
+    """The saved template, or printit's default, and the fields it takes."""
+    try:
+        template = mailing_mod.load_template()
+    except mailing_mod.MailError as exc:
+        raise GuiError(str(exc)) from None
+    return {"subject": template.subject, "body": template.body,
+            "saved": template.saved, "fields": dict(mailing_mod.FIELDS),
+            "path": mailing_mod.template_path()}
+
+
+def api_email_template_save(course, body):
+    try:
+        mailing_mod.save_template(str(body.get("subject") or ""),
+                                  str(body.get("body") or ""))
+    except mailing_mod.MailError as exc:
+        raise GuiError(str(exc)) from None
+    return api_email_template(course, {})
+
+
+def _email_inputs(course, body):
+    """The run, its letters, and the template as this send has it.
+
+    The subject and body come from the request when it carries them --
+    edited in the panel for this send only, never saved -- and from the
+    home's template when it does not.
+    """
+    path = course.file("record")
+    run_id = str(body.get("id") or "").strip()
+    detail = record_mod.run_detail(path, run_id) if run_id else None
+    if detail is None:
+        raise GuiError(f"no assessment called {run_id!r} is in this "
+                       f"course's record.")
+    if not detail.get("graded"):
+        raise GuiError("only a graded assessment can be emailed.")
+    bank = course.bank()
+    order = [s["slug"] for s in detail["skills"]]
+    titles = {}
+    for slug in order:
+        try:
+            titles[slug] = bank.skill_title(slug) if bank else slug
+        except BankError:
+            titles[slug] = slug
+    try:
+        index = pageindex_mod.load(detail["output"]) \
+            if detail.get("output") else None
+    except pageindex_mod.PageIndexError:
+        index = None
+    try:
+        saved = mailing_mod.load_template()
+        words = mailing_mod.words_for(course.path)
+        template = mailing_mod.Template(
+            subject=str(body["subject"]) if "subject" in body else saved.subject,
+            body=str(body["body"]) if "body" in body else saved.body)
+        letters = mailing_mod.plan(
+            path, run_id, course.roster() or [], titles, words,
+            queried=str(body.get("queried") or "leave out"),
+            order=order, index=index,
+            resend=[str(s) for s in (body.get("resend") or [])])
+    except mailing_mod.MailError as exc:
+        raise GuiError(str(exc)) from None
+    instructor = course_mod.identity(course.name).get("professor", "")
+    return detail, letters, template, words, instructor
+
+
+def _letter_json(letter):
+    return {"sid": letter.sid, "name": letter.name,
+            "address": letter.address, "status": letter.status,
+            "reason": letter.reason, "warning": letter.warning,
+            "told": letter.told, "pages": len(letter.pages),
+            "skills": [{"slug": s.slug, "title": s.title, "word": s.word,
+                        "outcome": s.outcome} for s in letter.skills]}
+
+
+def api_email_plan(course, body):
+    """Who gets an email from this run, why not, and what each would say.
+
+    Asked again as the subject and body are edited. A template that
+    cannot be filled comes back as `error`, with the list still drawn,
+    so the panel can say what is wrong without losing its place.
+    """
+    detail, letters, template, words, instructor = _email_inputs(course, body)
+    error = ""
+    try:
+        mailing_mod.check(template.subject)
+        mailing_mod.check(template.body)
+    except mailing_mod.MailError as exc:
+        error = str(exc)
+    out = []
+    for letter in letters:
+        row = _letter_json(letter)
+        if not error and letter.skills:
+            try:
+                row["subject"], row["body"] = mailing_mod.compose(
+                    letter, template, detail, instructor)
+            except mailing_mod.MailError as exc:
+                error = str(exc)
+        out.append(row)
+    return {"run": _run_json(detail), "letters": out, "error": error,
+            "due": sum(1 for l in letters if l.status == mailing_mod.DUE),
+            "attachment": mailing_mod.attachment_name(detail),
+            "words": {"passed": words.passed, "failed": words.failed,
+                      "queried": words.queried, "source": words.source}}
+
+
+def api_email_ready(course, _body):
+    """Whether this course's script can send mail now, and how many today.
+
+    Asked once when the panel opens: it is two calls to Google, and the
+    answer does not change while he types.
+    """
+    conn = form_mod.load(course.path)
+    if not conn.ready:
+        return {"ready": False, "settings": True,
+                "reason": "This course has no form script yet. Set one up "
+                          "on Settings."}
+    try:
+        return {"ready": True, **mailing_mod.ready(conn)}
+    except mailing_mod.MailError as exc:
+        return {"ready": False, "settings": True, "reason": str(exc)}
+    except form_mod.FormError as exc:
+        return {"ready": False, "settings": True,
+                "reason": f"The form script did not answer ({exc}). If it "
+                          f"was just updated, grant its new permission on "
+                          f"Settings."}
+
+
+class Mailing:
+    """One send at a time, in a thread, watched by polling `status`.
+
+    The same shape as `Scanning`: a send of forty emails takes a minute or
+    two, and a request held open that long looks like a hung page.
+    """
+
+    def __init__(self):
+        self.running = False
+        self.done = self.total = 0
+        self.run_id = ""
+        self.report = None
+        self.names = {}
+        self.error = ""
+
+    def status(self):
+        report = self.report
+        return {
+            "running": self.running, "done": self.done, "total": self.total,
+            "id": self.run_id, "error": self.error,
+            "sent": len(report.sent) if report else 0,
+            "failed": [{"sid": sid, "name": self.names.get(sid, ""),
+                        "reason": why}
+                       for sid, why in (report.failed if report else [])],
+            "skipped": len(report.skipped) if report else 0,
+        }
+
+    def start(self, course, body):
+        if self.running:
+            raise GuiError("emails are already being sent.")
+        detail, letters, template, _, instructor = _email_inputs(course, body)
+        try:
+            mailing_mod.check(template.subject)
+            mailing_mod.check(template.body)
+        except mailing_mod.MailError as exc:
+            raise GuiError(str(exc)) from None
+        due = [l for l in letters if l.status == mailing_mod.DUE]
+        if not due:
+            raise GuiError("nobody is due an email from this assessment.")
+        conn = form_mod.load(course.path)
+        self.running, self.done, self.total = True, 0, len(due)
+        self.run_id, self.report, self.error = detail["run_id"], None, ""
+        self.names = {l.sid: l.name for l in letters}
+        record_path = course.file("record")
+        scans_folder = os.path.join(course.path, "scans")
+
+        def progress(done, total):
+            self.done, self.total = done, total
+
+        def run():
+            try:
+                self.report = mailing_mod.send(
+                    letters, template, detail, record_path, scans_folder,
+                    conn, instructor=instructor, on_each=progress)
+            except (mailing_mod.MailError, form_mod.FormError) as exc:
+                self.error = str(exc)
+            except Exception as exc:                      # noqa: BLE001
+                traceback.print_exc()
+                self.error = f"the send failed: {exc}"
+            finally:
+                self.running = False
+
+        threading.Thread(target=run, daemon=True).start()
+        return self.status()
+
+
+MAILING = Mailing()
+
+
+def api_email_send(course, body):
+    return MAILING.start(course, body)
+
+
+def api_email_status(_course, _body):
+    return MAILING.status()
+
+
+def api_setup_update_script(course, _body):
+    """Push printit's current script over this course's, same URL (21)."""
+    return _provisioning(
+        course, lambda: provision_mod.update_script(course.name))
+
+
 ROUTES = {
     "/api/course": api_course,
     "/api/progress": api_progress,
@@ -3515,6 +3824,13 @@ ROUTES = {
     "/api/run/discard": api_run_discard,
     "/api/run/replay": api_run_replay,
     "/api/run/reuse": api_run_reuse,
+    "/api/email/template": api_email_template,
+    "/api/email/template/save": api_email_template_save,
+    "/api/email/plan": api_email_plan,
+    "/api/email/ready": api_email_ready,
+    "/api/email/send": api_email_send,
+    "/api/email/status": api_email_status,
+    "/api/setup/update-script": api_setup_update_script,
 }
 
 

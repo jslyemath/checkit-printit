@@ -827,6 +827,19 @@ class Vault:
             return
         if kind == "last":
             yield person.fake["last"]
+            # **A second surname for the same person** -- a preferred one,
+            # hyphenated or married, beside the registrar's (DESIGN 22).
+            # The fake surname is already standing in for the first, so
+            # `mask` refuses it, and with nothing else on offer masking
+            # stopped with a VaultError. Fresh draws instead, never one a
+            # person already wears. Lazy, so the registrar's own surname
+            # -- the case every vault so far has -- draws nothing and an
+            # existing vault comes out exactly as it did.
+            taken = {p.fake.get("last") for p in self.people}
+            for _ in range(100):
+                drawn = self._pick(LAST_NAMES, taken)
+                taken.add(drawn)
+                yield drawn
             return
 
         yield from self._full_names(value, person)

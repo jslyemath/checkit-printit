@@ -25,20 +25,19 @@
       <span id="roster-count" class="sec-count"></span>
     </header>
     <p class="hint-text" hidden>
-      Name, section and email are editable, and so is <b>Print as</b> &mdash;
-      fill that in and it replaces the name on the paper, the seating chart
-      and every list here. Leave it blank and Name is used. Ids and the
-      dropped flag are not editable: those are set by an import, a drop or a
-      pull, each of which has rules a text box would bypass.
+      First and Last are the registrar's; an import fills them. <b>Pref
+      first</b> and <b>Pref last</b> are the names a student goes by &mdash;
+      either one stands in for the registrar's on the paper, the seating
+      chart, every list here and the email. Leave one blank and the
+      registrar's is used. The arrows on the first heading turn both pairs
+      round. Section and email are editable too; ids and the dropped flag
+      are set by an import, a drop or a pull.
     </p>
-    <!-- How the name reads is a property of this view, like "show
-         dropped" -- not a fifth state on the Name heading, which
-         already cycles last and first each way and has no room to say
-         a display choice as well. -->
     <!-- The toolbar is gone. It held two controls that both belonged to
-         the table: the name format, which is now a swap button in the
-         Name heading, and "show dropped students", which is now a band
-         at the bottom you can open. -->
+         the table: the name order, which is now a swap button on the
+         first name heading (DESIGN 22: it turns the column order round),
+         and "show dropped students", which is now a band at the bottom
+         you can open. -->
 
     <!-- Header and body are both built from COLUMNS in app.js. They used to
          be two lists -- this one in markup, the cells in script -- and they
@@ -436,6 +435,91 @@
         </div>
       </section>
     </div>
+
+    <!-- The third page: emailing one graded run's students (DESIGN 21).
+         A page rather than a dialog, like the detail above: it holds a
+         class list, and a dialog that scrolls a class list is a page
+         that has lost its frame. -->
+    <div id="runs-mail" hidden>
+      <header class="pagehead">
+        <button id="mail-back" class="iconbtn" type="button"
+                aria-label="Back to all runs" title="Back to all runs"></button>
+        <h2 class="pagename" id="mail-title"></h2>
+        <button class="hint" type="button" aria-expanded="false"
+                aria-label="What this sends">?</button>
+      </header>
+      <p class="hint-text" hidden>One email to each student who sat this
+        assessment, from the Google account that owns this course&rsquo;s
+        form: their result for each skill, and their scanned pages as one
+        PDF. Each email is recorded as it goes, so sending again reaches
+        only the students not yet told &mdash; or told something that has
+        changed since. Edits here are for this send only; the template
+        itself is on Settings.</p>
+      <p id="mail-sub" class="muted"></p>
+      <p id="mail-ready" class="muted"></p>
+
+      <section class="annot">
+        <div class="annot-head">
+          <h3>This email</h3>
+        </div>
+        <div class="annot-body">
+          <div class="fields mailfields">
+            <label>Subject
+              <input id="mail-subject" type="text"></label>
+            <label>Body
+              <textarea id="mail-body" rows="11"></textarea></label>
+            <label title="Off leaves a skill marked ? out of the email and its pages out of the PDF, as if it were never sat.">Include ? marks
+              <span class="tickwrap"><input id="mail-queried" type="checkbox"></span></label>
+          </div>
+          <p id="mail-error" class="warnline" hidden></p>
+        </div>
+      </section>
+
+      <section class="annot">
+        <div class="annot-head">
+          <h3>As it arrives</h3>
+        </div>
+        <div class="annot-body">
+          <!-- Who, and which of how many, on one line above the email:
+               the heading column is too narrow to hold the count and
+               the arrows without wrapping them. -->
+          <div class="toolbar">
+            <span id="mail-to" class="muted"></span>
+            <span class="spacer"></span>
+            <span id="mail-which" class="sec-count"></span>
+            <button id="mail-prev" class="iconbtn" type="button"
+                    aria-label="The student before"></button>
+            <button id="mail-next" class="iconbtn" type="button"
+                    aria-label="The next student"></button>
+          </div>
+          <pre id="mail-preview" class="mailpreview"></pre>
+          <p id="mail-attach" class="muted"></p>
+        </div>
+      </section>
+
+      <section class="annot annot-full">
+        <div class="annot-head">
+          <h3>Who gets it</h3>
+          <span id="mail-count" class="sec-count"></span>
+        </div>
+        <div class="annot-body">
+          <div class="scroller">
+            <table id="mail-who">
+              <thead><tr>
+                <th>Name</th><th>Results</th><th>Pages</th>
+                <th class="stretch"></th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="toolbar">
+            <button id="mail-send" class="primary">Send</button>
+            <span id="mail-progress" class="muted"></span>
+          </div>
+          <div id="mail-out"></div>
+        </div>
+      </section>
+    </div>
   </section>
 
   <section id="view-seating" class="view seatapp" hidden>
@@ -664,8 +748,47 @@
     <section class="annot" id="setup-have" hidden>
       <div class="annot-head">
         <h3>This course&rsquo;s form</h3>
+        <button class="hint" type="button" aria-expanded="false"
+                aria-label="When to update the script">?</button>
       </div>
-      <div class="annot-body"><div id="setup-conn"></div></div>
+      <div class="annot-body">
+        <p class="hint-text" hidden><b>Update the script</b> pushes
+          printit&rsquo;s current script over this form&rsquo;s and keeps
+          its address. It is needed once before emailing students: Google
+          then asks you, once, to let the script send email as you, and
+          until you do, pushing and pulling wait too. Nothing on the form
+          itself changes.</p>
+        <div id="setup-conn"></div>
+        <div class="toolbar">
+          <button id="setup-update" type="button">Update the script</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- One template for every course (his choice, 2026-11-19), so this
+         card edits a file in the home rather than in the course, and
+         says so. Joins the tab's one save bar. -->
+    <section class="annot">
+      <div class="annot-head">
+        <h3>Emails to students</h3>
+        <button class="hint" type="button" aria-expanded="false"
+                aria-label="The fields an email can use">?</button>
+      </div>
+      <div class="annot-body">
+        <div class="hint-text" hidden>
+          <p>What Prior assessments sends each student. Shared by all your
+            courses. Each field in double braces is filled in per
+            student:</p>
+          <dl id="tpl-fields" class="fieldlist"></dl>
+        </div>
+        <div class="fields mailfields">
+          <label>Subject
+            <input id="tpl-subject" type="text"></label>
+          <label>Body
+            <textarea id="tpl-body" rows="11"></textarea></label>
+        </div>
+        <p id="tpl-error" class="warnline" hidden></p>
+      </div>
     </section>
 
     <p id="setup-checking" class="muted">Looking at this course…</p>

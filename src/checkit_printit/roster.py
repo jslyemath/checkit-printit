@@ -23,8 +23,9 @@ class RosterError(Exception):
 class Student:
     """One student.
 
-    `name` is what prints and what the seating chart matches on. `last` and
-    `first` are what the registrar says. They are separate fields because a
+    `name` is the registrar's whole name, and what the seating chart and
+    a re-import match on; what prints is `display`. `last` and `first`
+    are what the registrar says. They are separate fields because a
     seating chart says "Matt Marrowby" and a class list says "Marrowby,
     Matthew C." -- with only one of them, every re-import would rename the
     person on the printed page.
@@ -45,15 +46,17 @@ class Student:
     last: str = ""
     first: str = ""
 
-    #: What to print instead of `name` -- the *whole* name, not a first
-    #: name. "Matt Clifford", not "Matt".
+    #: The name the student goes by, in two parts, each standing in for
+    #: the registrar's: "Matt" for `first`, a hyphenated or married name
+    #: for `last`. Either may be blank, which means the registrar's.
     #:
-    #: It meant a first name until 2026-10-01, defaulted from the
-    #: registrar's `first` on import, and nothing ever read it. `first`,
-    #: `last` and `preferred` are empty on all eight real rosters, so there
-    #: was nothing to migrate and the meaning was free to fix. Had it stayed
-    #: a first name, every paper would have carried one word.
-    preferred: str = ""
+    #: Two fields, not one whole name (DESIGN 22). Until 2026-11-20 this
+    #: was `preferred`, the whole printed name, so that a lone "Matt"
+    #: could not replace one. With the printed name worked out from parts
+    #: (`display`), "Matt" alone prints "Matt Clifford" -- which is his
+    #: Sheets proof of concept, and what an email greeting needs.
+    pref_first: str = ""
+    pref_last: str = ""
 
     #: the other id system, when an export carries it
     alt_id: str = ""
@@ -97,16 +100,47 @@ class Student:
     #: Set by seating, not by the roster.
     version: str = ""
 
+    def name_fields(self):
+        """Every name field this student stores, real values all.
+
+        **One list, read by every privacy path**: `maskcourse` (and so
+        `privacy.saw`) avoids and masks these, and `nameguard` refuses a
+        commit carrying any of their words. Each kept its own tuple until
+        2026-11-20, which is how a new field could reach one and not the
+        other -- a preferred name the guard did not know would pass a
+        commit unremarked. A name field added here reaches all of them.
+        """
+        return (self.name, self.first, self.last,
+                self.pref_first, self.pref_last)
+
+    @property
+    def shown_first(self):
+        """The given name to show: the preferred one, else the registrar's."""
+        return self.pref_first or self.first
+
+    @property
+    def shown_last(self):
+        """The surname to show: the preferred one, else the registrar's."""
+        return self.pref_last or self.last
+
     @property
     def display(self):
-        """What a person should see: the preferred name, else the roster one.
+        """What a person should see. **The one place this rule lives.**
+
+        "First Last" from the shown parts -- each the preferred one, else
+        the registrar's (DESIGN 22) -- once the registrar's `first` and
+        `last` are both stored. Until then `name`, exactly as before:
+        a roster of full names alone prints what it always printed, and a
+        half is never guessed onto a paper.
 
         Every surface that *shows* this student goes through here -- the
-        printed paper, the seating chart, the tables. Every surface that
-        *matches* one keeps using `sid`, `alt_id`, `email` and `name`,
-        because a name an instructor can retype is not a key.
+        printed paper, the seating chart, the tables, the email. Every
+        surface that *matches* one keeps using `sid`, `alt_id`, `email` and
+        `name`, because a name an instructor can retype is not a key.
         """
-        return self.preferred or self.name
+        if self.first and self.last:
+            return f"{self.shown_first} {self.shown_last}"
+        return self.name
 
     def all_emails(self):
         """The primary first, then any other address seen, de-duplicated."""
@@ -206,6 +240,15 @@ def load(path):
         skills = entry.get("skills") or []
         if not isinstance(skills, list):
             raise RosterError(f"{name}: `skills` must be a list, not {type(skills).__name__}.")
+        if str(entry.get("preferred", "")).strip():
+            # Refused, not converted (DESIGN 22.7). No roster here ever
+            # held one, so a conversion would be code nobody runs -- and
+            # splitting a whole name into two parts is a guess.
+            raise RosterError(
+                f"student {i} in {path} has `preferred`, which was replaced "
+                f"on 2026-11-20 by two keys: `pref_first` for the given name "
+                f"they go by and `pref_last` for the surname. Put the name in "
+                f"those and delete the `preferred` line.")
         students.append(Student(
             name=name,
             skills=[str(s).strip() for s in skills if str(s).strip()],
@@ -214,7 +257,8 @@ def load(path):
             sid=str(entry.get("sid", "")).strip(),
             last=str(entry.get("last", "")).strip(),
             first=str(entry.get("first", "")).strip(),
-            preferred=str(entry.get("preferred", "")).strip(),
+            pref_first=str(entry.get("pref_first", "")).strip(),
+            pref_last=str(entry.get("pref_last", "")).strip(),
             alt_id=str(entry.get("alt_id", "")).strip(),
             emails=[str(e).strip().lower()
                     for e in (entry.get("emails") or []) if str(e).strip()],
@@ -554,8 +598,10 @@ def to_toml(roster, written_by="checkit-printit"):
             lines.append(f"last      = {quote(s.last)}")
         if s.first:
             lines.append(f"first     = {quote(s.first)}")
-        if s.preferred:
-            lines.append(f"preferred = {quote(s.preferred)}")
+        if s.pref_first:
+            lines.append(f"pref_first = {quote(s.pref_first)}")
+        if s.pref_last:
+            lines.append(f"pref_last = {quote(s.pref_last)}")
         if s.sid:
             lines.append(f"sid       = {quote(s.sid)}")
         if s.alt_id:

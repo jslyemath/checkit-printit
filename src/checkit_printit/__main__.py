@@ -850,8 +850,9 @@ def roster_import(class_list, out, section, covers, seating_path, dry_run):
 
     Merges rather than replaces: a student the file does not mention is marked
     dropped and kept, because the print record refers to them, and nothing you
-    authored -- the printed name, a preferred name, chosen skills -- is ever
-    overwritten by a class list.
+    authored -- the roster name, a preferred first or last name, chosen
+    skills -- is ever overwritten by a class list. First and last names
+    are the registrar's, and do follow it.
     """
     try:
         students, mapping, notes = classlist_mod.parse(class_list, section=section)

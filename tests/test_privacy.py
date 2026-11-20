@@ -66,6 +66,48 @@ def leaked(text):
     return [r for r in REAL if r.lower() in text.lower()]
 
 
+class TestPreferredNames:
+    """The names a student goes by are masked too (DESIGN 22).
+
+    `roster.load` teaches the vault through `privacy.saw` the moment the
+    file is read; everything printed then goes through `privacy.mask`.
+    Both halves are the CLI's own, so this drives them directly.
+    """
+
+    PREFERRED = ROSTER.replace(
+        'last    = "Quarrington"\n',
+        'last    = "Quarrington"\npref_first = "Pippa"\npref_last = "Quarrel"\n')
+    SPOKEN = ("Pippa", "Quarrel")
+
+    def test_every_spelling_of_a_preferred_name_is_masked(self, home,
+                                                          monkeypatch):
+        assert self.PREFERRED != ROSTER, "the fixture did not take"
+        path = course_mod.file_in("P", "roster")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.PREFERRED)
+        monkeypatch.setenv(privacy.ENV, "1")
+        student = list(roster_mod.load(path))[0]
+        assert student.display == "Pippa Quarrel"
+
+        text = ("Pippa Quarrel sat it. Quarrel, Pippa sat it.\n"
+                "Pippa did; Quarrel did; Philippa Quarrington did.")
+        out = privacy.mask(text)
+        assert out != text
+        for real in REAL[:2] + self.SPOKEN:
+            assert real.lower() not in out.lower(), real
+
+    def test_the_masked_preferred_name_unmasks_back(self, home, monkeypatch):
+        path = course_mod.file_in("P", "roster")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.PREFERRED)
+        monkeypatch.setenv(privacy.ENV, "1")
+        roster_mod.load(path)
+        out = privacy.mask("Dear Pippa Quarrel")
+        store = vault_mod.Vault.load(vault_mod.path_for("P"))
+        back, count = store.unmask_text(out)
+        assert count and back == "Dear Pippa Quarrel"
+
+
 class TestOff:
     def test_nothing_changes_and_no_vault_is_made(self, home):
         got = run("record", "student", "Philippa Quarrington", "-c", "P",

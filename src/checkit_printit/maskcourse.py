@@ -110,8 +110,7 @@ def learn_students(vault, people):
     # scan unable to tell a leak from a pseudonym doing its job. Two
     # passes over the roster costs nothing and the roster is right here.
     vault.avoid([word for student in people
-                 for spelling in (student.first, student.last, student.name,
-                                  student.preferred)
+                 for spelling in student.name_fields()
                  for word in (spelling or "").split()])
 
     for student in people:
@@ -121,13 +120,25 @@ def learn_students(vault, people):
             "sid": student.sid, "alt_id": student.alt_id,
             "emails": student.all_emails(),
         })
-        for spelling in (student.name, student.preferred,
-                         f"{student.last}, {student.first}".strip(" ,")):
+        # Every whole-name spelling the app can show: the roster name,
+        # the printed name (`display`, preferred parts included) and both
+        # filed forms. The Roster shows the parts in either order, so the
+        # filed form of each pair is something a page can carry.
+        for spelling in (student.name, student.display,
+                         f"{student.last}, {student.first}".strip(" ,"),
+                         f"{student.shown_last}, {student.shown_first}"
+                         .strip(" ,")):
             if spelling.strip():
                 vault.mask("full", spelling, person)
-        for field, kind in (("last", "last"), ("first", "first")):
-            if getattr(student, field):
-                vault.mask(kind, getattr(student, field), person)
+        # Then every part on its own, each under the kind it is. A
+        # preferred given name is masked like a first name; a preferred
+        # surname like a surname, given its own fake when it differs
+        # from the registrar's (`Vault._candidates`, DESIGN 22).
+        for value, kind in ((student.last, "last"), (student.first, "first"),
+                            (student.pref_first, "preferred"),
+                            (student.pref_last, "last")):
+            if value:
+                vault.mask(kind, value, person)
         for field in ID_KINDS:
             value = getattr(student, field, "")
             if value:

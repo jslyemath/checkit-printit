@@ -82,9 +82,49 @@ class TestTheRosterTable:
 
     def test_an_edit_reaches_the_file(self, course):
         gui_mod.api_roster_save(course, {"edits": [
-            {"index": 0, "field": "preferred", "value": "Ada L"}]})
-        again = gui_mod.Course("Test").roster()
-        assert list(again)[0].preferred == "Ada L"
+            {"index": 0, "field": "section", "value": "830"}]})
+        assert list(gui_mod.Course("Test").roster())[0].section == "830"
+
+    #: First and Last for Ada, in one save: one edit, not two halves.
+    BOTH = [{"index": 0, "field": "first", "value": "Augusta"},
+            {"index": 0, "field": "last", "value": "Lovelace"}]
+
+    def test_first_and_last_in_one_save_are_accepted(self, course):
+        gui_mod.api_roster_save(course, {"edits": self.BOTH})
+        ada = list(gui_mod.Course("Test").roster())[0]
+        assert (ada.first, ada.last) == ("Augusta", "Lovelace")
+
+    def test_the_roster_name_follows_first_and_last(self, course):
+        """`name` is the stored identity, and must not disagree with the
+        parts the table shows -- as the Name box renamed it before the
+        split (DESIGN 22)."""
+        gui_mod.api_roster_save(course, {"edits": self.BOTH})
+        assert list(gui_mod.Course("Test").roster())[0].name == "Augusta Lovelace"
+
+    def test_a_preferred_name_reaches_the_file_and_the_print(self, course):
+        gui_mod.api_roster_save(course, {"edits": self.BOTH + [
+            {"index": 0, "field": "pref_first", "value": "Ada"}]})
+        ada = list(gui_mod.Course("Test").roster())[0]
+        assert ada.pref_first == "Ada"
+        assert ada.display == "Ada Lovelace"
+        # and the roster name is the registrar's, not the preferred one
+        assert ada.name == "Augusta Lovelace"
+
+    def test_a_preferred_edit_leaves_the_roster_name_alone(self, course):
+        gui_mod.api_roster_save(course, {"edits": self.BOTH})
+        gui_mod.api_roster_save(course, {"edits": [
+            {"index": 0, "field": "pref_last", "value": "King"}]})
+        ada = list(gui_mod.Course("Test").roster())[0]
+        assert ada.name == "Augusta Lovelace"
+        assert ada.display == "Augusta King"
+
+    def test_the_row_carries_every_part_and_the_printed_name(self, course):
+        gui_mod.api_roster_save(course, {"edits": self.BOTH + [
+            {"index": 0, "field": "pref_first", "value": "Ada"}]})
+        row = gui_mod.api_roster(course, {})["students"][0]
+        assert (row["first"], row["last"]) == ("Augusta", "Lovelace")
+        assert (row["pref_first"], row["pref_last"]) == ("Ada", "")
+        assert row["display"] == "Ada Lovelace"
 
     def test_only_some_fields_are_editable(self, course):
         """Ids, the dropped flag and the accumulated addresses are set by an
@@ -95,16 +135,40 @@ class TestTheRosterTable:
                 gui_mod.api_roster_save(course, {"edits": [
                     {"index": 0, "field": field, "value": "x"}]})
 
-    def test_a_blank_name_is_refused(self, course):
-        """The name is what the seating chart matches on and what prints."""
-        with pytest.raises(gui_mod.GuiError, match="needs a name"):
+    def test_the_whole_name_is_no_longer_edited_directly(self, course):
+        """It follows First and Last; a box for it would be a second way
+        to say the same thing that could disagree with the first."""
+        with pytest.raises(gui_mod.GuiError, match="not editable"):
             gui_mod.api_roster_save(course, {"edits": [
-                {"index": 0, "field": "name", "value": "   "}]})
+                {"index": 0, "field": "name", "value": "Augusta Lovelace"}]})
+
+    def test_a_first_name_without_a_last_is_refused(self, course):
+        """Half a registrar name could only be completed by a guess
+        (DESIGN 22). Said with the remedy."""
+        with pytest.raises(gui_mod.GuiError,
+                           match=r"Ada Lovelace would have a First name and "
+                                 r"no Last.*import the class list"):
+            gui_mod.api_roster_save(course, {"edits": [
+                {"index": 0, "field": "first", "value": "Augusta"}]})
+
+    def test_clearing_one_half_is_refused_too(self, course):
+        gui_mod.api_roster_save(course, {"edits": self.BOTH})
+        with pytest.raises(gui_mod.GuiError, match="no First"):
+            gui_mod.api_roster_save(course, {"edits": [
+                {"index": 0, "field": "first", "value": "  "}]})
+
+    def test_a_preferred_name_with_nothing_to_stand_in_for_is_refused(self, course):
+        """MAT 106 before its re-import: whole names only."""
+        with pytest.raises(gui_mod.GuiError,
+                           match=r"Ada Lovelace has no First and Last yet"):
+            gui_mod.api_roster_save(course, {"edits": [
+                {"index": 0, "field": "pref_first", "value": "Ada"}]})
+        assert list(gui_mod.Course("Test").roster())[0].pref_first == ""
 
     def test_a_row_that_is_not_there_says_to_reload(self, course):
         with pytest.raises(gui_mod.GuiError, match="Reload"):
             gui_mod.api_roster_save(course, {"edits": [
-                {"index": 99, "field": "name", "value": "x"}]})
+                {"index": 99, "field": "first", "value": "x"}]})
 
     def test_only_the_named_fields_move(self, course):
         """A save changes what it was asked to change and nothing else.
@@ -115,13 +179,15 @@ class TestTheRosterTable:
         and I cannot say which action did it" is worth making impossible to
         wonder about again.
         """
-        before = {s.name: (s.section, s.email, s.sid, list(s.skills))
+        before = {s.sid: (s.section, s.email, list(s.skills), s.dropped)
                   for s in course.roster()}
-        gui_mod.api_roster_save(course, {"edits": [
-            {"index": 0, "field": "preferred", "value": "Ada L"}]})
-        after = {s.name: (s.section, s.email, s.sid, list(s.skills))
+        gui_mod.api_roster_save(course, {"edits": self.BOTH + [
+            {"index": 0, "field": "pref_first", "value": "Ada"}]})
+        after = {s.sid: (s.section, s.email, list(s.skills), s.dropped)
                  for s in gui_mod.Course("Test").roster()}
         assert before == after
+        # and the other student's name is untouched
+        assert list(gui_mod.Course("Test").roster())[1].name == "Bo Martin"
 
     def test_an_empty_batch_changes_nothing(self, course):
         before = open(course.file("roster"), encoding="utf-8").read()
@@ -132,10 +198,18 @@ class TestTheRosterTable:
         """All or nothing: a half-applied batch leaves the file disagreeing
         with the table still on screen."""
         with pytest.raises(gui_mod.GuiError):
-            gui_mod.api_roster_save(course, {"edits": [
-                {"index": 0, "field": "preferred", "value": "Ada L"},
+            gui_mod.api_roster_save(course, {"edits": self.BOTH + [
                 {"index": 0, "field": "sid", "value": "999"}]})
-        assert list(gui_mod.Course("Test").roster())[0].preferred == ""
+        ada = list(gui_mod.Course("Test").roster())[0]
+        assert (ada.first, ada.last, ada.name) == ("", "", "Ada Lovelace")
+
+    def test_a_half_name_anywhere_in_a_batch_writes_nothing(self, course):
+        """The name check runs before anything is applied, like the rest."""
+        with pytest.raises(gui_mod.GuiError):
+            gui_mod.api_roster_save(course, {"edits": [
+                {"index": 1, "field": "section", "value": "820"},
+                {"index": 0, "field": "last", "value": "Lovelace"}]})
+        assert list(gui_mod.Course("Test").roster())[1].section == "830"
 
 
 class TestSortingByName:
@@ -185,7 +259,7 @@ class TestSortingByName:
     def test_nothing_derived_is_written_to_the_file(self, course):
         gui_mod.api_roster(course, {})
         gui_mod.api_roster_save(course, {"edits": [
-            {"index": 0, "field": "preferred", "value": "Ada L"}]})
+            {"index": 0, "field": "section", "value": "830"}]})
         text = open(course.file("roster"), encoding="utf-8").read()
         assert "sort_last" not in text and "sort_first" not in text
         # and the empty last/first stay empty rather than being filled in

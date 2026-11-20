@@ -169,6 +169,21 @@ class TestTheGrid:
         assert [s["name"] for s in out["students"]] == ["Ada Lovelace",
                                                         "Bo Peep"]
 
+    def test_stored_name_parts_are_the_sort_keys(self, course):
+        """Once the parts are stored, Progress sorts on the shown ones --
+        preferred, else registrar -- rather than splitting the printed
+        name, which takes a compound surname's last word (DESIGN 22)."""
+        with open(course_mod.file_in("Test", "roster"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(ROSTER.replace(
+                'name = "Ada Lovelace"\n',
+                'name = "Ada Lovelace"\nfirst = "Ada"\nlast = "Lovelace"\n'
+                'pref_last = "King Noel"\n'))
+        out = gui_mod.api_progress(course, {})
+        ada = next(s for s in out["students"] if s["sid"] == "001")
+        assert ada["name"] == "Ada King Noel"
+        assert (ada["sort_last"], ada["sort_first"]) == ("King Noel", "Ada")
+
     def test_the_default_threshold_is_one(self, course):
         out = gui_mod.api_progress(course, {})
         assert {s["threshold"] for s in out["skills"]} == {1}

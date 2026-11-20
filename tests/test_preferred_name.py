@@ -1,9 +1,9 @@
 """The preferred name, and the one rule that keeps it safe.
 
-`preferred` is the whole name to print -- "Matt Clifford", not "Matt". It
-used to mean a first name, defaulted from the registrar's `first` on import,
-and nothing read it; it was empty on all eight real rosters, so the meaning
-was free to fix and there was nothing to migrate.
+Since 2026-11-20 it is two fields, `pref_first` and `pref_last`, each
+standing in for the registrar's part, and the printed name is worked out
+from the parts -- "Matt" alone prints "Matt Clifford" (DESIGN 22). Before
+that it was `preferred`, one whole printed name, which is now refused.
 
 The rule these tests exist to hold:
 
@@ -65,61 +65,110 @@ def chart_of(*names, versions=("A", "B")):
     )
 
 
+#: Augusta Lovelace, who goes by Ada. The registrar's parts are stored,
+#: so the printed name is worked out from them (DESIGN 22).
+ADA = dict(name="Augusta Lovelace", first="Augusta", last="Lovelace",
+           pref_first="Ada")
+
+
 class TestWhatDisplayMeans:
-    def test_without_a_preferred_name_it_is_the_roster_name(self):
+    """`Student.display`, the one place the printed-name rule lives."""
+
+    def test_a_whole_name_alone_prints_as_it_is(self):
+        """Every real roster until a re-import fills the parts."""
         assert Student(name="Ada Lovelace", skills=[]).display == "Ada Lovelace"
 
-    def test_with_one_it_is_the_preferred_name(self):
-        s = Student(name="Augusta Lovelace", skills=[], preferred="Ada Lovelace")
-        assert s.display == "Ada Lovelace"
+    def test_registrar_parts_print_first_name_first(self):
+        s = Student(name="Augusta Lovelace", skills=[],
+                    first="Augusta", last="Lovelace")
+        assert s.display == "Augusta Lovelace"
 
-    def test_blank_and_whitespace_are_not_a_name(self):
-        """An empty box means "use the roster name", not "print nothing"."""
-        assert Student(name="Ada Lovelace", skills=[], preferred="").display \
-            == "Ada Lovelace"
+    def test_a_preferred_first_name_stands_in_for_the_registrar_one(self):
+        """His Sheets proof of concept: "Ada" alone prints "Ada Lovelace"."""
+        assert Student(skills=[], **ADA).display == "Ada Lovelace"
+
+    def test_a_preferred_last_name_stands_in_too(self):
+        s = Student(name="Augusta Lovelace", skills=[], first="Augusta",
+                    last="Lovelace", pref_last="King")
+        assert s.display == "Augusta King"
+
+    def test_both_together(self):
+        s = Student(name="Augusta Lovelace", skills=[], first="Augusta",
+                    last="Lovelace", pref_first="Ada", pref_last="King")
+        assert s.display == "Ada King"
+
+    def test_a_blank_preferred_part_means_the_registrar_one(self):
+        """An empty box means "use the registrar's", not "print nothing"."""
+        s = Student(name="Augusta Lovelace", skills=[], first="Augusta",
+                    last="Lovelace", pref_first="", pref_last="")
+        assert s.display == "Augusta Lovelace"
+
+    def test_half_a_registrar_name_is_never_composed(self):
+        """A roster with only a first name stored prints the whole name,
+        rather than half of one with a preferred part beside it."""
+        s = Student(name="Augusta Lovelace", skills=[], first="Augusta",
+                    pref_first="Ada")
+        assert s.display == "Augusta Lovelace"
 
     def test_it_never_replaces_the_key(self):
         """`name` is what the roster file and the record are keyed on."""
-        s = Student(name="Augusta Lovelace", skills=[], preferred="Ada Lovelace")
-        assert s.name == "Augusta Lovelace"
+        assert Student(skills=[], **ADA).name == "Augusta Lovelace"
+
+    def test_name_fields_lists_every_stored_name(self):
+        """The one list every privacy path reads."""
+        s = Student(skills=[], pref_last="King", **ADA)
+        assert set(s.name_fields()) == {"Augusta Lovelace", "Augusta",
+                                        "Lovelace", "Ada", "King"}
 
 
 class TestTheRosterFileKeepsIt:
-    def test_it_survives_a_write_and_a_read(self, tmp_path):
-        """It used to be dropped on write whenever it equalled `first`, which
-        was always, because the import set it from `first`."""
-        people = Roster([Student(name="Augusta Lovelace", skills=["AD"],
-                                 sid="806001", preferred="Ada Lovelace")])
+    def test_both_parts_survive_a_write_and_a_read(self, tmp_path):
+        people = Roster([Student(skills=["AD"], sid="806001",
+                                 pref_last="King", **ADA)])
         path = tmp_path / "roster.toml"
         path.write_text(roster_mod.to_toml(people, "test"), encoding="utf-8")
-        back = roster_mod.load(str(path))
-        assert list(back)[0].preferred == "Ada Lovelace"
-        assert list(back)[0].display == "Ada Lovelace"
+        back = list(roster_mod.load(str(path)))[0]
+        assert (back.pref_first, back.pref_last) == ("Ada", "King")
+        assert back.display == "Ada King"
 
-    def test_it_survives_even_when_it_equals_the_first_name(self, tmp_path):
-        """The condition used to be `preferred != first`, so an instructor
-        who typed the registrar's first name -- wanting exactly that on the
-        paper -- had it silently dropped and got the full name instead.
-
-        This is the case the other round-trip test misses, because its
-        student has no `first` at all.
-        """
-        people = Roster([Student(name="Augusta Lovelace", skills=["AD"],
-                                 sid="806001", first="Augusta", last="Lovelace",
-                                 preferred="Augusta")])
+    def test_a_preferred_part_equal_to_the_registrar_one_survives(self, tmp_path):
+        """A condition of the old field (`preferred != first`) dropped an
+        instructor's value whenever it equalled the registrar's. Writing
+        is unconditional now; this keeps it that way."""
+        people = Roster([Student(skills=["AD"], sid="806001",
+                                 **dict(ADA, pref_first="Augusta"))])
         path = tmp_path / "roster.toml"
         path.write_text(roster_mod.to_toml(people, "test"), encoding="utf-8")
-        assert list(roster_mod.load(str(path)))[0].display == "Augusta"
+        assert list(roster_mod.load(str(path)))[0].pref_first == "Augusta"
 
     def test_no_preferred_name_writes_no_key(self, tmp_path):
         people = Roster([Student(name="Ada Lovelace", skills=[], sid="806001")])
         text = roster_mod.to_toml(people, "test")
-        assert "preferred" not in text
+        assert "pref_" not in text and "preferred" not in text
+
+    def test_the_old_whole_name_key_is_refused_by_name(self, tmp_path):
+        """Not converted: splitting a whole name in two is a guess, and no
+        roster here ever held one (DESIGN 22.7). The refusal says which
+        student and what to write instead."""
+        path = tmp_path / "roster.toml"
+        path.write_text('[[student]]\nname = "Augusta Lovelace"\n'
+                        'preferred = "Ada Lovelace"\nskills = []\n',
+                        encoding="utf-8")
+        with pytest.raises(roster_mod.RosterError,
+                           match=r"student 1 .*`pref_first`.*`pref_last`"):
+            roster_mod.load(str(path))
+
+    def test_an_empty_old_key_is_not_a_name_and_loads(self, tmp_path):
+        path = tmp_path / "roster.toml"
+        path.write_text('[[student]]\nname = "Augusta Lovelace"\n'
+                        'preferred = ""\nskills = []\n', encoding="utf-8")
+        assert list(roster_mod.load(str(path)))[0].display == "Augusta Lovelace"
 
 
 class TestAnImportDoesNotInventOne:
-    """The live hazard. `parse` set `preferred=first`, so the next real class
-    list would have given every student a printed name of one word."""
+    """The live hazard. `parse` once set the preferred name from `first`,
+    so the next real class list would have given every student a printed
+    name of one word."""
 
     CSV = ('"Student ID","Student Last Name","Student First Name","Student MI",'
            '"Subject","Course","Section","Email","Global ID"\n'
@@ -134,7 +183,7 @@ class TestAnImportDoesNotInventOne:
         return classlist.parse(str(p))[0]
 
     def test_the_registrar_does_not_supply_a_preferred_name(self, imported):
-        assert imported[0].preferred == ""
+        assert (imported[0].pref_first, imported[0].pref_last) == ("", "")
 
     def test_so_the_full_name_prints(self, imported):
         assert imported[0].display == "Augusta Lovelace"
@@ -143,15 +192,25 @@ class TestAnImportDoesNotInventOne:
         existing = Roster([Student(name="Augusta Lovelace", skills=["AD"],
                                    sid="806000001")])
         merged, _ = classlist.merge(existing, imported)
-        assert list(merged)[0].preferred == ""
+        assert (list(merged)[0].pref_first, list(merged)[0].pref_last) == ("", "")
+
+    def test_a_merge_fills_the_registrar_parts_on_a_whole_name_roster(
+            self, imported):
+        """How MAT 106 gets its First and Last: a re-import onto a roster
+        that only had whole names (DESIGN 22.8)."""
+        existing = Roster([Student(name="Augusta Lovelace", skills=["AD"],
+                                   sid="806000001")])
+        merged, _ = classlist.merge(existing, imported)
+        back = list(merged)[0]
+        assert (back.first, back.last) == ("Augusta", "Lovelace")
 
     def test_and_a_merge_keeps_one_the_instructor_typed(self, imported):
         """Instructor-authored fields survive a re-import; see classlist's
         own note on what an import may overwrite."""
-        existing = Roster([Student(name="Augusta Lovelace", skills=["AD"],
-                                   sid="806000001", preferred="Ada Lovelace")])
+        existing = Roster([Student(skills=["AD"], sid="806000001",
+                                   pref_last="King", **ADA)])
         merged, _ = classlist.merge(existing, imported)
-        assert list(merged)[0].display == "Ada Lovelace"
+        assert list(merged)[0].display == "Ada King"
 
 
 class TestItReachesThePaper:
@@ -161,7 +220,7 @@ class TestItReachesThePaper:
 
     def test_the_handout_carries_the_printed_name(self):
         s = Student(name="Augusta Lovelace", skills=["AD"], sid="806001",
-                    preferred="Ada Lovelace")
+                    first="Augusta", last="Lovelace", pref_first="Ada")
         assert self._handouts(s)[0].name == "Ada Lovelace"
 
     def test_and_the_roster_name_when_there_is_none(self):
@@ -171,7 +230,7 @@ class TestItReachesThePaper:
     def test_the_tex_sets_it(self):
         """The whole point: `\\setname` is what a student reads."""
         s = Student(name="Augusta Lovelace", skills=["AD"], sid="806001",
-                    preferred="Ada Lovelace")
+                    first="Augusta", last="Lovelace", pref_first="Ada")
         tex = assemble.main_tex(Pub(), self._handouts(s), [], None)
         assert r"\setname{Ada Lovelace}" in tex
         assert "Augusta" not in tex
@@ -179,7 +238,7 @@ class TestItReachesThePaper:
     def test_names_off_still_blanks_it(self):
         """A preferred name must not sneak past `--no-names`."""
         s = Student(name="Augusta Lovelace", skills=["AD"], sid="806001",
-                    preferred="Ada Lovelace")
+                    first="Augusta", last="Lovelace", pref_first="Ada")
         class Anon(Pub):
             names = False
         seeds = {("A", "AD"): 401}
@@ -192,7 +251,7 @@ class TestItReachesThePaper:
         """`record.printed.name` is documented as "as printed"; `sid` is the
         key, so this is for reading the log back."""
         s = Student(name="Augusta Lovelace", skills=["AD"], sid="806001",
-                    preferred="Ada Lovelace")
+                    first="Augusta", last="Lovelace", pref_first="Ada")
         report = assemble._report_dict(self._handouts(s), [], None, [("AD", 401)],
                                        [], None, {}, {}, Roster([s]), Pub())
         assert report["handouts"][0]["name"] == "Ada Lovelace"
@@ -203,7 +262,7 @@ class TestTheChartTakesEitherSpelling:
     """The one join made on a name, because `seating.toml` holds no id."""
 
     STUDENT = dict(name="Augusta Lovelace", skills=["AD"], sid="806001",
-                   preferred="Ada Lovelace")
+                   first="Augusta", last="Lovelace", pref_first="Ada")
 
     def test_a_seat_under_the_roster_name_matches(self):
         people = Roster([Student(**self.STUDENT)])
@@ -236,7 +295,7 @@ class TestTheChartTakesEitherSpelling:
         would hand somebody the wrong paper."""
         people = Roster([
             Student(name="Augusta Lovelace", skills=["AD"], sid="806001",
-                    preferred="Ada Lovelace"),
+                    first="Augusta", last="Lovelace", pref_first="Ada"),
             Student(name="Ada Lovelace", skills=["AD"], sid="806002"),
         ])
         with pytest.raises(seating_mod.SeatingError, match="matches 2 students"):
@@ -253,7 +312,7 @@ class TestDroppingFindsTheSeat:
 
     def _drop(self, tmp_path, seat_name):
         people = Roster([Student(name="Augusta Lovelace", skills=["AD"],
-                                 sid="806001", preferred="Ada Lovelace")])
+                                 sid="806001", first="Augusta", last="Lovelace", pref_first="Ada")])
         rp = tmp_path / "roster.toml"
         rp.write_text(roster_mod.to_toml(people, "test"), encoding="utf-8")
         sp = tmp_path / "seating.toml"
@@ -286,7 +345,7 @@ class TestTheDroppedCheckSeesEitherSpelling:
 
     def _check(self, seat_name):
         people = Roster([Student(name="Augusta Lovelace", skills=["AD"],
-                                 sid="806001", preferred="Ada Lovelace",
+                                 sid="806001", first="Augusta", last="Lovelace", pref_first="Ada",
                                  dropped=True)])
         assemble.check_dropped_are_unseated(people, chart_of(seat_name))
 
@@ -316,7 +375,7 @@ class TestThePrintJobViewShowsIt:
         course_mod.init("P", bank=str(bank_dir), adopt=None)
         people = Roster([
             Student(name="Augusta Lovelace", skills=["AD"], sid="806001",
-                    preferred="Ada Lovelace", section="820"),
+                    first="Augusta", last="Lovelace", pref_first="Ada", section="820"),
             Student(name="Grace Hopper", skills=["AD"], sid="806002",
                     section="820"),
         ])
@@ -356,7 +415,7 @@ class TestTheCollisionWarningLooksAtThePaper:
     def _run(self, pinned):
         people = Roster([
             Student(name="Augusta Lovelace", skills=["AD"], sid="806001",
-                    preferred="Ada Lovelace"),
+                    first="Augusta", last="Lovelace", pref_first="Ada"),
             Student(name="Grace Hopper", skills=["AD"], sid="806002"),
         ])
         chart = chart_of("Augusta Lovelace", "Grace Hopper")   # A then B
@@ -395,7 +454,7 @@ class TestTheCollisionWarningLooksAtThePaper:
         calls `printed_collisions` directly stays green."""
         people = Roster([
             Student(name="Augusta Lovelace", skills=["AD"], sid="806001",
-                    preferred="Ada Lovelace"),
+                    first="Augusta", last="Lovelace", pref_first="Ada"),
             Student(name="Grace Hopper", skills=["AD"], sid="806002"),
         ])
         chart = chart_of("Augusta Lovelace", "Grace Hopper")
@@ -418,7 +477,7 @@ class TestTheCollisionWarningLooksAtThePaper:
         people = Roster([
             # Prints as "Ada Lovelace", and is seated.
             Student(name="Augusta Lovelace", skills=["AD"], sid="806001",
-                    preferred="Ada Lovelace"),
+                    first="Augusta", last="Lovelace", pref_first="Ada"),
             Student(name="Grace Hopper", skills=["AD"], sid="806002"),
             # Also prints as "Ada Lovelace", and is not seated at all.
             Student(name="Ada Lovelace", skills=["AD"], sid="806003"),
@@ -439,7 +498,7 @@ class TestTheCollisionWarningLooksAtThePaper:
         have to land on the same student or the check reads the wrong row."""
         people = Roster([
             Student(name="Augusta Lovelace", skills=["AD"], sid="806001",
-                    preferred="Ada Lovelace"),
+                    first="Augusta", last="Lovelace", pref_first="Ada"),
             Student(name="Grace Hopper", skills=["AD"], sid="806002"),
         ])
         chart = chart_of("Ada Lovelace", "Grace Hopper")

@@ -21,6 +21,7 @@ ROSTER = '''
 name    = "Marguerite Vanterpool Reyes"
 last    = "Vanterpool Reyes"
 first   = "Marguerite"
+pref_last = "Vanterpool"
 sid     = "806000111"
 alt_id  = "2041000001"
 email   = "mvanter3@institute.edu"
@@ -32,7 +33,7 @@ skills  = ["AD"]
 name      = "Chidi Okonkwo"
 last      = "Okonkwo"
 first     = "Chidi"
-preferred = "Chi Okonkwo"
+pref_first = "Chi"
 sid       = "806000222"
 alt_id    = "2041000002"
 email     = "cokonkwo@institute.edu"
@@ -139,13 +140,44 @@ def test_it_learns_every_student_including_the_dropped_one(home, folder):
 
 
 def test_a_preferred_name_is_learned_too(home, folder):
-    """`Chi Okonkwo` is what the chart says, and it is not the roster name."""
+    """`Chi Okonkwo` is what the chart says, and it is not the roster name.
+
+    Since 2026-11-20 it is worked out from `pref_first = "Chi"` (DESIGN
+    22), so the vault has to learn the parts and the whole spellings the
+    app can show from them -- either order, since the Roster shows the
+    parts either way round.
+    """
     vault = Vault(course="Test")
     maskcourse.learn(vault, os.path.join(folder, "roster.toml"))
     reals = {r for p in vault.people for r in p.strings}
     assert "Chi Okonkwo" in reals
     assert "Chidi Okonkwo" in reals
     assert "Okonkwo, Chidi" in reals
+    assert "Okonkwo, Chi" in reals
+    assert "Chi" in reals
+    # And a preferred surname, on its own and in both whole spellings.
+    assert "Vanterpool" in reals
+    assert "Marguerite Vanterpool" in reals
+    assert "Vanterpool, Marguerite" in reals
+
+
+def test_a_preferred_surname_gets_its_own_fake(home, folder):
+    """A second surname for one person is not refused (DESIGN 22).
+
+    The vault gave a person one fake surname and offered nothing else,
+    so a preferred surname beside the registrar's found it taken and
+    stopped masking with a VaultError. It gets a fresh one instead --
+    not the registrar surname's fake, and not anybody else's.
+    """
+    vault = Vault(course="Test")
+    maskcourse.learn(vault, os.path.join(folder, "roster.toml"))
+    person = [p for p in vault.people
+              if p.real["last"] == "Vanterpool Reyes"][0]
+    mine = person.strings["Vanterpool"]
+    assert mine != person.strings["Vanterpool Reyes"]
+    others = {p.fake["last"] for p in vault.people if p is not person}
+    assert mine not in others
+    assert "Vanterpool" not in mine and "Reyes" not in mine
 
 
 # ----------------------------------------------------------- the twin --
@@ -293,7 +325,8 @@ def test_the_database_masking_is_schema_agnostic(home, folder, tmp_path):
 def test_a_preferred_name_gets_a_different_fake(home, folder):
     """Two real spellings of one student must not share one pseudonym.
 
-    `name = "Chidi Okonkwo"` and `preferred = "Chi Okonkwo"` both
+    `name = "Chidi Okonkwo"` and the preferred "Chi Okonkwo" (then a
+    `preferred` key, now `pref_first = "Chi"`) both
     rendered to the same fake name at first, because the fake given name
     does not depend on which real spelling was asked for. Unmasking then
     had to guess and put the roster spelling where the file said the

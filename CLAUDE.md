@@ -262,6 +262,57 @@ the code and docs use against it; `tools/docs.py` checks this table.
   `reference/control_center.gs` is the specification for wording.
 - **If the app ever tells someone to run a CLI command, that is a bug.**
 
+### Emailing students (DESIGN 21)
+
+- **`mailing.py` holds every rule**; the Prior assessments page and its
+  routes (`/api/email/*`) only gather and draw. Mail goes through the
+  form's script (`mail` op, `MailApp`), as the form's owner -- the only
+  Google identity printit has. One request per student.
+- **The script must report version 2** (`ping`); an older one is refused
+  before the first email. Settings' "Update the script" pushes and
+  `update-deployment`s (same URL), and then **every call, push and pull
+  included, waits** until he grants the new permission once.
+- **A `mail` request is never retried and a timeout is never recorded**
+  (`form.FormTimeout`): Google may have sent it. Everything else in
+  `form.call` still retries.
+- **`mailed` records what each email said, per skill**; a student is due
+  again when a mark changes. Only `due` letters are sent.
+- **The template is the home's** (`email.toml`, every course), Mustache
+  field tags only, read by `mailing.render` -- not pystache, which lets an
+  unclosed section through even in strict mode. An unknown field refuses.
+- **The words are the gradebook matching's** (`[marks]`), else "Pass" /
+  "Not yet", and the page says which.
+- **A paper's later sheets** are stored against its student by
+  `_note_pages` through `Index.first_page_of`; before 2026-11-19 they
+  were saved with nobody on them, and the page warns of a short paper.
+
+### Names (DESIGN 22)
+
+- **Four stored parts**:
+  - `first` and `last` are the registrar's, and an import refreshes them;
+  - `pref_first` and `pref_last` are the instructor's, and no import
+    touches them.
+
+  `name` is the registrar's whole name, the weakest key, and follows
+  First and Last when the Roster edits them. A roster with `preferred` is
+  refused: that was the old whole-name field.
+- **`Student.display` is the printed name, the one rule**: (pref else
+  registrar) first + last, once `first` and `last` are both stored;
+  `name` until then. Every surface that shows a student reads it.
+- **`Student.name_fields()` is the one list the privacy paths read**:
+  `maskcourse` (and so `privacy.saw`) and `nameguard`. Add a name field
+  there or it leaks. A second surname for one person gets its own fake
+  (`Vault._candidates`).
+- **The Roster**:
+  - the name columns are First, Last, Pref first and Pref last, each an
+    ordinary sortable column;
+  - the switch reorders both pairs in place (`orderRosterColumns`);
+  - a save that would leave half a name is refused
+    (`_check_name_parts`).
+- **Progress keeps one name column**, sorted on the shown parts
+  (`_shown_sort`). **Scans shows the name the record printed**, which is
+  history and unchanged.
+
 ## The web app
 
 `checkit-printit gui -c COURSE` serves one course on `127.0.0.1`, never
@@ -287,13 +338,17 @@ form, Print job, Runs, Scans, Progress, Seating, Settings (`VIEWS` in
 | the open list, the assessment | `availability.set_open`, `set_assessment` |
 | the form's wording | `form.payload_for`; fixed text `boilerplate.py` |
 | building | `runner.run`; a draft becoming a job folder, `printjob.py` |
+| emailing a run's students | `mailing.plan`, `compose`, `send`; the script update, `provision.update_script` |
 | the gradebook export | `gradebook.produce` |
 
 If the GUI needs a rule still inside a `@click.command`, move it out.
 
 **Working on it**: use `Scratch 48` (48 synthetic students shaped like the
-real roster) for layout and `Scratch` (two students, a real Google Form)
-for Google. The browser pane's servers come from `.claude/launch.json` in
+real roster) for layout and `Demo` (`printit-demo`, eight invented
+students at `example.invalid`) for everything else. `Demo` is the one
+test course on purpose: anything that needs a Google Form borrows one
+for the test and gives it back (DESIGN 21, "Testing without emailing
+anyone"). The browser pane's servers come from `.claude/launch.json` in
 the **session's** working directory (`../checkit`). Then:
 
 - **Restart the server after editing `gui/`** -- Python does not reload a

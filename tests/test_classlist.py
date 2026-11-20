@@ -239,12 +239,13 @@ class TestMerging:
         """The seating chart says "Matt Marrowby"; the registrar says "Matthew".
         A class list must never overwrite what prints."""
         roster = Roster([Student(name="Gus Lovelace", skills=["W1"],
-                                 preferred="Gus", sid="806000001",
+                                 pref_first="Gus", sid="806000001",
                                  last="Lovelace", first="Augusta")])
         roster, _ = classlist.merge(roster, self.banner(tmp_path))
         gus = next(s for s in roster if s.sid == "806000001")
         assert gus.name == "Gus Lovelace"
-        assert gus.preferred == "Gus"
+        assert gus.pref_first == "Gus"
+        assert gus.display == "Gus Lovelace"
         assert gus.skills == ["W1"]
         assert gus.first == "Augusta", "the legal name is still recorded"
 

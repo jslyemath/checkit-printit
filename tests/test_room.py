@@ -1457,8 +1457,12 @@ class TestWhatTheCanvasIsHanded:
         people = Roster([
             Student(name="Ada Lovelace", skills=[], sid="806001"),
             Student(name="Prince", skills=[], sid="806002"),
-            Student(name="Augusta Lovelace", skills=[], sid="806003",
-                    preferred="Ada B Lovelace"),
+            # A whole name only, of three words: the split-once rule.
+            Student(name="Ada B Lovelace", skills=[], sid="806003"),
+            # Parts stored, a two-word preferred given name: the parts
+            # rule (DESIGN 22).
+            Student(name="Maria Brontë", skills=[], sid="806004",
+                    first="Maria", last="Brontë", pref_first="Mary Ann"),
         ])
         with open(course_mod.file_in("P", "roster"), "w",
                   encoding="utf-8") as f:
@@ -1495,8 +1499,15 @@ class TestWhatTheCanvasIsHanded:
         """The card shows what the paper shows, so a student holding one
         can be found in the room."""
         obj, gui_mod = course
-        assert gui_mod.api_seating(obj, {})["names"]["806003"]["full"] == \
-            "Ada B Lovelace"
+        assert gui_mod.api_seating(obj, {})["names"]["806004"]["full"] == \
+            "Mary Ann Brontë"
+
+    def test_stored_parts_are_the_two_lines(self, course):
+        """Cutting at the first space would put "Ann Brontë" on the
+        bottom line; with the parts stored, the cut is theirs."""
+        obj, gui_mod = course
+        card = gui_mod.api_seating(obj, {})["names"]["806004"]
+        assert (card["top"], card["bottom"]) == ("Mary Ann", "Brontë")
 
     def test_the_room_comes_through(self, course, tmp_path):
         from checkit_printit import course as course_mod

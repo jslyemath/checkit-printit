@@ -153,10 +153,31 @@ CREATE TABLE IF NOT EXISTS scan_page (
     run_id    TEXT,
     sid       TEXT,
     slug      TEXT,
+    -- Which page of the printed run this scanned page is, so a
+    -- student's pages can be put back in the order they were printed
+    -- (21). NULL on rows saved before 2026-11-19, and on a page
+    -- nobody was attributed to.
+    run_page  INTEGER,
     PRIMARY KEY (scan_id, scan_page)
 );
 
+-- What each email to a student said, one row per skill in it (21).
+-- Written as each email goes, never before: a row here means Google
+-- accepted it. The outcome is the one the email reported, so a mark
+-- changed afterwards -- a "?" settled, a correction -- shows as not
+-- yet told, and the next send includes that student again.
+CREATE TABLE IF NOT EXISTS mailed (
+    mailed_id INTEGER PRIMARY KEY,
+    run_id  TEXT NOT NULL REFERENCES run(run_id) ON DELETE CASCADE,
+    sid     TEXT NOT NULL,
+    slug    TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    address TEXT NOT NULL,
+    sent    TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS scan_page_by_run ON scan_page(run_id);
+CREATE INDEX IF NOT EXISTS mailed_by_run ON mailed(run_id, sid);
 CREATE INDEX IF NOT EXISTS printed_by_student ON printed(sid, slug);
 CREATE INDEX IF NOT EXISTS printed_by_run ON printed(run_id);
 CREATE INDEX IF NOT EXISTS attempt_by_student ON attempt(sid, slug);
@@ -207,20 +228,26 @@ RENAMED = [
     ("attempt", "page", "run_page"),
 ]
 
-#: Columns added to `run` after the first databases were written.
+#: Columns added after the first databases were written, by table.
 #: `CREATE TABLE IF NOT EXISTS` does nothing to a table that exists,
 #: so a column added to SCHEMA alone reaches new courses only -- and
 #: the real one has three runs in it already.
 ADDED = {
-    "delisted": "INTEGER NOT NULL DEFAULT 0",
-    "graded": "INTEGER NOT NULL DEFAULT 0",
-    # Nullable, because the runs already in a record were built
-    # before run numbers existed and there is no honest number to
-    # give them. A paper from one of those carries a seed-based code
-    # or none at all, and `run_by_no` will not match it -- which is
-    # correct: those runs cannot be scanned by code.
-    "run_no": "INTEGER",
-    "rebuilt": "INTEGER NOT NULL DEFAULT 0",
+    "run": {
+        "delisted": "INTEGER NOT NULL DEFAULT 0",
+        "graded": "INTEGER NOT NULL DEFAULT 0",
+        # Nullable, because the runs already in a record were built
+        # before run numbers existed and there is no honest number to
+        # give them. A paper from one of those carries a seed-based
+        # code or none at all, and `run_by_no` will not match it --
+        # which is correct: those runs cannot be scanned by code.
+        "run_no": "INTEGER",
+        "rebuilt": "INTEGER NOT NULL DEFAULT 0",
+    },
+    "scan_page": {
+        # Nullable: a page saved before 2026-11-19 has no honest value.
+        "run_page": "INTEGER",
+    },
 }
 
 
@@ -275,7 +302,8 @@ def _schema_version():
     SQLite's signed 32-bit `user_version`.
     """
     import hashlib
-    text = repr((SCHEMA, sorted(ADDED.items()), RENAMED))
+    text = repr((SCHEMA, sorted((t, sorted(c.items()))
+                                for t, c in ADDED.items()), RENAMED))
     return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:7], 16)
 
 
@@ -326,10 +354,13 @@ def connect(path):
 
 def _migrate(db):
     db.executescript(SCHEMA)
-    have = {r["name"] for r in db.execute("PRAGMA table_info(run)")}
-    for column, decl in ADDED.items():
-        if column not in have:
-            db.execute(f"ALTER TABLE run ADD COLUMN {column} {decl}")
+    # Table and column names are this module's own constants, never
+    # input, which is the only reason they may be formatted in.
+    for table, columns in ADDED.items():
+        have = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
+        for column, decl in columns.items():
+            if column not in have:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
     for table, was, now in RENAMED:
         names = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
         if was in names and now not in names:
@@ -675,9 +706,10 @@ def add_scan(path, scan_id, sha, original, pages, size):
 def note_scan_pages(path, scan_id, rows):
     """What each page of this stack was decided to be.
 
-    `rows` are `(scan_page, run_id, sid, slug)`, and replace whatever
-    was there for this stack before -- a second pass over the same
-    pages is a correction of the first, not an addition to it.
+    `rows` are `(scan_page, run_id, sid, slug, run_page)`, and replace
+    whatever was there for this stack before -- a second pass over the
+    same pages is a correction of the first, not an addition to it.
+    `run_page` may be left off, which stores NULL.
     """
     db = connect(path)
     try:
@@ -693,10 +725,14 @@ def note_scan_pages(path, scan_id, rows):
         with db:
             db.execute("DELETE FROM scan_page WHERE scan_id = ?", (scan_id,))
             db.executemany(
-                "INSERT INTO scan_page (scan_id, scan_page, run_id, sid, slug)"
-                " VALUES (?, ?, ?, ?, ?)",
-                [(scan_id, int(page), run_id or None, sid or None, slug or None)
-                 for page, run_id, sid, slug in rows])
+                "INSERT INTO scan_page"
+                " (scan_id, scan_page, run_id, sid, slug, run_page)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                [(scan_id, int(row[0]), row[1] or None, row[2] or None,
+                  row[3] or None,
+                  int(row[4]) if len(row) > 4 and row[4] is not None
+                  else None)
+                 for row in rows])
         return len(rows)
     finally:
         db.close()
@@ -1124,5 +1160,83 @@ def skill_totals(path):
         return [dict(r) for r in db.execute(
             "SELECT slug, COUNT(*) AS papers, COUNT(DISTINCT sid) AS students"
             " FROM printed GROUP BY slug ORDER BY slug")]
+    finally:
+        db.close()
+
+
+# ----------------------------------------------------- emailing (21) --
+
+def attempts_in(path, run_id):
+    """Every decision saved for one run: `[{sid, slug, outcome, run_page}]`.
+
+    Absences included -- the caller decides what a sitting is, by the
+    rule in 17, and needs the absences to say so.
+    """
+    if not os.path.isfile(path):
+        return []
+    db = connect(path)
+    try:
+        return [dict(r) for r in db.execute(
+            "SELECT sid, slug, outcome, run_page FROM attempt"
+            " WHERE run_id = ? ORDER BY sid, slug", (run_id,))]
+    finally:
+        db.close()
+
+
+def scan_pages_in(path, run_id):
+    """The scanned pages attributed to someone in one run.
+
+    `[{scan_id, scan_page, sid, slug, run_page}]`. Only what he saved
+    on Scans -- a page the reader placed and he never confirmed is not
+    here, and is not a page of anybody's.
+    """
+    if not os.path.isfile(path):
+        return []
+    db = connect(path)
+    try:
+        return [dict(r) for r in db.execute(
+            "SELECT scan_id, scan_page, sid, slug, run_page FROM scan_page"
+            " WHERE run_id = ? AND sid IS NOT NULL"
+            " ORDER BY sid, run_page, scan_id, scan_page", (run_id,))]
+    finally:
+        db.close()
+
+
+def mailed_in(path, run_id):
+    """What each student of one run was last told: `{sid: {slug: outcome}}`.
+
+    The latest row per skill wins, so an email sent after a correction
+    replaces what the first one said.
+    """
+    if not os.path.isfile(path):
+        return {}
+    db = connect(path)
+    try:
+        told = {}
+        for r in db.execute(
+                "SELECT sid, slug, outcome FROM mailed WHERE run_id = ?"
+                " ORDER BY mailed_id", (run_id,)):
+            told.setdefault(r["sid"], {})[r["slug"]] = r["outcome"]
+        return told
+    finally:
+        db.close()
+
+
+def note_mailed(path, run_id, sid, address, skills, sent=None):
+    """Write down one email that Google accepted.
+
+    `skills` is `[(slug, outcome)]`, exactly what the email reported.
+    Called after the send returns, never before: a row here is a claim
+    that the student was told.
+    """
+    sent = sent or datetime.datetime.now().isoformat(timespec="seconds")
+    db = connect(path)
+    try:
+        with db:
+            db.executemany(
+                "INSERT INTO mailed (run_id, sid, slug, outcome, address, sent)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                [(run_id, sid, slug, outcome, address, sent)
+                 for slug, outcome in skills])
     finally:
         db.close()
